@@ -97,6 +97,9 @@
   const stats = { enabled: false, passive: false, muted: false, alone: false, micWanted: false, returning: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, micLevel: 0, receiveState: "off", radius: 0, held: false, reconnecting: false };
   const samples = new Float32Array(SAMPLES);
   const preferences = new Map();
+  const duels = BL.duelListening.create();
+  // Independent of saved per-player mutes: the panel feeds room duel events even while its tab is closed.
+  stats.muteDuels = false;
   let preferenceOwner = 0;
   let mic = null, pubPc = null, subPc = null, desired = [], queue = Promise.resolve();
   let listenerCount = null;
@@ -132,8 +135,9 @@
   const syncPreferences = () => {
     const me = BL.net.state.me, owner = me && validId(me.id) ? me.id : 0;
     if (owner === preferenceOwner) return;
-    preferenceOwner = owner; preferences.clear();
+    preferenceOwner = owner; preferences.clear(); duels.clear(); stats.muteDuels = false;
     if (owner) try {
+      stats.muteDuels = localStorage.getItem(PREF_KEY + owner + ".duels") === "true";
       const raw = localStorage.getItem(PREF_KEY + owner);
       const saved = raw && raw.length <= 65536 ? JSON.parse(raw) : null;
       if (Array.isArray(saved)) for (const item of saved.slice(0, PREF_MAX)) {
@@ -410,7 +414,7 @@
   const heard = (id) => {
     if (!preferenceOwner || !desired.includes(id)) return false;
     const sub = subs.get(id);
-    return (!sub || sub.gen === wantedGen.get(id)) && !preferences.get(id)?.muted;
+    return (!sub || sub.gen === wantedGen.get(id)) && !preferences.get(id)?.muted && !mutedByDuel(id);
   };
 
   const api = async (op, body, token = lifecycle) => {
@@ -1264,6 +1268,19 @@
     if (Number.isFinite(volume)) setPreference(player, null, Math.max(0, Math.min(VOLUME_MAX, volume)));
   };
   const volumeOf = (player) => { syncPreferences(); return localVolume(playerId(player)); };
+  const mutedByDuel = (player) => stats.muteDuels && duels.muted(playerId(player), preferenceOwner);
+  const refreshDuels = () => {
+    for (const [id, s] of subs) hear(s, heard(id));
+    emit();
+  };
+  const duel = (msg) => { if (duels.apply(msg)) refreshDuels(); };
+  const setMuteDuels = (on) => {
+    syncPreferences();
+    if (!preferenceOwner || stats.muteDuels === !!on) return;
+    stats.muteDuels = !!on;
+    try { localStorage.setItem(PREF_KEY + preferenceOwner + ".duels", String(stats.muteDuels)); } catch { /* This visit only. */ }
+    refreshDuels();
+  };
 
   const subscribe = (fn) => {
     subscribers.add(fn);
@@ -1275,6 +1292,7 @@
 
   const dispose = () => {
     unsubscribeAccount();
+    duels.clear();
     stop();
     subscribers.clear();
   };
@@ -1285,5 +1303,5 @@
     playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none",
     relayRenewals: relayRenewals.map(sample => ({ ...sample })) });
 
-  BL.voice = { support, probe, ICE_BLOCKED, warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, stop, setPeers, setOutdoor, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
+  BL.voice = { support, probe, ICE_BLOCKED, warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, stop, setPeers, setOutdoor, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();

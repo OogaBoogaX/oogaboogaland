@@ -181,7 +181,7 @@ export const audienceRoom = {
   // --- Ooga Chat speakers heard on the island (#666) ---
   // The Audience's list of chat speakers' publications (`{ id, zone, session, track, gen }`, id a GitHub account id),
   // replaced whole. An island player with an open outdoor grant in a zone hears that zone's chat speakers as voice peers
-  // by those ids (none of them is ever an island player too: the island's own voice ends a chat lease first).
+  // by those ids. They may also have an island body; only an island microphone supersedes their chat publication.
   cleanSources: (list) => (Array.isArray(list) ? list : []).filter((s) => s && Number.isSafeInteger(s.id) && s.id > 0 && isZone(s.zone)
     && typeof s.session === "string" && typeof s.track === "string").slice(0, 64),
   sources(room, list) {
@@ -234,7 +234,13 @@ export const audienceRoom = {
       const peers = plan.get(p.id) || [];
       if (o.scope === "main" && overhearing(p))
         for (const q of room.players.values()) if (q !== p && q.voice && q.voice.track && isOpen(q) && q.outdoor.scope === o.scope && !peers.includes(q.id)) peers.push(q.id);
-      for (const s of sources) if (s.zone === o.scope && s.id !== p.id && !peers.includes(s.id)) peers.push(s.id);
+      for (const s of sources) {
+        const v = room.players.get(s.id)?.voice;
+        // During handoff an old chat reference can still be in flight. Never use it to admit an island microphone
+        // from another place: that source is governed by voicePeers, and must not inherit a public chat grant.
+        if (v && v.pub && v.track) continue;
+        if (s.zone === o.scope && s.id !== p.id && !peers.includes(s.id)) peers.push(s.id);
+      }
       plan.set(p.id, peers);
     }
     return plan;

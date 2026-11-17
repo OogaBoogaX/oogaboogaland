@@ -62,7 +62,7 @@ Shared with the island, one copy each:
 | `src/js/format-large.js`, `src/js/roster-panel.js`, `src/js/contributor-identities.js`, `src/js/activity-repos.js` | Contributing Oogas (#656): the island's own panel over `/api/chat/public/contributors` (#664), its contribution states and ages, Oogatron's reading normalized as the island normalizes it, and each Ooga's face from `art/ooga-faces.png`, loaded when a stats strip first opens and not counted in the first load (`LAZY_ART`). A contributor in The Commons sees whose Ooga is on the island now; a stale or unreadable reading says so under the list |
 | `src/js/emoji-data.js`, `src/js/reaction-bar.js` | The island's own emoji panel (#655), in the Ooga Chat panel's footer: the ten reactions, the raised hand and the picker over every emoji, its skin tones and heart colours, from this browser's own choices (`ooga-reactions*`). `ooga-chat-app.js` hands it the audience socket as its connection: a tap is a `reaction` request, the hand a `hand` request an active speaker alone may make, and every reaction the server sends the zone pops over that participant's circle |
 | `src/js/voice-handoff.js` | The voice switch prompt's card, the island's and Ooga Chat's alike (Voice on another device, below): Switch here inside its click, Not now, and no focus taken by itself |
-| `src/js/chat-policy.js`, `src/js/reaction-policy.js`, `src/js/zone-map.js`, `src/js/commons-log.js` | The Commons and Online Oogas for an eligible contributor (#670): the island's chat rules, the raised hand in each tone, the zones as the island's Online Oogas groups them, and the conversation's log and composer, run over the app's own `/api/chat/commons` socket (`ooga-chat-http.js` `commons`), with the island's name field at the Commons' top, saved as the island's display name (`commonsName`, `POST /api/chat/commons/name`). Their look is placed by `ooga-chat.css`; no distance, crosshair, voice link or volume, which are the island's alone |
+| `src/js/chat-policy.js`, `src/js/reaction-policy.js`, `src/js/zone-map.js`, `src/js/commons-log.js` | The Commons and Online Oogas for an eligible contributor (#670): the island's chat rules, the raised hand in each tone, the zones as the island's Online Oogas groups them, and the conversation's log and composer, run over the app's own `/api/chat/commons` socket (`ooga-chat-http.js` `commons`), with the island's name field at the Commons' top, saved as the island's display name (`commonsName`, `POST /api/chat/commons/name`). Their look is placed by `ooga-chat.css`; no distance, crosshair or voice link, which are the island's alone |
 | `src/js/qr.js`, `src/js/banana-icon.js`, `src/js/jumbotron-font.js`, `src/js/factory-kiosk-core.js`, `src/js/factory-kiosk.js`, `src/js/donation-popup.js` | Feed the Oogas: the island's donation dialog and its kiosk screen, with the QR codes, the banana and the 5x7 letters they draw. The app opens it from its Bananas tab while the feed is live (the fixture entry's demo aside), real over its own `/donations` relay, with `ooga-chat-donor.js` as its `game`; its frame is placed by `ooga-chat.css` |
 | `src/js/native-icons.js` | `BL.nativeIcons`: the panel tabs' pixel icons (`bananas`, `roster`, `players`, `chat`), Ooga Chat's mark `cloud` (the tab icon on both, and the app's favicons and icons), DSB Land's destination mark `dsb` (the island's `dsb-island-icon` paths, held equal by the suite) and `voice()`, the roster's voice mark. `hud.js` fills the island's tab slots (`data-native-icon`) from it and draws its roster's voice mark with it |
 
@@ -74,7 +74,7 @@ module reads nothing at load but `window.BL` and the document.
 
 `sign-glyphs.js`, `native-icons.js`, `donations.js`, `banana-panel.js`, `qr.js`, `banana-icon.js`, `jumbotron-font.js`, `factory-kiosk-core.js`,
 `factory-kiosk.js`, `donation-popup.js`, `chat-policy.js`, `emoji-data.js`, `reaction-policy.js`, `zone-map.js`, `commons-log.js`, `format-large.js`, `roster-panel.js`,
-`contributor-identities.js`, `activity-repos.js`, `audience-tiles.js`, `reaction-bar.js`, `voice-handoff.js`, `ooga-chat-config.js`, `ooga-chat-auth.js`, `ooga-chat-roster.js`, `ooga-chat-device.js`,
+`contributor-identities.js`, `activity-repos.js`, `audience-tiles.js`, `reaction-bar.js`, `voice-handoff.js`, `duel-listening.js`, `ooga-chat-config.js`, `ooga-chat-auth.js`, `ooga-chat-roster.js`, `ooga-chat-device.js`,
 `ooga-chat-shell.js`, `ooga-chat-views.js`,
 `ooga-chat-http.js`, `ooga-chat-media.js`, `ooga-chat-donor.js`, `ooga-chat-commons.js`, `ooga-chat-faces.js`, then (fixture entry only) `ooga-chat-fixtures.js`, then `ooga-chat-app.js`. The build checks that
 `fixture.html` loads exactly `index.html`'s files plus the fixtures, just before the app.
@@ -269,11 +269,31 @@ asked for once and only as it scrolls near), a speaker's 3px source ring outside
 the island, purple `#b18aff` from Ooga Chat; listeners neutral), the hand over the portrait's centre (#655), the name without `@` on one
 line cut short with its whole self in the title and the accessible name (the ring alone says where a speaker speaks
 from), and under it a speaker's voice mark (crossed and red when source-muted) with Speaker, or Listener. The visitor's own voice
-mark mutes or unmutes them while they speak; anyone else's will mute that voice for this visitor once Ooga Chat plays
-them (#661). Tiles are keyed by `id` and kept: an update changes and moves only what changed, once a frame, and focus
+mark mutes or unmutes them while they speak here; anyone else's mutes that voice for this visitor alone. The same
+buttons, tooltips, local mute marks and speaking indicators appear in Online Oogas and Contributing Oogas. A microphone
+held on another device stays under that device's control. Local mutes keep measuring the voice, as on the island, and
+apply before a replacement track plays. They survive reconnects and reloads in this browser, keyed by listener and
+speaker provider ids (at most 512 choices per listener), with separate fixture storage; signing out clears the active
+choices. Nothing is sent to the server. Tiles are keyed by `id` and kept: an update changes and moves only what changed, once a frame, and focus
 stays on its tile. The list has one tab stop; arrow keys, Home and End move through every participant, up and down a
 row of the grid. Smaller circles in a panel under 400px wide (the island's drawer, a phone). A status line under the
 zones says when the list is not simply live, or is empty.
+
+**Per-player volume.** Click another speaker's name in the Ooga Chat grid to open their Volume control below it,
+or another player's name in Online Oogas to expand the same slider under their row. The default is 100%, with 5%
+steps from 0% to 200% where Web Audio is available, otherwise 100% maximum, as on the island. Volume and mute are
+independent and saved together per listener and participant id; earlier mute-only saves remain valid. The receiver
+uses the island's gain smoothing and boosted-peak limiter, with only one playback path per voice. Meters run before
+the gain, so a quieted or muted speaker still shows as speaking. Replacement tracks start at the saved level;
+disconnecting releases their source, gain and limiter. The fixture's synthetic tracks use the element path.
+
+**Duel listening.** In both apps, Online Oogas → Advanced settings has **Automatically mute duelists**, unchecked
+by default and remembered for the signed-in account in that browser. It temporarily silences both players in every
+active duel except the listener's own pair; other duels still mute while the listener is dueling. Manual mute and
+volume remain independent, so ending a duel or disabling this choice restores those choices. `duel-listening.js`
+keeps the bounded active pairs for both voice controllers. OBL reads its existing duel feed; OC reads only the pair
+ids from the Commons welcome and sanitized start/end frames. Losing that feed clears temporary mutes; reconnecting
+replaces the list from the server. This setting never captures audio or sends a mute to anyone else.
 
 **Footer.** The island's emoji panel (`reaction-bar.js`, #655) left of the account controls where there is room and
 above them where not, as the design has it: the ten reactions any signed-in account may send while the audience is
@@ -520,7 +540,7 @@ stylesheet 16.9 KB, sign-in picture 57.9 KB, Main Island's mark 3 KB): about 157
 alone was 71 KB, with sign-in 78 KB, with the space 88 KB). The manifest and icons are fetched by the browser when it
 considers installing, and the worker then keeps the same files once more in its cache, off the first paint. For comparison, the island's portable page is about
 39.7 MB (23 MB gzipped). The app loads no 3D engine, terrain, cabinets, replays or live feeds. `FIRST_LOAD_BUDGET` in
-the build (236 KB gzipped, raised from 224 KB for the voice client and the Commons' name field) fails a build that grows past it; raise it deliberately, with the reason, when a later issue
+the build (244 KB gzipped, raised from 224 KB to 236 KB for the voice client and the Commons' name field, then for each player's volume and mute, the optional duel muting and the voice handoffs of #766) fails a build that grows past it; raise it deliberately, with the reason, when a later issue
 adds weight.
 
 ## Artwork

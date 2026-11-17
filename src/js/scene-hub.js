@@ -8675,16 +8675,20 @@
     if (repoIsland && repoIsland.onIsland(p.x, feet, p.z)) return "repos";
     return island.onLand(p.x, p.z) ? "outside" : "between";
   };
-  // Inside a cave (behind its doorway plane, as `zoneOf` binds one, HQ and every cave whose zone reads `outside`) or the
-  // Timechain Sphere's shell (its passage included): the outdoor scope's entrances (outdoor-scope.js), never a zone name.
+  // The covered approaches to the Arcade's doors and Factory's shield are part of the public conversation. Their
+  // interior starts at the actual door, not the canopy's outer arch. Other caves keep their doorway boundary.
   const insideCave = (cave, gorilla) => {
-    if (!gorilla) return playerCaveIndex !== 0;
     const p = cave.root.position;
+    if (!gorilla) {
+      if (!playerCaveIndex) return false;
+      const opening = CAMERA_OPENINGS[playerCaveIndex - 1], m = opening.mouth;
+      return opening.headquarters || (p.x - m.x) * opening.sr + (p.z - m.z) * opening.cr < opening.outdoorPlane;
+    }
     if (!island.cavityAt(p.x, p.z, CAMERA_COLUMN, 0, p.y) || p.y < CAMERA_COLUMN.floor - 1e-6 || p.y >= CAMERA_COLUMN.ceiling) return false;
     const index = CAMERA_COLUMN.caveIndex;
     for (const opening of CAMERA_OPENINGS) {
       if (opening.headquarters ? index === island.headquarters.caveIndex : opening.caveIndex === index
-        && !opening.blocked && (p.x - opening.mouth.x) * opening.sr + (p.z - opening.mouth.z) * opening.cr < opening.planeZ) return true;
+        && !opening.blocked && (p.x - opening.mouth.x) * opening.sr + (p.z - opening.mouth.z) * opening.cr < opening.outdoorPlane) return true;
     }
     return false;
   };
@@ -8693,11 +8697,11 @@
     const p = timechainIsland.place, r = BL.timechainModels.SITE.radius, dx = x - p.x, dy = feet - p.y - BL.timechainModels.SITE.shellY, dz = z - p.z;
     return dx * dx + dy * dy + dz * dz < r * r;
   };
-  // Started down a level by the voice levels' own heights (`levelOf`), except in the open air off the island's edge,
-  // which is public air however far below the plane it falls.
+  // The same surface level spans the island, the outdoor islets, bridges and air between them. Below it, the public
+  // conversation ends immediately, including off the island's edge; the bridge waits for revocation before speaking.
   const shareScope = (driven, gorilla, zone) => {
     const p = driven.root.position, feet = p.y - (gorilla ? 0 : driven.baseY);
-    const descending = zone !== "between" && levelOf(p.x, feet, p.z, zone, LEVEL_AT);
+    const descending = levelOf(p.x, feet, p.z, zone, LEVEL_AT);
     const reason = BL.outdoorScope.hubReason(zone, insideCave(driven, gorilla) || insideSphere(p.x, feet, p.z), descending);
     BL.outdoorScope.report(reason === "outdoor" ? "main" : null, reason);
   };
@@ -11196,7 +11200,8 @@
       const m = island.mouths[i], sr = Math.sin(m.ry), cr = Math.cos(m.ry);
       const slot = caves.slots.find((candidate) => candidate.id === m.id);
       const blocked = slot.status === "dark";
-      CAMERA_OPENINGS.push({ id: m.id, caveIndex: i + 1, mouth: m, sr, cr, minX: PORTAL_MIN_X, maxX: PORTAL_MAX_X, minY: PORTAL_MIN_Y, maxY: PORTAL_MAX_Y, planeZ: PORTAL_Z, blocked, headquarters: slot.status === "headquarters", ramp: slot.status === "headquarters" ? island.headquarters.ramps.find((entry) => entry.id === m.id) : null, stopZ: blocked ? 0.53 + hubModels.sealedCaveFace(sealedCaveVariant(slot.id)).frontZ : PORTAL_Z, rim: hubModels.caveMouthRim().openingBounds });
+      const outdoorPlane = slot.scene === "arcade" ? BL.arcadeEntrance.DOOR_Z : slot.scene === "factory" ? BL.factoryModels.SHIELD_Z : PORTAL_Z;
+      CAMERA_OPENINGS.push({ id: m.id, caveIndex: i + 1, mouth: m, sr, cr, minX: PORTAL_MIN_X, maxX: PORTAL_MAX_X, minY: PORTAL_MIN_Y, maxY: PORTAL_MAX_Y, planeZ: PORTAL_Z, outdoorPlane, blocked, headquarters: slot.status === "headquarters", ramp: slot.status === "headquarters" ? island.headquarters.ramps.find((entry) => entry.id === m.id) : null, stopZ: blocked ? 0.53 + hubModels.sealedCaveFace(sealedCaveVariant(slot.id)).frontZ : PORTAL_Z, rim: hubModels.caveMouthRim().openingBounds });
     }
     mark("island");
     hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster });

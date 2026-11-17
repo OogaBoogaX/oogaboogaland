@@ -43,14 +43,18 @@
 // speaks again the same way.
 // `release(reason)` (the account's seam, ooga-chat-auth.js) ends speaking and keeps listening; `stop` ends both.
 //
-// `create({ broker, rtc, request, allowed, onChange, timers, target, memory, stall })`: `stall()` asks the feed to check
+// `create({ broker, rtc, request, allowed, onChange, timers, target, memory, preferenceKey, stall })`: `stall()` asks the feed to check
 // its socket now (the app's `feed.wake(true)`), `broker()` the adapter's `{ call(op, body) }` or
 // null, `rtc` the browser's WebRTC and media (the fixture passes its own), `request(type, fields)` sends a request over
 // the audience feed and returns its id (0 when it can't), `allowed()` whether the deployment lets anyone speak now,
-// `memory` the tab's own `{ take(), keep(record | null) }` (the app's session storage; none remembers nothing).
-// Returns `{ heard(msg), status(feedStatus), zone(next), join(), leave(), mute(), release(reason), stop(), retry(),
+// `memory` the tab's own `{ take(), keep(record | null) }` (the app's session storage; none remembers nothing),
+// `preferenceKey` the localStorage prefix for each listener's mute and volume choices (empty saves nothing).
+// `rtc.AudioContext` may override the receiver's context (null for synthetic fixture tracks).
+// Returns `{ heard(msg), status(feedStatus), zone(next), join(), leave(), mute(), identify(id), muteLocal(id, on), mutedLocally(id), setVolume(id, value), volumeOf(id), VOLUME_MAX, release(reason), stop(), retry(),
 // remember(on), dispose(), available, why, state, stats }`; `state` is `{ role, muted, phase, busy, notice, blocked, hearing, speaking,
-// talking, elsewhere }`. `elsewhere` says the account's voice is on another device (the island's, or another Ooga Chat
+// talking, elsewhere, localVersion, muteDuels }`; `localVersion` changes with local listening choices. `duel(msg)` takes
+// the Commons' pair-only snapshot/start/end or loss; `setMuteDuels(on)` is the account's opt-in, independent of manual
+// mute/volume, and `mutedByDuel(id)` explains an automatic mute. `elsewhere` says the account's voice is on another device (the island's, or another Ooga Chat
 // page's): Join Voice then needs the visitor's word, `join({ takeover: true })`, which moves it here. Speaking is this page's own meter on the captured microphone (as the island's voice.js meters it, the same
 // levels): true while an unmuted speaker's voice is loud enough, whoever else is listening, so the visitor sees it work
 // alone. `talking` is the participants whose voices this page hears speaking now, from a meter on each voice it plays
@@ -116,10 +120,11 @@
       audio: () => new Audio()
     };
   };
-  const IDLE = Object.freeze({ role: "listener", muted: true, phase: "off", busy: false, notice: "", blocked: false, hearing: 0, speaking: false, talking: Object.freeze([]), elsewhere: "" });
+  const IDLE = Object.freeze({ role: "listener", muted: true, phase: "off", busy: false, notice: "", blocked: false, hearing: 0, speaking: false, talking: Object.freeze([]), elsewhere: "", localVersion: 0, muteDuels: false });
   const create = ({ broker, rtc = browser(), request = () => 0, allowed = () => true, onChange = () => {},
-    timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) }, target = window, memory = null, stall = () => {} } = {}) => {
-    const R = rtc;
+    timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) }, target = window, memory = null, preferenceKey = "", stall = () => {} } = {}) => {
+    const R = rtc, HearContext = R.AudioContext === undefined ? target.AudioContext || target.webkitAudioContext : R.AudioContext;
+    const VOLUME_MAX = HearContext ? 2 : 1, GAIN_TAU = 0.05;
     let state = IDLE, phase = "off", notice = "", blocked = false, disposed = false;
     // The audience connection everything is held under, the zone asked for (and how many times it has changed), and the
     // server's last word on this connection (`you`).
@@ -128,6 +133,71 @@
     // the pulled voices by mid, and the backoff.
     let sub = null, receiveTicket = 0, tries = 0, retryTimer = 0, dropTimer = 0;
     const voices = new Map();
+    // Local listening choices, bounded and keyed by provider id, as on the island. Keep measuring muted voices so
+    // their speaking marks still work. Reconnects and new tracks retain the choice; another account loads its own.
+    const preferences = new Map(), participantId = (id) => typeof id === "string" && /^(gh|x):[1-9][0-9]{0,19}$/.test(id);
+    const duels = BL.duelListening.create();
+    let muteDuels = false;
+    let preferenceOwner = null, localVersion = 0;
+    const mutedLocally = (id) => !!preferences.get(id)?.muted;
+    const volumeOf = (id) => preferences.get(id)?.volume ?? 1;
+    const syncPreferences = (id = who) => {
+      const owner = participantId(id) ? id : null;
+      if (owner === preferenceOwner) return;
+      preferenceOwner = owner;
+      preferences.clear();
+      duels.clear();
+      muteDuels = false;
+      if (owner && preferenceKey) try {
+        muteDuels = target.localStorage.getItem(preferenceKey + owner + ".duels") === "true";
+        const raw = target.localStorage.getItem(preferenceKey + owner);
+        const saved = raw && raw.length <= 32768 ? JSON.parse(raw) : null;
+        if (Array.isArray(saved)) for (const item of saved.slice(0, 512)) {
+          // The first local-mute release stored ids alone. Keep those choices when adding volume.
+          const [id, muted, volume] = typeof item === "string" ? [item, true, 1] : Array.isArray(item) ? item : [];
+          if (!participantId(id) || id === owner || typeof muted !== "boolean" || !Number.isFinite(volume) || volume < 0 || volume > 2) continue;
+          if (muted || volume !== 1) preferences.set(id, { muted, volume: Math.min(VOLUME_MAX, volume) });
+        }
+      } catch { /* Storage off or malformed: start with this account's defaults. */ }
+      for (const v of voices.values()) if (v.el) setLevel(v, true);
+      localVersion++;
+    };
+    // The session can name the listener before an audience connection opens, so a panel can set a choice even then.
+    const identify = (id) => { syncPreferences(id); emit(); };
+    const setPreference = (id, muted, volume) => {
+      if (disposed || !preferenceOwner || !participantId(id) || id === preferenceOwner) return;
+      const previous = preferences.get(id), nextMuted = muted ?? previous?.muted ?? false, nextVolume = volume ?? previous?.volume ?? 1;
+      if (nextMuted === (previous?.muted ?? false) && nextVolume === (previous?.volume ?? 1)) return;
+      if (!nextMuted && nextVolume === 1) preferences.delete(id);
+      else {
+        if (!previous && preferences.size >= 512) return;
+        preferences.set(id, { muted: nextMuted, volume: nextVolume });
+      }
+      for (const v of voices.values()) if (v.el && v.participant === id) setLevel(v, nextMuted);
+      if (preferenceKey) try { target.localStorage.setItem(preferenceKey + preferenceOwner, JSON.stringify([...preferences].map(([id, p]) => [id, p.muted, p.volume]))); }
+      catch { /* Storage off: keep the choice for this visit. */ }
+      localVersion++;
+      emit();
+    };
+    const muteLocal = (id, on) => setPreference(id, !!on, null);
+    const setVolume = (id, value) => {
+      const volume = Number(value);
+      if (Number.isFinite(volume)) setPreference(id, null, Math.max(0, Math.min(VOLUME_MAX, volume)));
+    };
+    const githubId = (id) => typeof id === "string" && id.startsWith("gh:") ? Number(id.slice(3)) : 0;
+    const mutedByDuel = (id) => muteDuels && duels.muted(githubId(id), githubId(preferenceOwner));
+    const refreshDuels = () => {
+      for (const v of voices.values()) if (v.el) setLevel(v, true);
+      localVersion++;
+      emit();
+    };
+    const duel = (msg) => { if (duels.apply(msg)) refreshDuels(); };
+    const setMuteDuels = (on) => {
+      if (disposed || !preferenceOwner || muteDuels === !!on) return;
+      muteDuels = !!on;
+      if (preferenceKey) try { target.localStorage.setItem(preferenceKey + preferenceOwner + ".duels", String(muteDuels)); } catch { /* This visit only. */ }
+      refreshDuels();
+    };
     // Speaking: the join's ticket, the microphone, the publishing connection, the lease's generation and the mute.
     let joinTicket = 0, mic = null, pub = null, lease = 0, speaker = false, muted = true, renewTimer = 0, pubDropTimer = 0;
     // Staying a speaker: `again` from the server's acknowledgement until the visitor leaves or the server refuses,
@@ -164,14 +234,15 @@
       if (disposed) return;
       let hearing = 0;
       for (const v of voices.values()) if (v.el) hearing++;
-      const next = { role: speaker ? "speaker" : "listener", muted: speaker ? muted : true, phase, busy: BUSY.has(phase), notice, blocked: blocked && hearing > 0, hearing,
-        speaking: speaker && !muted && speaking, talking,
+      const asleep = !!HearContext && !!hearAudio && hearAudio.state !== "running";
+      const next = { role: speaker ? "speaker" : "listener", muted: speaker ? muted : true, phase, busy: BUSY.has(phase), notice, blocked: (blocked || asleep) && hearing > 0, hearing,
+        speaking: speaker && !muted && speaking, talking, localVersion, muteDuels,
         // Where the account's voice is while it is not here ("island" or "app"): the page asks before taking it. Not
         // while it means to speak again by itself: the lease still read elsewhere is then its own, from before the loss.
         elsewhere: !again && !speaker && !BUSY.has(phase) && you && (you.elsewhere === "island" || you.elsewhere === "app") ? you.elsewhere : "" };
       const s = state;
       if (s.role === next.role && s.muted === next.muted && s.phase === next.phase && s.notice === next.notice && s.blocked === next.blocked && s.hearing === next.hearing
-        && s.speaking === next.speaking && s.talking === next.talking && s.elsewhere === next.elsewhere) return;
+        && s.speaking === next.speaking && s.talking === next.talking && s.elsewhere === next.elsewhere && s.localVersion === next.localVersion) return;
       state = Object.freeze(next);
       onChange(state);
     };
@@ -222,6 +293,18 @@
     const listening = () => (sub ? "listening" : connection ? "connecting" : "off");
 
     // --- hearing ---
+    // As on the island: a muted element keeps the stream alive; its source feeds the meter and a gain/peak limiter.
+    // Only the gain path reaches the speakers. Without Web Audio the element plays, capped at ordinary volume.
+    const setLevel = (v, immediate = false) => {
+      const muted = mutedLocally(v.participant) || mutedByDuel(v.participant), volume = volumeOf(v.participant);
+      if (!HearContext) { v.el.volume = volume; v.el.muted = muted; }
+      else if (v.gain) {
+        const param = v.gain.gain, value = muted ? 0 : volume;
+        v.limiter.ratio.value = volume > 1 ? 20 : 1;
+        if (immediate) { param.cancelScheduledValues(hearAudio.currentTime); param.setValueAtTime(value, hearAudio.currentTime); }
+        else param.setTargetAtTime(value, hearAudio.currentTime, GAIN_TAU);
+      }
+    };
     const play = (v) => {
       const out = v.el.play();
       if (out && typeof out.catch === "function") out.catch((err) => {
@@ -257,19 +340,29 @@
       if (metered) hearTimer = timers.set(readHeard, SPEAK_MS);
     };
     const meterHeard = (v) => {
-      const Ctx = target.AudioContext || target.webkitAudioContext;
-      if (!Ctx || !v.el) return;
-      try {
-        if (!hearAudio) hearAudio = new Ctx();
-        const source = hearAudio.createMediaStreamSource(v.el.srcObject), analyser = hearAudio.createAnalyser();
-        analyser.fftSize = SAMPLES;
-        source.connect(analyser);
-        v.meter = { source, analyser, quiet: 0, speaking: false };
-        if (!hearTimer) hearTimer = timers.set(readHeard, SPEAK_MS);
-      } catch { v.meter = null; }
+      if (!HearContext || !v.el) return;
+      if (!hearAudio) {
+        hearAudio = new HearContext();
+        hearAudio.addEventListener("statechange", emit);
+      }
+      const source = hearAudio.createMediaStreamSource(v.el.srcObject);
+      v.meter = { source, analyser: null, quiet: 0, speaking: false };
+      const analyser = v.meter.analyser = hearAudio.createAnalyser();
+      analyser.fftSize = SAMPLES;
+      source.connect(analyser);
+      v.gain = hearAudio.createGain();
+      v.limiter = hearAudio.createDynamicsCompressor();
+      v.limiter.threshold.value = -1; v.limiter.knee.value = 0;
+      v.limiter.attack.value = 0.003; v.limiter.release.value = 0.1;
+      setLevel(v, true);
+      source.connect(v.gain);
+      v.gain.connect(v.limiter); v.limiter.connect(hearAudio.destination);
+      if (!hearTimer) hearTimer = timers.set(readHeard, SPEAK_MS);
     };
     const silence = (v) => {
       if (v.meter) { v.meter.source.disconnect(); v.meter = null; retalk(); }
+      if (v.gain) { v.gain.disconnect(); v.gain = null; }
+      if (v.limiter) { v.limiter.disconnect(); v.limiter = null; }
       if (!v.el) return;
       try { v.el.pause(); } catch { /* Already stopped. */ }
       v.el.srcObject = null;
@@ -297,8 +390,8 @@
     };
     // A tap or key anywhere plays what the browser held back, inside that gesture as it requires.
     const wake = (event) => {
-      if (event.isTrusted && hearAudio && hearAudio.state === "suspended") hearAudio.resume().catch(() => {});
-      if (!event.isTrusted || !blocked) return;
+      if (event.isTrusted && hearAudio && hearAudio.state !== "running") hearAudio.resume().then(emit, emit);
+      if (!event.isTrusted || !state.blocked) return;
       blocked = false;
       for (const v of voices.values()) if (v.el) play(v);
       emit();
@@ -311,11 +404,14 @@
       if (!v) return;
       silence(v);
       const el = R.audio();
+      el.muted = !!HearContext || mutedLocally(v.participant) || mutedByDuel(v.participant);
       el.autoplay = true;
       el.srcObject = R.stream(event.track);
       v.el = el;
+      setLevel(v, true);
+      try { meterHeard(v); }
+      catch { receiveFailed(failure("connection_failed", true)); return; }
       play(v);
-      meterHeard(v);
       emit();
     };
     const closeReceive = () => {
@@ -398,7 +494,7 @@
             if (!t || typeof t.mid !== "string" || typeof t.participant !== "string" || voices.size >= TRACKS_MAX) continue;
             const had = voices.get(t.mid);
             if (had) silence(had);
-            voices.set(t.mid, { mid: t.mid, participant: t.participant, el: null, meter: null });
+            voices.set(t.mid, { mid: t.mid, participant: t.participant, el: null, meter: null, gain: null, limiter: null });
           }
           // The SFU's offer is answered whatever its tracks were for, so the session stays in step with the server.
           const offer = res && res.sessionDescription;
@@ -739,7 +835,8 @@
       const was = you && you.elsewhere;
       you = next;
       if (typeof next.id === "string") who = next.id;
-      if (was !== next.elsewhere) emit();
+      syncPreferences();
+      if (was !== next.elsewhere || state.localVersion !== localVersion) emit();
       if (lease && (speaker || BUSY.has(phase)) && next.speak !== "pending" && next.speak !== "active") endSpeaking(why === "moved" ? NOTICE.moved : NOTICE.ended, false);
       else if (again && !speaker && !BUSY.has(phase)) resume();
     };
@@ -773,6 +870,7 @@
         unanswered = false; resumeAt = 0; timers.clear(resumeTimer); resumeTimer = 0;
         you = msg.you && typeof msg.you.speak === "string" ? msg.you : null;
         if (you && typeof you.id === "string") who = you.id;
+        syncPreferences();
         recall();
         tries = 0;
         if (was && !again) notice = NOTICE.reconnected;
@@ -826,6 +924,7 @@
       connection = null;
       you = null;
       who = null;
+      syncPreferences();
       stales.length = 0;
       tries = 0;
       phase = "off";
@@ -843,7 +942,7 @@
       stop();
       timers.clear(hearTimer);
       hearTimer = 0;
-      if (hearAudio) hearAudio.close().catch(() => {});
+      if (hearAudio) { hearAudio.removeEventListener("statechange", emit); hearAudio.close().catch(() => {}); }
       hearAudio = null;
       disposed = true;
       target.removeEventListener("pointerup", wake, true);
@@ -851,7 +950,7 @@
     };
     const supported = () => typeof R.PeerConnection === "function" && typeof R.getUserMedia === "function";
     const available = () => supported() && !!allowed();
-    return { heard, status, zone: zoneTo, join, leave, mute, release, stop, retry, remember, dispose,
+    return { heard, status, zone: zoneTo, join, leave, mute, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, identify, release, stop, retry, remember, dispose,
       get available() { return available(); }, get why() { return supported() ? "" : NOTICE.unsupported; },
       get state() { return state; }, get stats() { return { ...stats, voices: voices.size, receiving: !!sub, publishing: !!pub, capturing: !!mic, connection, lease }; } };
   };

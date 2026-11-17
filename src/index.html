@@ -332,6 +332,7 @@
         <button type="button" data-preset="dsb">DSB</button>
         <button type="button" data-preset="poker">Poker</button>
         <button type="button" data-preset="sky">Sky</button>
+        <button type="button" data-action="bifrost-mute">Sound</button>
         <button type="button" class="leave" data-action="leave">Leave<span> chamber</span></button>
       </nav>
       <nav class="presets" aria-label="Drop" data-scene="drop" hidden>
@@ -476,6 +477,8 @@
               <p class="help" id="players-diagnostics-status">Off</p>
             </div>
             <label class="players-speak" id="players-speak" hidden><input type="checkbox" id="players-speak-input"> Read joins aloud</label>
+            <label class="players-speak"><input type="checkbox" id="players-mute-duels" aria-describedby="players-mute-duels-help"> Automatically mute duelists</label>
+            <p class="help" id="players-mute-duels-help">Until their duel ends. Your own duel pair is exempt.<br>Manual mute and volume choices stay unchanged.</p>
           </div>
         </details>
         <div class="players slab" id="players-list"></div>
@@ -2358,6 +2361,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/arcade-cabinets.js"></script>
   <script src="js/arcade-popular.js"></script>
   <script src="js/duel-rules.js"></script>
+  <script src="js/duel-listening.js"></script>
   <script src="js/net.js"></script>
   <script src="js/game-net.js"></script>
   <script src="js/highscores.js"></script>
@@ -2601,6 +2605,8 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/bifrost-heimdall.js"></script>
   <script src="js/bifrost-window.js"></script>
   <script src="js/cave-directory.js"></script>
+  <script src="js/bifrost-audio.js"></script>
+  <script src="js/bifrost-echo.js"></script>
   <script src="js/scene-bifrost.js"></script>
   <script src="js/scene-timechain.js"></script>
   <script src="js/timechain-data.js" data-defer="timechain"></script>

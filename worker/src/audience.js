@@ -250,9 +250,16 @@ export class Audience extends DurableObject {
     return deltas;
   }
 
-  /** Each zone's listener count for the Room's open grants (#667), sent when a zone gains or loses its last listener. */
+  // Speakers receive too, including while their microphone is opening. The island must not gate its microphone
+  // as alone merely because everybody in Ooga Chat pressed Join Voice.
+  hearingCounts() {
+    const main = this.model.counts("main"), dsb = this.model.counts("dsb");
+    return { main: main.listeners + main.chatSpeakers, dsb: dsb.listeners + dsb.chatSpeakers };
+  }
+
+  /** Each zone's receivers for the Room's open grants (#667), sent when a zone gains or loses its last receiver. */
   listenersChanged() {
-    const counts = { main: this.model.counts("main").listeners, dsb: this.model.counts("dsb").listeners };
+    const counts = this.hearingCounts();
     const sig = `${counts.main > 0}|${counts.dsb > 0}`;
     if (sig === this.listenersSig || !this.env.ROOM) return;
     this.listenersSig = sig;
@@ -676,7 +683,7 @@ export class Audience extends DurableObject {
     this.confirmRetired();
     await this.scheduleAlarm();
     if (clean.length) this.refreshContributions();
-    return { ok: true, pending: [...pending], listeners: { main: this.model.counts("main").listeners, dsb: this.model.counts("dsb").listeners } };
+    return { ok: true, pending: [...pending], listeners: this.hearingCounts() };
   }
 
   /** An island world speaker's reaction (the Room's `react`), to Ooga Chat's clients in its zone (#668). */

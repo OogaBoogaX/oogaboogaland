@@ -55,9 +55,11 @@
   // The mechanism charges as someone nears an open world's window: how fast it follows, the seconds between bursts, and
   // the sparkles a burst throws. Bands of light run up the beam: how many of its drums one band spans, how many bands
   // leave its foot a second at rest and fully charged, and the seconds a burst's surge takes to reach the sky and how
-  // many drums it lights at once.
+  // many drums it lights at once. Looking up into the dome spins the ₿ faster too, by up to `GAZE_SPIN` radians a second,
+  // following the view at `GAZE_EASE`: still slower than a full charge.
   const CHARGE_EASE = 2, BURST_GAP = [4.5, 1.6], BURST_FROM = 0.3;
   const BAND = 9, BAND_RATE = [0.3, 2.4], SURGE_TIME = 1.3, SURGE_WIDTH = 2.5;
+  const GAZE_SPIN = 2.4, GAZE_EASE = 2;
   const SPARKLES = ["#ffc83a", "#fff2b8", "#7fe0ff", "#ffffff"].map((c) => models.particleGeometry(c, 0.1, 1));
   // A burst charged toward an open world's window throws that world's sparkles instead: its colour, paler, warmed toward
   // gold, and white. Cached by colour.
@@ -141,6 +143,14 @@
   const PLAY_SLICE_MS = 8;
   let preparedDsb = null, pictureAbort = null, pictureShot = null, directory = null;
   const NO_ACTORS = [];
+  // The chamber's sound (bifrost-audio.js) and what it follows, written in place each frame: the charge, the world it
+  // answers, that window's side of the view and how far the view looks up.
+  let audio = null;
+  const ROOM = { charge: 0, world: null, side: 0, gaze: 0 };
+  // The visitor's Dimensional Echo, now and then (bifrost-echo.js).
+  let echo = null;
+  // The Ooga's own nearness to the nearest open window this frame, which the echo keeps out of the way of.
+  let userPull = 0;
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
   // room every frame, so signed-in players in the chamber hear each other (voice needs a driven Ooga).
   const mayPossess = (cave) => BL.net.mayDrive(cave.traits.name);
@@ -356,12 +366,14 @@
     if (leaving) return;
     world.pilot = pilot.player ? pilot.player.traits.name : null;
     leaving = go("hub");
+    if (leaving) audio.cue("leave");
   };
   // Through a window to its world, as the same Ooga, once a transition is free to start.
   const travel = (w) => {
     if (leaving) return;
     world.pilot = avatar.traits.name;
     if (!go(w.row.scene, null, !!w.row.instant)) return;
+    audio.cue("cross", w.row.id);
     leaving = true;
     w.held = true;
     pilot.setActive(false);
@@ -372,6 +384,7 @@
     pictureTries = PICTURE_TRIES; pictureWait = PICTURE_DELAY;
     leaving = false;
     pilot.setActive(true);
+    audio.cue("stay");
   };
   const onKey = (e) => {
     if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) return pilot.resetCamera();
@@ -434,7 +447,7 @@
     addChild(root, s.glyph, ...s.beam.map((b) => b.node), ...s.rings);
     // The mechanism's charge, the bands running up its beam and a burst's surge (1 when none is climbing), and its two
     // shockwaves: one round the ₿, one across the floor.
-    s.charge = 0; s.flare = 0; s.burstWait = BURST_GAP[0]; s.bob = 0; s.flow = 0; s.surge = 1; s.stepLead = null;
+    s.charge = 0; s.gaze = 0; s.flare = 0; s.burstWait = BURST_GAP[0]; s.bob = 0; s.flow = 0; s.surge = 1; s.stepLead = null;
     s.shocks = [[CORE.glyphY, 5], [0.03, 9]].map(([y, reach]) => {
       const node = createNode({ position: { x: 0, y, z: 0 }, geometry: BM.shockwave(), visible: false, sightHidden: true });
       addChild(root, node);
@@ -689,6 +702,7 @@
     hud.onAction((action, value) => {
       if (action === "cave-directory" && !leaving) directory.open();
       else if (action === "leave") leaveChamber();
+      else if (action === "bifrost-mute") hud.toast(audio.setMuted(!audio.muted) ? "Sound off" : "Sound on");
       else if (action === "reset-view") pilot.resetCamera();
       else if (action === "mode-preset") return presetView(value);
       else if (!leaving && action.startsWith("mode-")) pilot.modeAction(action);
@@ -735,6 +749,18 @@
     remotes = BL.remotePlayers.create({ root, crew: people, fx, unarmed: true });
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
+    // The chamber's resonance, come up with the whoom of the field crossed to get here.
+    audio = BL.bifrostAudio.create();
+    if (ctx.from) audio.cue("arrive");
+    // Now and then, a while after the Ooga reaches the hall, its double separates and goes through to another world.
+    echo = avatar ? BL.bifrostEcho.create({
+      root, fx, camera, avatar, pilot, glyph: scene.glyph, windows: scene.windows.filter((w) => w.kind === "travel"),
+      hall: { r: HALL.r, inHall: (p) => Math.hypot(p.x, p.z) < HALL.r - 1 },
+      nearness, mine: () => userPull,
+      cue: (name) => audio.cue(name),
+      prepare: (geometry) => ctx.renderer.prepareGeometry(geometry),
+      busy: () => leaving || !!document.querySelector("dialog[open]")
+    }) : null;
     lightUp(scene);
     leaving = false;
     directory = BL.caveDirectory.create({
@@ -744,6 +770,7 @@
         if (leaving) return false;
         world.pilot = pilot.player ? pilot.player.traits.name : null;
         leaving = go(id, place);
+        if (leaving) audio.cue("leave");
         return leaving;
       }
     });
@@ -753,7 +780,7 @@
     bifrostScene.input = input;
     bifrostScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      bifrost: { get scene() { return scene; }, get avatar() { return avatar; }, get pictured() { return !!(world.windowViews && world.windowViews.dsb); }, get outside() { return !!world.bifrostView; } }
+      bifrost: { get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, echo: () => !!echo && echo.trigger(), get echoState() { return echo ? echo.state : "none"; }, get pictured() { return !!(world.windowViews && world.windowViews.dsb); }, get outside() { return !!world.bifrostView; } }
     };
   };
 
@@ -772,6 +799,13 @@
     AT.along = radial - HALL.r;
     AT.across = p.x * w.c - p.z * w.sn;
     return AT;
+  };
+  // How near (0 to 1) a point stands to an open window, as its glow, its rim and the mechanism answer: fully from `NEAR`
+  // metres of its opening, nothing from `FAR`, eased.
+  const nearness = (w, p) => {
+    const at = against(w, p), d = Math.hypot(Math.max(0, -at.along), Math.max(0, Math.abs(at.across) - WINDOW.halfW));
+    const want = clamp((FAR - d) / (FAR - NEAR), 0, 1);
+    return want * want * (3 - 2 * want);
   };
   // Cross the glass itself, retaining the step's overshoot. The emerging
   // character is inside the destination plane, so holding forward cannot
@@ -801,6 +835,7 @@
         avatar.leap.vx = m[0] * vx + m[8] * vz; avatar.leap.vz = m[2] * vx + m[10] * vz;
         pilot.transformView(m, w.yaw);
         w.crossings++;
+        audio.cue("mirror");
         return;
       }
     }
@@ -826,7 +861,8 @@
       s.stepLead = s.lead;
       for (let i = 0; i < s.beam.length; i++) s.beam[i].node.geometry = s.lead.charge.beam[step];
     }
-    s.glyph.rotation.y += dt * (0.6 + 5 * k);
+    s.gaze += (ROOM.gaze - s.gaze) * Math.min(1, dt * GAZE_EASE);
+    s.glyph.rotation.y += dt * (0.6 + 5 * k + GAZE_SPIN * s.gaze);
     s.bob += dt * (1.5 + 4 * k);
     s.glyph.position.y = CORE.glyphY + Math.sin(s.bob) * 0.06 * (0.4 + k);
     s.glyph.scale.x = s.glyph.scale.y = s.glyph.scale.z = 1 + (0.04 * k + 0.12 * s.flare) * (1 + Math.sin(elapsed * 9));
@@ -856,6 +892,7 @@
         }
         s.flare = 1;
         s.surge = 0;
+        audio.cue("burst", s.lead ? s.lead.row.id : null);
       }
     } else s.burstWait = Math.max(s.burstWait, BURST_GAP[1]);
     for (let i = 0; i < s.shocks.length; i++) {
@@ -989,6 +1026,17 @@
     footsteps.update(drivenHere);
     mechanism(s, dt, elapsed);
     heavens(s, dt, elapsed);
+    // The sound follows the mechanism: its charge, the world it answers from that window's side, and the view looking up.
+    const eye = camera.position, look = camera.target, vx = look.x - eye.x, vy = look.y - eye.y, vz = look.z - eye.z, flat = Math.hypot(vx, vz) || 1;
+    ROOM.charge = s.charge;
+    ROOM.world = s.lead ? s.lead.row.id : null;
+    ROOM.gaze = clamp((vy / Math.hypot(flat, vy) - 0.2) / 0.5, 0, 1);
+    if (s.lead) {
+      const dx = s.lead.sn * HALL.r - eye.x, dz = s.lead.c * HALL.r - eye.z, d = Math.hypot(dx, dz);
+      ROOM.side = d > 0.5 ? (dx * -vz + dz * vx) / (d * flat) : 0;
+    }
+    audio.update(dt, ROOM);
+    if (echo) echo.update(dt);
     // The way out's field hums and shows the outline of whoever walks through it.
     const g = s.gate;
     g.phase.update(dt, elapsed);
@@ -1002,12 +1050,14 @@
     // The open world's window alone answers whoever comes near (the Ooga, or with none, the view): its glow, its rim,
     // which breathes at rest and climbs to white-hot, its light and the light's reach, its passage's ribs and how often
     // its field ripples. The mirrors keep their look. Every field hums in the same blue.
+    // The Dimensional Echo's double pulls on its window as a traveller would.
     const who = avatar ? avatar.root.position : pilot.orbit.target, L = RENDER_OPTS.lights;
+    userPull = 0;
     for (let i = 0; i < s.windows.length; i++) {
       const w = s.windows[i];
       if (w.kind === "travel") {
-        const at = against(w, who), d = Math.hypot(Math.max(0, -at.along), Math.max(0, Math.abs(at.across) - WINDOW.halfW));
-        const want = clamp((FAR - d) / (FAR - NEAR), 0, 1), k = want * want * (3 - 2 * want), o = w.light * 8, power = 0.7 + 2.6 * w.near;
+        const mine = nearness(w, who), k = Math.max(mine, echo ? echo.pullOf(w) : 0), o = w.light * 8, power = 0.7 + 2.6 * w.near;
+        if (mine > userPull) userPull = mine;
         w.near += (k - w.near) * Math.min(1, dt * EASE);
         w.neon.glow = 1 + BRIGHTEN * w.near;
         const rim = w.rims[Math.min(BM.RIM_STEPS - 1, Math.floor(w.near * BM.RIM_STEPS))];
@@ -1065,6 +1115,10 @@
     remotes = null;
     footsteps.dispose();
     footsteps = null;
+    if (echo) echo.dispose();
+    echo = null;
+    audio.dispose();
+    audio = null;
     if (avatar) people.unparkWeapons(avatar);
     if (people) people.dispose();
     fx.dispose();
@@ -1092,6 +1146,7 @@
     }
     if (avatar) set.add(avatar.headOpen).add(avatar.headClosed);
     if (remotes) remotes.liveGeometry(set);
+    if (echo) echo.liveGeometry(set);
   };
   const stats = () => {
     let nodes = 0;

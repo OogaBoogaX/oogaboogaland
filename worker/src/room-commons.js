@@ -6,7 +6,8 @@
 // welcome, nothing durable), the same ids and order, the same Unicode policy, the same retry dedupe and the same rate
 // bucket by account, so a contributor's tabs on the island and in Ooga Chat together still speak about once a second.
 // Its view of Online Oogas is presence without positions: each player's id, login, display, body, zone, voice, mute and
-// hand (`join`, `leave`, `body`, `zone`, `vstate`, `hand`), and the clouds. No pose, distance, SFU id, private
+// hand (`join`, `leave`, `body`, `zone`, `vstate`, `hand`), the clouds and active duel pair ids for local listening.
+// No duel health, coordinates, challenges or outcomes. No pose, distance, SFU id, private
 // conversation or voice link reaches it, and it can send nothing but chat lines: private conversations, voice links,
 // reactions over a body and every world action stay the island's (docs/ooga-chat-backend.md, the capability matrix).
 // Re-exported by protocol.js, as the audience glue is, so the Room's checks load it with the protocol.
@@ -14,6 +15,7 @@
 import { bridgeFeatures } from "./chat-bridge-protocol.js";
 import { getPlayer } from "./db.js";
 import { audienceRoom } from "./room-audience.js";
+import { duel } from "./duel.js";
 
 export const COMMONS_V = 1;
 export const COMMONS_FEATURE = "commons-v1";
@@ -78,8 +80,10 @@ export const commonsRoom = {
     m.chatBucket = room.chatBucketFor(m.id, m.seenAt);
     all.set(m.connId, m);
     server.serializeAttachment(attachmentOf(m));
+    duel.init(room);
     room.send(server, { t: "community", v: COMMONS_V, op: "welcome", epoch: epochOf(room, now), send: bridgeFeatures(room.env).commonsSend,
       you: { id: m.id, login: m.login, display: m.display }, players: [...room.players.values()].map(presenceOf),
+      duels: [...room.duels.values()].map((d) => ({ id: d.id, a: d.a, b: d.b })),
       features: [globalThis.BL.chatPolicy.FEATURE, COMMONS_FEATURE] });
     room.send(server, { t: "chat-history", messages: room.chat.list() });
     audienceRoom.welcome(room, m);
@@ -128,8 +132,18 @@ export const commonsRoom = {
 
   /** What the Room broadcasts that Online Oogas and The Commons show, to every member, without a position. */
   relay(room, msg) {
-    if (!room.community || !room.community.size || !msg || !RELAYED.has(msg.t)) return;
-    const out = JSON.stringify(msg.t === "join" ? { t: "join", p: presenceOf(room.players.get(msg.p.id) || msg.p) } : msg);
+    if (!room.community || !room.community.size || !msg) return;
+    // Listening needs only the active pair. Never relay combat frames, coordinates, health or challenge traffic.
+    let frame;
+    if (msg.t === "duel") {
+      if (msg.op === "start") frame = { t: "duel", op: "start", id: msg.id, a: msg.a, b: msg.b };
+      else if (msg.op === "end") frame = { t: "duel", op: "end", id: msg.id };
+      else return;
+    } else {
+      if (!RELAYED.has(msg.t)) return;
+      frame = msg.t === "join" ? { t: "join", p: presenceOf(room.players.get(msg.p.id) || msg.p) } : msg;
+    }
+    const out = JSON.stringify(frame);
     for (const m of room.community.values()) room.send(m.ws, out);
   },
 

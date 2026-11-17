@@ -41,6 +41,9 @@
   const sheet = $("sheet"), panel = $("players-panel"), list = $("players-list"), status = $("players-status"), count = $("players-count");
   const hearing = $("players-hearing"), range = $("players-hearing-range"), rangeValue = $("players-hearing-value"), V = BL.voice;
   const speak = $("players-speak"), speakBox = $("players-speak-input"), synth = window.speechSynthesis || null, toastBox = $("toast");
+  const muteDuels = $("players-mute-duels");
+  muteDuels.addEventListener("change", () => V.setMuteDuels(muteDuels.checked));
+  net.subscribeDuel(V.duel);
   // The slider's stops run RADIUS_MIN..RADIUS_MAX metres, and one more stop past them is no limit.
   const RANGE_STEP = Number(range.step);
   range.min = String(V.RADIUS_MIN);
@@ -201,10 +204,11 @@
       const words = hand && BL.reactionPolicy.HANDS.includes(hand) ? "Hand raised" : `Pinned emoji ${hand}`;
       row.hand.title = words; row.hand.setAttribute("aria-label", words);
     }
-    const blocked = !!login && BL.voice.mutedLocally(row.id);
-    if (row.voiceLook !== look || row.voiceLogin !== login || row.voiceSelf !== self || row.blocked !== blocked) {
+    const blocked = !!login && BL.voice.mutedLocally(row.id), duelMuted = !self && V.mutedByDuel(row.id);
+    if (row.voiceLook !== look || row.voiceLogin !== login || row.voiceSelf !== self || row.blocked !== blocked || row.duelMuted !== duelMuted) {
+      row.duelMuted = duelMuted;
       row.voiceLook = look; row.voiceLogin = login; row.voiceSelf = self; row.blocked = blocked;
-      const button = row.voice, words = BL.hud.voiceWords(look, self, blocked, login);
+      const button = row.voice, words = BL.hud.voiceWords(look, self, blocked, login) + (duelMuted ? ". Automatically muted until their duel ends" : "");
       button.hidden = !look;
       button.dataset.voice = look; button.dataset.login = login; button.dataset.self = String(self);
       button.disabled = !login && !self;
@@ -302,6 +306,8 @@
   const paintHearing = () => {
     if (!showing || stale) return;
     const voice = V.stats;
+    muteDuels.checked = voice.muteDuels;
+    muteDuels.disabled = !net.state.me;
     hearing.hidden = false;
     const words = voice.radius ? `${voice.radius} m` : "No limit", value = String(voice.radius || V.RADIUS_MAX + RANGE_STEP);
     if (rangeValue.textContent !== words) { rangeValue.textContent = words; range.setAttribute("aria-valuetext", words); }

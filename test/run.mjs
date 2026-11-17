@@ -23012,6 +23012,10 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
     out.mouth = at({ x: lab.x, y: 0, z: lab.z }, 0.5);
     const outX = labMouth.x + (labMouth.apron.x - labMouth.x) * 2.5, outZ = labMouth.z + (labMouth.apron.z - labMouth.z) * 2.5;
     out.apron = at({ x: outX, y: D.island.surfaceAt(outX, outZ), z: outZ }, 0.5);
+    out.canopies = ["c2", "c3"].map((id) => {
+      const m = D.island.mouths.find((mouth) => mouth.id === id), along = -2;
+      return at({ x: m.x + Math.sin(m.ry) * along, y: m.floorY, z: m.z + Math.cos(m.ry) * along }, 0.5);
+    });
     out.air = at({ x: 53.7, y: 8, z: -31 }, 0.5);
     // Inside the Sphere's shell, down its passage short of the curtain, and Merge Rock, which has no public scope yet.
     // Only a crossing's Ooga stands behind the doors (timechain-gate.js puts one left there on the bridge), so the
@@ -23033,11 +23037,13 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
     lands.every((land) => r[land].home.scope === "main" && r[land].bridge.scope === "main" && r[land].land.scope === "main")
       && r.apron.scope === "main" && r.air.scope === "main" && r.mouth.scope === null && r.mouth.reason === "interior"
       && r.passage.scope === null && r.passage.reason === "interior" && (!r.repos || r.repos.scope === null && r.repos.reason === "unscoped"), JSON.stringify(r));
+  record("outdoor scope: covered cave approaches before the Arcade doors and Factory shield stay in Main Island",
+    r.canopies.every((p) => p.zone === "outside" && p.scope === "main"), JSON.stringify(r.canopies));
   // Levels: by height off the island's edge, and down HQ's ramps, its basement's and the rainforest's descent.
   const lv = await b.evaluate(`(() => {
     const B = __ooga, D = BL.scenes.hub.debug, H = D.island.headquarters, M = __ooga.poolIsland, L = BL.poolLayout, net = BL.net.state;
     const at = (x, y, z) => { B.pilot.navigate({ position: { x, y, z }, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(0.6, 1 / 60); return { to: net.blendTo, t: +net.blendT.toFixed(2), zone: net.zone, scope: BL.outdoorScope.state.scope, reason: BL.outdoorScope.state.reason }; };
-    const air = (feet) => { const o = { to: "", t: 0 }; return D.levelOf(53.7, feet, -31, "between", o) ? { to: o.to, t: +o.t.toFixed(2) } : null; };
+    const air = (feet) => { const o = { to: "", t: 0 }, descending = D.levelOf(53.7, feet, -31, "between", o); return descending ? { to: o.to, t: +o.t.toFixed(2), reason: BL.outdoorScope.hubReason("between", false, descending) } : null; };
     const near = (samples, y) => samples.reduce((best, p) => Math.abs(p.y - y) < Math.abs(best.y - y) ? p : best);
     const world = (lx, ly, lz) => [M.worldX(lx, lz), M.place.y + ly, M.worldZ(lx, lz)], down = L.rampPoint(50), room = H.basement.rooms[0];
     const entrance = near(H.ramps[0].samples, H.floor / 2), stair = near(H.basement.ramps[0].samples, (H.floor + H.basement.floor) / 2);
@@ -23052,6 +23058,8 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
   record("voice levels: off the island's edge height alone picks the level: the surface a metre under the plane, then HQ's, then the basement's, all the way down",
     a.over === null && a.dip === null && a.half.to === "hq" && Math.abs(a.half.t - 0.5) <= 0.01 && a.floor.to === "hq" && a.floor.t === 1 && a.under.to === "hq" && a.under.t === 1
       && a.down.to === "hq-basement" && Math.abs(a.down.t - 0.5) <= 0.01 && a.deep.to === "hq-basement" && a.deep.t === 1, JSON.stringify(a));
+  record("outdoor scope: air below the main island's surface level is excluded at every depth",
+    [a.half, a.floor, a.under, a.down, a.deep].every((p) => p.reason === "descending"), JSON.stringify(a));
   record("voice levels: down HQ's entrance ramps, its basement's and the rainforest's descent a player hears both levels by height, each level alone on it, its rooms HQ's whatever the height, never the lake over the chamber",
     lv.entrance.to === "hq" && Math.abs(lv.entrance.t - lv.rampShare) <= 0.05 && lv.floor.to === "hq" && lv.floor.t === 1 && lv.floor.zone === "hq" && lv.stair.to === "hq-basement" && Math.abs(lv.stair.t - 0.5) <= 0.05 && lv.stair.zone === "hq-basement"
       && lv.basement.to === "hq-basement" && lv.basement.t === 1 && lv.basement.zone === "hq-basement" && lv.backUp.to === "hq" && lv.backUp.t === 1 && lv.backUp.zone === "hq"
@@ -26421,7 +26429,7 @@ for (const ready of [false, true]) scene("dsb", { label: "entrance audio " + rea
         const original = AudioContext.prototype.createBufferSource, gainOriginal = AudioContext.prototype.createGain, audio = __ooga.audio, fade = audio.fade;
         window.__entranceLeave = { original, gainOriginal, gains: [], context: null, fade: 0 };
         AudioContext.prototype.createGain = function() { const gain = gainOriginal.call(this); __entranceLeave.gains.push(gain); return gain; };
-        AudioContext.prototype.createBufferSource = function() { window.__entranceLeave.context = this; return original.call(this); };
+        AudioContext.prototype.createBufferSource = function() { if (__ooga.scene === "dsb" && !__ooga.transitioning) window.__entranceLeave.context = this; return original.call(this); };
         audio.fade = seconds => { window.__entranceLeave.fade = seconds; fade(seconds); };
       })()`);
       const p = await b.evaluate(`(() => { const r = document.getElementById("dsb-start-audio").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
@@ -28081,7 +28089,7 @@ const footstepChecks = BL => {
 // when someone is listed, without touching the visitor's own mute or telling the room. voice.js runs in a fixture
 // with a fake microphone, peer connection and Worker, so every state of the track is read directly.
 const voiceAloneChecks = async () => {
-  const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),ops=[],netMuted=[],emits=[];
+  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),ops=[],netMuted=[],emits=[];
   const track={enabled:true,stop(){},clone(){return {enabled:true,stop(){}};}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
   class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
   class Audio {constructor(){this.muted=false;}pause(){}play(){return Promise.resolve();}}
@@ -28129,7 +28137,7 @@ const voiceAloneChecks = async () => {
 };
 // A fresh fixture of voice.js for the failure paths: whatever the SFU refuses is named in `failing`, and timers are held.
 const voiceFailureChecks = async () => {
-  const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
+  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
   const page=(joined=false,AudioContext=undefined)=>{
     const timers=[],calls=[],bodies=[],pcs=[],failing=new Set(),holds=new Map();let holdLeave=null;
     const track={enabled:true,stopped:false,stop(){this.stopped=true;},clone(){return {enabled:true,stop(){}};}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
@@ -28202,7 +28210,7 @@ const voiceFailureChecks = async () => {
 // Someone who pressed Join voice comes back in voice, muted, on their first press, with the microphone never touched
 // until they unmute; only Leave voice ends that. voice.js runs per "page" over one shared localStorage.
 const voiceReturnChecks = async () => {
-  const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
+  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
   const stored=new Map(),settle=()=>new Promise(r=>setTimeout(r,0));
   const page=({active=false,zone="outside",denied=false}={})=>{
     const ops=[],told=[],presses=new Map();let mics=0;
@@ -28295,7 +28303,7 @@ const voiceHandoffChecks = () => {
 };
 // iOS keeps every element at 1; both paths must sound the same at every step.
 const voiceHearingChecks = async () => {
-  const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),settle=()=>new Promise(r=>setTimeout(r,0));
+  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),settle=()=>new Promise(r=>setTimeout(r,0));
   const remote=(login,zone,x,z,placed=true)=>({login,zone,poseZone:placed?zone:null,x,y:0,z});
   const rig=(ios,webAudio=true,saved=null,store=new Map())=>{
     const ops=[],bodies=[],netMuted=[],timers=new Map(),els=[],pulled=[],gains=[],limiters=[],ctxs=[],handlers=new Map(),subscribers=new Set();let timerId=0,onTrack=null,captures=0;
@@ -28443,6 +28451,31 @@ const voiceHearingChecks = async () => {
   const savedPlayers={desktop:await preferences(false),ios:await preferences(true)};
   record("voice player preferences: prejoin settings request no microphone or connection, reload applies mute and real boost before the first track, volume never unmutes or bypasses range and zones, stable identities survive renames and environments, and shared-browser accounts remain separate",
     Object.values(savedPlayers).every(r=>r.prejoin&&r.reload&&r.landedOutside&&r.receiveOnly&&r.limited&&r.initial==="0,1.5,0"&&r.boost==="2,1.5,0"&&r.muteWins==="2,0,0"&&r.volumeIndependent&&r.boundary==="0"&&r.returned==="2"&&r.listenerAway==="0"&&r.listenerBack==="0.25"&&r.identity&&r.otherAccount&&r.restored&&r.signedOut&&r.localOnly&&r.legacyUntouched&&r.disposed),JSON.stringify(savedPlayers));
+  const duelListening = async (webAudio) => {
+    const r = rig(false, webAudio), V = r.V;
+    await V.enable(); await settle(); V.setPeers([2, 3, 4], [1, 1, 1]); await settle(); r.land([2, 3, 4]);
+    const sent = r.ops.length, defaultOff = !V.stats.muteDuels;
+    V.duel({ op: "start", id: 1, a: 2, b: 3 });
+    const unchecked = r.levels([2, 3]) === "1,1";
+    V.setVolume(3, .5); V.muteLocal(2, true); V.setMuteDuels(true);
+    const silenced = r.levels([2, 3]) === "0,0" && !V.mutedLocally(3) && V.volumeOf(3) === .5;
+    V.duel({ op: "end", id: 1 });
+    const restored = r.levels([2, 3]) === "0,0.5";
+    V.duel({ op: "list", duels: [{ id: 2, a: 71, b: 2 }, { id: 3, a: 3, b: 4 }] }); V.muteLocal(2, false);
+    const exception = r.levels([2, 3, 4]) === "1,0,0";
+    V.setMuteDuels(false);
+    const disabled = r.levels([2, 3, 4]) === "1,0.5,1";
+    V.setMuteDuels(true); V.duel({ op: "lost" });
+    const lost = r.levels([2, 3, 4]) === "1,0.5,1", local = sent === r.ops.length;
+    const saved = r.store.get("oogaboogaland.voice-players.71.duels") === "true";
+    r.account({ id: 72, login: "other" }); const other = !V.stats.muteDuels;
+    r.account({ id: 71, login: "listener" }); const remembered = V.stats.muteDuels;
+    V.dispose();
+    return { defaultOff, unchecked, silenced, restored, exception, disabled, lost, local, saved, other, remembered };
+  };
+  const duelAudio = [await duelListening(true), await duelListening(false)];
+  record("voice duel listening: opt-in only, both duelists silenced through gain or element, own pair exempt while other duels stay muted, ends/loss restore manual levels and account choices stay separate",
+    duelAudio.every((r) => Object.values(r).every(Boolean)), JSON.stringify(duelAudio));
   // #392: between two levels each voice plays at its equal-power share (an islander, someone on HQ's level and a second
   // climber halfway, each in a zone of their own), on iOS through its gain as on the desktop, and the hearing range is
   // measured across the main world.
@@ -30958,9 +30991,9 @@ const playersColumnChecks = async () => {
     runInNewContext(await readFile(join(root, "src/js/voice-blend.js"), "utf8"), context);
     Object.assign(window.BL, {
       net: { state: { room: "live", me: { login: "me", display: "Me" }, selfId: 1, online: 3, zone: "outside", hostId: 0, self: { x: 0, y: 0, z: 0, zone: "outside" }, voiceLinks: false, clouds: [] }, remotes,
-        voiceLink: () => "none", toggleVoiceLink() {}, subscribe() {}, subscribeRoster() {}, subscribeMoves() {}, subscribePresence() {}, subscribeReactions() {}, subscribeAudience() {}, subscribeClouds() {} },
+        voiceLink: () => "none", toggleVoiceLink() {}, subscribe() {}, subscribeRoster() {}, subscribeMoves() {}, subscribePresence() {}, subscribeReactions() {}, subscribeAudience() {}, subscribeClouds() {}, subscribeDuel() {} },
       hud: { voiceIcon: make("svg"), voiceWords: () => "In voice", toast() {} },
-      voice: { stats: { enabled: true, muted: false, speaking: false, radius: 0 }, fades: false, RADIUS_MIN: 5, RADIUS_MAX: 60, VOLUME_MAX: 2, subscribe() {}, speaking: () => false, inEarshot: () => true, mutedLocally: () => false, volumeOf: () => 1, setVolume() {}, setRadius() {} },
+      voice: { stats: { enabled: true, muted: false, speaking: false, radius: 0 }, fades: false, RADIUS_MIN: 5, RADIUS_MAX: 60, VOLUME_MAX: 2, subscribe() {}, speaking: () => false, inEarshot: () => true, mutedLocally: () => false, mutedByDuel: () => false, duel() {}, setMuteDuels() {}, volumeOf: () => 1, setVolume() {}, setRadius() {} },
       sheet: { visible: () => true, setBadge() {}, watchViews() {}, attending: () => true }, sound: { muted: false, subscribe() {} }, pilot: { turnToward() {} } });
     runInNewContext(await readFile(join(root, "src/js/players.js"), "utf8"), context);
     handlers.sheetchange();
@@ -32740,7 +32773,7 @@ const studioCatalogueProof = async () => {
 
 // Exercise the shipped voice lifecycle with deferred permissions/signaling and no real devices/network.
 const studioVoiceLifecycleProof = async () => {
-  const source=await readFile(join(root,"src/js/voice.js"),"utf8");
+  const source=await readFile(join(root,"src/js/duel-listening.js"),"utf8")+await readFile(join(root,"src/js/voice.js"),"utf8");
   const fixture=(gathering="complete",candidate=true,failFirstPeer=false,voiceTurn=false)=>{
     const calls=[],streams=[],peers=[],elements=[],timers=new Map(),failing=new Map(),clock={at:null};let timerId=0,gum=0,permission=null,publishResponse=null,deferred=null,peerAttempts=0;
     class Peer {
@@ -33394,7 +33427,7 @@ const outdoorScopeChecks = () => {
     outdoors: ["outside", "between", "sphere", "rainforest", "bifrost"].every((zone) => hub(zone) === "outdoor"),
     entrances: ["outside", "sphere", "rainforest", "bifrost"].every((zone) => hub(zone, true) === "interior"),
     under: ["rainforest-under", "hq", "hq-basement"].every((zone) => hub(zone) === "descending") && hub("outside", false, true) === "descending"
-      && hub("sphere", false, true) === "descending" && hub("outside", true, true) === "interior",
+      && hub("sphere", false, true) === "descending" && hub("between", false, true) === "descending" && hub("outside", true, true) === "interior",
     unscoped: hub("repos") === "unscoped",
     // Grouped with the island by the panels (zone-map.js), but never public by that.
     grouped: ["lab", "bca", "factory", "arcade", "mirror", "cave-3"].every((zone) => Z.zoneMap.groupOf(zone) === "outside" && hub(zone) === "unknown"),
@@ -33860,10 +33893,10 @@ const oogaChatChecks = async () => {
   // on its acknowledgement; refusals leave nothing held; Leave Voice keeps listening; the server ending a lease, a new
   // connection or a zone change stop capture exactly once; a sync asked before a zone change plays nothing of the old zone.
   const voiceCheck = async () => {
-    const M = load(["src/ooga-chat/ooga-chat-media.js"], { window: {}, setTimeout, clearTimeout, Math, Date, Promise, Object, Number, Map, Set, Error }).oogaChatMedia;
+    const M = load(["src/js/duel-listening.js", "src/ooga-chat/ooga-chat-media.js"], { window: {}, setTimeout, clearTimeout, Math, Date, Promise, Object, Number, Map, Set, Error }).oogaChatMedia;
     const flush = async (n = 6) => { for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0)); };
     const rig = ({ deny = null, holdPlay = false, allowed = true, memory = null } = {}) => {
-      const log = [], asked = [], listeners = new Map(), tracks = [], pcs = [];
+      const log = [], asked = [], listeners = new Map(), tracks = [], pcs = [], elements = [];
       let delay = null, nextMid = 0, playHeld = holdPlay, failing = null, stalls = 0;
       // Waits of a second or more are held for the check to fire by hand (`waits`); shorter ones run as they are.
       const waits = [], timers = { set: (fn, ms) => ms >= 1000 ? -waits.push({ fn, ms }) : setTimeout(fn, ms), clear: (id) => { if (id < 0) waits[-id - 1] = null; else clearTimeout(id); } };
@@ -33889,12 +33922,12 @@ const oogaChatChecks = async () => {
       let captures = 0;
       const rtc = { PeerConnection: PC, stream: (t) => ({ t }),
         getUserMedia: async () => { captures++; if (deny) throw Object.assign(new Error("no"), { name: deny }); const track = { enabled: true, readyState: "live", stops: 0, on: {}, stop() { this.stops++; this.readyState = "ended"; }, addEventListener(t, fn) { this.on[t] = fn; }, removeEventListener(t) { delete this.on[t]; } }; tracks.push(track); return { getAudioTracks: () => [track], getTracks: () => [track] }; },
-        audio: () => ({ srcObject: null, played: 0, play() { this.played++; return playHeld ? Promise.reject(Object.assign(new Error("held"), { name: "NotAllowedError" })) : Promise.resolve(); }, pause() {} }) };
+        audio: () => { const el = { srcObject: null, played: 0, play() { this.played++; return playHeld ? Promise.reject(Object.assign(new Error("held"), { name: "NotAllowedError" })) : Promise.resolve(); }, pause() {} }; elements.push(el); return el; } };
       const target = { addEventListener: (t, fn) => listeners.set(t, fn), removeEventListener: (t) => listeners.delete(t) };
       let requestId = 0;
       const c = M.create({ broker: () => broker, rtc, target, memory, timers, allowed: () => allowed, stall: () => { stalls++; }, request: (type, fields) => { asked.push({ type, ...fields, id: ++requestId }); return requestId; } });
       const answer = (ok, you, error) => c.heard({ type: "result", requestId: asked.at(-1).id, ok, you, ...(error ? { error: { code: error, retryable: false } } : {}) });
-      return { c, log, asked, tracks, pcs, listeners, answer, get captures() { return captures; }, get stalls() { return stalls; }, hold: (op) => { let go; delay = { op, until: new Promise((r) => { go = r; }) }; return () => { delay = null; go(); }; },
+      return { c, log, asked, tracks, pcs, elements, listeners, answer, get captures() { return captures; }, get stalls() { return stalls; }, hold: (op) => { let go; delay = { op, until: new Promise((r) => { go = r; }) }; return () => { delay = null; go(); }; },
         play: (held) => { playHeld = held; }, failNext: (op) => { failing = op; },
         fire: (ms) => { const i = waits.findIndex((w) => w && w.ms === ms); if (i < 0) return false; const { fn } = waits[i]; waits[i] = null; fn(); return true; } };
     };
@@ -33905,6 +33938,22 @@ const oogaChatChecks = async () => {
     r.c.zone("main"); snap(r, "c1", "none"); await flush();
     out.listener = r.captures === 0 && r.log.join() === "ice@c1,receive/open@c1,receive/sync@c1,renegotiate@c1" && r.c.state.hearing === 1 && r.c.state.phase === "listening" && !r.c.available;
     await r.c.join(); out.listenerNoJoin = r.captures === 0 && !r.asked.length;
+    const duelAudio = {}, element = () => r.elements.at(-1);
+    r.c.duel({ op: "start", id: 1, a: 7, b: 8 });
+    duelAudio.defaultOff = !r.c.state.muteDuels && !element().muted;
+    r.c.setVolume("gh:7", .5); r.c.setMuteDuels(true);
+    duelAudio.muted = element().muted && !r.c.mutedLocally("gh:7") && element().volume === .5;
+    snap(r, "c2", "none"); await flush();
+    duelAudio.replacement = element().muted && element().volume === .5;
+    r.c.duel({ op: "end", id: 1 });
+    duelAudio.ended = !element().muted && element().volume === .5;
+    r.c.duel({ op: "start", id: 2, a: 1, b: 7 });
+    duelAudio.ownPair = !element().muted;
+    r.c.muteLocal("gh:7", true); r.c.duel({ op: "lost" });
+    duelAudio.manual = element().muted && r.c.mutedLocally("gh:7") && r.c.volumeOf("gh:7") === .5;
+    r.c.dispose();
+    record("Ooga Chat duel listening: unchecked by default, opt-in silences replacement tracks, duel end restores volume, own pair is exempt, manual mute survives connection loss",
+      Object.values(duelAudio).every(Boolean), JSON.stringify(duelAudio));
     // A contributor: muted capture, lease, publish, acknowledged speaker; mute, unmute, leave and keep listening.
     r = rig();
     r.c.zone("main"); snap(r, "c1", "eligible"); await flush();

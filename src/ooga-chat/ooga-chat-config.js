@@ -94,7 +94,7 @@
   // The two outdoor zones; the roster's buttons (#653) choose between them. A saved value outside them is the first.
   const ZONES = ["main", "dsb"];
   const parseZone = (value) => ZONES.includes(value) ? value : ZONES[0];
-  // Per-adapter storage keys, so a review session's choices never reach production's. Only `STORED` names are kept:
+  // Per-adapter storage keys, so a review session's choices never reach production's. `STORED` and per-account mutes are kept:
   // `sweep` removes any other key under this adapter's prefix and any older unversioned `ooga-chat.` key (a saved
   // screen, role or speaker flag), so nothing saved can bring back a choice panel or a microphone. The one word a
   // speaker leaves is the tab's own, in session storage (`speaker`, ooga-chat-app.js): for the page that replaces it at once.
@@ -106,7 +106,7 @@
     for (let i = 0; i < storage.length; i++) {
       const key = storage.key(i);
       if (!key?.startsWith("ooga-chat.") || key.startsWith(theirs)) continue;
-      if (key.startsWith(mine) && STORED.includes(key.slice(mine.length))) continue;
+      if (key.startsWith(mine) && (STORED.includes(key.slice(mine.length)) || /^muted\.(gh|x):[1-9][0-9]{0,19}(\.duels)?$/.test(key.slice(mine.length)))) continue;
       gone.push(key);
     }
     for (const key of gone) storage.removeItem(key);

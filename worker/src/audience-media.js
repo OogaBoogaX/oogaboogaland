@@ -127,7 +127,8 @@ export const createMediaBroker = (aud) => {
     for (const c of aud.model.conns.values()) {
       if (c.zone !== conn.zone || c.id === conn.id || !c.lease || c.lease.state !== "active") continue;
       const m = states.get(c.connId);
-      if (m && m.pub && m.track && !out.has(c.id)) out.set(c.id, { session: m.pub, track: m.track, gen: m.gen });
+      // Source kind is part of the generation: the Room and Audience clocks can issue the same number on handoff.
+      if (m && m.pub && m.track && !out.has(c.id)) out.set(c.id, { session: m.pub, track: m.track, gen: -m.gen - 1 });
     }
     return out;
   };
@@ -172,7 +173,7 @@ export const createMediaBroker = (aud) => {
     for (const c of aud.model.conns.values()) {
       if (!c.zone || !c.lease || c.lease.state !== "active") continue;
       const m = states.get(c.connId);
-      if (m && m.pub && m.track) now.set(c.zone, `${now.get(c.zone) || ""}|${c.id}:${m.gen}`);
+      if (m && m.pub && m.track) now.set(c.zone, `${now.get(c.zone) || ""}|${c.id}:${-m.gen - 1}`);
     }
     const changed = new Set();
     for (const zone of new Set([...now.keys(), ...announced.keys()])) if ((now.get(zone) || "") !== (announced.get(zone) || "")) changed.add(zone);
