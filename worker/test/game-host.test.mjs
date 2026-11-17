@@ -39,11 +39,13 @@ const echo = {
 // A kind that takes bytes from its first player alone and passes them on.
 const relayed = { ...echo, id: "relay", limits: { sockets: 3, chars: 64, bytes: 8 }, buckets: { say: { rate: 2, burst: 2 }, relay: { rate: 2, burst: 2 } },
   create: () => ({ ...echo.create(), relay: (p) => p.id === 1 }) };
-const KINDS = new Map([[echo.id, echo], [relayed.id, relayed], [ghostHunt.id, ghostHunt]]);
+// A kind that greets a page joining with a frame of its own.
+const greeted = { ...echo, id: "greet", create: () => ({ ...echo.create(), greet: (p) => [new Uint8Array([9, p.id]).buffer] }) };
+const KINDS = new Map([[echo.id, echo], [relayed.id, relayed], [greeted.id, greeted], [ghostHunt.id, ghostHunt]]);
 
-const harness = ({ stored = new Map(), env = {} } = {}) => {
+const harness = ({ stored = new Map(), env = {}, sockets = [] } = {}) => {
   const clock = { now: 1.7e12 };
-  const timers = [], accepted = [];
+  const timers = [], accepted = [...sockets];
   const socket = () => ({
     sent: [], bins: [], closed: null, store: null,
     send(m) { if (typeof m === "string") this.sent.push(JSON.parse(m)); else this.bins.push(m); },
@@ -92,7 +94,7 @@ const harness = ({ stored = new Map(), env = {} } = {}) => {
     }
     clock.now = until;
   };
-  return { host, join, send, run, timers, stored, clock, alarm, ready: () => ready };
+  return { host, join, send, run, timers, stored, clock, alarm, accepted, ready: () => ready };
 };
 const states = (ws) => ws.sent.filter((m) => m.t === "state");
 
@@ -372,4 +374,17 @@ test("a kind that relays passes bytes from the page it allows to every other pag
   const other = harness(), e = (await other.join(1)).ws;
   await other.host.webSocketMessage(e, bytes);
   assert.equal(e.closed.code, protocol.CLOSE_PROTOCOL, "a game that does not relay closes on bytes, as before");
+});
+
+test("a page joining hears the state and then what the game greets it with; after a wake, pages still connected are its players again", async () => {
+  const h = harness();
+  const a = (await h.join(1, "greet:here:v1")).ws;
+  assert.deepEqual(a.sent.map((m) => m.t), ["welcome", "state"]);
+  assert.deepEqual([...new Uint8Array(a.bins[0])], [9, 1], "greeted after its welcome and state");
+  const b = (await h.join(2, "greet:here:v1")).ws;
+  const woke = harness({ stored: h.stored, sockets: [a, b] });
+  await woke.ready();
+  assert.deepEqual(woke.host.game.state().heard, ["join 1", "join 2"], "both still connected, joined again");
+  await woke.send(b, { t: "run" });
+  assert.equal(woke.host.game.state().running, true, "and heard as players");
 });
