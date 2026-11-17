@@ -88,6 +88,8 @@ export class GameHost extends DurableObject {
     this.name = name;
     this.kind = kind;
     this.game = kind.create(Date.now());
+    // A game may speak to one page alone (the hangar's Tess queue, each page its own place in it).
+    this.game.tell = (id, msg) => { const p = this.sockets.get(id); if (p) this.send(p.ws, msg); };
     return true;
   }
 
