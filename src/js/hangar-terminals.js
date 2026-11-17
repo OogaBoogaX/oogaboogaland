@@ -743,8 +743,11 @@
     return { light: plane(light, pic.w, pic.h, 0.6), black: plane(black, pic.w, pic.h, 0, true), grain };
   });
 
-  // `root`: the scene's root; `audio`: the hangar's sound; `mood()`: Kortik's Sis's mood, 0 to 5; `toast(text)`.
-  const create = ({ root, audio, mood, toast }) => {
+  // `root`: the scene's root; `audio`: the hangar's sound; `mood()`: Kortik's Sis's mood, 0 to 5; `toast(text)`. While
+  // the page follows the hall on the Worker (`follow(true)`, `hangar-link.js`), a press is asked of the hall (`ask()`,
+  // false when it could not be sent), which starts and stops the show for everyone in the hangar (`sync`, joined as far
+  // in as it has got), and this page's film running out is told to it (`done(id)`), ending it for everyone.
+  const create = ({ root, audio, mood, toast, ask = null, done = null }) => {
     const L = HM.LAYOUT, K = HM.KIOSK, P = HM.projector(), S = HM.filmScreen(), B = HM.projectorBeam(), X = extras(), pic = S.picture;
 
     // ---- the terminals ----
@@ -821,16 +824,38 @@
     // grain's and the flicker's clocks.
     let phase = "idle", t = 0, hoist = 0, hoistFrom = 0, unroll = 0, upFrom = 0, lamp = 0, motor = 0, film = null, index = 0, at = 0, splice = 0, painted = 0;
     let weaveT = 0, grainT = 0, shownGrain = -1, wx = 0, wy = 0, flick = 0, clock = 0, near = -1, deskNear = -1, beep = false;
+    // Whether the hall starts and stops the show (`follow`), and the id of the last it named that this page has played.
+    let following = false, followed = 0;
     // The light the picture throws on the floor now (`lights`).
     const light = { level: 0 };
     const running = () => phase === "lower" || phase === "down" || phase === "strike" || phase === "film";
     const go = (next) => { phase = next; t = 0; };
-    const start = () => {
+    // The show from `since` s in (the hall's, joined late): the screen already down that far, the film on to the frame
+    // it has reached; false, starting nothing, once its film has run out by then.
+    const startAt = (since) => {
       film = reel(BL.jetFeed.reading());
       index = at = splice = painted = 0;
-      beep = false;
-      go("lower");
-      audio.roll(SHOW.hoist);
+      beep = since > 0;
+      let u = since;
+      if (u < SHOW.hoist) { go("lower"); t = u; audio.roll(SHOW.hoist - u); return true; }
+      u -= SHOW.hoist; hoist = 1;
+      if (u < SHOW.down) { go("down"); t = u; audio.roll(SHOW.down - u); return true; }
+      u -= SHOW.down; unroll = 1;
+      audio.projector(true);
+      if (u < SHOW.strike) { go("strike"); t = u; return true; }
+      u -= SHOW.strike;
+      while (index < film.length && u >= film[index].hold) u -= film[index++].hold;
+      if (index >= film.length) {
+        audio.projector(false);
+        film = null; index = 0; hoist = unroll = 0;
+        go("idle");
+        return false;
+      }
+      go("film"); at = u; painted = index; lamp = 1;
+      return true;
+    };
+    const start = () => {
+      startAt(0);
       toast("Projector on · the Jet's history on the big screen over the runway.");
     };
     const stop = () => {
@@ -840,6 +865,11 @@
       toast("Projector off.");
     };
     const press = () => {
+      if (following) {
+        if (phase !== "idle" && !running() || !ask || !ask()) return false;
+        BL.gamepad.rumble(0.2, 0.4, 70);
+        return true;
+      }
       if (phase === "idle") start();
       else if (running()) stop();
       else return false;
@@ -890,7 +920,11 @@
       const was = film[index];
       index++;
       at = 0;
-      if (index >= film.length) { go("runout"); return; }
+      if (index >= film.length) {
+        go("runout");
+        if (following && followed && done) done(followed);
+        return;
+      }
       const now = film[index];
       if (now.kind !== "leader") { splice = SHOW.splice; audio.clunk(); }
       else if (now.n === 2 && now.q === 0 && !beep) { beep = true; audio.beep(pic.x, pic.y, pic.z); }
@@ -1029,8 +1063,26 @@
     };
     const liveGeometry = (set) => { for (const g of live) set.add(g); };
 
+    // Following the hall, or starting shows here again.
+    const follow = (on) => {
+      following = on;
+      if (!on) followed = 0;
+    };
+    // The hall's show now (`f`: { id, at, by, end }, or null) at server time `now` (ms): a new one started from as far in
+    // as it has got, and the one showing stopped once the hall has stopped it.
+    const sync = (f, now) => {
+      if (!f) return;
+      if (f.id !== followed) {
+        followed = f.id;
+        const since = Math.max(0, (now - f.at) / 1000);
+        if (f.end === null && phase === "idle" && startAt(since) && since < 1) toast("Projector on · the Jet's history on the big screen over the runway.");
+        return;
+      }
+      if (f.end !== null && running()) stop();
+    };
+
     return {
-      update, useNear, actLabel, press, tapMonitor, lights, liveGeometry, nodes: kiosks.map((k) => k.node), projector: head, screen: frame,
+      update, useNear, actLabel, press, tapMonitor, follow, sync, lights, liveGeometry, nodes: kiosks.map((k) => k.node), projector: head, screen: frame,
       monitors: desks.map((d) => d.nodes),
       get near() { return near >= 0; },
       // Whether the film show is on, from the screen winding down to it winding back up.
