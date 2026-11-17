@@ -5,7 +5,8 @@
 //
 // - nodes (`node(n, alts)`): each one's position, rotation (its quaternion if it has one, else its Euler rotation),
 //   scale, whether it shows, its glow, and which of `alts` (geometries it may show) it shows; only those changed since
-//   the last frame, and all of them every `KEY_MS`, so a page joining has them all within that;
+//   the last frame, and all of them every `KEY_MS`, so a page joining has them all within that, and once more as
+//   everything comes to rest, so the last whole frame shows where it came to rest (the forklift a driver left);
 // - values (`values(array, ease)`): a system's own few numbers (a Float32Array it keeps current on the host and reads on
 //   the others), sent whole when changed, and on the others eased between frames as the nodes are when `ease`, else
 //   taken as they come;
@@ -44,7 +45,7 @@
     // The host's: each node's state as last sent (quantized), and scratch; the events since the last frame.
     let sent = new Int16Array(0), scratch = new Int16Array(12);
     const events = [];
-    let lastAt = -Infinity, keyAt = -Infinity, hosting = false;
+    let lastAt = -Infinity, keyAt = -Infinity, hosting = false, moved = false;
     const valSent = [];
     // The others': each node's state from (A, at ta) and to (B, at tb), its flags before and after tb; each value's
     // next numbers and when they apply; the events waiting to play, with their times.
@@ -105,7 +106,7 @@
       set hosting(on) {
         if (on === hosting) return;
         hosting = on;
-        keyAt = -Infinity; lastAt = -Infinity; events.length = 0; queue.length = 0;
+        keyAt = -Infinity; lastAt = -Infinity; moved = false; events.length = 0; queue.length = 0;
         sent.fill(-32768);
         valSent.forEach((v) => v.fill(NaN));
         known.fill(0);
@@ -186,7 +187,13 @@
           events.length = 0;
           if (o + text.length <= MAX_BYTES) { new Uint8Array(bytes, o, text.length).set(text); evBytes = text.length; o += text.length; }
         }
-        if (!count && !valCount && !evBytes) return null;
+        if (!count && !valCount && !evBytes) {
+          if (!moved) return null;
+          moved = false;
+          return api.write(now, true);
+        }
+        if (full) moved = false;
+        else if (count || valCount) moved = true;
         v.setUint32(0, magic, true); v.setUint8(4, FORMAT); v.setUint8(5, full ? 1 : 0); v.setUint16(6, count, true);
         v.setFloat64(8, now, true); v.setUint8(16, valCount); v.setUint16(17, evBytes, true);
         return new Uint8Array(bytes, 0, o);
