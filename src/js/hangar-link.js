@@ -52,7 +52,8 @@
         } else if (!want && link) api.close();
         const live = !!link && link.state === "live";
         if (live && !wasLive) connection++;
-        if (!live) tessGuide = null;
+        // Her queue let go only as the link drops: the hall may tell it before the welcome that makes the link live.
+        if (wasLive && !live) tessGuide = null;
         wasLive = live;
         if (live) { heardAt = performance.now(); tell(); }
         else told = null;
