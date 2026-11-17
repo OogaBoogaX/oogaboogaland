@@ -1673,9 +1673,9 @@
     buildSpace(scene);
     hireCrew(scene);
     // The walkers relayed from the page the hall elects to move them (`hangar-relay.js`), registered in the same order on
-    // every page: the crew, each gorilla and all it wears.
+    // every page: the crew, each gorilla and all it wears; then Kortik's Sis, her faces and what she lays down.
     scene.relay = BL.hangarRelay.create();
-    const relayTree = (n) => { scene.relay.node(n); for (const c of n.children || []) relayTree(c); };
+    const relayTree = (n, alts = null) => { scene.relay.node(n, alts && alts.includes(n.geometry) ? alts : null); for (const c of n.children || []) relayTree(c, alts); };
     for (const a of scene.crew) relayTree(a.root);
     scene.puppet = false;
     const F = LAYOUT.fireTest, exits = JM.EXHAUST;
@@ -1694,9 +1694,12 @@
     targets.push(scene.fire.body);
     soundPanel = openSoundPanel();
     // Kortik's Sis, the hangar's chief engineer (`sis.js`).
-    scene.sis = BL.sis.create({ fx, audio, fire: scene.fire, jet: scene.jet, toast: hud.toast, blocks: () => scene.forklift.blocks,
+    scene.sis = BL.sis.create({ fx: scene.relay.proxy(fx, ["say", "sayAt", "spawnParticle", "puff"], "sis.fx"),
+      audio: scene.relay.proxy(audio, ["voice", "boot", "clang", "poke", "beep"], "sis.audio"), fire: scene.fire, jet: scene.jet, toast: hud.toast, blocks: () => scene.forklift.blocks,
       avoid: (x, z, feet, height, radius) => !!scene.anomaly && scene.anomaly.keepsOut(x, z, feet, height, radius), quieted: () => !!scene.network && scene.network.quiet });
     addChild(root, scene.sis.node, scene.sis.props);
+    relayTree(scene.sis.node, scene.sis.heads); relayTree(scene.sis.props);
+    scene.relay.values(scene.sis.shared); scene.relay.refs(scene.sis.refs);
     input.add(scene.sis.body, { kind: "sis", preset: null }, { radius: 1.2 });
     targets.push(scene.sis.body);
     // The Jet acting up on its own now and then (`hangar-anomaly.js`): not on a test page unless `anomaly=` asks, which
@@ -1713,11 +1716,16 @@
     // (`hangar-meltdown.js`), with nothing else going on: not on a test page unless `meltdown=` asks, which under debug
     // also sets the wait between them, s.
     const fed = DEBUG ? Number(params.get("meltdown")) : NaN;
-    scene.meltdown = BL.hangarMeltdown.create({ root, fx, audio, sis: scene.sis, rooms: side.map((r, i) => ({ spots: r.spots, gorilla: scene.crew[first + i], door: scene.roomDoors[i], shut: r.door.turn })),
+    scene.meltdown = BL.hangarMeltdown.create({ root, fx: scene.relay.proxy(fx, ["say", "sayAt", "spawnParticle", "puff"], "meltdown.fx"),
+      audio: scene.relay.proxy(audio, ["voice", "boot", "clang", "poke"], "meltdown.audio"), sis: scene.sis, rooms: side.map((r, i) => ({ spots: r.spots, gorilla: scene.crew[first + i], door: scene.roomDoors[i], shut: r.door.turn })),
       // Tess, to break up the fight, when nobody else has her.
       tess: { free: () => !scene.guide.lent && !scene.guide.holding, lend: (drive) => { scene.guide.lend(drive); scene.tessFor = drive ? "meltdown" : null; } },
       busy: () => leaving || scene.anomaly.playing || scene.fire.t >= 0 || scene.roomFire.burning || scene.sis.rampaging || scene.guide.lent || !!scene.shimmer && scene.shimmer.holding || !!scene.network && scene.network.quiet,
       blocker: () => people && people.player, auto: !params.has("nosim") || fed > 0, gap: fed > 0 ? fed : null });
+    // The meltdown, relayed too: the room doors it swings, its cloud and what flies out of it, and the gorillas it names.
+    for (const d of scene.roomDoors) relayTree(d);
+    for (const n of scene.meltdown.nodes) relayTree(n);
+    scene.relay.values(scene.meltdown.shared); scene.relay.refs([...scene.crew, ...scene.meltdown.refs]);
     // The terminals by the runway and the film show they start (`hangar-terminals.js`), its mood page reading hers.
     scene.terminals = BL.hangarTerminals.create({ root, audio, mood: () => scene.sis.mood, toast: hud.toast,
       ask: () => scene.link.send({ t: "film" }), done: (id) => scene.link.send({ t: "film", done: id }) });
@@ -1923,6 +1931,8 @@
     s.relay.hosting = hosting;
     if (s.puppet && !puppet) adoptWalkers(s);
     s.puppet = puppet;
+    s.sis.puppet = puppet;
+    s.meltdown.puppet = puppet;
     if (puppet) s.relay.play(L.serverNow());
     s.anomaly.follow(L.following);
     s.fire.follow(L.following);
@@ -1983,7 +1993,7 @@
     hallLife(s, elapsed);
     s.anomaly.update(dt);
     s.roomFire.update(dt);
-    s.meltdown.update(dt);
+    if (!s.puppet) s.meltdown.update(dt);
     s.fire.update(dt, drivenHere);
     pressLife(s.forklift, dt);
     powerLife(s.forklift, dt);
