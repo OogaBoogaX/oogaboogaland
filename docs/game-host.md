@@ -161,21 +161,35 @@ that length only for aiming the monkeys and tests the round's whole reach, throu
 
 `worker/src/games/hangar.js` is kind `hangar` at the venue `hall`, optional: on only where `GAME_FEATURES` names it.
 It keeps the Lightning Jet Hangar's hall on the server's clock, so everyone in the hangar sees the same thing at the
-same moment, from the timings every page plays (`src/js/hangar-hall.js`, which the Worker imports unchanged).
+same moment, from the timings every page plays (`src/js/hangar-hall.js`, which the Worker imports unchanged). A page
+follows it while its link is live, and for 20 s after it drops (`src/js/hangar-link.js`); otherwise, and for anyone
+signed out, the hangar plays on its own as it always has.
 
 - **What it decides.** The engine anomalies (which kind, when, a gap at random from the end of one to the start of the
   next, each kind once a shuffled bag), whether a lightning jumps to a room and which one, and the fire that lights
-  there while it burns; the static fire test (one press for everyone, none while it runs or cools down); and the film
-  show (started and stopped by any press, ended for everyone by the first page whose film runs out).
-- **What pages send.** `jet`, whether anything the page knows stands on the Jet or within the shuffle's reach, on a
-  change (the lowrider and the shuffle never start then, and stop for everyone the moment a page says so); `fire`, a
-  press of the test's button; `film`, a press at a terminal, or `done` with the show's id once its film ran out.
-- **What pages play.** Its state (`anomaly`, `room`, `test`, `film`, each with its id and its start `at`) from as far in
-  as each has got, so a page arriving late joins an anomaly, a fire or a show partway. A page follows the hall while
-  its link is live, and for 20 s after it drops (`src/js/hangar-link.js`); otherwise the hangar plays on its own.
+  there while it burns; the static fire test (one press for everyone, none while it runs or cools down); the film show
+  (started and stopped by any press, ended for everyone by the first page whose film runs out); the network (a walk
+  up to the shape, drawn by that player's own odds, plays it for everyone, the hall quiet a while after); the
+  forklift's seat (one driver at a time); Tess's queue (the island's own rules, `tess-queue.js`, through a small
+  adapter); and the desks' monitor turns.
+- **Its host.** One page moves the hall's walkers: the earliest arrival whose page is showing, handed on the moment it
+  leaves or hides. It also picks where and when the shape shows (it has the hall's walls and everyone's places) and
+  flies Tess between turns.
+- **Bytes.** The host's frames of the walkers (Kortik's Sis, the crew, the meltdown, the crane, the fan, the lofts, the
+  boards' Jets, `src/js/hangar-relay.js`) and the forklift driver's frames of it are passed on unread to everyone
+  else, from no other page; the forklift's last whole frame is kept and handed to a page as it joins (`greet`).
+- **What pages send.** `seen` (whether the page shows), `jet` (whether anything it knows stands on the Jet or within the
+  shuffle's reach), `fire`, `film` (or `done`), `shape` (the host's showing), `walkup`, `poke` (kept, the last few, for
+  the host to give Sis), `seat`, `desk`, `tess-guide` (the island's queue protocol) and `tess-pose` (the host's).
+- **What pages play.** Its state (`host`, `driver`, `anomaly`, `room`, `test`, `film`, `shape`, `network`, `pokes`,
+  `desks`), each event with its id and its start `at`, from as far in as each page has got, so a page arriving late
+  joins an anomaly, a fire, a show, the shape or the network partway. A page that is not the host plays the walkers
+  back from the host's frames a fifth of a second behind, eased between them, and its own systems leave them be.
 - **Its tick.** Four times a second while anyone is in the hall; an empty hall does not run.
 - **What it keeps.** Its schedule, saved as any hosted game's, and the account ids of the test's presser and the
-  show's starter while those run. The pages' words on the Jet are kept only while each page is connected.
+  show's starter while those run, of the last few to poke Sis, and of the forklift's driver while they drive. The
+  pages' words on the Jet, their odds for the network and their places in Tess's queue are kept only while each page
+  is connected; Tess's conversation never reaches the hall.
 
 ## Cost
 
