@@ -275,7 +275,7 @@ const create = (_now, random = Math.random) => {
     /** What a page joining hears besides the state: the forklift where it was last left. */
     greet: () => liftFrame ? [liftFrame] : [],
     /** What a restart picks up: the schedule, or null once the hall is empty. */
-    save: () => players.size ? JSON.stringify({ anomaly, fire, test, film, nextAt, roomUntil, id, bag, left }) : null,
+    save: () => players.size ? JSON.stringify({ anomaly, fire, test, film, pokeN, desks, nextAt, roomUntil, id, bag, left }) : null,
     /** Picks up a saved hall: its schedule goes on where it stopped, on the same clock. */
     restore: (data) => {
       let s = null;
@@ -287,6 +287,8 @@ const create = (_now, random = Math.random) => {
       fire = f && Number.isFinite(f.at) ? { id: f.id | 0, at: f.at, room: Math.min(0.999, Math.max(0, +f.room || 0)) } : null;
       const x = s.test;
       test = x && Number.isFinite(x.at) && Number.isSafeInteger(x.by) ? { id: x.id | 0, at: x.at, by: x.by } : null;
+      pokeN = Number.isSafeInteger(s.pokeN) && s.pokeN >= 0 ? s.pokeN : 0;
+      if (Array.isArray(s.desks) && s.desks.length === desks.length) for (let i = 0; i < desks.length; i++) desks[i] = Number.isSafeInteger(s.desks[i]) && s.desks[i] >= 0 ? s.desks[i] : 0;
       const v = s.film;
       film = v && Number.isFinite(v.at) && Number.isSafeInteger(v.by) ? { id: v.id | 0, at: v.at, by: v.by, end: Number.isFinite(v.end) ? v.end : null } : null;
       nextAt = +s.nextAt || 0; roomUntil = Number.isFinite(s.roomUntil) ? s.roomUntil : -Infinity; id = s.id | 0;

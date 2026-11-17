@@ -258,4 +258,10 @@ test("a desk monitor turned on any page is counted for everyone", () => {
   assert.equal(g.message({ id: 1 }, hangar.parse({ t: "desk", i: 2, m: 1 }), t0), true);
   g.message({ id: 1 }, hangar.parse({ t: "desk", i: 2, m: 1 }), t0);
   assert.equal(g.state().desks[5], 2);
+  g.message({ id: 1 }, { t: "poke" }, t0);
+  const h = hangar.create(t0, seeded(11));
+  assert.equal(h.restore(g.save(), t0), true);
+  assert.equal(h.state().desks[5], 2, "the counts come back after a restart");
+  h.join({ id: 1 }, t0); h.message({ id: 1 }, { t: "poke" }, t0);
+  assert.deepEqual(h.state().pokes.at(-1), [2, 1], "and the pokes go on numbering from where they were");
 });
