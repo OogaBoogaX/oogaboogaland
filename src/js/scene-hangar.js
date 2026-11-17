@@ -212,6 +212,8 @@
   let canvas = null, people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, unsubscribeAccount = null, remotes = null, footsteps = null, node = null;
   let unsubscribeFeed = null, boardsDirty = false, audio = null, actPrompt = false, soundPanel = null;
   const NO_ACTORS = [], NO_POKES = [], NO_ARGS = [];
+  // Where the hall's clock, s, turns over for the hall's small touches, so it stays small enough to flicker by.
+  const AMBIENT_WRAP = 1e5;
   // What walks the hall besides the Oogas, for them to keep clear of: the other players' Oogas, Kortik's Sis and the
   // gorillas of the hangar's crew. (The forklift they meet by its own shape, `forkliftIn`.)
   const ACTORS = [];
@@ -898,10 +900,11 @@
   // The neon's flicker, and the mouth's light with it, as dim as an anomaly has the hall's lights (`dim`).
   const neonLife = (s, dt, elapsed, dim) => {
     s.stutterWait -= dt;
-    if (s.stutterWait <= 0) {
+    if (s.stutterWait <= 0 && !s.puppet) {
       s.stutterWait = NEON_STUTTER[0] + Math.random() * (NEON_STUTTER[1] - NEON_STUTTER[0]);
       s.stutter = Math.floor(Math.random() * s.neon.length);
       s.stutterAt = elapsed;
+      s.relay.record("amb.neon", [s.stutter]);
     }
     const since = elapsed - s.stutterAt;
     for (let i = 0; i < s.neon.length; i++) {
@@ -994,18 +997,20 @@
   // anomaly runs the wrong way (its `rabbit`, where its front is); the lamps as dim as the hall's lights (`dim`), the
   // markers as their own (`marks`), and steady, without the rabbit, by `steady` (0 to 1) as emergency lights.
   const lampLife = (s, dt, elapsed, dim, marks, steady) => {
-    if ((s.lampWait -= dt) <= 0) {
+    if ((s.lampWait -= dt) <= 0 && !s.puppet) {
       s.lampWait = LAMP_STUTTER[0] + Math.random() * (LAMP_STUTTER[1] - LAMP_STUTTER[0]);
       s.lampOut = Math.floor(Math.random() * s.lamps.length);
       s.lampAt = elapsed;
+      s.relay.record("amb.lamp", [s.lampOut]);
     }
     const since = elapsed - s.lampAt;
     let out = false;
     for (let i = 0; i < LAMP_FAILS.length; i += 2) if (since >= LAMP_FAILS[i] && since < LAMP_FAILS[i + 1]) out = true;
     for (let i = 0; i < s.lamps.length; i++) s.lamps[i].glow = (out && i === s.lampOut ? LAMP_DIM : 1 + 0.04 * Math.sin(elapsed * (2.1 + i * 0.37) + i * 1.9)) * dim;
-    if ((s.rabbitWait -= dt) <= 0) {
+    if ((s.rabbitWait -= dt) <= 0 && !s.puppet) {
       s.rabbitWait = RABBIT[0] + Math.random() * (RABBIT[1] - RABBIT[0]);
       s.rabbitAt = elapsed;
+      s.relay.record("amb.rabbit", NO_ARGS);
     }
     const back = s.anomaly.rabbit, front = back !== null ? back : LAYOUT.runway.z0 - (elapsed - s.rabbitAt) * RABBIT_SPEED;
     for (let i = 0; i < s.markers.length; i++) {
@@ -1200,6 +1205,7 @@
     s.glass.push(loftGlow);
     s.loftScreens = loft.screens;
     s.loftDark = between(LOFT_LIFE.dark);
+    s.loftScreens = loft.screens;
     s.lofts = loft.windows.map((w) => {
       const back = createNode({ position: { ...w.back }, geometry: loft.back, sightHidden: true, depthBias: 1 });
       const screen = createNode({ position: { ...w.screen }, geometry: loft.screens[0], sightHidden: true, depthBias: 0.5 });
@@ -1789,9 +1795,19 @@
     // The crane, by its axes (eased) and its job's place, posed here from them, and its cues.
     scene.relay.values(scene.crane.shared, true); scene.relay.values(scene.crane.flags);
     scene.relay.on("crane.cue", (name, x, y, z) => { if (audio) audio.craneCue(name, x, y, z); });
+    // The hall's small touches as the host has them: the fan, the lofts' crew, their monitors and windows, the boards'
+    // Jets and their trails; and the neon's, the lamps' and the runway's moments, on the hall's clock.
+    relayTree(scene.fan);
+    for (const l of scene.lofts) { relayTree(l.body); scene.relay.node(l.screen, scene.loftScreens); scene.relay.node(l.back); }
+    for (const F of scene.flyers) { relayTree(F.flight); for (const p of F.trail) scene.relay.node(p.node); }
+    scene.ambientT = 0;
+    scene.relay.on("amb.neon", (i) => { scene.stutter = i; scene.stutterAt = scene.ambientT; });
+    scene.relay.on("amb.lamp", (i) => { scene.lampOut = i; scene.lampAt = scene.ambientT; });
+    scene.relay.on("amb.rabbit", () => { scene.rabbitAt = scene.ambientT; });
     // The terminals by the runway and the film show they start (`hangar-terminals.js`), its mood page reading hers.
     scene.terminals = BL.hangarTerminals.create({ root, audio, mood: () => scene.sis.mood, toast: hud.toast,
-      ask: () => scene.link.send({ t: "film" }), done: (id) => scene.link.send({ t: "film", done: id }) });
+      ask: () => scene.link.send({ t: "film" }), done: (id) => scene.link.send({ t: "film", done: id }),
+      onTurn: (i, m) => { if (scene.link.following) scene.link.send({ t: "desk", i, m }); } });
     for (const n of scene.terminals.nodes) {
       input.add(n, { kind: "terminal", preset: null }, { radius: 0.8 });
       targets.push(n);
@@ -2037,6 +2053,9 @@
     s.anomaly.sync(L.hall.anomaly || null, L.serverNow());
     s.fire.sync(L.hall.test || null, L.serverNow(), L.you);
     s.terminals.sync(L.hall.film || null, L.serverNow());
+    // The terminals' pictures on the hall's clock, and the desks' monitors as turned in the hall.
+    s.terminals.clock = (L.serverNow() / 1000) % AMBIENT_WRAP;
+    if (L.hall.desks) s.terminals.turns(L.hall.desks);
     s.shimmer.sync(L.hall.shape || null, L.serverNow());
     // The network the hall played, from as far in as it has got.
     const Nw = L.hall.network;
@@ -2236,12 +2255,13 @@
     const beamed = shown + beaconLight(s.forklift, RENDER_OPTS.lights, shown);
     s.guide.light(RENDER_OPTS.lights, beamed * 8);
     glowNear(elapsed, beamed + 1 + s.network.lights(RENDER_OPTS.lights, beamed + 1), dim);
-    heavens(s, dt, elapsed);
-    neonLife(s, dt, elapsed, dim);
-    lampLife(s, dt, elapsed, dim, s.anomaly.dim * s.network.env.markers, s.network.env.emergency);
-    loftLife(s, dt, elapsed, dim);
-    fanLife(s, dt);
-    boardJets(s, dt);
+    // The hall's small touches: on the hall's clock while the page follows it, so the neon and the lamps flicker and the
+    // runway's pulse runs alike everywhere; their stutters, the lofts, the fan and the boards' Jets as the host has them.
+    const T = s.ambientT = s.link.following ? (s.link.serverNow() / 1000) % AMBIENT_WRAP : elapsed;
+    heavens(s, dt, T);
+    neonLife(s, dt, T, dim);
+    lampLife(s, dt, T, dim, s.anomaly.dim * s.network.env.markers, s.network.env.emergency);
+    if (!s.puppet) { loftLife(s, dt, T, dim); fanLife(s, dt); boardJets(s, dt); }
     feedLife(s);
     s.crane.update(dt, camera.position);
     craneBeam(s.crane.beam);
