@@ -53,6 +53,9 @@ export class GameHost extends DurableObject {
       this.sweeping = (await ctx.storage.getAlarm()) !== null;
       if (saved && typeof saved === "object" && this.bind(saved.name) && Date.now() - saved.at < RESUME_MS) this.game.restore(saved.data, Date.now());
       else if (saved) await ctx.storage.delete("game");
+      // The sockets still connected after a wake are the game's players again.
+      const now = Date.now();
+      if (this.game) for (const p of this.sockets.values()) this.game.join(p, now);
       this.schedule();
       this.inspect.woke(this.sockets.size);
     });

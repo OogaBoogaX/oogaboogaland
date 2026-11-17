@@ -7,8 +7,12 @@
 // where it was first made. A kind marked `optional` is off unless the Worker's `GAME_FEATURES` (comma-separated kinds)
 // names it: off, /api/me does not offer it and its route answers 404, so every page plays it on its own as before.
 import { ghostHunt } from "./games/ghost-hunt.js"; // HALLOWEEN
+import { hangar } from "./games/hangar.js";
 
-export const GAME_KINDS = new Map([[ghostHunt.id, ghostHunt]]); // HALLOWEEN
+export const GAME_KINDS = new Map([
+  [ghostHunt.id, ghostHunt], // HALLOWEEN
+  [hangar.id, hangar]
+]);
 
 const switchedOn = (env) => new Set(String((env && env.GAME_FEATURES) || "").split(",").map((s) => s.trim()).filter(Boolean));
 const on = (k, names) => !k.optional || names.has(k.id);

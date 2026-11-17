@@ -89,6 +89,7 @@ test("the page takes real donations only from a Worker with the bananapayserver 
   assert.equal((await me({ DB: {}, CONNECTION_REPORT_LIMITER: {} })).connectionReports, true, "reports require both storage and a limiter");
   assert.equal((await me({ DB: {} })).connectionReports, false, "reports fail closed without a limiter");
   assert.deepEqual((await me({ GAMES: {} })).games, ["ghost-hunt"], "a Worker with the GAMES binding names the games it hosts");
+  assert.deepEqual((await me({ GAMES: {}, GAME_FEATURES: " hangar, nothing " })).games, ["ghost-hunt", "hangar"], "an optional game is offered only once GAME_FEATURES names it");
 });
 
 test("a D1 failure is never reported as signed out, and a failed session stamp is no failure at all", async () => {
