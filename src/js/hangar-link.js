@@ -45,6 +45,9 @@
         if (want && !link) {
           link = BL.gameNet.open(KIND, VENUE, { state: (msg) => {
             if (msg.s && typeof msg.s === "object") { hall = msg.s; heardAt = performance.now(); }
+            // A hidden page, whose frames do not run, says so with each state it hears: one that came back while hidden
+            // (a deploy, a network change) is otherwise taken for showing, and could be handed the walkers.
+            if (document.hidden && link && link.send({ t: "seen", v: false })) told = false;
           }, bytes, message });
         } else if (!want && link) api.close();
         const live = !!link && link.state === "live";
