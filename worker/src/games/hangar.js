@@ -31,6 +31,9 @@
 // `after` once it has played for them, the showing after that never drawing) decide whether it plays, for everyone
 // (`network`: where, its seed, when); the hall stays quiet a while after, no anomaly nor test starting meanwhile.
 //
+// Kortik's Sis's pokes: a page whose Ooga pokes her (`poke`) tells the hall, which keeps the last few (`pokes`, each its
+// number and whose), so the host, which moves her, gives her each once, from that player.
+//
 // What it hears: `jet`, a page's word on whether anything it knows stands on the Jet (`on`) or within the shuffle's
 // reach (`near`), sent on a change. The lowrider never starts with anyone on the Jet nor the shuffle with anything near
 // (the next in the bag instead, or the failed start), and either stops for everyone the moment a page says so. Nothing
@@ -57,6 +60,7 @@ const parse = (m) => {
   if (m.t === "jet") return typeof m.on === "boolean" && typeof m.near === "boolean" ? { t: "jet", on: m.on, near: m.near } : null;
   if (m.t === "seen") return typeof m.v === "boolean" ? { t: "seen", v: m.v } : null;
   if (m.t === "fire") return { t: "fire" };
+  if (m.t === "poke") return { t: "poke" };
   if (m.t === "shape") return shapeOf(m.s);
   if (m.t === "walkup") return Number.isSafeInteger(m.id) && m.id > 0 && finite(m.x) && finite(m.z) && Math.abs(m.x) < 200 && Math.abs(m.z) < 200
     ? { t: "walkup", id: m.id, x: m.x, z: m.z, every: m.every === true, dense: m.dense === true } : null;
@@ -84,6 +88,9 @@ const create = (_now, random = Math.random) => {
   // The static fire test running or cooling down ({ id, at, by }) or null; the film show ({ id, at, by, end }, end null
   // while it runs) or null; the shape showing ({ id, at, s }) or null; the network ({ id, at, x, z, seed, dense }) or null.
   let test = null, film = null, shape = null, network = null;
+  // The last pokes at Sis, each [its number, whose], and how many there have been.
+  const pokes = [];
+  let pokeN = 0;
   const N = HALL.NETWORK;
   const netQuietUntil = () => network ? network.at + (N.end + N.quiet) * 1000 : -Infinity;
   const testing = (now) => !!test && now < test.at + (HALL.FIRE.result + A.afterFire) * 1000;
@@ -132,6 +139,11 @@ const create = (_now, random = Math.random) => {
         elect();
         if (host === shownHost) return false;
         shownHost = host;
+        return true;
+      }
+      if (m.t === "poke") {
+        pokes.push([++pokeN, p.id]);
+        if (pokes.length > 8) pokes.shift();
         return true;
       }
       if (m.t === "shape") {
@@ -194,7 +206,7 @@ const create = (_now, random = Math.random) => {
       return true;
     },
     running: () => players.size > 0,
-    state: () => ({ host, anomaly, room: fire, test, film, shape, network }),
+    state: () => ({ host, anomaly, room: fire, test, film, shape, network, pokes }),
     motion: () => false,
     /** Whether `p`'s bytes go on to the hall: only the host's. */
     relay: (p) => p.id === host,
@@ -225,7 +237,7 @@ const create = (_now, random = Math.random) => {
 export const hangar = {
   id: "hangar", code: 2, version: 1, venues: ["hall"], optional: true, tickMs: 250, stateEvery: 40,
   limits: { sockets: 32, chars: 256, bytes: 16384 },
-  buckets: { jet: { rate: 4, burst: 4 }, press: { rate: 1, burst: 2 }, relay: { rate: 12, burst: 6 } },
-  bucketOf: (t) => t === "jet" || t === "seen" ? "jet" : "press",
+  buckets: { jet: { rate: 4, burst: 4 }, press: { rate: 1, burst: 2 }, poke: { rate: 5, burst: 5 }, relay: { rate: 12, burst: 6 } },
+  bucketOf: (t) => t === "jet" || t === "seen" ? "jet" : t === "poke" ? "poke" : "press",
   parse, create
 };

@@ -191,3 +191,14 @@ test("the host's shape is everyone's, and a walk up to it plays the network for 
   const third = g.state().shape;
   assert.equal(g.message({ id: 1 }, hangar.parse({ t: "walkup", id: third.id, x: 1, z: 1 }), t0 + 91 * S), false, "the showing after it played draws for nobody who saw it");
 });
+
+test("a poke at Sis from any page is kept for the host, numbered, the last few", () => {
+  const t0 = 1.7e12, g = hangar.create(t0, seeded(4));
+  g.join({ id: 1 }, t0); g.join({ id: 2 }, t0);
+  assert.equal(hangar.bucketOf("poke"), "poke");
+  for (let i = 0; i < 10; i++) assert.equal(g.message({ id: 1 + (i % 2) }, { t: "poke" }, t0 + i), true);
+  const pokes = g.state().pokes;
+  assert.equal(pokes.length, 8);
+  assert.deepEqual(pokes.at(-1), [10, 2]);
+  assert.deepEqual(pokes[0], [3, 1]);
+});
