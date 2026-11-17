@@ -9,7 +9,11 @@
 // The static fire test (`hangar-fire.js`), s from the press: the result, when the presser's controls come back, and
 // ready again. A room's fire (`hangar-room-fire.js`), s from the bolt landing: done, its operator back at his post.
 // The film show (`hangar-terminals.js`): how long from its stop (a press, or its film run out) until the screen has
-// wound back up and it may start again, s, and the longest the hall lets one run, s.
+// wound back up and it may start again, s, and the longest the hall lets one run, s. The network
+// (`hangar-network.js`): its end, s, how long the hall stays quiet after (`quiet`), how much longer, s, at random
+// between, the next anomaly waits past that, and each player's odds at a walk up to the shape (`first` at their first,
+// second and later walk ups until it has played for them; `after`, once it has, the showing after it played never
+// drawing). The shape (`hangar-shimmer.js`): the longest a showing lasts, its afterimage too, s.
 (() => {
   "use strict";
   const scope = typeof window === "undefined" ? globalThis : window;
@@ -22,6 +26,8 @@
   const FIRE = Object.freeze({ result: 10.6, ready: 30.6 });
   const ROOM_FIRE = Object.freeze({ done: 12.6 });
   const FILM = Object.freeze({ wind: 9, most: 1800 });
+  const NETWORK = Object.freeze({ end: 14.8, quiet: 15, defer: Object.freeze([10, 40]), first: Object.freeze([0.6, 0.85, 1]), after: 0.3 });
+  const SHAPE = Object.freeze({ most: 40 });
 
-  BL.hangarHall = Object.freeze({ ANOMALY, FIRE, ROOM_FIRE, FILM, KINDS: Object.freeze(Object.keys(ANOMALY.length)) });
+  BL.hangarHall = Object.freeze({ ANOMALY, FIRE, ROOM_FIRE, FILM, NETWORK, SHAPE, KINDS: Object.freeze(Object.keys(ANOMALY.length)) });
 })();

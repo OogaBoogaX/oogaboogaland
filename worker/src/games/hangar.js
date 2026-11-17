@@ -24,6 +24,13 @@
 // id): the earliest arrival whose page is showing (`seen`), handed on the moment that page leaves or is hidden. Its
 // frames of them (bytes, `hangar-relay.js`) are passed on unread to everyone else in the hall, and from no other page.
 //
+// The shape: the host picks when and where, as it can from the hall's walls and everyone's places, and tells the hall
+// (`shape`: its spot and how it will run), which keeps it while it shows (with its afterimage), so a page arriving then
+// sees it from as far in as it has got. The network: a page whose Ooga walks up to the shape says so (`walkup`, once a
+// showing, with where it plays, between that Ooga and the shape), and that player's own odds (`NETWORK.first`, then
+// `after` once it has played for them, the showing after that never drawing) decide whether it plays, for everyone
+// (`network`: where, its seed, when); the hall stays quiet a while after, no anomaly nor test starting meanwhile.
+//
 // What it hears: `jet`, a page's word on whether anything it knows stands on the Jet (`on`) or within the shuffle's
 // reach (`near`), sent on a change. The lowrider never starts with anyone on the Jet nor the shuffle with anything near
 // (the next in the bag instead, or the failed start), and either stops for everyone the moment a page says so. Nothing
@@ -33,12 +40,26 @@ import "../../../src/js/hangar-hall.js";
 
 const HALL = globalThis.BL.hangarHall, A = HALL.ANOMALY;
 
+const finite = (v) => typeof v === "number" && Number.isFinite(v);
+// A showing of the shape as the host describes it: every field a finite number within bounds, or null.
+const SHAPE_KEYS = ["x", "z", "mirror", "slow", "formed", "held", "gone", "end", "nearOn", "nearReach", "nearShare", "nearPeak", "nearSeed",
+  "catchOn", "close", "catchShare", "catchSeed", "stirOn", "stirReach", "stirPeak"];
+const shapeOf = (s) => {
+  if (!s || typeof s !== "object" || Array.isArray(s)) return null;
+  const out = {};
+  for (const k of SHAPE_KEYS) { if (!finite(s[k]) || Math.abs(s[k]) > 1e7) return null; out[k] = s[k]; }
+  return out.end > 0 && out.end <= HALL.SHAPE.most && Math.abs(out.x) < 200 && Math.abs(out.z) < 200 ? { t: "shape", s: out } : null;
+};
+
 /** A page's message as the hall reads it: false for one that is not a message at all, null for one to ignore. */
 const parse = (m) => {
   if (!m || typeof m !== "object" || Array.isArray(m) || typeof m.t !== "string") return false;
   if (m.t === "jet") return typeof m.on === "boolean" && typeof m.near === "boolean" ? { t: "jet", on: m.on, near: m.near } : null;
   if (m.t === "seen") return typeof m.v === "boolean" ? { t: "seen", v: m.v } : null;
   if (m.t === "fire") return { t: "fire" };
+  if (m.t === "shape") return shapeOf(m.s);
+  if (m.t === "walkup") return Number.isSafeInteger(m.id) && m.id > 0 && finite(m.x) && finite(m.z) && Math.abs(m.x) < 200 && Math.abs(m.z) < 200
+    ? { t: "walkup", id: m.id, x: m.x, z: m.z, every: m.every === true, dense: m.dense === true } : null;
   if (m.t === "film") return m.done === undefined ? { t: "film" } : Number.isSafeInteger(m.done) && m.done > 0 ? { t: "film", done: m.done } : null;
   return null;
 };
@@ -61,8 +82,10 @@ const create = (_now, random = Math.random) => {
   // many kinds are left in the bag.
   let anomaly = null, fire = null, roomUntil = -Infinity, nextAt = 0, id = 0, left = 0;
   // The static fire test running or cooling down ({ id, at, by }) or null; the film show ({ id, at, by, end }, end null
-  // while it runs) or null.
-  let test = null, film = null;
+  // while it runs) or null; the shape showing ({ id, at, s }) or null; the network ({ id, at, x, z, seed, dense }) or null.
+  let test = null, film = null, shape = null, network = null;
+  const N = HALL.NETWORK;
+  const netQuietUntil = () => network ? network.at + (N.end + N.quiet) * 1000 : -Infinity;
   const testing = (now) => !!test && now < test.at + (HALL.FIRE.result + A.afterFire) * 1000;
 
   const gap = () => (A.gap[0] + random() * (A.gap[1] - A.gap[0])) * 1000;
@@ -95,7 +118,7 @@ const create = (_now, random = Math.random) => {
 
   return {
     join: (p, now) => {
-      players.set(p.id, { on: false, near: false, seen: true });
+      players.set(p.id, { on: false, near: false, seen: true, misses: 0, played: false, skip: false, used: 0 });
       elect();
       if (players.size === 1 && !anomaly && nextAt < now) nextAt = now + gap();
     },
@@ -111,8 +134,29 @@ const create = (_now, random = Math.random) => {
         shownHost = host;
         return true;
       }
+      if (m.t === "shape") {
+        if (p.id !== host || shape) return false;
+        shape = { id: ++id, at: now, s: m.s };
+        // The showing after the network played for a player never draws for them.
+        for (const q of players.values()) if (q.skip) { q.skip = false; q.used = shape.id; }
+        return true;
+      }
+      if (m.t === "walkup") {
+        if (!shape || shape.id !== m.id || f.used === shape.id || network && now < netQuietUntil()) return false;
+        f.used = shape.id;
+        const every = m.every && p.debug;
+        if (!every) {
+          const odds = f.played ? N.after : N.first[Math.min(f.misses, N.first.length - 1)];
+          if (random() >= odds) { f.misses++; return false; }
+        }
+        network = { id: ++id, at: now, x: m.x, z: m.z, seed: Math.floor(random() * 1e9), dense: every && m.dense };
+        for (const q of players.values()) { q.played = true; q.skip = true; }
+        const wait = network.at + (N.end + N.quiet + N.defer[0] + random() * (N.defer[1] - N.defer[0])) * 1000;
+        if (nextAt < wait) nextAt = wait;
+        return true;
+      }
       if (m.t === "fire") {
-        if (test || anomaly) return false;
+        if (test || anomaly || network && now < network.at + N.end * 1000) return false;
         test = { id: ++id, at: now, by: p.id };
         return true;
       }
@@ -137,18 +181,20 @@ const create = (_now, random = Math.random) => {
       shownHost = host;
       if (fire && now >= roomUntil) { fire = null; changed = true; }
       if (test && now >= test.at + HALL.FIRE.ready * 1000) { test = null; changed = true; }
+      if (shape && now >= shape.at + shape.s.end * 1000) { shape = null; changed = true; }
+      if (network && now >= netQuietUntil()) { network = null; changed = true; }
       if (film && (film.end !== null && now >= film.end + HALL.FILM.wind * 1000 || now >= film.at + HALL.FILM.most * 1000)) { film = null; changed = true; }
       if (anomaly) {
         if (!over(now)) return changed;
         end(now);
         return true;
       }
-      if (now < nextAt || testing(now)) return changed;
+      if (now < nextAt || testing(now) || now < netQuietUntil()) return changed;
       begin(now);
       return true;
     },
     running: () => players.size > 0,
-    state: () => ({ host, anomaly, room: fire, test, film }),
+    state: () => ({ host, anomaly, room: fire, test, film, shape, network }),
     motion: () => false,
     /** Whether `p`'s bytes go on to the hall: only the host's. */
     relay: (p) => p.id === host,

@@ -158,3 +158,36 @@ test("one page moves the hall's walkers: the earliest arrival that is showing, h
   g.message({ id: 4 }, { t: "seen", v: false }, t0); g.message({ id: 6 }, { t: "seen", v: false }, t0);
   assert.equal(g.state().host, 0, "with every page hidden, nobody moves them");
 });
+
+test("the host's shape is everyone's, and a walk up to it plays the network for everyone by that player's own odds", () => {
+  const t0 = 1.7e12, N = HALL.NETWORK, draws = [];
+  const g = hangar.create(t0, () => draws.length ? draws.shift() : 0.5);
+  g.join({ id: 1 }, t0); g.join({ id: 2 }, t0);
+  draws.push(0.7, 0.9, 0.1);
+  const s = { x: 3, z: -4, mirror: 1, slow: 0.2, formed: 2, held: 9, gone: 11, end: 30, nearOn: 1, nearReach: 5, nearShare: 0.3, nearPeak: 0.1, nearSeed: 7,
+    catchOn: 0, close: 2, catchShare: 0.2, catchSeed: 9, stirOn: 1, stirReach: 4, stirPeak: 0.3 };
+  assert.equal(hangar.parse({ t: "shape", s: { ...s, end: 999 } }), null, "a showing longer than any is refused");
+  assert.equal(g.message({ id: 2 }, hangar.parse({ t: "shape", s }), t0), false, "only from the host");
+  assert.equal(g.message({ id: 1 }, hangar.parse({ t: "shape", s }), t0), true);
+  const shape = g.state().shape;
+  assert.deepEqual(shape.s, s);
+  const walk = (who, at) => g.message({ id: who }, hangar.parse({ t: "walkup", id: shape.id, x: 1, z: 1 }), at);
+  assert.equal(walk(2, t0 + S), false, "a first walk up misses at 0.7 against 60%");
+  assert.equal(walk(2, t0 + 2 * S), false, "one draw a showing");
+  assert.equal(walk(1, t0 + 3 * S), false, "the other player's first walk up misses at 0.9");
+  g.step(t0 + 30 * S);
+  assert.equal(g.state().shape, null, "gone with its afterimage");
+  g.message({ id: 1 }, hangar.parse({ t: "shape", s }), t0 + 31 * S);
+  const second = g.state().shape;
+  assert.equal(g.message({ id: 2 }, hangar.parse({ t: "walkup", id: second.id, x: 1, z: 1 }), t0 + 32 * S), true, "their second walk up plays it at 85%");
+  const net = g.state().network;
+  assert.deepEqual([net.x, net.z, net.dense], [1, 1, false]);
+  assert.ok(g.debug.nextAt >= net.at + (N.end + N.quiet + N.defer[0]) * S, "the next anomaly waits past its quiet");
+  assert.equal(g.message({ id: 1 }, { t: "fire" }, net.at + S), false, "no test while it plays");
+  g.step(net.at + (N.end + N.quiet) * S);
+  assert.equal(g.state().network, null);
+  g.step(second.at + 30 * S);
+  g.message({ id: 1 }, hangar.parse({ t: "shape", s }), t0 + 90 * S);
+  const third = g.state().shape;
+  assert.equal(g.message({ id: 1 }, hangar.parse({ t: "walkup", id: third.id, x: 1, z: 1 }), t0 + 91 * S), false, "the showing after it played draws for nobody who saw it");
+});
