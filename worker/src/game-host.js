@@ -5,7 +5,9 @@
 //
 // From the room's patterns (room.js): hibernatable sockets with attachments, one socket per account (a newer one kicks
 // the older with `replaced`), a cap on sockets (`full`), per-socket token buckets (protocol.js `takeToken`), and the
-// false/null convention for unreadable and unwanted messages. Pages send JSON text; nothing else is read.
+// false/null convention for unreadable and unwanted messages. Pages send JSON text; a game with `relay` also takes
+// bytes (at most its `limits.bytes`, limited by its `relay` bucket), which it passes on unread to every other socket when
+// `relay(player, now)` says that page may send them (the hangar's hall, from the page it elected to move its walkers).
 //
 // The tick: a setTimeout chain that runs only while the kind says it runs (`running`), each call a `step` the kind
 // keeps to its own fixed steps, so an idle instance has no timer and can hibernate (billed only while awake). Every tick
@@ -125,7 +127,8 @@ export class GameHost extends DurableObject {
     const p = this.byWs(ws);
     if (!p) return;
     this.inspect.count("in");
-    if (typeof message !== "string" || message.length > this.kind.limits.chars) { this.close(p, "unreadable message"); return; }
+    if (typeof message !== "string") { this.relay(p, message); return; }
+    if (message.length > this.kind.limits.chars) { this.close(p, "unreadable message"); return; }
     let raw;
     try { raw = JSON.parse(message); } catch { this.close(p, "unreadable message"); return; }
     const msg = this.kind.parse(raw);
@@ -139,6 +142,16 @@ export class GameHost extends DurableObject {
       this.save(now);
     }
     this.schedule();
+  }
+
+  // Bytes from `p`, passed on unread to every other socket if the kind takes them from it.
+  relay(p, bytes) {
+    if (!this.game.relay || !(bytes instanceof ArrayBuffer) || bytes.byteLength > this.kind.limits.bytes) { this.close(p, "unreadable message"); return; }
+    const now = Date.now(), b = this.kind.buckets.relay;
+    const bucket = p.buckets.relay || (p.buckets.relay = { tokens: b.burst, at: now });
+    if (!takeToken(bucket, b.rate, now, b.burst) || !this.game.relay(p, now)) return;
+    this.inspect.count("relayed");
+    for (const q of this.sockets.values()) if (q !== p) this.send(q.ws, bytes);
   }
 
   // On this compatibility date close handlers must not call ws.close() (room.js).

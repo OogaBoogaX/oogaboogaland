@@ -36,7 +36,10 @@ const echo = {
     };
   }
 };
-const KINDS = new Map([[echo.id, echo], [ghostHunt.id, ghostHunt]]);
+// A kind that takes bytes from its first player alone and passes them on.
+const relayed = { ...echo, id: "relay", limits: { sockets: 3, chars: 64, bytes: 8 }, buckets: { say: { rate: 2, burst: 2 }, relay: { rate: 2, burst: 2 } },
+  create: () => ({ ...echo.create(), relay: (p) => p.id === 1 }) };
+const KINDS = new Map([[echo.id, echo], [relayed.id, relayed], [ghostHunt.id, ghostHunt]]);
 
 const harness = ({ stored = new Map(), env = {} } = {}) => {
   const clock = { now: 1.7e12 };
@@ -351,4 +354,22 @@ test("a hunt saved by the server is picked up again with its clock going on from
   assert.equal(S.round, round);
   assert.equal(S.epoch, H.t.now + 30000 - at, "thirty seconds down are not thirty seconds of hunt");
   assert.equal(ghostHunt.create(T0).save(), null, "an idle hunt saves nothing");
+});
+
+test("a kind that relays passes bytes from the page it allows to every other page, unread, and from no other", async () => {
+  const h = harness();
+  const a = (await h.join(1, "relay:here:v1")).ws, b = (await h.join(2, "relay:here:v1")).ws, c = (await h.join(3, "relay:here:v1")).ws;
+  const bytes = new Uint8Array([1, 2, 3, 4]).buffer;
+  await h.host.webSocketMessage(a, bytes);
+  assert.deepEqual([a.bins.length, b.bins.length, c.bins.length], [0, 1, 1], "to everyone but the sender");
+  assert.equal(b.bins[0], bytes);
+  await h.host.webSocketMessage(b, bytes);
+  assert.deepEqual([a.bins.length, c.bins.length], [0, 1], "and from no page the kind does not allow");
+  await h.host.webSocketMessage(a, bytes); await h.host.webSocketMessage(a, bytes);
+  assert.equal(b.bins.length, 2, "past its bucket a frame is dropped");
+  await h.host.webSocketMessage(a, new ArrayBuffer(9));
+  assert.equal(a.closed.code, protocol.CLOSE_PROTOCOL, "past the kind's size it closes");
+  const other = harness(), e = (await other.join(1)).ws;
+  await other.host.webSocketMessage(e, bytes);
+  assert.equal(e.closed.code, protocol.CLOSE_PROTOCOL, "a game that does not relay closes on bytes, as before");
 });
