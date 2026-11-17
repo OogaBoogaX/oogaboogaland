@@ -43,6 +43,9 @@
 // turns the host flies her about her work and sends her pose (`tess-pose`), which goes to everyone else as the turn's
 // would.
 //
+// The crew's desks: a page whose visitor turns a desk's monitor on says so (`desk`), and the hall counts each monitor's
+// turns (`desks`, two a desk), so every page shows the same pictures.
+//
 // What it hears: `jet`, a page's word on whether anything it knows stands on the Jet (`on`) or within the shuffle's
 // reach (`near`), sent on a change. The lowrider never starts with anyone on the Jet nor the shuffle with anything near
 // (the next in the bag instead, or the failed start), and either stops for everyone the moment a page says so. Nothing
@@ -54,6 +57,8 @@ import { tessQueue } from "../tess-queue.js";
 const HALL = globalThis.BL.hangarHall, A = HALL.ANOMALY;
 // The two relays' magic (`hangar-relay.js`): the walkers', from the host, and the forklift's, from its driver.
 const WALKERS = 0x3148474f, LIFT = 0x3146474f;
+// The most desks the hall counts turns for.
+const DESKS = 16;
 
 const finite = (v) => typeof v === "number" && Number.isFinite(v);
 // A showing of the shape as the host describes it: every field a finite number within bounds, or null.
@@ -73,6 +78,7 @@ const parse = (m) => {
   if (m.t === "seen") return typeof m.v === "boolean" ? { t: "seen", v: m.v } : null;
   if (m.t === "fire") return { t: "fire" };
   if (m.t === "poke") return { t: "poke" };
+  if (m.t === "desk") return Number.isInteger(m.i) && m.i >= 0 && m.i < DESKS && (m.m === 0 || m.m === 1) ? { t: "desk", i: m.i, m: m.m } : null;
   if (m.t === "tess-guide") return tessQueue.parse(m);
   if (m.t === "tess-pose") return tessQueue.parse({ op: "pose", token: "host", a: m.a }) ? { t: "tess-pose", a: m.a } : null;
   if (m.t === "seat") return typeof m.on === "boolean" ? { t: "seat", on: m.on } : null;
@@ -106,6 +112,8 @@ const create = (_now, random = Math.random) => {
   // The last pokes at Sis, each [its number, whose], and how many there have been.
   const pokes = [];
   let pokeN = 0;
+  // Each desk monitor's turns, two a desk.
+  const desks = new Array(DESKS * 2).fill(0);
   // Who drives the forklift (an account id, 0 for none) and its last whole frame.
   let driver = 0, liftFrame = null;
   // The Tess queue's room, as `tess-queue.js` asks of the island's: each page a peer, always where she is, showing as
@@ -185,6 +193,7 @@ const create = (_now, random = Math.random) => {
         driver = m.on ? p.id : 0;
         return true;
       }
+      if (m.t === "desk") { desks[m.i * 2 + m.m]++; return true; }
       if (m.t === "poke") {
         pokes.push([++pokeN, p.id]);
         if (pokes.length > 8) pokes.shift();
@@ -251,7 +260,7 @@ const create = (_now, random = Math.random) => {
       return true;
     },
     running: () => players.size > 0,
-    state: () => ({ host, driver, anomaly, room: fire, test, film, shape, network, pokes }),
+    state: () => ({ host, driver, anomaly, room: fire, test, film, shape, network, pokes, desks }),
     motion: () => false,
     /** Whether `p`'s bytes go on to the hall: the walkers' from the host, the forklift's from its driver, whose last
      * whole frame is kept for a page joining. */
@@ -294,6 +303,6 @@ export const hangar = {
   id: "hangar", code: 2, version: 1, venues: ["hall"], optional: true, tickMs: 250, stateEvery: 40,
   limits: { sockets: 32, chars: 256, bytes: 16384 },
   buckets: { jet: { rate: 4, burst: 4 }, press: { rate: 1, burst: 2 }, poke: { rate: 5, burst: 5 }, tess: { rate: 10, burst: 10 }, relay: { rate: 12, burst: 6 } },
-  bucketOf: (t) => t === "jet" || t === "seen" ? "jet" : t === "poke" ? "poke" : t === "tess-guide" || t === "tess-pose" ? "tess" : "press",
+  bucketOf: (t) => t === "jet" || t === "seen" ? "jet" : t === "poke" || t === "desk" ? "poke" : t === "tess-guide" || t === "tess-pose" ? "tess" : "press",
   parse, create
 };

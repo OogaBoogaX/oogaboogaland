@@ -245,3 +245,12 @@ test("Tess in the hall: the island's queue, one turn at a time, and the host's p
   assert.equal(hangar.parse({ t: "tess-pose", a: [1, 2] }), null);
   assert.equal(hangar.bucketOf("tess-guide"), "tess");
 });
+
+test("a desk monitor turned on any page is counted for everyone", () => {
+  const t0 = 1.7e12, g = hangar.create(t0, seeded(10));
+  g.join({ id: 1 }, t0);
+  assert.equal(hangar.parse({ t: "desk", i: 99, m: 0 }), null);
+  assert.equal(g.message({ id: 1 }, hangar.parse({ t: "desk", i: 2, m: 1 }), t0), true);
+  g.message({ id: 1 }, hangar.parse({ t: "desk", i: 2, m: 1 }), t0);
+  assert.equal(g.state().desks[5], 2);
+});
