@@ -298,6 +298,8 @@
           fn(...e.slice(1));
         }
       },
+      // The last frame written never went: the next is written whole.
+      missed: () => { keyAt = -Infinity; },
       get count() { return nodes.length; },
       get delay() { return delay; }
     };

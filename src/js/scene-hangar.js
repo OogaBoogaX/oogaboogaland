@@ -2140,10 +2140,11 @@
   // The host's frame of the walkers, once they have all moved this frame.
   const relayLife = (s) => {
     const now = s.link.serverNow();
-    if (s.liftRelay.hosting) { const lift = s.liftRelay.write(now); if (lift) s.link.sendBytes(lift); }
+    // A frame that could not go (the link down a moment) makes the next whole, since its changes were taken as sent.
+    if (s.liftRelay.hosting) { const lift = s.liftRelay.write(now); if (lift && !s.link.sendBytes(lift)) s.liftRelay.missed(); }
     if (!s.relay.hosting) return;
     const out = s.relay.write(now);
-    if (out) s.link.sendBytes(out);
+    if (out && !s.link.sendBytes(out)) s.relay.missed();
   };
 
   const update = (dt, elapsed) => {
