@@ -464,6 +464,7 @@
     // Over, or cut short: the engines cold, the Jet at rest, the lights full, the arcs gone, and the wait for the next.
     const end = () => {
       if (kind === "blackout") { sis.dark(0); audio.power(1); }
+      if ((kind === "lowrider" || kind === "shuffle") && t < LENGTH[kind]) audio.cut();
       kind = null; dim = 1; ambient = 1; heat = 0;
       glow.fill(0);
       jet.rotation.x = REST_X; jet.rotation.z = REST_Z; J.x = REST_PX; J.y = REST_Y; J.z = REST_PZ;

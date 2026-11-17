@@ -931,6 +931,16 @@
       }
       return true;
     };
+    // The lowrider's or the shuffle's sound let go now, for one cut short (someone onto the Jet, or in its way): what
+    // was still to come of it silenced at once.
+    const cut = () => {
+      if (!ready) return;
+      const now = ctx.currentTime, T = test;
+      for (const g of [T.thumpGain, T.bangHitGain, T.bangKnockGain, T.clankGain, T.whooshGain, T.whoomphGain, T.roarGain]) {
+        g.gain.cancelScheduledValues(now);
+        g.gain.setTargetAtTime(0, now, 0.03);
+      }
+    };
     // How much of the hall's electrical hum has power: the mains at once, the neon with the bed's next levelling.
     const setPower = (k) => {
       power = k;
@@ -1472,7 +1482,7 @@
     };
 
     return {
-      listen, update, setMuted, setVolume, glint, test: play, deafen, misfire, revs, zap, blackout, lowrider, shuffle, power: setPower, strain, outage, clang, voice, boot, poke, beep, denied, forklift, forkliftWork, horn, projector, clunk, roll, watchCrane, craneCue, watchRoom, roomCue, dispose,
+      listen, update, setMuted, setVolume, glint, test: play, deafen, misfire, revs, zap, blackout, lowrider, shuffle, cut, power: setPower, strain, outage, clang, voice, boot, poke, beep, denied, forklift, forkliftWork, horn, projector, clunk, roll, watchCrane, craneCue, watchRoom, roomCue, dispose,
       get muted() { return muted; },
       get volume() { return volume; },
       get ready() { return ready; },
