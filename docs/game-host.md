@@ -166,10 +166,12 @@ follows it while its link is live, and for 20 s after it drops (`src/js/hangar-l
 signed out, the hangar plays on its own as it always has.
 
 - **What it decides.** The engine anomalies (which kind, when, a gap at random from the end of one to the start of the
-  next, each kind once a shuffled bag), whether a lightning jumps to a room and which one, and the fire that lights
+  next, each kind once a shuffled bag, none while the shape shows or the host's page holds them back, as a page alone
+  waits for its meltdown, its shape and its network), whether a lightning jumps to a room and which one, and the fire that lights
   there while it burns; the static fire test (one press for everyone, none while it runs or cools down); the film show
   (started and stopped by any press, ended for everyone by the first page whose film runs out); the network (a walk
-  up to the shape, drawn by that player's own odds, plays it for everyone, the hall quiet a while after); the
+  up to the shape, drawn by that player's own odds, plays it for everyone, the hall quiet a while after and the next
+  showing drawing for nobody); the
   forklift's seat (one driver at a time); Tess's queue (the island's own rules, `tess-queue.js`, through a small
   adapter); and the desks' monitor turns.
 - **Its host.** One page moves the hall's walkers: the earliest arrival whose page is showing, handed on the moment it
@@ -177,19 +179,23 @@ signed out, the hangar plays on its own as it always has.
   flies Tess between turns.
 - **Bytes.** The host's frames of the walkers (Kortik's Sis, the crew, the meltdown, the crane, the fan, the lofts, the
   boards' Jets, `src/js/hangar-relay.js`) and the forklift driver's frames of it are passed on unread to everyone
-  else, from no other page; the forklift's last whole frame is kept and handed to a page as it joins (`greet`).
+  else, from no other page; the forklift's last whole frame (one is written as it comes to rest, and as its driver
+  gets out, switched off) is kept and handed to a page as it joins (`greet`).
 - **What pages send.** `seen` (whether the page shows), `jet` (whether anything it knows stands on the Jet or within the
-  shuffle's reach), `fire`, `film` (or `done`), `shape` (the host's showing), `walkup`, `poke` (kept, the last few, for
+  shuffle's reach, and whether it holds the anomalies back; on a change and every few seconds), `fire`, `film` (or `done`), `shape` (the host's showing), `walkup`, `poke` (kept, the last few, for
   the host to give Sis), `seat`, `desk`, `tess-guide` (the island's queue protocol) and `tess-pose` (the host's).
 - **What pages play.** Its state (`host`, `driver`, `anomaly`, `room`, `test`, `film`, `shape`, `network`, `pokes`,
   `desks`), each event with its id and its start `at`, from as far in as each page has got, so a page arriving late
-  joins an anomaly, a fire, a show, the shape or the network partway. A page that is not the host plays the walkers
-  back from the host's frames a fifth of a second behind, eased between them, and its own systems leave them be.
+  joins an anomaly, a fire, a show, the shape or the network partway, and one it was still playing that the hall has
+  moved past (a hidden tab's) is let go. A page that is not the host plays the walkers back from the host's frames a
+  fifth of a second behind, or as far as the host's frames come in old (its round trip to the hall), eased between
+  them, and its own systems leave them be; a page that takes the walkers over starts them afresh from where they stand.
 - **Its tick.** Four times a second while anyone is in the hall; an empty hall does not run.
-- **What it keeps.** Its schedule, saved as any hosted game's, and the account ids of the test's presser and the
+- **What it keeps.** Its schedule, with the shape and the network, saved as any hosted game's, and the account ids of the test's presser and the
   show's starter while those run, of the last few to poke Sis, and of the forklift's driver while they drive. The
-  pages' words on the Jet, their odds for the network and their places in Tess's queue are kept only while each page
-  is connected; Tess's conversation never reaches the hall.
+  pages' words on the Jet and their places in Tess's queue are kept only while each page is connected, and each
+  account's odds for the network in memory for the object's life, never saved; Tess's conversation never reaches the
+  hall.
 
 ## Cost
 
