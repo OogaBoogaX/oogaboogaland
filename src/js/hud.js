@@ -946,7 +946,9 @@
       // A board is any object with `title`, `help`, `canvas`, `count`, `index`, `caption`, `note`, `version` and
       // `go(index)`, plus optional `wide` and `captionAbove` layouts and a `link` out ({ href, label }, opened in a new tab). The dialog copies the canvas, captions the page, lays one dot per page and pages with the
       // chevrons, the dots and the arrow keys; it never learns what a board shows, so a board can change freely.
-      // `updateBoard` repaints whenever the open board's version moves.
+      // `updateBoard` repaints whenever the open board's version moves. `expanded` gives a screen more viewport space.
+      // Optional `hover(x,y)`, `dragStart(x,y)`, `dragMove(x,y)`, `dragEnd(cancelled)` and `onClose()` keep interactive
+      // canvases in their own pixel coordinates; a captured drag suppresses its following click.
       // A `floating` board also supplies `paused` and `setPaused`, and keeps island input available.
       let board = null, boardShown = -1, boardDots = -1;
       let controlsHidden = saved?.controlsHidden === true;
@@ -1038,11 +1040,56 @@
         paintBoardControls();
         scheduleBoardSave();
       };
+      let screenPointer = -1, suppressScreenPick = false;
+      const screenPoint = { x: 0, y: 0 };
+      const pointOnBoard = (e) => {
+        const r = el.boardScreen.getBoundingClientRect(), src = board.canvas;
+        screenPoint.x = (e.clientX - r.left - el.boardScreen.clientLeft) * src.width / el.boardScreen.clientWidth;
+        screenPoint.y = (e.clientY - r.top - el.boardScreen.clientTop) * src.height / el.boardScreen.clientHeight;
+      };
+      const finishScreenPointer = (cancelled) => {
+        if (screenPointer < 0) return;
+        const id = screenPointer; screenPointer = -1;
+        if (el.boardScreen.hasPointerCapture(id)) el.boardScreen.releasePointerCapture(id);
+        board?.dragEnd?.(cancelled);
+        suppressScreenPick = true;
+        updateBoard();
+      };
+      on(el.boardScreen, "pointerdown", e => {
+        if (screenPointer >= 0) { finishScreenPointer(true); e.preventDefault(); return; }
+        suppressScreenPick = false;
+        if (!board?.dragStart || e.button !== 0 || !e.isPrimary) return;
+        pointOnBoard(e);
+        if (!board.dragStart(screenPoint.x, screenPoint.y)) return;
+        screenPointer = e.pointerId;
+        el.boardScreen.setPointerCapture(e.pointerId);
+        e.preventDefault(); e.stopPropagation(); updateBoard();
+      });
+      on(el.boardScreen, "pointermove", e => {
+        if (!board) return;
+        if (e.pointerId === screenPointer) {
+          pointOnBoard(e); board.dragMove(screenPoint.x, screenPoint.y);
+          e.preventDefault(); e.stopPropagation(); updateBoard();
+        } else if (board.hover) {
+          pointOnBoard(e); board.hover(screenPoint.x, screenPoint.y); updateBoard();
+        }
+      });
+      on(el.boardScreen, "pointerleave", () => { if (screenPointer < 0 && board?.hover) { board.hover(-1, -1); updateBoard(); } });
+      on(el.boardScreen, "pointerup", e => {
+        if (e.pointerId !== screenPointer) return;
+        pointOnBoard(e); board.dragMove(screenPoint.x, screenPoint.y);
+        finishScreenPointer(false); e.preventDefault(); e.stopPropagation();
+      });
+      for (const type of ["pointercancel", "lostpointercapture"]) on(el.boardScreen, type, e => { if (e.pointerId === screenPointer) finishScreenPointer(true); });
+      on(window, "blur", () => finishScreenPointer(true));
+      on(document, "visibilitychange", () => { if (document.hidden) finishScreenPointer(true); });
       on(el.boardScreen, "click", (e) => {
+        if (suppressScreenPick) { suppressScreenPick = false; e.preventDefault(); return; }
         // A board that takes picks (the Sphere's room directory) hears where on its picture the press landed, and
         // answers "close" when that is done with it.
         if (board?.pick) {
-          if (board.pick(e.offsetX * board.canvas.width / el.boardScreen.clientWidth, e.offsetY * board.canvas.height / el.boardScreen.clientHeight) === "close") closeBoard();
+          pointOnBoard(e);
+          if (board.pick(screenPoint.x, screenPoint.y) === "close") closeBoard();
           else updateBoard();
           return;
         }
@@ -1273,12 +1320,14 @@
         if (floatingId) scheduleBoardSave();
       };
       const openBoard = (next) => {
-        finishBoardPointer();
+        finishScreenPointer(true); finishBoardPointer();
+        board?.onClose?.(); suppressScreenPick = false;
         if (el.board.open && !!board?.floating !== !!next.floating) el.board.close();
         board = next;
         boardDots = -1;
         letterSign(el.boardTitle, board.title);
         el.board.classList.toggle("board-wide", !!board.wide);
+        el.board.classList.toggle("board-expanded", !!board.expanded);
         el.board.classList.toggle("board-floating", !!board.floating);
         el.board.classList.toggle("board-caption-above", !!board.captionAbove);
         el.board.classList.toggle("board-carousel", !!board.carousel);
@@ -1326,9 +1375,10 @@
         if (board.floating) { layoutBoard(); placeBoard(); }
       };
       const closeBoard = () => {
-        finishBoardPointer();
+        finishScreenPointer(true); finishBoardPointer();
         const closing = board;
         board = null;
+        closing?.onClose?.();
         if (el.board.open) el.board.close();
         if (floatingId) {
           if (lastBoard === controller) { lastBoardWidth = boardWindow.width; lastBoard = null; }
@@ -1356,6 +1406,7 @@
       };
       const pageBoard = (step) => {
         if (!board) return;
+        finishScreenPointer(true);
         board.go((board.index + step + board.count) % board.count);
         updateBoard();
       };
@@ -1418,7 +1469,7 @@
       on(el.boardDots, "click", (e) => {
         const dot = e.target.closest(".board-dot");
         if (!dot || !board) return;
-        interactBoard();
+        interactBoard(); finishScreenPointer(true);
         dot.blur();
         board.go(+dot.dataset.page);
         updateBoard();
@@ -1443,7 +1494,7 @@
         open: openBoard, close: closeBoard, update: updateBoard,
         setHidden(on) {
           if (el.board.hidden === on) return;
-          finishBoardPointer();
+          finishScreenPointer(true); finishBoardPointer();
           if (on && el.board.contains(document.activeElement)) document.activeElement.blur();
           el.board.hidden = on;
           if (!on && board) {

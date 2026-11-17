@@ -1,5 +1,5 @@
 // A lecture's script out to a voice tool, and its recording back in.
-//   npm run lecture:script -- btc-01 [file.json]      writes the lecture as { id, title, by, sentences: [{ text, pause }] }
+//   npm run lecture:script -- btc-01 [file.json]      writes the lecture as { id, title, by, sentences: [{ text, pause, mood }] }
 //                                                     (to the file, or printed): one entry a sentence, `pause` the
 //                                                     seconds of silence before it (a breath, a new slide, a new section);
 //                                                     after a question come his replies to each of its answers in turn
@@ -55,7 +55,8 @@ if (args[0] === "--import") {
   // Every sentence a recording holds, in the timeline's order: the lecture, and after each question what he says to
   // each of its answers, one answer after another. `pause` is the quiet before a sentence.
   const { L, lecture } = timelineOf(id), course = L.courseOf(lecture.course);
-  const sentences = L.compile(lecture).sentences.map((s) => ({ text: s.text, pause: Math.round(s.lead * 100) / 100 }));
+  // `mood` is how a sentence is said, where it is not plain: a voice tool gives each mood its own energy and pace.
+  const sentences = L.compile(lecture).sentences.map((s) => ({ text: s.text, pause: Math.round(s.lead * 100) / 100, ...(s.mood && s.mood !== "plain" ? { mood: s.mood } : {}), ...(s.land ? { land: true } : {}) }));
   const out = JSON.stringify({ id, title: lecture.title, by: course ? course.by : "", sentences }, null, 1) + "\n";
   if (args[1]) { writeFileSync(resolve(args[1]), out); console.log(`${id}: ${sentences.length} sentences to ${resolve(args[1])}`); }
   else process.stdout.write(out);

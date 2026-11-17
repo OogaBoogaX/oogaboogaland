@@ -18,11 +18,17 @@
   const SLIDES = ["title", "section", "points", "quote", "code", "table", "figure", "number", "compare", "live"];
   const PLACES = ["lectern", "centre", "left", "right", "tablet", "screen"];
   const GESTURES = ["rest", "open", "wide", "count", "chop", "point", "shrug", "pinch", "glasses", "lean", "weigh", "up"];
+  // How a sentence is said (`m` on it; plain unless named): a voice tool turns each into its own energy and pace.
+  const MOODS = ["plain", "warm", "wry", "grave", "excited", "hushed", "firm"];
+  const moodOf = (s, plain = "plain") => typeof s !== "string" && s.m || plain, heldOf = (s) => typeof s !== "string" && s.p || 0;
+  // `land: true` on a sentence marks the line a passage was built toward: said slowly, alone in its entry, with a
+  // silence before it and a longer one after, so it is heard and has time to sink in.
+  const landOf = (s) => typeof s !== "string" && s.land === true;
   const COLORS = ["ink", "blue", "red", "green", "amber", "grey"];
   const LIVE = ["blocks", "mempool", "difficulty"];
   const SHAPES = ["text", "box", "line", "arrow", "circle", "ellipse", "path"];
   // Speech: words a minute, the breath between sentences and the least a sentence takes, for a lecture with no recording.
-  const PACE = { wpm: 168, gap: 0.32, least: 1.1, beat: 0.55, section: 1.2 };
+  const PACE = { wpm: 168, gap: 0.32, least: 1.1, beat: 0.55, section: 1.2, land: 0.35, settle: 0.5, slow: 1.35 };
   // A marker's speed across the grid (units a second) and how long any one stroke may take.
   const DRAW = { speed: 70, least: 0.35, most: 3.2, text: 11 };
 
@@ -57,14 +63,18 @@
   // A lecture as one timeline: every sentence with its start and length, the beat, section and slide it belongs to and
   // how much of its slide shows; every board stroke with when it starts, how long it takes and which board it is on.
   const compile = (lecture) => {
-    const rec = timings.get(lecture.id) || null;
+    // A recording made of an earlier text has another count of sentences: it is passed over, and the lecture is timed
+    // from its words until it is recorded again.
+    const made = timings.get(lecture.id) || null, rec = made && made.starts.length === totals(lecture).spoken ? made : null;
     const sentences = [], beats = [], sections = [], slides = [], strokes = [], quizzes = [];
     let t = 0, slide = -1, epoch = -1, n = 0;
     // One sentence onto the timeline, `lead` seconds of quiet after the one before it. A recording has its own times.
     const push = (s, lead, fields) => {
-      const text = sentenceOf(s), start = rec ? rec.starts[n] : t + lead;
-      const length = rec ? (n + 1 < rec.starts.length ? rec.starts[n + 1] : rec.duration) - start : Math.max(PACE.least, words(text) * 60 / PACE.wpm);
-      sentences.push({ i: n, text, start, length, lead, quiz: -1, branch: -1, ...fields });
+      const text = sentenceOf(s), land = landOf(s);
+      if (n) lead += (land ? PACE.land : 0) + (sentences[n - 1].land ? PACE.settle : 0);
+      const start = rec ? rec.starts[n] : t + lead;
+      const length = rec ? (n + 1 < rec.starts.length ? rec.starts[n + 1] : rec.duration) - start : Math.max(PACE.least, words(text) * 60 / PACE.wpm * (land ? PACE.slow : 1));
+      sentences.push({ i: n, text, start, length, lead, land, quiz: -1, branch: -1, ...fields });
       t = start + length;
       n++;
       return start;
@@ -81,8 +91,9 @@
         const starts = [], place = beat.at || (beat.board ? "tablet" : quiz ? "centre" : "lectern");
         beat.say.forEach((s, k) => {
           if (typeof s !== "string" && s.show !== undefined) show = s.show;
-          const lead = !n ? 0 : PACE.gap + (k ? 0 : b0 > first ? PACE.beat : si ? PACE.section : 0);
-          starts.push(push(s, lead, { beat: bi, section: si, slide, show, gesture: typeof s !== "string" && s.g || beat.g || "open", place, epoch: beat.board ? epoch : -1, quiz: quiz ? quizzes.length : -1 }));
+          // `p` on a sentence holds that many seconds more before it: a beat of silence ahead of a line that should land.
+          const lead = !n ? 0 : PACE.gap + (k ? 0 : b0 > first ? PACE.beat : si ? PACE.section : 0) + heldOf(s);
+          starts.push(push(s, lead, { beat: bi, section: si, slide, show, mood: moodOf(s), gesture: typeof s !== "string" && s.g || beat.g || "open", place, epoch: beat.board ? epoch : -1, quiz: quiz ? quizzes.length : -1 }));
         });
         // What he says to each answer follows the question, one answer after another; a player plays the one chosen
         // and passes over the rest. On those sentences `show` is the answer chosen, from 1, which the slide marks.
@@ -90,7 +101,7 @@
           const ask = sentences[sentences.length - 1], Q = { i: quizzes.length, beat: bi, section: si, slide, ask: b0, answer: quiz.answer, options: quiz.options.length, hold: 0, gate: 0, end: 0, branches: [] };
           quiz.options.forEach((option, k) => {
             const lines = k === quiz.answer ? quiz.right : quiz.wrong[k], f = sentences.length;
-            lines.forEach((s, j) => push(s, PACE.gap + (j ? 0 : PACE.beat), { beat: bi, section: si, slide, show: k + 1, gesture: typeof s !== "string" && s.g || (k === quiz.answer ? "up" : "open"), place, epoch: -1, quiz: Q.i, branch: k }));
+            lines.forEach((s, j) => push(s, PACE.gap + (j ? 0 : PACE.beat) + heldOf(s), { beat: bi, section: si, slide, show: k + 1, mood: moodOf(s, k === quiz.answer ? "warm" : "plain"), gesture: typeof s !== "string" && s.g || (k === quiz.answer ? "up" : "open"), place, epoch: -1, quiz: Q.i, branch: k }));
             Q.branches.push({ first: f, count: lines.length, start: sentences[f].start, end: 0 });
           });
           // The lecture holds where the asking ends. In a recording that is a little short of the first reply, inside
@@ -179,7 +190,7 @@
       if (kind === "circle" && op.t && String(op.t).length * 0.55 * Math.min(op.size || 5, v[2] * 0.8) > 2 * v[2] + 0.5) out.push(`${w}: the label "${op.t}" is wider than its circle`);
     });
   };
-  const LIMITS = { sentence: 230, title: 46, point: 74, points: 6, lines: 12, line: 62, rows: 7, cell: 34, words: [2800, 4300], slides: [20, 40], boards: [3, 12], sections: [4, 9],
+  const LIMITS = { sentence: 230, land: 12, title: 46, point: 74, points: 6, lines: 12, line: 62, rows: 7, cell: 34, words: [2800, 4300], slides: [20, 40], boards: [3, 12], sections: [4, 9],
     // A question: its own length and its answers', how many answers, how many a lecture asks, and how many sentences he
     // says to a right answer and to each wrong one.
     question: 120, option: 58, options: [3, 4], quizzes: [3, 6], right: [1, 2], wrong: [1, 3] };
@@ -226,12 +237,16 @@
     else lecture.reading.forEach((r, i) => { text(r && r.title, 64, `${lecture.id} reading ${i + 1} title`, out); if (r && r.by !== undefined) text(r.by, 48, `${lecture.id} reading ${i + 1} by`, out); });
     if (!Array.isArray(lecture.sources) || lecture.sources.length < 2 || lecture.sources.some((x) => typeof x !== "string" || !x.trim())) out.push(`${lecture.id}: name at least two sources it was written from`);
     let total = 0, slides = 0, boards = 0, quizzes = 0, first = true, afterQuiz = false;
-    // One sentence an entry: it is the caption, and where a lecture may stop for a question.
+    // An entry is one caption, said in one breath, and where a lecture may stop for a question: a sentence, or up
+    // to three short ones that belong together ("Twenty-five years. That is how long it took.").
     const sentence = (s, w) => {
       const t = sentenceOf(s);
       text(t, LIMITS.sentence, w, out);
-      if (typeof t === "string" && /[.!?]["\u201d]?\s+[A-Z]/.test(t.replace(/\b(?:[A-Z]\.){2,}|\b(?:Mr|Ms|Dr|vs|St|No)\./g, ""))) out.push(`${w}: more than one sentence ("${t.slice(0, 40)}…")`);
+      if (typeof t === "string" && (t.replace(/\b(?:[A-Z]\.){2,}|\b(?:Mr|Ms|Dr|vs|St|No)\./g, "").match(/[.!?]["\u201d]?\s+[A-Z]/g) || []).length > 2) out.push(`${w}: more than three sentences ("${t.slice(0, 40)}…")`);
       if (typeof s !== "string" && s.g !== undefined && !GESTURES.includes(s.g)) out.push(`${w}: gesture ${s.g}`);
+      if (typeof s !== "string" && s.m !== undefined && !MOODS.includes(s.m)) out.push(`${w}: mood ${s.m}`);
+      if (typeof s !== "string" && s.p !== undefined && !(s.p > 0 && s.p <= 3)) out.push(`${w}: a held pause is over 0 and up to 3 seconds`);
+      if (typeof s !== "string" && s.land !== undefined && (s.land !== true || typeof t !== "string" || words(t) > LIMITS.land || /[.!?]["\u201d]?\s+[A-Z]/.test(t))) out.push(`${w}: a line that lands is one sentence of at most ${LIMITS.land} words, marked land: true`);
       return typeof t === "string" ? words(t) : 0;
     };
     const lines = (list, [lo, hi], w) => {
@@ -303,7 +318,7 @@
   };
 
   BL.lectures = {
-    GRID, SLIDES, PLACES, GESTURES, COLORS, LIVE, PACE, LIMITS,
+    GRID, SLIDES, PLACES, GESTURES, MOODS, COLORS, LIVE, PACE, LIMITS,
     course, add, timing, compile, at, state, sentenceAt, check, totals, shapeOf, travel, words,
     get: (id) => lectures.get(id) || null, courseOf: (id) => courses.get(id) || null, courses: () => [...courses.values()], timed: (id) => timings.has(id)
   };

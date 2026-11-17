@@ -28,7 +28,7 @@
     lecturer: "pumponopoulos", by: "Professor Pumponopoulos", parts: PARTS,
     lectures: lectures.map(([part, title, blurb], i) => {
       const nn = String(i + 1).padStart(2, "0");
-      return { n: i + 1, id: `btc-${nn}`, part, title, blurb, group: `lecture-btc-${"abcdefghijklmn"[i]}`, audio: `/media/lectures/btc-${nn}.m4a` };
+      return { n: i + 1, id: `btc-${nn}`, part, title, blurb, available: i === 0, group: `lecture-btc-${"abcdefghijklmn"[i]}`, audio: `/media/lectures/btc-${nn}.m4a` };
     })
   });
 })();
