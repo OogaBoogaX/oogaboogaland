@@ -1767,6 +1767,9 @@
     if (DEBUG && params.get("network") === "b") scene.network.density = "b";
     if (DEBUG && params.get("netfog") === "1") scene.network.fog = true;
     scene.netShow = -1; scene.netFrom = 0; scene.netUsed = true;
+    // The hall on the Worker, followed while it is offered (hangar-link.js), and what this page last told it of the Jet.
+    scene.link = BL.hangarLink.create();
+    scene.wordsAt = -Infinity; scene.saidOn = false; scene.saidNear = false; scene.roomFollowed = 0;
     // Tess notices the shape if she is near it and free when she would notice it, and glances at it, looks it over or is
     // puzzled by it.
     scene.unsettled = BL.hangarGuide.unsettled(scene.shimmer, camera);
@@ -1830,7 +1833,7 @@
     hangarScene.input = input;
     hangarScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      hangar: { layout: LAYOUT, feed: BL.jetFeed, get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, get fire() { return scene && scene.fire; }, get sis() { return scene && scene.sis && scene.sis.debug; }, get anomaly() { return scene && scene.anomaly && scene.anomaly.debug; }, get roomFire() { return scene && scene.roomFire && scene.roomFire.debug; }, get meltdown() { return scene && scene.meltdown && scene.meltdown.debug; }, get shimmer() { return scene && scene.shimmer && scene.shimmer.debug; }, get network() { return scene && scene.network && scene.network.debug; }, get terminals() { return scene && scene.terminals && scene.terminals.debug; }, get keypad() { return scene && scene.keypad && scene.keypad.debug; }, get crane() { return scene && scene.crane && scene.crane.debug; }, get guide() { return scene && scene.guide; } }
+      hangar: { layout: LAYOUT, feed: BL.jetFeed, get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, get fire() { return scene && scene.fire; }, get sis() { return scene && scene.sis && scene.sis.debug; }, get anomaly() { return scene && scene.anomaly && scene.anomaly.debug; }, get roomFire() { return scene && scene.roomFire && scene.roomFire.debug; }, get meltdown() { return scene && scene.meltdown && scene.meltdown.debug; }, get shimmer() { return scene && scene.shimmer && scene.shimmer.debug; }, get network() { return scene && scene.network && scene.network.debug; }, get terminals() { return scene && scene.terminals && scene.terminals.debug; }, get keypad() { return scene && scene.keypad && scene.keypad.debug; }, get crane() { return scene && scene.crane && scene.crane.debug; }, get guide() { return scene && scene.guide; }, get link() { return scene && scene.link; } }
     };
   };
   const feetOf = () => avatar ? avatar.root.position.y - avatar.baseY : 0;
@@ -1899,6 +1902,32 @@
       g.phase.ripples.pulse(opening.minX + Math.random() * (opening.maxX - opening.minX), opening.floorY + Math.random() * (opening.ceilingY - opening.floorY), 0);
     }
   };
+  // The hall on the Worker, while this page follows it (hangar-link.js): the anomaly it names played here, and the room
+  // fire it lit, and this page's word on the Jet sent on a change, at most four times a second, and again after the link
+  // comes back.
+  const hallLife = (s, elapsed) => {
+    const L = s.link;
+    L.update();
+    if (!L.live) s.saidOn = s.saidNear = false;
+    s.anomaly.follow(L.following);
+    if (!L.following) return;
+    s.anomaly.sync(L.hall.anomaly || null, L.serverNow());
+    // The room fire a lightning lit, which burns on past it: lit here from as far in as it has got, unless this page's
+    // own lightning lit it already.
+    const R = L.hall.room;
+    if (R && R.id !== s.roomFollowed) {
+      const from = (L.serverNow() - R.at) / 1000, F = s.roomFire;
+      if (from >= 0) {
+        s.roomFollowed = R.id;
+        if (!F.burning && from < BL.hangarHall.ROOM_FIRE.done - 0.25) { F.pick(Math.min(F.count - 1, Math.floor(R.room * F.count))); F.ignite(from); }
+      }
+    }
+    if (elapsed - s.wordsAt < 0.25) return;
+    s.wordsAt = elapsed;
+    const w = s.anomaly.words();
+    if ((w.on !== s.saidOn || w.near !== s.saidNear) && L.send({ t: "jet", on: w.on, near: w.near })) { s.saidOn = w.on; s.saidNear = w.near; }
+  };
+
   const update = (dt, elapsed) => {
     const s = scene, drivenHere = people && people.player;
     const previousX = avatar ? avatar.root.position.x : 0, previousZ = avatar ? avatar.root.position.z : 0;
@@ -1919,8 +1948,9 @@
     if (people) people.update(dt, elapsed);
     // The Ooga driven here never rests inside a crate or a chest (`hangarModels.pushOut`).
     if (drivenHere && !drivenHere.camp.seat) HM.pushOut(drivenHere.root.position, drivenHere.root.position.y - drivenHere.baseY, drivenHere.bodyRadius || 0.35);
-    // The Jet acting up on its own, driving the engines before the static fire test burns them; then the test, after
-    // the crew has moved, so a presser it knocks down lies where the crew left them.
+    // The Jet acting up on its own (or as the hall says), driving the engines before the static fire test burns them;
+    // then the test, after the crew has moved, so a presser it knocks down lies where the crew left them.
+    hallLife(s, elapsed);
     s.anomaly.update(dt);
     s.roomFire.update(dt);
     s.meltdown.update(dt);
@@ -2089,6 +2119,7 @@
     scene.gate.phase.dispose();
     scene.launch.phase.dispose();
     if (scene.window) scene.window.dispose();
+    scene.link.close();
     scene.anomaly.dispose();
     scene.meltdown.dispose();
     scene.shimmer.dispose();
