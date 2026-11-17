@@ -8,7 +8,9 @@
 // server's clock (ms), `you` this page's account as the hall knows it, `send(msg)` a message to the hall (false while
 // not live), `sendBytes` a frame of the walkers; `hosting`, whether this page is the one the hall has move the walkers
 // (`hangar-relay.js`), whose frames from the others go to `bytes`. The hall hears whether the page is showing (`seen`)
-// as it joins and whenever that changes, so a hidden page hands the walkers on. `close()` on leaving.
+// as it joins and whenever that changes, so a hidden page hands the walkers on. `channel` shares Tess over the hall in
+// the island room's shape (`hub-guide.js`): her queue as the hall tells this page, her pose, and whether this page flies
+// her between turns (the host). `close()` on leaving.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -16,6 +18,13 @@
   const KIND = "hangar", VENUE = "hall", GRACE_MS = 20000;
   const create = ({ bytes = null } = {}) => {
     let link = null, hall = null, heardAt = -Infinity, told = null;
+    // Tess's queue as the hall last told this page, and a count of the link coming up, which her guide watches.
+    let tessGuide = null, connection = 0, wasLive = false;
+    const message = (msg) => {
+      if (msg.t !== "tess-guide") return;
+      if (msg.op === "state") tessGuide = msg;
+      else if (msg.op === "pose" && tessGuide) tessGuide.pose = msg.a;
+    };
     // The hall told whether this page shows, whenever that changes and once each time the link comes up.
     const tell = () => {
       const v = !document.hidden;
@@ -36,19 +45,33 @@
         if (want && !link) {
           link = BL.gameNet.open(KIND, VENUE, { state: (msg) => {
             if (msg.s && typeof msg.s === "object") { hall = msg.s; heardAt = performance.now(); }
-          }, bytes });
+          }, bytes, message });
         } else if (!want && link) api.close();
-        if (link && link.state === "live") { heardAt = performance.now(); tell(); }
+        const live = !!link && link.state === "live";
+        if (live && !wasLive) connection++;
+        if (!live) tessGuide = null;
+        wasLive = live;
+        if (live) { heardAt = performance.now(); tell(); }
         else told = null;
       },
       close: () => {
         if (link) link.close();
-        link = null; hall = null; heardAt = -Infinity; told = null;
+        link = null; hall = null; heardAt = -Infinity; told = null; tessGuide = null; wasLive = false;
       },
       dispose: () => {
         api.close();
         document.removeEventListener("visibilitychange", tell);
       }
+    };
+    api.channel = {
+      state: {
+        get me() { return BL.net && BL.net.state.me; }, get tessShared() { return api.following; }, get tessGuide() { return tessGuide; },
+        get room() { return api.live ? "live" : "closed"; }, get connectionToken() { return String(connection); }
+      },
+      sendTess: (m) => api.send({ t: "tess-guide", ...m }),
+      sendPose: (a) => api.send({ t: "tess-pose", a }),
+      drives: () => api.hosting,
+      serverNow: () => api.serverNow()
     };
     return api;
   };

@@ -1732,6 +1732,8 @@
     scene.liftRelay.values(scene.liftVals, true); scene.liftRelay.values(scene.liftFlags);
     scene.liftPuppet = false; scene.seatAsked = false;
     scene.liftRelay.on("lift.horn", () => audio.horn());
+    // The hall on the Worker, followed while it is offered (hangar-link.js).
+    scene.link = BL.hangarLink.create({ bytes: (bytes) => scene.relay.read(bytes) || scene.liftRelay.read(bytes) });
     const relayTree = (n, alts = null) => { scene.relay.node(n, alts && alts.includes(n.geometry) ? alts : null); for (const c of n.children || []) relayTree(c, alts); };
     for (const a of scene.crew) relayTree(a.root);
     scene.puppet = false;
@@ -1826,7 +1828,7 @@
     scene.guide = BL.hangarGuide.create({
       parent: root, input, fx, camera, pilot, visitor: () => people && people.player, world, hud, coarse: COARSE, landing: true,
       quality: () => renderer.quality, busy: () => leaving || scene.fire.t >= 0 || scene.keypad.open >= 0,
-      targets: { sis: [scene.sisHead], show: [HM.projector().lens, HM.filmScreen().picture] }
+      targets: { sis: [scene.sisHead], show: [HM.projector().lens, HM.filmScreen().picture] }, channel: scene.link.channel
     });
     scene.distraction = BL.hangarGuide.distraction(scene.sis);
     // Now and then, a faint shape gathering and coming apart in the air where the visitor is looking
@@ -1846,8 +1848,7 @@
     if (DEBUG && params.get("network") === "b") scene.network.density = "b";
     if (DEBUG && params.get("netfog") === "1") scene.network.fog = true;
     scene.netShow = -1; scene.netFrom = 0; scene.netUsed = true;
-    // The hall on the Worker, followed while it is offered (hangar-link.js), and what this page last told it of the Jet.
-    scene.link = BL.hangarLink.create({ bytes: (b) => scene.relay.read(b) || scene.liftRelay.read(b) });
+    // What this page last told the hall of the Jet, and of the hall's events which it has played.
     scene.wordsAt = -Infinity; scene.saidOn = false; scene.saidNear = false; scene.roomFollowed = 0; scene.netFollowed = 0; scene.pokeSeen = 0; scene.wasHosting = false;
     // Tess notices the shape if she is near it and free when she would notice it, and glances at it, looks it over or is
     // puzzled by it.
