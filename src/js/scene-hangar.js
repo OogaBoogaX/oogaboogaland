@@ -2309,7 +2309,8 @@
         // else in the doorway (an Ooga in the air, say) goes out as it always has.
         const p = pilot.player.root.position;
         if (walk.phase) { /* walking itself */ }
-        else if (pilot.player === avatar && walkingOut(p, previousX, previousZ, dt)) {
+        // Only the visitor's own walking: another player's Ooga pushing theirs takes nobody out.
+        else if (pilot.player === avatar && pilot.controls.moving() && walkingOut(p, previousX, previousZ, dt)) {
           Object.assign(walk, { phase: WALK_OFF, t: 0, x: p.x, z: p.z, through: false });
           pilot.controls.reset(); input.reset(); hud.tooltip.hide();
         } else if (through(p, p.y - pilot.player.baseY, 0)) leaveHangar();
