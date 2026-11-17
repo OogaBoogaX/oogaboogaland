@@ -398,12 +398,20 @@
       if (active) door(dt);
     };
 
+    // Relayed from the page that moves the hall's walkers (`hangar-relay.js`): its nodes, the objects its effects name,
+    // and whether one is on (`shared`), kept current on the host and read on the others, where it does not run (`puppet`).
+    const shared = new Float32Array(1);
+    let puppet = false;
+    const nodes = [...balls.map((b) => b.node), ...pops.map((q) => q.node)];
+
     return {
-      update,
+      update: (dt) => { update(dt); shared[0] = active ? 1 : 0; },
+      nodes, shared, refs: [SPARK, STAR],
+      get puppet() { return puppet; }, set puppet(on) { puppet = on; },
       // Put the next off: none for at least `s` s from now, however long it has been due.
       defer: (s) => { if (wait < s) wait = s; },
       get holding() { return active ? gorilla : null; },
-      get active() { return active; },
+      get active() { return puppet ? shared[0] > 0 : active; },
       dispose: () => { if (active) release(); },
       debug: {
         play: (i, j) => start(i, j), spots: SPOTS.map((p) => p.name), get spot() { return active ? SPOTS[spot].name : ""; },
