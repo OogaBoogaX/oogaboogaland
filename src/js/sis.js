@@ -760,10 +760,13 @@
       actor.x = p.x; actor.y = feet; actor.z = p.z;
     };
     // Taking her on from the host's frames (or playing on alone again): on from where she stands, to a spot of hers.
+    // Whatever this page last had her do is long past (a fit, a rampage, a brawl, her quiet moment), so none of it goes
+    // on: she stands, shows, hammer in hand, and takes up her routine.
     const adopt = () => {
       yaw = node.rotation.y; feet = shared[5]; pathN = pathAt = 0;
-      if (panicking || brawlAt || rampage) return;
-      if (doing === "hush") endHush();
+      endHush();
+      panicking = false; down = 0; rampage = storming = false; pips = 0; brawlAt = null; scare = null; fitT = 0; chaseT = 0;
+      node.visible = true;
       goTo(nextSpot(null));
     };
     const update = (dt, driven, eye) => {
