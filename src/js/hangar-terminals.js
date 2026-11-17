@@ -747,7 +747,9 @@
   // the page follows the hall on the Worker (`follow(true)`, `hangar-link.js`), a press is asked of the hall (`ask()`,
   // false when it could not be sent), which starts and stops the show for everyone in the hangar (`sync`, joined as far
   // in as it has got), and this page's film running out is told to it (`done(id)`), ending it for everyone.
-  const create = ({ root, audio, mood, toast, ask = null, done = null }) => {
+  // Shared too, a desk monitor turned is told to it (`onTurn(desk, monitor)`) and every desk's turns taken from it
+  // (`turns(counts)`, two a desk), and the pages turn on its clock (`clock`).
+  const create = ({ root, audio, mood, toast, ask = null, done = null, onTurn = null }) => {
     const L = HM.LAYOUT, K = HM.KIOSK, P = HM.projector(), S = HM.filmScreen(), B = HM.projectorBeam(), X = extras(), pic = S.picture;
 
     // ---- the terminals ----
@@ -902,6 +904,7 @@
     const turnMonitor = (i, m = Math.random() < 0.5 ? 0 : 1) => {
       const d = desks[i], node = d.nodes[m];
       d.turned[m]++;
+      if (onTurn) onTurn(i, m);
       d.blink[m] = DESK_BLINK;
       audio.beep(node.position.x, node.position.y, node.position.z, DESK_CLICK[0], DESK_CLICK[1]);
       return true;
@@ -1081,8 +1084,17 @@
       if (f.end !== null && running()) stop();
     };
 
+    // Every desk's monitors turned as many times as the hall says (two counts a desk), blinking where that moves one on.
+    const turns = (counts) => {
+      for (let i = 0; i < desks.length; i++) for (let m = 0; m < 2; m++) {
+        const n = counts[i * 2 + m] | 0, d = desks[i];
+        if (n > d.turned[m]) { d.turned[m] = n; d.blink[m] = DESK_BLINK; }
+      }
+    };
+
     return {
-      update, useNear, actLabel, press, tapMonitor, follow, sync, lights, liveGeometry, nodes: kiosks.map((k) => k.node), projector: head, screen: frame,
+      update, useNear, actLabel, press, tapMonitor, follow, sync, turns,
+      get clock() { return clock; }, set clock(v) { clock = v; }, lights, liveGeometry, nodes: kiosks.map((k) => k.node), projector: head, screen: frame,
       monitors: desks.map((d) => d.nodes),
       get near() { return near >= 0; },
       // Whether the film show is on, from the screen winding down to it winding back up.
