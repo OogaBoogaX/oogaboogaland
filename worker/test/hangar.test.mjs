@@ -120,3 +120,22 @@ test("one press starts the fire test for everyone, none while it runs or cools d
   g.debug.begin(t0 + 40 * S);
   assert.equal(g.message({ id: 1 }, { t: "fire" }, t0 + 41 * S), false, "nor while an anomaly plays");
 });
+
+test("the film show starts and stops for everyone, ends when the first page's film runs out, and starts again once wound up", () => {
+  const t0 = 1.7e12, g = hangar.create(t0, seeded(9));
+  g.join({ id: 1 }, t0); g.join({ id: 2 }, t0);
+  assert.deepEqual(hangar.parse({ t: "film", done: "x" }), null);
+  assert.equal(g.message({ id: 1 }, { t: "film" }, t0), true);
+  const film = g.state().film;
+  assert.deepEqual(film, { id: 1, at: t0, by: 1, end: null });
+  assert.equal(g.message({ id: 2 }, { t: "film", done: 99 }, t0 + 60 * S), false, "only the film showing ends");
+  assert.equal(g.message({ id: 2 }, { t: "film", done: film.id }, t0 + 60 * S), true);
+  assert.equal(g.state().film.end, t0 + 60 * S);
+  assert.equal(g.message({ id: 1 }, { t: "film", done: film.id }, t0 + 61 * S), false, "the first page to say so is enough");
+  assert.equal(g.message({ id: 1 }, { t: "film" }, t0 + 62 * S), false, "not again while it winds up");
+  assert.equal(g.step(t0 + 60 * S + HALL.FILM.wind * S), true);
+  assert.equal(g.state().film, null);
+  assert.equal(g.message({ id: 2 }, { t: "film" }, t0 + 80 * S), true);
+  assert.equal(g.message({ id: 1 }, { t: "film" }, t0 + 81 * S), true, "a press while it shows stops it");
+  assert.equal(g.state().film.end, t0 + 81 * S);
+});

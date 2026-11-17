@@ -8,6 +8,8 @@
 // often a lightning ends in the jump to a room (0 to 1) and when the bolt lands there, s from the lightning's start.
 // The static fire test (`hangar-fire.js`), s from the press: the result, when the presser's controls come back, and
 // ready again. A room's fire (`hangar-room-fire.js`), s from the bolt landing: done, its operator back at his post.
+// The film show (`hangar-terminals.js`): how long from its stop (a press, or its film run out) until the screen has
+// wound back up and it may start again, s, and the longest the hall lets one run, s.
 (() => {
   "use strict";
   const scope = typeof window === "undefined" ? globalThis : window;
@@ -19,6 +21,7 @@
   });
   const FIRE = Object.freeze({ result: 10.6, ready: 30.6 });
   const ROOM_FIRE = Object.freeze({ done: 12.6 });
+  const FILM = Object.freeze({ wind: 9, most: 1800 });
 
-  BL.hangarHall = Object.freeze({ ANOMALY, FIRE, ROOM_FIRE, KINDS: Object.freeze(Object.keys(ANOMALY.length)) });
+  BL.hangarHall = Object.freeze({ ANOMALY, FIRE, ROOM_FIRE, FILM, KINDS: Object.freeze(Object.keys(ANOMALY.length)) });
 })();

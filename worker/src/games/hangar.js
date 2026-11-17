@@ -15,11 +15,16 @@
 // alone hands the test its controls), never while one runs or cools down, nor while an anomaly plays; and no anomaly
 // starts while it runs or for a while after it hands back (`ANOMALY.afterFire`), as on a page alone.
 //
+// The film show: a page's press starts it for everyone (`film`: its id, when, who pressed), or stops it once it runs
+// (`end`); the first page whose film runs out says so (`done`), which ends it for everyone, since each page's copy of the
+// film is as long as that page's reading of the Jet's repository. Once the screen has wound back up (`FILM.wind`) it
+// may start again.
+//
 // What it hears: `jet`, a page's word on whether anything it knows stands on the Jet (`on`) or within the shuffle's
 // reach (`near`), sent on a change. The lowrider never starts with anyone on the Jet nor the shuffle with anything near
 // (the next in the bag instead, or the failed start), and either stops for everyone the moment a page says so. Nothing
 // it keeps names a player but those two words, kept while their page is connected and never saved, and the test's
-// presser's account id, kept while the test runs and cools down.
+// presser's account id, kept while the test runs and cools down, and the film show's starter's, while it shows.
 import "../../../src/js/hangar-hall.js";
 
 const HALL = globalThis.BL.hangarHall, A = HALL.ANOMALY;
@@ -29,6 +34,7 @@ const parse = (m) => {
   if (!m || typeof m !== "object" || Array.isArray(m) || typeof m.t !== "string") return false;
   if (m.t === "jet") return typeof m.on === "boolean" && typeof m.near === "boolean" ? { t: "jet", on: m.on, near: m.near } : null;
   if (m.t === "fire") return { t: "fire" };
+  if (m.t === "film") return m.done === undefined ? { t: "film" } : Number.isSafeInteger(m.done) && m.done > 0 ? { t: "film", done: m.done } : null;
   return null;
 };
 
@@ -41,8 +47,9 @@ const create = (_now, random = Math.random) => {
   // at when the bolt lands) or null, and until when it burns; when the next anomaly may start; the last one's id; how
   // many kinds are left in the bag.
   let anomaly = null, fire = null, roomUntil = -Infinity, nextAt = 0, id = 0, left = 0;
-  // The static fire test running or cooling down ({ id, at, by }) or null.
-  let test = null;
+  // The static fire test running or cooling down ({ id, at, by }) or null; the film show ({ id, at, by, end }, end null
+  // while it runs) or null.
+  let test = null, film = null;
   const testing = (now) => !!test && now < test.at + (HALL.FIRE.result + A.afterFire) * 1000;
 
   const gap = () => (A.gap[0] + random() * (A.gap[1] - A.gap[0])) * 1000;
@@ -88,6 +95,17 @@ const create = (_now, random = Math.random) => {
         test = { id: ++id, at: now, by: p.id };
         return true;
       }
+      if (m.t === "film") {
+        if (m.done !== undefined) {
+          if (!film || film.id !== m.done || film.end !== null) return false;
+          film.end = now;
+          return true;
+        }
+        if (!film) { film = { id: ++id, at: now, by: p.id, end: null }; return true; }
+        if (film.end !== null) return false;
+        film.end = now;
+        return true;
+      }
       f.on = m.on; f.near = m.near;
       if (anomaly && over(now)) { end(now); return true; }
       return false;
@@ -97,6 +115,7 @@ const create = (_now, random = Math.random) => {
       let changed = false;
       if (fire && now >= roomUntil) { fire = null; changed = true; }
       if (test && now >= test.at + HALL.FIRE.ready * 1000) { test = null; changed = true; }
+      if (film && (film.end !== null && now >= film.end + HALL.FILM.wind * 1000 || now >= film.at + HALL.FILM.most * 1000)) { film = null; changed = true; }
       if (anomaly) {
         if (!over(now)) return changed;
         end(now);
@@ -107,10 +126,10 @@ const create = (_now, random = Math.random) => {
       return true;
     },
     running: () => players.size > 0,
-    state: () => ({ anomaly, room: fire, test }),
+    state: () => ({ anomaly, room: fire, test, film }),
     motion: () => false,
     /** What a restart picks up: the schedule, or null once the hall is empty. */
-    save: () => players.size ? JSON.stringify({ anomaly, fire, test, nextAt, roomUntil, id, bag, left }) : null,
+    save: () => players.size ? JSON.stringify({ anomaly, fire, test, film, nextAt, roomUntil, id, bag, left }) : null,
     /** Picks up a saved hall: its schedule goes on where it stopped, on the same clock. */
     restore: (data) => {
       let s = null;
@@ -122,6 +141,8 @@ const create = (_now, random = Math.random) => {
       fire = f && Number.isFinite(f.at) ? { id: f.id | 0, at: f.at, room: Math.min(0.999, Math.max(0, +f.room || 0)) } : null;
       const x = s.test;
       test = x && Number.isFinite(x.at) && Number.isSafeInteger(x.by) ? { id: x.id | 0, at: x.at, by: x.by } : null;
+      const v = s.film;
+      film = v && Number.isFinite(v.at) && Number.isSafeInteger(v.by) ? { id: v.id | 0, at: v.at, by: v.by, end: Number.isFinite(v.end) ? v.end : null } : null;
       nextAt = +s.nextAt || 0; roomUntil = Number.isFinite(s.roomUntil) ? s.roomUntil : -Infinity; id = s.id | 0;
       bag.splice(0, bag.length, ...s.bag);
       left = Math.min(bag.length, Math.max(0, s.left | 0));
