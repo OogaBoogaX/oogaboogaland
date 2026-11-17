@@ -38,12 +38,18 @@
 // page goes), whose frames of it (bytes, `hangar-relay.js`'s forklift relay) are passed on to everyone else; the last
 // whole one is kept and handed to a page as it joins, so a forklift parked anywhere stands there for it too.
 //
+// Tess: one visitor at a time, by the island's own queue (`tess-queue.js`, its rules unchanged, here through `queueRoom`:
+// each page its own place, the turn's holder sending her pose for the rest, the conversation never here); between
+// turns the host flies her about her work and sends her pose (`tess-pose`), which goes to everyone else as the turn's
+// would.
+//
 // What it hears: `jet`, a page's word on whether anything it knows stands on the Jet (`on`) or within the shuffle's
 // reach (`near`), sent on a change. The lowrider never starts with anyone on the Jet nor the shuffle with anything near
 // (the next in the bag instead, or the failed start), and either stops for everyone the moment a page says so. Nothing
 // it keeps names a player but those two words, kept while their page is connected and never saved, and the test's
 // presser's account id, kept while the test runs and cools down, and the film show's starter's, while it shows.
 import "../../../src/js/hangar-hall.js";
+import { tessQueue } from "../tess-queue.js";
 
 const HALL = globalThis.BL.hangarHall, A = HALL.ANOMALY;
 // The two relays' magic (`hangar-relay.js`): the walkers', from the host, and the forklift's, from its driver.
@@ -67,6 +73,8 @@ const parse = (m) => {
   if (m.t === "seen") return typeof m.v === "boolean" ? { t: "seen", v: m.v } : null;
   if (m.t === "fire") return { t: "fire" };
   if (m.t === "poke") return { t: "poke" };
+  if (m.t === "tess-guide") return tessQueue.parse(m);
+  if (m.t === "tess-pose") return tessQueue.parse({ op: "pose", token: "host", a: m.a }) ? { t: "tess-pose", a: m.a } : null;
   if (m.t === "seat") return typeof m.on === "boolean" ? { t: "seat", on: m.on } : null;
   if (m.t === "shape") return shapeOf(m.s);
   if (m.t === "walkup") return Number.isSafeInteger(m.id) && m.id > 0 && finite(m.x) && finite(m.z) && Math.abs(m.x) < 200 && Math.abs(m.z) < 200
@@ -100,6 +108,15 @@ const create = (_now, random = Math.random) => {
   let pokeN = 0;
   // Who drives the forklift (an account id, 0 for none) and its last whole frame.
   let driver = 0, liftFrame = null;
+  // The Tess queue's room, as `tess-queue.js` asks of the island's: each page a peer, always where she is, showing as
+  // the page says, told by its account id (`game.tell`, which the host sets); no storage, so nothing of it is kept.
+  const peers = new Map();
+  const queueRoom = { players: peers, ctx: null, background: () => {}, scheduleAlarm: () => {}, send: (id, msg) => { if (game.tell) game.tell(id, msg); } };
+  const peerOf = (p) => {
+    let q = peers.get(p.id);
+    if (!q) { q = { id: p.id, ws: p.id, inHub: true, zone: "outside", visible: true }; peers.set(p.id, q); }
+    return q;
+  };
   const N = HALL.NETWORK;
   const netQuietUntil = () => network ? network.at + (N.end + N.quiet) * 1000 : -Infinity;
   const testing = (now) => !!test && now < test.at + (HALL.FIRE.result + A.afterFire) * 1000;
@@ -132,19 +149,32 @@ const create = (_now, random = Math.random) => {
   // Whether the anomaly playing must stop now: its end, or someone where it may not go on.
   const over = (now) => now >= anomaly.at + A.length[anomaly.kind] * 1000 || anomaly.kind === "lowrider" && any("on") || anomaly.kind === "shuffle" && any("near");
 
-  return {
+  const game = {
     join: (p, now) => {
       players.set(p.id, { on: false, near: false, seen: true, misses: 0, played: false, skip: false, used: 0 });
       elect();
+      tessQueue.presence(queueRoom, peerOf(p));
       if (players.size === 1 && !anomaly && nextAt < now) nextAt = now + gap();
     },
-    leave: (p) => { players.delete(p.id); elect(); if (driver === p.id) driver = 0; },
+    leave: (p) => {
+      players.delete(p.id); elect(); if (driver === p.id) driver = 0;
+      const q = peers.get(p.id);
+      if (q) { tessQueue.presence(queueRoom, q, true); peers.delete(p.id); }
+    },
     /** A page's message, read by `parse`; true when the hall's state changed and should go out now. */
     message: (p, m, now) => {
       const f = players.get(p.id);
       if (!f) return false;
+      if (m.t === "tess-guide") { tessQueue.message(queueRoom, peerOf(p), m); return false; }
+      if (m.t === "tess-pose") {
+        if (p.id !== host || queueRoom.tessQueue && queueRoom.tessQueue.entries[0] && queueRoom.tessQueue.entries[0].phase === "active") return false;
+        for (const id of peers.keys()) if (id !== p.id && game.tell) game.tell(id, { t: "tess-guide", op: "pose", a: m.a });
+        return false;
+      }
       if (m.t === "seen") {
         f.seen = m.v;
+        peerOf(p).visible = m.v;
+        tessQueue.presence(queueRoom, peerOf(p));
         elect();
         if (host === shownHost) return false;
         shownHost = host;
@@ -203,6 +233,7 @@ const create = (_now, random = Math.random) => {
     },
     /** The hall to `now`; true when its state changed. */
     step: (now) => {
+      tessQueue.sweep(queueRoom, now);
       let changed = host !== shownHost || driver !== shownDriver;
       shownHost = host; shownDriver = driver;
       if (fire && now >= roomUntil) { fire = null; changed = true; }
@@ -256,12 +287,13 @@ const create = (_now, random = Math.random) => {
     },
     debug: { players, get anomaly() { return anomaly; }, get nextAt() { return nextAt; }, begin, end }
   };
+  return game;
 };
 
 export const hangar = {
   id: "hangar", code: 2, version: 1, venues: ["hall"], optional: true, tickMs: 250, stateEvery: 40,
   limits: { sockets: 32, chars: 256, bytes: 16384 },
-  buckets: { jet: { rate: 4, burst: 4 }, press: { rate: 1, burst: 2 }, poke: { rate: 5, burst: 5 }, relay: { rate: 12, burst: 6 } },
-  bucketOf: (t) => t === "jet" || t === "seen" ? "jet" : t === "poke" ? "poke" : "press",
+  buckets: { jet: { rate: 4, burst: 4 }, press: { rate: 1, burst: 2 }, poke: { rate: 5, burst: 5 }, tess: { rate: 10, burst: 10 }, relay: { rate: 12, burst: 6 } },
+  bucketOf: (t) => t === "jet" || t === "seen" ? "jet" : t === "poke" ? "poke" : t === "tess-guide" || t === "tess-pose" ? "tess" : "press",
   parse, create
 };

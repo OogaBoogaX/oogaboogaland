@@ -223,3 +223,25 @@ test("the forklift has one driver, whose frames alone go on, and the last whole 
   assert.equal(g.state().driver, 0, "a driver's page going leaves the seat free");
   assert.deepEqual(g.greet({ id: 3 }), [whole], "and the forklift where they left it");
 });
+
+test("Tess in the hall: the island's queue, one turn at a time, and the host's pose of her between turns", () => {
+  const t0 = 1.7e12, g = hangar.create(t0, seeded(8)), told = [];
+  g.tell = (id, msg) => told.push([id, msg]);
+  g.join({ id: 1 }, t0); g.join({ id: 2 }, t0);
+  const views = (id) => told.filter(([to, m]) => to === id && m.op === "state").map(([, m]) => m);
+  g.message({ id: 2 }, hangar.parse({ t: "tess-guide", op: "join" }), t0);
+  const ready = views(2).at(-1);
+  assert.equal(ready.phase, "ready", "alone in the queue, it is their turn to accept");
+  assert.ok(ready.token, "their own token, told to them alone");
+  assert.ok(views(1).every((v) => v.token === ""), "nobody else hears it");
+  const a = [1, 2, 3, 1, 0, 0, 0, 0, 0, 0, 0, 1];
+  g.message({ id: 1 }, hangar.parse({ t: "tess-pose", a }), t0);
+  assert.deepEqual(told.filter(([to, m]) => to === 2 && m.op === "pose").map(([, m]) => m.a), [a], "the host's pose between turns goes to everyone else");
+  g.message({ id: 2 }, hangar.parse({ t: "tess-guide", op: "accept", token: ready.token }), t0);
+  assert.equal(views(2).at(-1).phase, "active");
+  told.length = 0;
+  g.message({ id: 1 }, hangar.parse({ t: "tess-pose", a }), t0 + 500);
+  assert.equal(told.length, 0, "not while someone has her");
+  assert.equal(hangar.parse({ t: "tess-pose", a: [1, 2] }), null);
+  assert.equal(hangar.bucketOf("tess-guide"), "tess");
+});
