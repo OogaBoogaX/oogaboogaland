@@ -1401,12 +1401,13 @@
     send(`{"t":"swing"}`);
     return true;
   };
-  // A duel frame (duel-rules.js): `challenge`, `accept` or `decline` player `to`, `cancel`, `forfeit`, or a `hit` of
-  // `kind`; only to a live room that holds duels, and whether it went.
+  // A duel frame (duel-rules.js): `challenge` (with `kind` "hit", one made by landing a blow), `accept` or `decline`
+  // player `to`, `cancel`, `forfeit`, or a `hit` of `kind`; only to a live room that holds duels, and whether it went.
   const sendDuel = (op, to = 0, kind = "") => {
     if (state.room !== "live" || !state.duel) return false;
     if (op === "hit") send(`{"t":"duel","op":"hit","kind":"${kind}"}`);
     else if (op === "cancel" || op === "forfeit") send(`{"t":"duel","op":"${op}"}`);
+    else if (op === "challenge" && kind === "hit") send(`{"t":"duel","op":"challenge","to":${to},"hit":true}`);
     else send(`{"t":"duel","op":"${op}","to":${to}}`);
     return true;
   };

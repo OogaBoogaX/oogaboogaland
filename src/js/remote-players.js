@@ -786,6 +786,14 @@
         textX: entry.plateTextX, baseline: entry.plateBaseline, barLeft: entry.plateBarLeft, barTop: entry.plateBarTop, barWidth: BAR_W,
         headX: entry.screenX, textWidth: entry.labelW, font: nameFont, spacing: NAME_SPACING } : null;
     };
+    // The top middle of a body's nameplate as last laid out, written into `out` (x, y in CSS pixels): for a mark drawn
+    // over it each frame (a duel's health bar). False while it has none.
+    const plateTop = (id, out) => {
+      const entry = bodies.get(id);
+      if (!entry || !Number.isFinite(entry.plateLeft)) return false;
+      out.x = entry.plateLeft + entry.plateW / 2; out.y = entry.plateTop;
+      return true;
+    };
     // Each cloud speaker shown now, as `fn(x, y, z, id)` at the seat's surface under them.
     const cloudSpots = (fn) => {
       for (const entry of bodies.values()) if (entry.cloud && entry.cave.root.visible) fn(entry.x, entry.y, entry.z, entry.id);
@@ -797,7 +805,7 @@
       out.x = entry.x; out.y = entry.y; out.z = entry.z;
       return true;
     };
-    const pool = { update, actors, pick, drawNames, liveGeometry, stats, setUnderlying, nameplate, cloudSpots, cloudSpot, dispose, body: id => bodies.get(id)?.cave || null };
+    const pool = { update, actors, pick, drawNames, liveGeometry, stats, setUnderlying, nameplate, plateTop, cloudSpots, cloudSpot, dispose, body: id => bodies.get(id)?.cave || null };
     return pool;
   };
 

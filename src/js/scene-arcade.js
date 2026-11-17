@@ -2260,7 +2260,7 @@
     const reported = BL.voiceBlend.place(zoneNow);
     if (inHallway && reported === "arcade") BL.net.setBlend("ghost-arena", hallwayAlong);
     else if (inHallway && reported === "ghost-arena") BL.net.setBlend("arcade", 1 - hallwayAlong);
-    else if (reported === "arcade" && zipline && drivenHere && drivenHere.root.position.z < BH.top.z) BL.net.setBlend("block-frenzy", clamp((BH.top.z - drivenHere.root.position.z) / (BH.top.z - BH.fade), 0, 1));
+    else if (reported === "arcade" && zipline && drivenHere && drivenHere.root.position.z < BH.top.z && AW.onBlockGround(drivenHere.root.position.x, drivenHere.root.position.z)) BL.net.setBlend("block-frenzy", clamp((BH.top.z - drivenHere.root.position.z) / (BH.top.z - BH.fade), 0, 1));
     else BL.net.setBlend(null, 0);
     huntHearing = inRing ? 1 : inHallway ? BL.voiceBlend.weight("ghost-arena", "arcade", "ghost-arena", hallwayAlong) : 0;
     // Exit hunt shows while this visitor hunts in the arena.
@@ -2317,7 +2317,7 @@
     ambience(dt);
     audio.tick(dt);
     // Into the clouds: the fade to Block Frenzy's start menu.
-    if (zipline && !leaving && avatar && avatar.root.position.z < BH.fade) open("block", "zipline");
+    if (zipline && !leaving && avatar && avatar.root.position.z < BH.fade && AW.onBlockGround(avatar.root.position.x, avatar.root.position.z)) open("block", "zipline");
     if (watchGate) {
       watchGate.update();
       if (avatar && !leaving && pilot.player === avatar) {

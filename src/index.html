@@ -2144,13 +2144,19 @@ Open the pull request from my fork as a draft and keep it draft while building o
       <button type="button" class="duel-button duel-decline" data-duel="decline">Decline</button>
     </div>
     <div class="duel-hud" id="duel-hud" role="group" aria-label="Duel" hidden>
-      <div class="duel-bars">
-        <div class="duel-side"><span class="duel-name"></span><span class="duel-bar"><span class="duel-fill"></span></span><span class="duel-hp"></span></div>
-        <span class="duel-clock" aria-live="polite"></span>
-        <div class="duel-side duel-them"><span class="duel-name"></span><span class="duel-bar"><span class="duel-fill"></span></span><span class="duel-hp"></span></div>
+      <div class="duel-head"><span class="duel-title">Duel</span><span class="duel-clock"></span></div>
+      <div class="duel-rows">
+        <div class="duel-side"><span class="duel-name"></span><span class="duel-bar"><span class="duel-chip"></span><span class="duel-fill"></span></span><span class="duel-hp"></span><span class="duel-far"></span></div>
+        <div class="duel-side duel-them"><span class="duel-name"></span><span class="duel-bar"><span class="duel-chip"></span><span class="duel-fill"></span></span><span class="duel-hp"></span><span class="duel-far"></span></div>
       </div>
       <p class="duel-note" role="alert" hidden></p>
       <button type="button" class="duel-yield" data-duel="yield">Yield</button>
+    </div>
+    <div class="duel-flash" id="duel-flash" aria-hidden="true" hidden></div>
+    <p class="duel-count" id="duel-count" role="status" hidden></p>
+    <div class="duel-result" id="duel-result" role="status" hidden>
+      <strong class="duel-result-title"></strong>
+      <span class="duel-result-line"></span>
     </div>
     <!-- HALLOWEEN: the ghost hunt's HUD (ghost-hud.js shows and hides it; no data-scene, or every arrival would show it). -->
     <ol class="ghost-scores" id="ghost-scores" aria-label="Hunters' points" hidden></ol>

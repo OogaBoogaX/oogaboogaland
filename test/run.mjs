@@ -9488,6 +9488,20 @@ const gameRulesChecks = async () => {
         !W.mayWatch(null, false) && !!W.mayWatch({ id: 1 }, false) && !!W.mayWatch(null, true) && left === true && opened.join() === "block,watch-deck" && wayBack
         && shown && trigger && rock && crosses && seamless && onlyOpening && levels && clearDoor && back,
         JSON.stringify({ left, opened, wayBack, shown, trigger, rock, crosses, seamless, onlyOpening, levels, clearDoor, back }));
+      // Regression: the door's trigger had no far side, so the strip of Ghost Hunter's arena level with it sent an Ooga
+      // to Block Frenzy. Nowhere in the arena, its hallway or the main hall is Block Frenzy's ground, at any height, and
+      // every handover to Block Frenzy in the scene asks for that ground.
+      const { HALL: MH, HAUNT: HT, MEZZ: MZ } = BL.arcadeModels, AR = HT.arena, strays = [];
+      const stray = (x, z) => { for (const feet of [0, MZ.y - 0.5, MZ.y, MZ.y + 0.5]) if (W.onBlockGround(x, z) || W.atPortal(x, z, feet)) { if (strays.length < 4) strays.push([+x.toFixed(2), +z.toFixed(2), feet]); return; } };
+      for (let x = AR.x - AR.r; x <= AR.x + AR.r; x += 0.25) for (let z = AR.z - AR.r; z <= AR.z + AR.r; z += 0.1) if (Math.hypot(x - AR.x, z - AR.z) <= AR.r) stray(x, z);
+      for (let x = MH.halfW - 2; x <= HT.end + 2; x += 0.25) for (let z = HT.z0; z <= HT.z1; z += 0.1) stray(x, z);
+      for (let x = -MH.halfW; x <= MH.halfW; x += 0.25) for (let z = MH.back; z <= MH.front; z += 0.1) stray(x, z);
+      const own = W.onBlockGround(D.plane, D.z) && W.onBlockGround(D.reach, D.z) && W.onBlockGround(H.x, H.ledge) && W.onBlockGround(H.top.x, H.fade - 1) && W.onBlockGround(H.stop.x, H.stop.z) && !W.atPortal(D.reach + 0.1, D.z, D.y);
+      const sa = await readFile(new URL("../src/js/scene-arcade.js", import.meta.url), "utf8");
+      const handovers = sa.split("\n").filter(line => /open\("block"|goToWatchDeck\(|setBlend\("block-frenzy"/.test(line)), asked = handovers.filter(line => /AW\.onBlockGround\(|AW\.mayWatch\(/.test(line));
+      const doorAsked = /if \(AW\.atPortal\(p\.x, p\.z, p\.y - avatar\.baseY\)\) \{[^\n]*enterWatchDoor\(\)/.test(sa) && sa.split("enterWatchDoor()").length === 2;
+      record("arcade zones: no spot in Ghost Hunter's arena, its hallway or the main hall is Block Frenzy's ground, and every handover to Block Frenzy asks for it",
+        strays.length === 0 && own && handovers.length === 3 && asked.length === 3 && doorAsked, JSON.stringify({ strays, own, handovers: handovers.length, asked: asked.length, doorAsked }));
       // The scene's own full-chairs answer and update bounce, run with a director that refuses `go` while the arrival fades in.
       const fullAnswer = sb.match(/onChairsFull: (\(\) => \{.*\}) \}\);/)?.[1], bounceLine = sb.match(/^ {4}if \(chairsBounce\b.*$/m)?.[0];
       if (!fullAnswer || !bounceLine) throw Error("block chairs bounce anchors missing");

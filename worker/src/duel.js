@@ -110,7 +110,7 @@ export const duel = {
     if (back && back.to === p.id && back.exp >= now) return duel.start(room, q, p, now);
     duel.withdraw(room, p, "replaced");
     duel.setInvite(room, p, { to: q.id, exp: now + R.INVITE_MS });
-    duel.tell(room, q, { op: "challenged", from: p.id, exp: R.INVITE_MS });
+    duel.tell(room, q, msg.hit ? { op: "challenged", from: p.id, exp: R.INVITE_MS, hit: true } : { op: "challenged", from: p.id, exp: R.INVITE_MS });
     duel.tell(room, p, { op: "challenging", to: q.id, exp: R.INVITE_MS });
   },
 

@@ -63,7 +63,6 @@
   // Looking down then clears the hidden head. Portal ownership stays with the Ooga, not this offset.
   const CLOSE_VIEW = { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 6, orbitDist: 6 };
   const STEP_MAX = pilotMod.WALK.step;
-  const MAGAZINE_REACH = 0.7, MAGAZINE_SCALE = 2.4;
   const MATRIX_GATE_HIDDEN_Y = 3.2, MATRIX_BUTTON_REACH = 3.4, MATRIX_BUTTON_USE_REACH = 2.2;
   const MIRROR_GATE_Z = 0.28;
   const MIRROR_GATE_CLOSED = true;
@@ -218,12 +217,11 @@
   ];
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
-  const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
-  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", poolbridge: "Vine bridge · to the Mempool island", poolsign: "Mempool Rainforest · the way down is through the hill", poolpainting: "Wall painting · tap to read it closely", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", jumbotron: "Oogatron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", bifrostbridge: "Bifröst · the bridge to ₿IFRÖST", bifrostgate: "₿IFRÖST · walk an Ooga through the field", heimdall: "Heimdall · keeper of the bridge", gate: null };
+  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", poolbridge: "Vine bridge · to the Mempool island", poolsign: "Mempool Rainforest · the way down is through the hill", poolpainting: "Wall painting · tap to read it closely", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", jumbotron: "Oogatron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", bifrostbridge: "Bifröst · the bridge to ₿IFRÖST", bifrostgate: "₿IFRÖST · walk an Ooga through the field", heimdall: "Heimdall · keeper of the bridge", gate: null };
   const RETICLE_PROPS = new Set(["tree", "bush", "flower", "torch", "firepit", "ladder", "poolsign", "poolpainting", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainkeypad", "bifrostgate", "heimdall"]);
   const workCave = (slot) => slot.repo && (slot.status === "open" || slot.status === "mirror");
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
-  const SCREEN_CULL_PROPS = new Set(["tree", "bush", "rock", "crate", "barrel", "flower", "grass", "palm", "poolrock", "poolfern", "poollog", "canopy", "magazine"]);
+  const SCREEN_CULL_PROPS = new Set(["tree", "bush", "rock", "crate", "barrel", "flower", "grass", "palm", "poolrock", "poolfern", "poollog", "canopy"]);
   const SOLID_PROPS = new Set(["tree", "firepit", "dock", "jumbotron", "poolbridge", "poolsign", "poolrock", "canopy"]);
   const CLANKER_STEP_PROPS = new Set(["poolrock"]);
   const BUSH_WORDS = ["Something rustles.", "A beetle. Ooga leaves it.", "Just a bush."];
@@ -342,7 +340,7 @@
   // Every way out of an island cabinet's Cloud Hopper but its own Exit (Escape at the menu, Return to the island, a lost
   // seat) comes back with this place and no yard: the launch used it up, and the Ooga would never be stood at its cabinet.
   const restoreCloudYard = (ctx) => { if (ctx.place === "cloud-hopper-return" && cloudYard && !world.arcadeYard) { world.arcadeYard = cloudYard; cloudYard = null; } };
-  let magazine, magazineState, clankers, clankerPlay, clankerMeshes, clankerPartOwners, grabSupportEntry = null, entropyLab, chalkboard, factoryMouth = null, arcadeMouth = null, bcaMouth = null, glCanvas = null;
+  let magazineState, clankers, clankerPlay, clankerMeshes, clankerPartOwners, grabSupportEntry = null, entropyLab, chalkboard, factoryMouth = null, arcadeMouth = null, bcaMouth = null, glCanvas = null;
   const dragHand = new Float64Array(3), dragFoot = new Float64Array(3);
   const THROW_SWING_TIME = 0.28, THROW_SETTLE_TIME = 0.2, THROW_CARRY_SPEED_MAX = 8;
   const clankerCaptures = [];
@@ -505,7 +503,6 @@
       const drops = crew.list[i].stunGear.drops;
       for (let j = 0; j < drops.length; j++) if (drops[j].active && drops[j].node) hideNodeIfCut(drops[j].node);
     }
-    if (magazine?.node) hideNodeIfCut(magazine.node);
   };
   const CLANKER_FIRE = [models.particleGeometry("#ff8a2a", 0.18, 1), models.particleGeometry("#ffc148", 0.16, 1)];
   const CLANKER_SMOKE = models.particleGeometry("#70685f", 0.2, 0);
@@ -951,7 +948,7 @@
   };
 
   const addProp = (kind, node, x, z, radius) => {
-    const owner = { kind: "prop", prop: kind, node, x, z, ripe: 0, pickRadius: radius, active: true };
+    const owner = { kind: "prop", prop: kind, node, x, z, pickRadius: radius, active: true };
     if (SCREEN_CULL_PROPS.has(kind)) node.screenCull = true;
     if (kind === "tree" || kind === "bush" || kind === "flower" || kind === "grass" || kind === "palm") owner.weaponType = "none";
     if (kind === "tree" || kind === "palm") node.npcTreeSupport = true;
@@ -3062,7 +3059,7 @@
       if (quiet) node.screenCull = true;
       if (quiet || kind === "flower" || kind === "bush") node.sightHidden = true;
       if (MATRIX_LIVING_PROPS.has(kind)) node.matrixLiving = true;
-      const owner = quiet ? { kind: "prop", prop: kind, node, x, z, ripe: 0, pickRadius: 0, active: true } : props[props.length - 1];
+      const owner = quiet ? { kind: "prop", prop: kind, node, x, z, pickRadius: 0, active: true } : props[props.length - 1];
       owner.footprint = footprint;
       owner.scenery = true;
       owner.reservation = reservation;
@@ -3212,7 +3209,6 @@
     sceneryPathCulled = pathCulled;
     sceneryFixedCulled = fixedCulled;
     sceneryReflows++;
-    if (magazine && !magazine.revealed && !magazine.host.active) attachMagazineHost();
   };
   const isPlayerAttack = source => !!source && (source === crew.player || source.controlled && source.actionControlled);
   const weaponImpact = (source, hit, dx, dy, dz, power = 1, projectile = null) => {
@@ -3290,74 +3286,13 @@
     }
     return equipJetpack(cave);
   };
-  const attachMagazineHost = () => {
-    let host = null, best = Infinity;
-    for (const o of scenery) {
-      if (!o.active || o.prop !== "bush" && o.prop !== "tree") continue;
-      // Meadow bushes can be walked through. Keep the hidden spare reachable
-      // without needing the other pickup, even when the pile resizes scenery.
-      const score = (o.prop === "bush" ? 0 : 1000000) + Math.abs(o.node.position.y) * 100 + fnv1a(`${o.x}/${o.z}/magazine`) / 4294967296;
-      if (score < best) { host = o; best = score; }
-    }
-    if (!host) throw new Error("No scenery can hide the spare magazine");
-    magazine.host = host;
-    const p = magazine.node.position, bounds = BL.scene.boundsOf(host.node.geometry);
-    p.x = host.x; p.z = host.z;
-    p.y = magazine.y = host.node.position.y + bounds.max[1] * host.node.scale.y + 0.4;
-  };
-  const spawnMagazinePickup = () => {
-    if (magazine) return;
-    const visual = models.spareMagazine(), node = visual.node;
-    node.visible = false;
-    node.scale.x = node.scale.y = node.scale.z = MAGAZINE_SCALE;
-    addChild(root, node); placed.push(node);
-    magazine = { node, model: visual, host: null, owner: null, revealed: false, y: 0, ammo: 30 };
-    attachMagazineHost();
-    trackMirrorObject(node, 1);
-  };
-  const revealMagazine = (host = magazine && magazine.host) => {
-    if (!magazine || magazine.revealed || host !== magazine.host || !host.active) return false;
-    const node = magazine.node;
-    magazine.revealed = node.visible = true;
-    magazine.owner = addProp("magazine", node, node.position.x, node.position.z, 0.2);
-    refreshObjectGuides();
-    hud.toast("A full spare magazine!");
-    hud.hint(pilot.player ? "Walk into the magazine to collect it." : "Double-tap an Ooga, then walk into the magazine.", 5000);
-    return true;
-  };
-  const removeMagazinePickup = () => {
-    if (!magazine) return;
-    const { node, owner } = magazine;
-    untrackMirrorObject(node);
-    if (owner) { input.remove(node); drop(targets, node); drop(props, owner); }
-    removeChild(root, node); drop(placed, node);
-    magazine = null;
-    refreshObjectGuides();
-  };
-  const grantMagazine = (cave = pilot.player) => {
-    // Debug grants still create a full spare after the hidden pickup is gone.
-    if (!magazine) return crew.collectMagazine(cave);
-    const available = magazine.ammo;
-    const remaining = crew.collectGroundMagazine(available, cave);
-    if (remaining === available) return false;
-    const added = available - remaining;
-    if (remaining) {
-      magazine.ammo = remaining;
-      magazine.model.setAmmo(remaining);
-    } else removeMagazinePickup();
-    pilot.showAct();
-    return added;
-  };
   const loseAbyssAmmo = (cave = pilot.player) => {
     if (!cave) return false;
     const hadMagazines = crew.hasMagazine(cave), hadAmmo = cave.weapon.ammo > 0;
     if (!hadMagazines && !hadAmmo) return false;
     crew.stopBurst(cave);
     crew.stopReload(cave, true);
-    if (hadMagazines) {
-      crew.removeMagazines(cave);
-      spawnMagazinePickup();
-    }
+    if (hadMagazines) crew.removeMagazines(cave);
     cave.weapon.ammo = 0;
     pilot.showAct();
     hud.toast(hadMagazines && hadAmmo ? "Spare magazines and loaded AK-47 ammo lost to the abyss"
@@ -5915,34 +5850,26 @@
     });
     return true;
   };
-  const dropBanana = (o, chance) => {
-    if (now < o.ripe || Math.random() > chance) return false;
-    o.ripe = now + RIPEN;
-    pile.deliverBananas(1);
-    hud.toast("A banana fell out and rolled to the pile!");
-    return true;
-  };
   const reactProp = (o, p) => {
     const w = o.node.world;
     const x = w[12], z = w[14];
-    const foundMagazine = (o.prop === "tree" || o.prop === "bush") && revealMagazine(o);
     switch (o.prop) {
       case "tree":
         if (!wobble(o.node, 0.1)) return;
         fx.burst(x, 2.6, z, 10, [LEAF], 1.6);
         if (RENDER_OPTS.stars > NIGHT) critters.burst(x, z);
-        if (!foundMagazine && !dropBanana(o, TREE_CHANCE)) hud.toast("Leaves. Just leaves.");
+        hud.toast("Leaves. Just leaves.");
         break;
       case "bush":
         if (!wobble(o.node, 0.25)) return;
         fx.burst(x, w[13] + 0.7, z, 6, [LEAF], 1.2);
-        if (!foundMagazine && !dropBanana(o, BUSH_CHANCE)) hud.toast(BUSH_WORDS[fnv1a(`${o.x}/${o.z}/${Math.floor(now)}`) % BUSH_WORDS.length]);
+        hud.toast(BUSH_WORDS[fnv1a(`${o.x}/${o.z}/${Math.floor(now)}`) % BUSH_WORDS.length]);
         break;
       case "palm":
         if (!wobble(o.node, 0.05)) return;
         if (hammock && hammock.anchors.includes(o)) hammock.kick();
         fx.burst(x, w[13] + 3.6, z, 12, [LEAF], 1.6);
-        if (!dropBanana(o, TREE_CHANCE)) hud.toast(PALM_WORDS[fnv1a(`${o.x}/${o.z}/${Math.floor(now)}`) % PALM_WORDS.length]);
+        hud.toast(PALM_WORDS[fnv1a(`${o.x}/${o.z}/${Math.floor(now)}`) % PALM_WORDS.length]);
         break;
       case "jumbotron":
         // Resolve the tap onto the cabinet: the side arrows and the dot strip page the board where
@@ -5981,9 +5908,6 @@
         break;
       case "dock":
         hud.toast("The planks creak over the drop.");
-        break;
-      case "magazine":
-        hud.toast(pilot.player ? "Walk into it to collect it." : "Double-tap an Ooga, then walk into it.");
         break;
       case "gate":
         hud.toast(bifrostIsle ? "₿IFRÖST · Bifröst starts here" : `${caves.gate.name} · leads nowhere yet`);
@@ -6035,12 +5959,12 @@
         if (!wobble(o.node, 0.08)) return;
         fx.burst(x, w[13] + 4.2, z, 10, [LEAF], 1.7);
         if (RENDER_OPTS.stars > NIGHT) critters.burst(x, z);
-        if (!dropBanana(o, TREE_CHANCE)) hud.toast("Leaves and lianas.");
+        hud.toast("Leaves and lianas.");
         break;
       case "poolfern":
         if (!wobble(o.node, 0.3)) return;
         fx.burst(x, w[13] + 0.5, z, 6, [LEAF], 1.1);
-        if (!dropBanana(o, BUSH_CHANCE)) hud.toast("Fronds. Ooga finds nothing.");
+        hud.toast("Fronds. Ooga finds nothing.");
         break;
       case "poollog":
         if (!wobble(o.node, 0.1)) return;
@@ -8198,23 +8122,6 @@
       pilot.showAct();
       hud.toast("No jetpacks under ground");
     }
-    if (magazine && magazine.revealed) {
-      const node = magazine.node;
-      node.rotation.y += dt * 0.9;
-      node.position.y = magazine.y + Math.sin(elapsed * 2) * 0.08;
-      if (player && player.root.visible && player.state !== "sleeping") {
-        const p = player.root.position, feet = p.y - player.baseY;
-        const dx = p.x - node.position.x, dz = p.z - node.position.z;
-        if (dx * dx + dz * dz < MAGAZINE_REACH * MAGAZINE_REACH
-          && feet < node.position.y + 0.28 && feet + player.bodyHeight > node.position.y - 0.28) {
-          const added = grantMagazine(player);
-          if (added) {
-            hud.toast(magazine ? `+${added} ammo · ${magazine.ammo} left` : "Spare magazine collected");
-            if (!magazine) hud.hint("R selects the fullest spare · Space reloads near the pile", 5000);
-          }
-        }
-      }
-    }
     for (let i = 0; i < sleepers.length; i++) {
       const s = sleepers[i];
       s.timer -= dt;
@@ -8816,6 +8723,7 @@
     if (cloudPlaying()) return;
     crew.drawDrops(ctx2d, project);
     remotes.drawNames(ctx2d, project, gameMode);
+    duels.draw(ctx2d, project);
     if (debugSelectedGorilla) {
       const entry = debugSelectedGorilla, move = entry.debugMove, p = entry.root.position;
       ctx2d.save();
@@ -11179,7 +11087,6 @@
       get count() { return crew ? crew.magazineCount(crew.player) : 0; },
       get carrier() { return crew && crew.hasMagazine(crew.player) ? crew.player.traits.name : null; }
     };
-    magazine = null;
     camera = createCamera({ fov: 48, near: 0.5, far: 900 });
     root = createNode();
     positionDebug = document.getElementById("position-debug");
@@ -11298,7 +11205,7 @@
       };
     }
     addTarget(gate, gateOwner, { radius: arch ? 0 : 3 });
-    props.push({ kind: "prop", prop: "gate", node: gate, x: gate.position.x, z: gate.position.z, ripe: 0, active: true });
+    props.push({ kind: "prop", prop: "gate", node: gate, x: gate.position.x, z: gate.position.z, active: true });
     claim(gate.position.x, gate.position.z, arch ? arch.reach : 3);
     TICKER_AT.y = gate.position.y + (arch ? arch.top + 1 : 6);
     GATE_VIEW.target.y = gate.position.y + (arch ? arch.middle : 2.5);
@@ -11420,7 +11327,6 @@
       placed.push(node);
       ringLanterns.push(node);
     }
-    spawnMagazinePickup();
     cloudNodeStart = root.children.length;
     critters = crittersMod.create({ root, renderer, flowers: scenery.filter((o) => o.prop === "flower" && o.active), fire: firePos, secondaryFire: { x: 0, y: island.headquarters.floor, z: 0 }, meadowRadius: MEADOW, heightAt: island.surfaceAt, activeAt: effectsActiveAt });
     cloudRememberNodes(cloudNodeStart);
@@ -11825,9 +11731,9 @@
       return workHit(cave);
     };
     // Duels (duel.js): a challenge is refused while the visitor is busy with something else.
-    duels = BL.duel.create({ root, remotes, pilot, fx, clear: liveClear, refusal: () =>
+    duels = BL.duel.create({ root, remotes, pilot, crew, camera: () => camera, fx, clear: liveClear, refusal: () =>
       cloudHopper?.active ? "Not during Cloud Hopper" : gameMode ? "Not while a game runs" : clankerPlay?.active ? "Duels are fought as an Ooga"
-        : !pilot.player ? "Drive your Ooga to duel" : pilot.player.camp.seat ? "Get up first" : "" });
+        : !pilot.player ? "Drive your Ooga to duel" : pilot.player.camp.seat ? "Get up first" : pilot.player.health.stunned ? "Catch your breath first" : "" });
     shared.onSwing = (cave, charge) => duels.swing(cave, charge);
     shared.onShot = (cave, from, to) => {
       duels.shot(cave, from, to);
@@ -11850,7 +11756,6 @@
       Math.max(cave.headOpen.verts.length, cave.headClosed.verts.length));
     for (const veil of caveVeils) for (const cave of crew.list) veil.phase.body.track(cave.root, cave.traits.height * 2,
       Math.max(cave.headOpen.verts.length, cave.headClosed.verts.length));
-    if (magazine) trackMirrorObject(magazine.node, 1);
     for (let caveIndex = 0; caveIndex < crew.list.length; caveIndex++) {
       const cave = crew.list[caveIndex];
       cave.root.matrixLiving = true;
@@ -12220,7 +12125,7 @@
         setHour: (h, daylen = NaN, day = clock.dayOfYear) => {
           clock = daylight.createClock({ hour: h, daylen, day, time: timeParam });
         },
-        magazine: { state: magazineState, get pickup() { return magazine; }, reveal: revealMagazine, grant: grantMagazine },
+        magazine: { state: magazineState },
         get jetpack() {
           return {
             pickup: null,
@@ -12546,7 +12451,7 @@
     // Drop every per-visit ref but the cached island.
     terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = totemSolids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = critters = clock = presets = mirrorCave = matrixCave = matrixControl = fire = headquarters = positionDebug = overlayCanvas = null;
     beasts.clear();
-    magazine = magazineState = weather = footsteps = petReactions = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
+    magazineState = weather = footsteps = petReactions = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
     doorIsland = doorZones = null;
     island = chalkboardDressing = chalkboardClearance = null;
@@ -12621,7 +12526,7 @@
       if (cloudHopper?.active) return true;
       if (timechainIsland && timechainIsland.gate.busy) return true;
       if (factoryWalk.phase || factoryWalk.still > 0) return true;
-      if (pile.inMotion || fx.inMotion || poolEffectsActive && (weather.active || mempoolIsland.water.active) || magazine && magazine.revealed || mirrorCave.ripples.active || mirrorCave.body.active) return true;
+      if (pile.inMotion || fx.inMotion || poolEffectsActive && (weather.active || mempoolIsland.water.active) || mirrorCave.ripples.active || mirrorCave.body.active) return true;
       if (!entropyLab.phase.paused && (entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active)) return true;
       for (const veil of caveVeils) {
         const phase = veil.phase;
