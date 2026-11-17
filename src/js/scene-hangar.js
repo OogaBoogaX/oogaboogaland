@@ -424,15 +424,33 @@
     return true;
   };
   const NT = BL.hangarNetwork.T, NET_DEFER = [10, 40];
+  // The network round (x, z), laid out from `seed`, `since` s in (the hall's, joined late): the shape steadied first,
+  // the outage heard only from its start.
+  const startNetwork = (s, x, z, seed, since = 0) => {
+    const sh = s.shimmer;
+    if (s.network.active) return;
+    if (sh.state === "show") sh.cohere(Math.max(0, NT.cohere - since), NT.hold, NT.dissolve);
+    s.network.play(x, z, seed, -since);
+    if (audio && since < 0.5) audio.outage(s.network.cues());
+    s.netDefer = between(NET_DEFER);
+  };
   const playNetwork = (s, anywhere) => {
     const me = people && people.player, sh = s.shimmer;
-    if (s.network.active) return;
     const at = me ? me.root.position : pilot.orbit.target;
     const x = sh.state === "show" && !anywhere ? (at.x + sh.at.x) / 2 : at.x, z = sh.state === "show" && !anywhere ? (at.z + sh.at.z) / 2 : at.z;
-    if (sh.state === "show") sh.cohere(NT.cohere, NT.hold, NT.dissolve);
-    s.network.play(x, z);
-    if (audio) audio.outage(s.network.cues());
-    s.netDefer = between(NET_DEFER);
+    startNetwork(s, x, z, (Math.random() * 1e9) | 0);
+  };
+  // The nearest Ooga to (x, z), the visitor's or another player's, for the shape to answer.
+  const NEAREST = { x: 0, z: 0 };
+  const closestOoga = (x, z) => {
+    const me = people && people.player, others = remotes ? remotes.actors() : NO_ACTORS;
+    let best = Infinity;
+    if (me) { best = Math.hypot(me.root.position.x - x, me.root.position.z - z); NEAREST.x = me.root.position.x; NEAREST.z = me.root.position.z; }
+    for (let i = 0; i < others.length; i++) {
+      const o = others[i], d = Math.hypot(o.x - x, o.z - z);
+      if (d < best) { best = d; NEAREST.x = o.x; NEAREST.z = o.z; }
+    }
+    return best < Infinity ? NEAREST : null;
   };
   const netLife = (s, dt, elapsed) => {
     const sh = s.shimmer, me = people && people.player, N = s.network;
@@ -442,7 +460,13 @@
     if (!s.netUsed && !N.active && sh.state === "show" && me && !me.camp.seat) {
       const p = me.root.position, d = Math.hypot(p.x - sh.at.x, p.z - sh.at.z);
       if (s.netFrom < 0) s.netFrom = d;
-      if (d < 4.5 && s.netFrom - d >= 3 && sh.t < sh.at.gone + 8) { s.netUsed = true; if (netDraw()) playNetwork(s, false); }
+      if (d < 4.5 && s.netFrom - d >= 3 && sh.t < sh.at.gone + 8) {
+        s.netUsed = true;
+        // Following the hall, the walk up is the hall's to draw, by this player's own odds; else this page draws.
+        const L = s.link, shown = L.following && L.hall.shape;
+        if (shown) L.send({ t: "walkup", id: shown.id, x: (p.x + sh.at.x) / 2, z: (p.z + sh.at.z) / 2, every: NET_EVERY, dense: params.get("network") === "b" });
+        else if (!L.following && netDraw()) playNetwork(s, false);
+      }
     }
     N.update(dt, elapsed);
     if (N.quiet) { s.anomaly.defer(s.netDefer); s.meltdown.defer(s.netDefer); }
@@ -1781,7 +1805,9 @@
     scene.shimmer = BL.hangarShimmer.create({ root, audio, camera, renderer, coarse: COARSE, auto: !params.has("nosim") || glints > 0, gap: glints > 0 ? glints : null,
       busy: () => leaving || scene.anomaly.playing || scene.fire.t >= 0 || scene.meltdown.active || scene.roomFire.burning || scene.sis.rampaging || scene.sis.brawling
         || scene.tessFor !== "shimmer" && (scene.guide.lent || scene.guide.holding || scene.guide.state.phase !== "work") || scene.terminals.showing || scene.keypad.open >= 0 || !!scene.network && scene.network.quiet && !scene.network.active,
-      ooga: () => people && people.player, guide: () => scene.guide.root.position, clear: clearOf });
+      ooga: () => people && people.player, guide: () => scene.guide.root.position, clear: clearOf,
+      others: () => remotes ? remotes.actors() : NO_ACTORS, closest: closestOoga,
+      onShow: (showing) => { if (scene.link.hosting) scene.link.send({ t: "shape", s: showing }); } });
     // The network, walked up to (`netLife`); on a debug page in density `b` with `network=b`, its haze pulled in with
     // `netfog=1`, or played with Shift+N.
     scene.network = BL.hangarNetwork.create({ root, renderer, camera, onStop: (early) => { if (audio) { audio.strain(1, 0); if (early) audio.outage(null); } } });
@@ -1791,7 +1817,7 @@
     scene.netShow = -1; scene.netFrom = 0; scene.netUsed = true;
     // The hall on the Worker, followed while it is offered (hangar-link.js), and what this page last told it of the Jet.
     scene.link = BL.hangarLink.create({ bytes: (b) => scene.relay.read(b) });
-    scene.wordsAt = -Infinity; scene.saidOn = false; scene.saidNear = false; scene.roomFollowed = 0;
+    scene.wordsAt = -Infinity; scene.saidOn = false; scene.saidNear = false; scene.roomFollowed = 0; scene.netFollowed = 0;
     // Tess notices the shape if she is near it and free when she would notice it, and glances at it, looks it over or is
     // puzzled by it.
     scene.unsettled = BL.hangarGuide.unsettled(scene.shimmer, camera);
@@ -1944,10 +1970,19 @@
     s.anomaly.follow(L.following);
     s.fire.follow(L.following);
     s.terminals.follow(L.following);
+    s.shimmer.follow(L.following, hosting);
     if (!L.following) return;
     s.anomaly.sync(L.hall.anomaly || null, L.serverNow());
     s.fire.sync(L.hall.test || null, L.serverNow(), L.you);
     s.terminals.sync(L.hall.film || null, L.serverNow());
+    s.shimmer.sync(L.hall.shape || null, L.serverNow());
+    // The network the hall played, from as far in as it has got.
+    const Nw = L.hall.network;
+    if (Nw && Nw.id !== s.netFollowed) {
+      s.netFollowed = Nw.id;
+      const since = (L.serverNow() - Nw.at) / 1000;
+      if (since >= 0 && since < NT.end - 0.25) { s.network.density = Nw.dense ? "b" : "a"; startNetwork(s, Nw.x, Nw.z, Nw.seed, since); }
+    }
     // The room fire a lightning lit, which burns on past it: lit here from as far in as it has got, unless this page's
     // own lightning lit it already.
     const R = L.hall.room;
