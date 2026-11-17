@@ -112,9 +112,10 @@
       at.x = S.fire.x; at.y = S.fire.y + 0.1; at.z = S.fire.z;
       sound.x = S.fire.x; sound.y = S.fire.y; sound.z = S.fire.z;
     };
-    const ignite = () => {
+    // `from`: how far in it starts, s (the hall's, joined late).
+    const ignite = (from = 0) => {
       if (active) return;
-      active = true; t = 0; level = 0; flash = 1; phase = 0;
+      active = true; t = from; level = 0; flash = from > 0.3 ? 0 : 1; phase = 0;
       pos.x = S.post.x; pos.z = S.post.z; heading = S.post.heading;
       onBracket();
       audio.roomCue("strike", at.x, at.y, at.z);
@@ -212,7 +213,7 @@
       get extinguisher() { return { x: ext.position.x, y: ext.position.y, z: ext.position.z }; },
       get operator() { return { x: pos.x, z: pos.z, heading }; }
     };
-    return { pick, ignite, update, lights, dispose, debug, at, get holding() { return active ? gorilla : null; }, get burning() { return active; } };
+    return { pick, ignite, update, lights, dispose, debug, at, get count() { return rooms.length; }, get holding() { return active ? gorilla : null; }, get burning() { return active; } };
   };
 
   BL.hangarRoomFire = { create, AT, FIRE };

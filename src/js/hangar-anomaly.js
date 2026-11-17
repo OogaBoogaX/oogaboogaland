@@ -43,6 +43,11 @@
 // closed, if anyone comes that near, or a frame runs too long to trust; meanwhile the hangar's own walkers keep out of
 // that reach (`keepsOut`). Kortik's Sis yells at it to stay put. Its sound is `hangarAudio.shuffle`.
 //
+// Followed (`follow(true)`, while the page follows the hall on the Worker, `hangar-link.js`), none comes by itself: the
+// hall picks each for everyone, and `sync` plays the one it names from its start on the server's clock, joining it as far
+// in as it has got (its sound from there too), and ends it when the hall does. `words()` is what this page tells the hall
+// of the Jet: whether anything it knows stands on it, and whether anything stands within the shuffle's reach.
+//
 // `create` builds the arcs once a visit; `update` runs the wait and the anomaly, allocating nothing a frame.
 (() => {
   "use strict";
@@ -167,6 +172,8 @@
     // throats are, and the hall's own light; when the next arc strikes; whether Kortik's Sis has jumped yet; where the marker lamps' wrong-way pulse
     // is (null while they run their own way); and the crack's flash.
     let wait = pause(), kind = null, t = 0, dim = 1, ambient = 1, heat = 0, arcAt = 0, spooked = false, rabbit = null, flash = 0;
+    // Whether the hall picks them (`follow`), and the id of the last the hall named that this page has played.
+    let following = false, followed = 0;
     // The static fire test running, or not long done.
     const held = () => fire.t >= 0 && fire.t < fire.AT.result + AFTER_FIRE;
 
@@ -435,21 +442,24 @@
     };
 
     // `jump`, for a lightning: whether it ends in the jump to a room (left to chance when not said), and `to`, which room
-    // (one at random when not said).
-    const begin = (k, jump, to) => {
-      kind = k; t = 0; arcAt = 0; spooked = false;
-      if (k === "misfire") audio.misfire(MISFIRE);
-      else if (k === "phantom") audio.revs(REVS.script);
+    // (one at random when not said). `from`: how far in it starts, s (the hall's, joined late), what came before passed
+    // over but for where it leaves things: the lights, the Jet's mesh, the room's fire.
+    const begin = (k, jump, to, from = 0) => {
+      kind = k; t = from; arcAt = 0; spooked = from > 1;
+      if (k === "misfire") audio.misfire(MISFIRE, from);
+      else if (k === "phantom") audio.revs(REVS.script, from);
       else if (k === "lightning") {
         jumping = !room.burning && (jump === undefined ? Math.random() < ZAP.room : jump);
         into = to;
         landed = false;
-        jet.geometry = lit;
-        jet.glow = ZAP.glow[0];
-        audio.zap(ZAP, { x: J.x, y: 5, z: nose }, { x: J.x, y: 5, z: tail });
-      } else if (k === "blackout") audio.blackout(BLACKOUT);
-      else if (k === "lowrider") audio.lowrider(LOWRIDER);
-      else if (k === "shuffle") audio.shuffle(SHUFFLE);
+        if (from < ZAP.crack) { jet.geometry = lit; jet.glow = ZAP.glow[0]; }
+        if (jumping && from >= A.lands) { room.pick(into); room.ignite(from - A.lands); landed = true; }
+        audio.zap(ZAP, { x: J.x, y: 5, z: nose }, { x: J.x, y: 5, z: tail }, from);
+      } else if (k === "blackout") {
+        audio.blackout(BLACKOUT, from);
+        if (from >= BLACKOUT.kill) audio.power(BLACKOUT.banks.filter((b) => b <= from).length / BLACKOUT.banks.length);
+      } else if (k === "lowrider") audio.lowrider(LOWRIDER, from);
+      else if (k === "shuffle") audio.shuffle(SHUFFLE, from);
     };
     // Over, or cut short: the engines cold, the Jet at rest, the lights full, the arcs gone, and the wait for the next.
     const end = () => {
@@ -470,7 +480,7 @@
     const update = (dt) => {
       for (const a of arcs) if (a.life > 0 && (a.life -= dt) <= 0) a.node.visible = false;
       if (!kind) {
-        if (auto && (wait -= dt) <= 0 && !held() && !busy()) {
+        if (auto && !following && (wait -= dt) <= 0 && !held() && !busy()) {
           // The lowrider only with nobody on the Jet, the shuffle only with everyone clear of it: the next in the bag
           // instead, or the failed start.
           let k = next();
@@ -519,7 +529,27 @@
     const liveGeometry = (set) => { set.add(lit); };
     // Put the next off: none for at least `s` s from now, however long it has been due.
     const defer = (s) => { if (wait < s) wait = s; };
-    return { update, lights, liveGeometry, dispose, debug, standsOn, keepsOut, defer, get playing() { return !!kind; }, get dim() { return dim; }, get ambient() { return ambient; }, get rabbit() { return rabbit; },
+    // Following the hall, or playing on its own again (a fresh wait first).
+    const follow = (on) => {
+      if (on === following) return;
+      following = on;
+      if (!on) { followed = 0; wait = pause(); }
+    };
+    // The hall's anomaly now (`a`: { id, kind, at, jump, room }, or null) at server time `now` (ms): a new one played from
+    // as far in as it has got, the one playing ended once the hall has done with it; one this page has played, or cut
+    // short itself (someone on the Jet), never again.
+    const sync = (a, now) => {
+      if (!a) { if (kind && followed) { end(); followed = 0; } return; }
+      if (a.id === followed) return;
+      if (kind) end();
+      followed = a.id;
+      const from = Math.max(0, (now - a.at) / 1000);
+      if (from < LENGTH[a.kind] - 0.25) begin(a.kind, a.jump, Math.min(room.count - 1, Math.floor(a.room * room.count)), from);
+    };
+    // What this page tells the hall: whether anything it knows stands on the Jet, and within the shuffle's reach.
+    const words = { on: false, near: false };
+    const word = () => { words.on = riders(); words.near = near(blocked); return words; };
+    return { update, lights, liveGeometry, dispose, debug, standsOn, keepsOut, defer, follow, sync, words: word, get playing() { return !!kind; }, get dim() { return dim; }, get ambient() { return ambient; }, get rabbit() { return rabbit; },
       get powered() { return kind !== "blackout" || t < BLACKOUT.kill || t >= BLACKOUT.banks[BLACKOUT.banks.length - 1]; } };
   };
 

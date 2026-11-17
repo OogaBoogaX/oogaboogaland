@@ -616,10 +616,12 @@
     // louder each try, then coughing, dropping out and catching as they fall away; the last try's burst (`burp`) a
     // whoomph with the roar and the rumble for a moment; at the cut the hum dead with a thunk; then the metal ticking as
     // it cools.
+    // Each anomaly's sound also takes how far into it it starts, s (the hall's, joined late): what came before is set
+    // in the past, so the voices pick up where they would be by now.
     const TICKS = [[0.9, 2500], [1.5, 1900], [2.2, 2900], [2.9, 2200]];
-    const misfire = (M) => {
+    const misfire = (M, from = 0) => {
       if (!ready || muted) return false;
-      const t0 = ctx.currentTime + 0.02, at = (s) => t0 + s, T = test, top = M.heat[M.heat.length - 1];
+      const t0 = ctx.currentTime + 0.02 - from, at = (s) => t0 + s, T = test, top = M.heat[M.heat.length - 1];
       const clear = (param, value) => { param.cancelScheduledValues(t0); param.setValueAtTime(value, t0); };
       for (const g of [T.humGain, T.whineGain, T.whooshGain, T.whoomphGain, T.roarGain, T.rumbleGain, T.clankGain, T.pingGain]) clear(g.gain, 0);
       clear(T.whine.frequency, 140); clear(T.whine2.frequency, 210); clear(T.whineFilter.frequency, 300); clear(T.whooshFilter.frequency, 300);
@@ -673,9 +675,9 @@
     // 1 the right, 0..1): each rev on its engine's own voice, spooling up over `REV_UP` of it, the roar's band opening,
     // the rumble deepening and the whine climbing, harder revs higher and louder, and running back down.
     const REV_UP = 0.45;
-    const revs = (R) => {
+    const revs = (R, from = 0) => {
       if (!ready || muted) return false;
-      const t0 = ctx.currentTime + 0.02, at = (s) => t0 + s;
+      const t0 = ctx.currentTime + 0.02 - from, at = (s) => t0 + s;
       for (const v of test.revs) {
         for (const param of [v.level.gain, v.roarBand.frequency, v.rumble.frequency, v.whine.frequency, v.whine2.frequency]) param.cancelScheduledValues(t0);
         v.level.gain.setValueAtTime(0, t0); v.roarBand.frequency.setValueAtTime(220, t0); v.rumble.frequency.setValueAtTime(38, t0);
@@ -695,9 +697,9 @@
     // Lightning through the Jet from now, on its times `Z` (s from its start: its crawl from `from` to `to`, { x, y, z },
     // nose to tail, and the crack): the hum rising; the sizzle crackling, panned along the Jet as the lightning runs from
     // end to end; then the crack with a thump under it, and silence.
-    const zap = (Z, from, to) => {
+    const zap = (Z, from, to, since = 0) => {
       if (!ready || muted) return false;
-      const t0 = ctx.currentTime + 0.02, at = (s) => t0 + s, T = test;
+      const t0 = ctx.currentTime + 0.02 - since, at = (s) => t0 + s, T = test;
       const clear = (param, value) => { param.cancelScheduledValues(t0); param.setValueAtTime(value, t0); };
       for (const g of [T.humGain, T.sizzleGain, T.crackGain, T.boomNoiseGain]) clear(g.gain, 0);
       place(from.x, from.y, from.z, 1);
@@ -832,9 +834,9 @@
     // A blackout from now, on its times `B` (s from its start: the power killed at `kill`, the banks coming back on at
     // `banks`, the end): a heavy relay's clunk as it dies; a low hum in the dark, wavering; a clunk as each bank comes
     // back, the hum gone with the first. The mains and the neon follow `power`, which the anomaly sets.
-    const blackout = (B) => {
+    const blackout = (B, from = 0) => {
       if (!ready || muted) return false;
-      const t0 = ctx.currentTime + 0.02, at = (s) => t0 + s, T = test, first = B.banks[0];
+      const t0 = ctx.currentTime + 0.02 - from, at = (s) => t0 + s, T = test, first = B.banks[0];
       const clear = (param, value) => { param.cancelScheduledValues(t0); param.setValueAtTime(value, t0); };
       for (const g of [T.humGain, T.clankGain]) clear(g.gain, 0);
       clear(T.clankFilter.frequency, 300); clear(T.hum.frequency, 100);
@@ -860,9 +862,9 @@
     // to `detune`), and the deep body under it, dropping from `from` to `to` Hz over `drop` s, `body[0]` loud and gone by
     // `body[1]` s.
     const BANG = { hit: 1.2, close: [900, 110], hitLen: 0.13, knock: 0.6, knockHz: [170, 105], knockLen: 0.16, detune: 0.05, from: 95, to: 42, drop: 0.045, body: [1.1, 0.4] };
-    const lowrider = (L) => {
+    const lowrider = (L, from = 0) => {
       if (!ready || muted) return false;
-      const t0 = ctx.currentTime + 0.02, at = (s) => t0 + s, T = test;
+      const t0 = ctx.currentTime + 0.02 - from, at = (s) => t0 + s, T = test;
       const clear = (param, value) => { param.cancelScheduledValues(t0); param.setValueAtTime(value, t0); };
       clear(T.thumpGain.gain, 0); clear(T.bangHitGain.gain, 0); clear(T.bangKnockGain.gain, 0);
       clear(T.thump.frequency, BANG.from); clear(T.thump2.frequency, BANG.from * 2); clear(T.bangHitBand.frequency, BANG.close[0]); clear(T.bangKnock.frequency, BANG.knockHz[0]);
@@ -891,9 +893,9 @@
     // The Jet shuffling in its bay from now, on its times `S` (s from its start): the brakes letting go with a clunk at
     // `brake`; a tyre scrub at each of `scrubs`; a creak of loaded metal at each of `creaks`, the clank's ring gliding up;
     // and the engines' short bursts, `bursts` [s, how hard], a whoomph and a cough of roar.
-    const shuffle = (S) => {
+    const shuffle = (S, from = 0) => {
       if (!ready || muted) return false;
-      const t0 = ctx.currentTime + 0.02, at = (s) => t0 + s, T = test;
+      const t0 = ctx.currentTime + 0.02 - from, at = (s) => t0 + s, T = test;
       const clear = (param, value) => { param.cancelScheduledValues(t0); param.setValueAtTime(value, t0); };
       for (const g of [T.clankGain, T.whooshGain, T.whoomphGain, T.roarGain]) clear(g.gain, 0);
       clear(T.clankFilter.frequency, 380); clear(T.whooshFilter.frequency, 700); clear(T.roarFilter.frequency, 900);
