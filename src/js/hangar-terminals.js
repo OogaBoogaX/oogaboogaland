@@ -903,10 +903,11 @@
     // Desk `i`'s monitor `m` (one at random with none) on to its next picture, after a blink, with a click.
     const turnMonitor = (i, m = Math.random() < 0.5 ? 0 : 1) => {
       const d = desks[i], node = d.nodes[m];
-      d.turned[m]++;
-      if (onTurn) onTurn(i, m);
-      d.blink[m] = DESK_BLINK;
       audio.beep(node.position.x, node.position.y, node.position.z, DESK_CLICK[0], DESK_CLICK[1]);
+      // Shared, the hall turns it, for everyone (`turns`).
+      if (onTurn && onTurn(i, m)) return true;
+      d.turned[m]++;
+      d.blink[m] = DESK_BLINK;
       return true;
     };
     const useNear = (x, z, reach, feet) => reaches(x, z, feet) >= 0 && press() || deskReaches(x, z, feet) >= 0 && turnMonitor(deskReaches(x, z, feet));
@@ -1084,11 +1085,11 @@
       if (f.end !== null && running()) stop();
     };
 
-    // Every desk's monitors turned as many times as the hall says (two counts a desk), blinking where that moves one on.
+    // Every desk's monitors turned as many times as the hall says (two counts a desk), blinking where that changes one.
     const turns = (counts) => {
       for (let i = 0; i < desks.length; i++) for (let m = 0; m < 2; m++) {
         const n = counts[i * 2 + m] | 0, d = desks[i];
-        if (n > d.turned[m]) { d.turned[m] = n; d.blink[m] = DESK_BLINK; }
+        if (n !== d.turned[m]) { d.turned[m] = n; d.blink[m] = DESK_BLINK; }
       }
     };
 

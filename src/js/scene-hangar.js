@@ -1807,7 +1807,7 @@
     // The terminals by the runway and the film show they start (`hangar-terminals.js`), its mood page reading hers.
     scene.terminals = BL.hangarTerminals.create({ root, audio, mood: () => scene.sis.mood, toast: hud.toast,
       ask: () => scene.link.send({ t: "film" }), done: (id) => scene.link.send({ t: "film", done: id }),
-      onTurn: (i, m) => { if (scene.link.following) scene.link.send({ t: "desk", i, m }); } });
+      onTurn: (i, m) => scene.link.following && scene.link.send({ t: "desk", i, m }) });
     for (const n of scene.terminals.nodes) {
       input.add(n, { kind: "terminal", preset: null }, { radius: 0.8 });
       targets.push(n);
@@ -2039,12 +2039,14 @@
     if (s.liftPuppet) s.liftRelay.play(L.serverNow());
     // Hosting, each poke at Sis from another page the hall has kept, given to her once, from that player's Ooga.
     const P = L.following && L.hall.pokes || NO_POKES;
+    // The pokes as numbered from now on taking her over; numbered lower than any given her, the hall restarted.
     if (hosting && !s.wasHosting) s.pokeSeen = P.length ? P[P.length - 1][0] : 0;
+    else if (P.length && P[P.length - 1][0] < s.pokeSeen) s.pokeSeen = 0;
     s.wasHosting = hosting;
     if (hosting) {
       hallOogas();
       for (let i = 0; i < P.length; i++) {
-        const [n, by] = P[i];
+        const n = P[i][0], by = P[i][1];
         if (n <= s.pokeSeen) continue;
         s.pokeSeen = n;
         const who = by === L.you ? people && people.player : SHELLS.get(by);
