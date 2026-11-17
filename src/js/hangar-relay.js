@@ -19,7 +19,8 @@
 // one relay and read another's), the format, whether the frame is whole, how many nodes, the time (the
 // server's clock, ms), how many values, how many bytes of events; then each node (its index, its flags and alt, its
 // glow, its position in cm, its rotation, its scale in thousandths), each value (its index, its length, its floats),
-// and the events as JSON text. `write(now)` on the host, at most every `FRAME_MS` (null between), `read(bytes)` and
+// and the events as JSON text. `write(now, now_)` on the host, at most every `FRAME_MS` (null between) unless `now_`
+// says to write one now, whole, `read(bytes)` and
 // `play(now)` on the others; `hosting` says which this page is, starting afresh whenever it changes. Nothing allocates
 // a frame but the bytes and the events.
 (() => {
@@ -128,10 +129,10 @@
         return out;
       },
       // The host's frame at `now`, or null before FRAME_MS has passed or when nothing changed.
-      write: (now) => {
-        if (!hosting || now - lastAt < FRAME_MS) return null;
+      write: (now, whole = false) => {
+        if (!hosting || !whole && now - lastAt < FRAME_MS) return null;
         lastAt = now;
-        const full = now - keyAt >= KEY_MS;
+        const full = whole || now - keyAt >= KEY_MS;
         if (full) keyAt = now;
         const v = new DataView(bytes);
         let o = HEADER, count = 0;
