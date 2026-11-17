@@ -2023,14 +2023,14 @@
     s.crane.puppet = puppet;
     if (puppet) s.relay.play(L.serverNow());
     // The forklift: driven here while this page holds its seat, else as its driver's frames have it. Sitting in it asks
-    // the hall for its seat, and getting out gives it back with a whole last frame, so it stands where it was left for
-    // everyone; losing the seat to another page's driver gets the Ooga out again.
+    // the hall for its seat, and getting out gives it back with a whole last frame, switched off first, so it stands
+    // where it was left, dark, for everyone; losing the seat to another page's driver gets the Ooga out again.
     const F = s.forklift, D = L.following ? L.hall.driver || 0 : 0, mine = !!D && D === L.you, me = people && people.player, sitting = !!me && me.camp.seat === F.seat;
     // Asked again a second on while the hall still names no driver (the first lost, or the hall restarted under it).
     if (L.following && sitting && (!s.seatAsked || !D && L.live && performance.now() - s.seatAskAt > 1000)) {
       if (L.send({ t: "seat", on: true })) { s.seatAsked = true; s.seatAskAt = performance.now(); }
     } else if (s.seatAsked && (!sitting || !L.following)) {
-      if (s.liftRelay.hosting) { liftShare(s, F); const last = s.liftRelay.write(L.serverNow(), true); if (last) L.sendBytes(last); }
+      if (s.liftRelay.hosting) { powerOff(F); liftShare(s, F); const last = s.liftRelay.write(L.serverNow(), true); if (last) L.sendBytes(last); }
       L.send({ t: "seat", on: false });
       s.seatAsked = false;
     }
