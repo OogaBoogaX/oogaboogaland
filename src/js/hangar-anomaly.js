@@ -48,24 +48,24 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { createNode, addChild } = BL.scene;
-  const HM = BL.hangarModels, JM = BL.jetModels;
+  const HM = BL.hangarModels, JM = BL.jetModels, A = BL.hangarHall.ANOMALY;
 
   // From the end of one anomaly to the start of the next, s, at random between; and how long after the static fire test
-  // hands its controls back before one may start.
-  const GAP = [60, 300], AFTER_FIRE = 10;
+  // hands its controls back before one may start (`hangar-hall.js`, shared with the Worker).
+  const GAP = A.gap, AFTER_FIRE = A.afterFire;
   // The failed start, s from its start: the three tries, each turning over for `spin` and sputtering out for `sputter`,
   // the throats as hot as `heat` at each try's peak and glowing on a little for `embers` after; the last try's burst
   // `burp` into it, `burpLen` long at `thrust`; the cut, and the end. How far the lights dim (`dim`, after `fade`), and
   // further as each try pulls (`dip`), coming back over `back` once it is cut; and how many arcs a second crackle before
   // the tries and through them.
-  const MISFIRE = { tries: [2.6, 5.4, 8.4], spin: 1.3, sputter: 0.7, embers: 0.6, heat: [0.4, 0.6, 0.85], burp: 1.2, burpLen: 0.25, thrust: 0.3, cut: 10.6, end: 14, dim: 0.6, fade: 1.5, dip: 0.15, back: 0.6, arcs: [1.2, 3] };
+  const MISFIRE = { tries: [2.6, 5.4, 8.4], spin: 1.3, sputter: 0.7, embers: 0.6, heat: [0.4, 0.6, 0.85], burp: 1.2, burpLen: 0.25, thrust: 0.3, cut: 10.6, end: A.length.misfire, dim: 0.6, fade: 1.5, dip: 0.15, back: 0.6, arcs: [1.2, 3] };
   // The phantom revs, s from their start: the script, each rev [start, engine (0 the left, 1 the right), length, how
   // hard], the two answering each other faster and harder until the right has the last word but one; the end. How hot a
   // throat glows at a full rev, how far the Jet leans toward the engine revving, radians, and how hard it shudders.
   const REVS = {
     script: [[0.5, 0, 1.2, 0.5], [2, 1, 1.3, 0.55], [3.6, 0, 0.8, 0.6], [4.4, 0, 0.8, 0.7], [5.5, 1, 0.8, 0.65], [6.3, 1, 0.8, 0.75],
       [7.1, 1, 1, 0.85], [8.4, 0, 1.5, 0.9], [10.2, 1, 1.8, 1], [12.3, 0, 0.6, 0.4]],
-    end: 13.6, heat: 0.55, lean: 0.003, shudder: 0.0015
+    end: A.length.phantom, heat: 0.55, lean: 0.003, shudder: 0.0015
   };
   // How much of a rev it takes to spool up to its peak (the sound's `REV_UP`).
   const SPOOL = 0.45;
@@ -76,19 +76,19 @@
   // lamps' pulse runs the wrong way, m/s, from `rabbit[0]`; how bright the gold trim burns (the lit mesh's glow, from the
   // plain mesh's glass to full); and the crack's flash, how long it lasts and its light.
   // How often a lightning ends in the jump to the control room instead (0 to 1).
-  const ZAP = { start: 0.6, crawl: 4, crack: 5.6, end: 7.2, arcs: 16, life: 0.14, size: 1.7, spread: 1.6, dim: 0.5, fade: 0.8, back: 0.6, rabbit: [0.5, 45], glow: [0.22, 1], flash: 0.25, light: [2.4, 2.8, 3.6], room: 0.35 };
+  const ZAP = { start: 0.6, crawl: 4, crack: 5.6, end: A.length.lightning, arcs: 16, life: 0.14, size: 1.7, spread: 1.6, dim: 0.5, fade: 0.8, back: 0.6, rabbit: [0.5, 45], glow: [0.22, 1], flash: 0.25, light: [2.4, 2.8, 3.6], room: A.jump };
   // The jump: how long the bolt takes to reach the room from the crack, s, and how long each of its lengths burns; how
   // far its lengths kink off the straight line, m, and how thick it is against a nozzle's arc.
-  const JUMP = { time: 0.3, life: 0.4, kink: 0.7, thick: 2.2 };
+  const JUMP = { time: A.lands - ZAP.crack, life: 0.4, kink: 0.7, thick: 2.2 };
   // The blackout, s from its start: one flicker (`flicker`, [from, to], down to `low`), the power killed at `kill`; how
   // dark the lights go and the hall's own light; the nozzles glowing in the dark like eyes from `wake` after the kill,
   // how bright and how they breathe, and their blink at `blink` for `blinkLen`; the banks coming back on, and the end.
-  const BLACKOUT = { flicker: [0.05, 0.12], low: 0.3, kill: 0.2, dark: 0.03, ambient: 0.15, wake: 0.6, eyes: 0.35, breathe: 0.08, blink: 4.2, blinkLen: 0.18, banks: [6.8, 7.4, 8, 8.6], end: 10 };
+  const BLACKOUT = { flicker: [0.05, 0.12], low: 0.3, kill: 0.2, dark: 0.03, ambient: 0.15, wake: 0.6, eyes: 0.35, breathe: 0.08, blink: 4.2, blinkLen: 0.18, banks: [6.8, 7.4, 8, 8.6], end: A.length.blackout };
   // The lowrider, s from its start: its first beat, the beat, how many, and how far into a beat the nose gear comes back
   // down (`slam`); how far the nose lifts at the hardest, radians, about the main gear (`gear`, m along the Jet from its
   // middle); the end; and how hard each beat is, n from 0, easing in and out over the first and last two, every other
   // one softer.
-  const LOWRIDER = { start: 0.4, beat: 0.6, beats: 14, slam: 0.5, pitch: 0.035, gear: 1.5, end: 10, hard: (n) => Math.min(1, (n + 1) / 2, (LOWRIDER.beats - n) / 2) * (n % 2 ? 0.65 : 1) };
+  const LOWRIDER = { start: 0.4, beat: 0.6, beats: 14, slam: 0.5, pitch: 0.035, gear: 1.5, end: A.length.lowrider, hard: (n) => Math.min(1, (n + 1) / 2, (LOWRIDER.beats - n) / 2) * (n % 2 ? 0.65 : 1) };
   // The hangar shuffle, s from its start: the brakes letting go; its keyframes, each [s, along (m, toward the nose
   // less), roll (radians, the right wing up more)], eased between: a lurch forward and back, a sway from wing to wing and
   // a last lurch, settling on its marks; the tyre scrubs and the gear's creaks, s; the engines' bursts, [s, how hard];
@@ -96,7 +96,7 @@
   const SHUFFLE = {
     brake: 0.4, keys: [[0, 0, 0], [0.4, 0, 0], [0.75, -0.2, 0], [1.3, 0.08, 0], [1.9, -0.04, 0], [2.4, 0, 0], [3, 0, 0.0105], [3.7, 0, -0.0105], [4.4, 0, 0.008],
       [5.1, 0, -0.008], [5.8, 0, 0.005], [6.5, 0, -0.004], [7.1, 0, 0], [7.8, -0.12, 0.004], [8.4, 0.06, -0.003], [9.2, 0, 0], [10.5, 0, 0]],
-    scrubs: [0.4, 1.3, 1.9, 7.8, 8.4], creaks: [3, 3.7, 4.4, 5.1, 5.8, 6.5], bursts: [[0.75, 0.6], [3, 0.4], [4.4, 0.35], [7.8, 0.7]], end: 11, pad: 3.35, along: 0.2, roll: 0.0105
+    scrubs: [0.4, 1.3, 1.9, 7.8, 8.4], creaks: [3, 3.7, 4.4, 5.1, 5.8, 6.5], bursts: [[0.75, 0.6], [3, 0.4], [4.4, 0.35], [7.8, 0.7]], end: A.length.shuffle, pad: 3.35, along: 0.2, roll: 0.0105
   };
   // How near anything may come to where the shuffling Jet may reach, m; how far it may reach along, to the side and up,
   // m; and how far its nozzles stand out behind its cells.

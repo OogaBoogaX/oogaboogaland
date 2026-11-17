@@ -23,7 +23,7 @@
   // The routine's beats, s after the strike: the shout; walking to the extinguisher; taking it off its bracket; walking
   // to where he sprays from; spraying; the fire out; lowering it; walking back to the bracket; hanging it up; walking
   // home; done.
-  const AT = { shout: 0.15, go: 0.8, take: 2.3, took: 2.75, carry: 3.0, spray: 4.3, out: 7.6, stop: 8.2, back: 8.9, hang: 10.4, hung: 10.85, home: 11.1, done: 12.6 };
+  const AT = { shout: 0.15, go: 0.8, take: 2.3, took: 2.75, carry: 3.0, spray: 4.3, out: 7.6, stop: 8.2, back: 8.9, hang: 10.4, hung: 10.85, home: 11.1, done: BL.hangarHall.ROOM_FIRE.done };
   // The fire: how fast it takes, how tall it stands at full (m), its flames' places on the console's top round the spot
   // and their sizes, and its light (rgb at full, how far it reaches, m); the strike's flash (how long, rgb, reach).
   const FIRE = { grow: 1.4, height: 0.75, flames: [[0, 0, 1], [0.1, -0.12, 0.7], [-0.08, 0.13, 0.62]], light: [1.8, 0.8, 0.24], reach: 5.5, flash: 0.35, flashLight: [2.4, 2.8, 3.6], flashReach: 7 };

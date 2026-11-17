@@ -22,7 +22,7 @@
 
   // The test from the press, in seconds: armed, the engines spooling up, firing, faltering (warning) and blowing (boom),
   // the presser out cold (out), and the result standing until the booth is ready again.
-  const AT = { spool: 0.5, fire: 3, warning: 6, boom: 7.5, out: 7.6, result: 10.6, ready: 30.6 };
+  const AT = { spool: 0.5, fire: 3, warning: 6, boom: 7.5, out: 7.6, result: BL.hangarHall.FIRE.result, ready: BL.hangarHall.FIRE.ready };
   // What the screen shows in each phase.
   const SCREEN = { ready: "ready", armed: "armed", spool: "spool", fire: "fire", warning: "warning", boom: "boom", out: "boom", result: "result" };
   const SCREENS = ["ready", "armed", "spool", "fire", "warning", "boom", "result", "checks", "days", "rules"];
