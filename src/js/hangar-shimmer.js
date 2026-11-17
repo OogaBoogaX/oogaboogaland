@@ -515,6 +515,8 @@
       S.nearOn = near.on ? 1 : 0; S.nearReach = near.reach; S.nearShare = near.share; S.nearPeak = near.peak; S.nearSeed = near.seed;
       S.catchOn = near.catchOn ? 1 : 0; S.close = near.close; S.catchShare = near.catchShare; S.catchSeed = near.catchSeed;
       S.stirOn = near.stirOn ? 1 : 0; S.stirReach = near.stirReach; S.stirPeak = near.stirPeak;
+      // To the millimetre and the thousandth, so it fits a message to the hall.
+      for (const k in S) S[k] = Math.round(S[k] * 1000) / 1000;
       return S;
     };
     // A showing the hall shared, `since` s in: as it was described, from there.

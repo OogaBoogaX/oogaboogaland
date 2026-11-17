@@ -301,7 +301,7 @@ const create = (_now, random = Math.random) => {
 
 export const hangar = {
   id: "hangar", code: 2, version: 1, venues: ["hall"], optional: true, tickMs: 250, stateEvery: 40,
-  limits: { sockets: 32, chars: 256, bytes: 16384 },
+  limits: { sockets: 32, chars: 768, bytes: 16384 },
   buckets: { jet: { rate: 4, burst: 4 }, press: { rate: 1, burst: 2 }, poke: { rate: 5, burst: 5 }, tess: { rate: 10, burst: 10 }, relay: { rate: 12, burst: 6 } },
   bucketOf: (t) => t === "jet" || t === "seen" ? "jet" : t === "poke" || t === "desk" ? "poke" : t === "tess-guide" || t === "tess-pose" ? "tess" : "press",
   parse, create

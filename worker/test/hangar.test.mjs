@@ -168,6 +168,9 @@ test("the host's shape is everyone's, and a walk up to it plays the network for 
   const s = { x: 3, z: -4, mirror: 1, slow: 0.2, formed: 2, held: 9, gone: 11, end: 30, nearOn: 1, nearReach: 5, nearShare: 0.3, nearPeak: 0.1, nearSeed: 7,
     catchOn: 0, close: 2, catchShare: 0.2, catchSeed: 9, stirOn: 1, stirReach: 4, stirPeak: 0.3 };
   assert.equal(hangar.parse({ t: "shape", s: { ...s, end: 999 } }), null, "a showing longer than any is refused");
+  const widest = Object.fromEntries(Object.keys(s).map((k) => [k, k.endsWith("Seed") ? 999999 : -123.456]));
+  widest.end = 39.999;
+  assert.ok(JSON.stringify({ t: "shape", s: widest }).length <= hangar.limits.chars, "a showing at its widest fits a message to the hall");
   assert.equal(g.message({ id: 2 }, hangar.parse({ t: "shape", s }), t0), false, "only from the host");
   assert.equal(g.message({ id: 1 }, hangar.parse({ t: "shape", s }), t0), true);
   const shape = g.state().shape;
