@@ -630,8 +630,9 @@
       if (kind === "prod") { scareSpot.lx = best.lx; scareSpot.ly = best.ly; scareSpot.lz = best.lz; }
       return best.cell;
     };
+    // Not while another page moves her (`puppet`): its frames have her react, and say her lines, for everyone.
     const spook = (x, z, kind = null) => {
-      if (panicking) return false;
+      if (panicking || puppet) return false;
       if (doing === "hush") { endHush(); doing = "glare"; t = 0; spot.dur = pick(TIMES.glare[0], TIMES.glare[1]); }
       engX = x; engZ = z; settled = false; spookSaid = false; spookAt = clock; peekAt = 0; peekT = 0;
       const choices = rampage || storming ? IN_PLACE : SCARES;
@@ -672,7 +673,7 @@
     // while she smashes, storms off or the static fire has her.
     let grooveBeat = 0.6;
     const groove = (beat) => {
-      if (panicking || rampage || storming) return false;
+      if (panicking || rampage || storming || puppet) return false;
       if (doing === "hush") { endHush(); doing = "glare"; t = 0; spot.dur = pick(TIMES.glare[0], TIMES.glare[1]); }
       grooveBeat = beat; spookAt = clock; spookSaid = false; scare = null;
       fit(11);
@@ -684,7 +685,7 @@
     let zapAt = 0, zapSpark = 0;
     const zap = (x, z0, z1) => {
       const dz = p.z < z0 ? z0 - p.z : p.z > z1 ? p.z - z1 : 0;
-      if (panicking || Math.hypot(p.x - x, dz) > ZAP.reach) return false;
+      if (panicking || puppet || Math.hypot(p.x - x, dz) > ZAP.reach) return false;
       scare = null; zapAt = clock; spookSaid = false; soot = PANIC.soot;
       fit(10);
       fitLen = fitT = ZAP.len;
