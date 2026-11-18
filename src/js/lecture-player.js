@@ -211,9 +211,9 @@
         const left = progress[next.id];
         passed = left ? left.q || 0 : 0;
         t = left && !left.done && left.t < timeline.duration - 20 ? landing(Math.max(0, left.t - 4)) : 0;
-        // A recording is a file of the staged site's (scripts/site.mjs); the source tree and the portable page have
-        // none to ask for, and play to the recording's times with captions.
-        if (timeline.recorded && next.audio && BL.deferredScripts) {
+        // A recording is served by the site's Worker from R2 (worker/src/lecture-audio.js); the source tree and the
+        // portable page have none to ask for, and play to the recording's times with captions.
+        if (timeline.audio && BL.deferredScripts) {
           audio = new Audio(); audio.preload = "none"; audio.playbackRate = speed; audio.preservesPitch = true; audio.volume = LEVEL * soundChannel.gain; audio.addEventListener("error", () => { audio = null; });
           // Hidden tabs run no scene frames. Media events must advance the same cue state, gates and completion
           // as a frame, including the final event when the recording has already paused at its end.
@@ -222,7 +222,7 @@
           recording.addEventListener("timeupdate", mediaTick);
           recording.addEventListener("ended", mediaTick);
           // Selecting a lecture creates the element; only play() asks for the recording.
-          recording.src = next.audio;
+          recording.src = timeline.audio;
         }
         sync();
         return true;

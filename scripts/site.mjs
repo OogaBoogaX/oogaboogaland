@@ -48,14 +48,8 @@ for (const source of mediaContext.BL.studioMedia.sources) for (const path of [so
   mediaFiles.add(path.slice(7));
 }
 for (const file of mediaFiles) copyFileSync(join(root, "src/media", file), join(out, "media", file));
-// A lecture's recording, staged once the lecture has its timing file (scripts/lecture-script.mjs --import writes both).
-const lectureAudio = join(root, "src/media/lectures");
-if (existsSync(lectureAudio)) for (const file of readdirSync(lectureAudio)) {
-  const id = /^([a-z]+-\d\d)\.m4a$/.exec(file);
-  if (!id || !existsSync(join(root, "src/js", `lecture-${id[1]}.timing.js`))) continue;
-  mkdirSync(join(out, "media/lectures"), { recursive: true });
-  copyFileSync(join(lectureAudio, file), join(out, "media/lectures", file));
-}
+// Lecture recordings are never staged: the Worker serves /media/lectures/* from R2 (worker/src/lecture-audio.js), and
+// `npm run serve` answers them itself (scripts/serve.mjs).
 
 let shell = readFileSync(join(root, "oogaboogaland.html"), "utf8");
 // Search crawlers and browsers need fetchable favicon URLs: the portable page's exact PNG bytes at stable paths, with

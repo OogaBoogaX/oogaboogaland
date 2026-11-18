@@ -19,7 +19,7 @@
     "html_handling": "drop-trailing-slash",
     "not_found_handling": "404-page",
     // Only these paths run the Worker (worker/src/index.js); every other path is served straight from _site.
-    "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/game/*", "/donations/*", "/inspect"]
+    "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/game/*", "/donations/*", "/inspect", "/media/lectures/*"]
   },
   "vars": {
     "ENVIRONMENT": "production",
@@ -55,7 +55,12 @@
   },
   // Private production replay storage; public reads are served through the Worker.
   // See docs/cloud-hopper-replays.md for validation and bounded retention.
-  "r2_buckets": [{ "binding": "CLOUD_HOPPER_REPLAYS", "bucket_name": "oogaboogaland-production-replays" }],
+  // Lecture recordings, private, served at /media/lectures/* through the Worker (worker/src/lecture-audio.js) and
+  // uploaded by hand before a deploy that names them (`npm --prefix worker run lectures:production`, docs/lectures.md).
+  "r2_buckets": [
+    { "binding": "CLOUD_HOPPER_REPLAYS", "bucket_name": "oogaboogaland-production-replays" },
+    { "binding": "LECTURE_AUDIO", "bucket_name": "oogaboogaland-production-lectures" }
+  ],
   "d1_databases": [
     {
       "binding": "DB",

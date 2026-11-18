@@ -2,7 +2,8 @@
 // /auth/*, the account API under /api/*, the totems' merge summaries under /api/totems/* and Repo Island's at /api/repo-totems, voice
 // signalling under /api/voice/*, Tess's answers at /api/tess, GitHub pictures at /api/avatar/<id> (avatar.js), who stands where for the World Map at /api/world (world.js), /room, the island's live socket, /game/*, the sockets
 // of the games the Worker hosts itself (game-host.js), /donations/*, passed on to bananapayserver over the
-// DONATIONS binding, and /inspect with its feed /api/inspect/ws, the Durable Object inspector (inspect.js). Only those paths run this code (`run_worker_first` in wrangler.<env>.jsonc); every other path is
+// DONATIONS binding, /inspect with its feed /api/inspect/ws, the Durable Object inspector (inspect.js), and the lecture
+// recordings under /media/lectures/* from R2 (lecture-audio.js). Only those paths run this code (`run_worker_first` in wrangler.<env>.jsonc); every other path is
 // served straight from _site.
 
 import { handleAvatar } from "./avatar.js";
@@ -23,6 +24,7 @@ import { handleTotems } from "./totems.js";
 import { handleRepoTotems } from "./repo-totems.js";
 import { gameName } from "./games.js";
 import { handleInspect } from "./inspect.js";
+import { handleLectureAudio } from "./lecture-audio.js";
 import { inspectEdge } from "./inspect-report.js";
 
 export { Room } from "./room.js";
@@ -121,6 +123,7 @@ export default {
     if (url.pathname === "/room") return handleRoom(request, env, ctx);
     if (url.pathname.startsWith("/game/")) return handleGame(request, env, url, ctx);
     if (url.pathname.startsWith("/donations/")) return handleDonations(request, env, url);
+    if (url.pathname.startsWith("/media/lectures/")) return handleLectureAudio(request, env, url, ctx);
     return env.ASSETS.fetch(request);
   },
 

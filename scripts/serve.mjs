@@ -124,6 +124,28 @@ async function totemFeed(req, res, pathname) {
   }
 }
 
+// A lecture's recording (docs/lectures.md): the copy `npm run lecture:script -- --import` keeps in untracked/lectures/,
+// else the one the production Worker serves from R2, asked for with the browser's range and nothing else of its request.
+const lectureFile = /^\/media\/lectures\/([a-z]+-\d\d-[0-9a-f]{16}\.m4a)$/;
+async function lectureAudio(req, res, file) {
+  if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "method not allowed");
+  const kept = readOrNull(join(root, "untracked", "lectures", file));
+  if (kept) return respond(req, res, file, kept);
+  try {
+    const headers = {};
+    if (req.headers.range) headers.Range = req.headers.range;
+    const response = await fetch(`https://oogabooga.land/media/lectures/${file}`, { method: req.method, headers, redirect: "error", signal: AbortSignal.timeout(30000) });
+    if (response.headers.get("content-type") !== "audio/mp4") return send(res, 404, "not found");
+    const outgoing = { "Content-Type": "audio/mp4", "Cache-Control": "no-store", "Accept-Ranges": "bytes" };
+    for (const name of ["content-length", "content-range"]) if (response.headers.has(name)) outgoing[name] = response.headers.get(name);
+    const body = req.method === "HEAD" ? null : Buffer.from(await response.arrayBuffer());
+    res.writeHead(response.status, outgoing);
+    res.end(body || undefined);
+  } catch {
+    send(res, 503, "lecture recording unavailable");
+  }
+}
+
 const server = createServer((req, res) => {
   // A malformed escape such as `/src/%` throws here; that is the request's fault, not the server's.
   let pathname;
@@ -133,7 +155,9 @@ const server = createServer((req, res) => {
     return send(res, 400, "bad request");
   }
   if (pathname === "/api/repo-totems" || /^\/api\/totems\/[0-3]$/.test(pathname)) return void totemFeed(req, res, pathname);
-  if (pathname === "/") return serveFile(req, res, join(site, "index.html"));
+  const lecture = lectureFile.exec(pathname);
+  if (lecture) return void lectureAudio(req, res, lecture[1]);
+  if (pathname === "/")return serveFile(req, res, join(site, "index.html"));
   if (pathname === "/src" || pathname === "/src/") return serveFile(req, res, join(src, "index.html"));
   if (pathname.startsWith("/src/")) {
     // Resolve inside src/ only; a normalized path that escapes it is refused.

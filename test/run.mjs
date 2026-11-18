@@ -3947,9 +3947,11 @@ const mediaSourceServer = async () => {
   const server = createServer(async (req, res) => {
     try {
       const path = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
-      const relative = path.startsWith("/src/") ? path.slice(5) : path.startsWith("/media/") ? path.slice(1) : null;
+      // Lecture recordings live in R2, not the repository (worker/src/lecture-audio.js): the Studio's sample stands in.
+      const lecture = /^\/media\/lectures\/[a-z]+-\d\d-[0-9a-f]{16}\.m4a$/.test(path);
+      const relative = lecture ? "media/studio-sample.mp4" : path.startsWith("/src/") ? path.slice(5) : path.startsWith("/media/") ? path.slice(1) : null;
       if (!relative || relative.split("/").some(part => !part || part === "." || part === "..") || relative.includes("\\")) { res.writeHead(404); res.end(); return; }
-      const extension = extname(relative), body = await readFile(join(root, "src", relative));
+      const extension = extname(lecture ? path : relative), body = await readFile(join(root, "src", relative));
       const response = previewResponse(body, types[extension] || "application/octet-stream", req, extension === ".mp4" || extension === ".webm" || extension === ".m4a");
       res.writeHead(response.status, response.headers); res.end(response.body);
     } catch (_) { res.writeHead(404); res.end(); }
@@ -23427,8 +23429,8 @@ const timechainLectureAudio = {
       const button = await b.evaluate('(()=>{const r=document.getElementById("lecture-toggle").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()');
       await b.click(button.x, button.y);
       const playing = await untilPage(b, '__selectedLectureAudio.readyState >= 2 && !__selectedLectureAudio.paused && B.timechain.motion.player.recorded', 15000);
-      const origin = await b.evaluate('location.origin');
-      record("lecture audio: starting playback requests and decodes only the chosen same-origin recording", playing && requests.length > 0 && requests.every(url => url === origin + "/media/lectures/btc-01.m4a"), JSON.stringify(requests));
+      const chosen = await b.evaluate('location.origin + BL.lectures.compile(BL.lectures.get("btc-01")).audio');
+      record("lecture audio: starting playback requests and decodes only the chosen same-origin recording", playing && requests.length > 0 && /\/media\/lectures\/btc-01-[0-9a-f]{16}\.m4a$/.test(chosen) && requests.every(url => url === chosen), JSON.stringify(requests));
       await tourGo(b, "hub");
       record("lecture audio: leaving the hall pauses and releases the recording URL", await b.evaluate('__ooga.scene==="hub"&&__selectedLectureAudio.paused&&__selectedLectureAudio.getAttribute("src")===null'), "");
     } finally { b.on("Network.requestWillBeSent", null); await b.send("Network.disable"); }
@@ -35200,10 +35202,10 @@ const lecturePlayerChecks = async () => {
     }
     const BL = { lectures: L, deferredScripts: recorded ? {} : null, deferred: { load: async () => {} }, sound: { muted: false, subscribe: () => () => {}, channel: () => ({ gain: 1, level: 1, node: (context, to) => to || context.destination, subscribe: () => () => {}, show() {}, release() {} }) } };
     runInNewContext(source, { window: { BL }, Audio, localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } });
-    const player = BL.lecturePlayer.create(), entry = { id: 'btc-01', group: 'lecture-btc-a', audio: 'btc-01.m4a' };
+    const player = BL.lecturePlayer.create(), entry = { id: 'btc-01', group: 'lecture-btc-a' };
     assert.equal(media.length, 0);
     await player.open(entry);
-    if (recorded) { assert.equal(media[0].preload, "none"); assert.equal(media[0].src, entry.audio); }
+    if (recorded) { assert.equal(media[0].preload, "none"); assert.match(media[0].src, /^\/media\/lectures\/btc-01-[0-9a-f]{16}\.m4a$/); assert.equal(media[0].src, L.compile(L.get('btc-01')).audio); }
     return { player, media, entry, L };
   };
 
