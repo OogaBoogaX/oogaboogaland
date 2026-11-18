@@ -29162,8 +29162,12 @@ const voiceHearingChecks = async () => {
     r.remotes.get(3).z=20;r.land(ids);out.landedOutside=r.levels([3])==="0";
     r.remotes.get(3).z=15;r.tick();
     out.initial=r.levels(ids);out.receiveOnly=r.captures===0;
-    out.limited=r.gains.every(g=>g.out.size===1&&[...g.out].every(l=>l.kind==="limiter"&&l.out.has(r.ctxs[0].destination)&&l.threshold.value===-1&&l.knee.value===0&&l.ratio.value===(g.id===4?1:20)));
-    V.muteLocal(2,false);out.boost=r.levels(ids);
+    // The limiter follows the combined level a voice plays at: a muted boost (2) and a quiet one (4) pass through.
+    const ratios=()=>ids.map(id=>[...r.gains.filter(g=>g.id===id&&g.out.size).at(-1).out][0].ratio.value).join();
+    out.limited=r.gains.every(g=>g.out.size===1&&[...g.out].every(l=>l.kind==="limiter"&&l.out.has(r.ctxs[0].destination)&&l.threshold.value===-1&&l.knee.value===0))&&ratios()==="1,20,1";
+    V.muteLocal(2,false);out.boost=r.levels(ids)+"|"+ratios();
+    // Every other player's voice at half leaves 2 at a combined 100%, unlimited, and keeps each one's own volume.
+    V.setPlayersLevel(.5);out.players=r.levels(ids)+"|"+ratios()+"|"+V.volumeOf(2);V.setPlayersLevel(1);
     V.muteLocal(3,true);V.setVolume(3,.5);out.muteWins=r.levels(ids);out.volumeIndependent=V.volumeOf(3)===.5;
     V.setVolume(4,2);r.tick(10);out.boundary=r.levels([4]);
     // A remote changing environment remains adjustable while inaudible, and keeps its setting on returning.
@@ -29184,7 +29188,7 @@ const voiceHearingChecks = async () => {
   };
   const savedPlayers={desktop:await preferences(false),ios:await preferences(true)};
   record("voice player preferences: prejoin settings request no microphone or connection, reload applies mute and real boost before the first track, volume never unmutes or bypasses range and zones, stable identities survive renames and environments, and shared-browser accounts remain separate",
-    Object.values(savedPlayers).every(r=>r.prejoin&&r.reload&&r.landedOutside&&r.receiveOnly&&r.limited&&r.initial==="0,1.5,0"&&r.boost==="2,1.5,0"&&r.muteWins==="2,0,0"&&r.volumeIndependent&&r.boundary==="0"&&r.returned==="2"&&r.listenerAway==="0"&&r.listenerBack==="0.25"&&r.identity&&r.otherAccount&&r.restored&&r.signedOut&&r.localOnly&&r.legacyUntouched&&r.disposed),JSON.stringify(savedPlayers));
+    Object.values(savedPlayers).every(r=>r.prejoin&&r.reload&&r.landedOutside&&r.receiveOnly&&r.limited&&r.initial==="0,1.5,0"&&r.boost==="2,1.5,0|20,20,1"&&r.players==="1,0.75,0|1,1,1|2"&&r.muteWins==="2,0,0"&&r.volumeIndependent&&r.boundary==="0"&&r.returned==="2"&&r.listenerAway==="0"&&r.listenerBack==="0.25"&&r.identity&&r.otherAccount&&r.restored&&r.signedOut&&r.localOnly&&r.legacyUntouched&&r.disposed),JSON.stringify(savedPlayers));
   const duelListening = async (webAudio) => {
     const r = rig(false, webAudio), V = r.V;
     await V.enable(); await settle(); V.setPeers([2, 3, 4], [1, 1, 1]); await settle(); r.land([2, 3, 4]);

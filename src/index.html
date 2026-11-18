@@ -316,7 +316,7 @@
         </svg>
       </button>
       <button type="button" class="mode-hud environment-sound" id="environment-sound"
-        aria-label="Mute environment sounds" title="Mute environment sounds · M" aria-pressed="false"
+        aria-label="Sound levels" title="Sound levels · M mutes game sounds" data-muted="false"
         aria-haspopup="dialog" aria-controls="sound-mixer" aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path fill="currentColor" d="M3 9h4l5-4v14l-5-4H3z"/>
@@ -2233,7 +2233,7 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
         <button type="button" class="ghost-spectate-next" id="ghost-spectate-next" aria-label="Next player">Next ▶</button>
       </div>
     </div>
-    <!-- The speaker button's long press (sound-panel.js): a level for everything and one for each sound this place holds. -->
+    <!-- The speaker button's panel (sound-panel.js): a level for all game sounds, all players' voices and each sound this place holds. -->
     <section class="sound-mixer" id="sound-mixer" role="dialog" aria-labelledby="sound-mixer-title" tabindex="-1" hidden>
       <div class="sound-mixer-head">
         <h2 id="sound-mixer-title">Sound</h2>

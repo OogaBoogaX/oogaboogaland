@@ -6,7 +6,7 @@
   // `gates`: each context's way out and its context, kept until that context is seen closed.
   // `uses`: how many channels play straight into a context's way out, so the last to let go takes it down.
   const listeners = new Set(), watchers = new Set(), outputs = new WeakMap(), gates = new Map(), uses = new WeakMap();
-  // Every sound a visitor can turn up or down by itself (the speaker button's long press, sound-panel.js), in the
+  // Every sound a visitor can turn up or down by itself (the speaker button's panel, sound-panel.js), in the
   // panel's order. A module holds its channel while it lives, so the panel lists only what this place can sound.
   const NAMES = [
     ["footsteps", "Footsteps"], ["rain", "Rain"], ["wind", "Wind"], ["thunder", "Thunder"], ["surf", "Waves"],

@@ -277,7 +277,7 @@
     const reading = { live: false, bpm: 0, phase: 0, level: 0, conf: 0 };
     // A line for a tap on the booth, the decks or the speakers.
     const words = () => {
-      const muted = BL.sound.muted ? " · sound muted (the speaker button)" : "";
+      const muted = BL.sound.muted ? " · sound muted (M, or the speaker button's Sound on/off)" : "";
       const name = STATIONS[channel].name;
       if (mode === "off") return "The radio is off on this page";
       if (mode === "waiting") return `${name} · tap or press a key to tune in`;
