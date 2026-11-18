@@ -32,7 +32,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  CABINETS, hockey, block, BLOCK, duel, tessQueue, CLOSE_KICK, CLOSE_PROTOCOL, CLOSE_ERROR, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
+  CABINETS, hockey, block, BLOCK, duel, tessQueue, CLOSE_KICK, CLOSE_PROTOCOL, CLOSE_ERROR, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, MEMBER_SWEEP_MS, CLEANUP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, PROP_MAGIC, PROP_FEATURE, PROP_FRAME_MAX, PROP_HZ, POSE_SAVE_MS, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
   DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, ROOM_LOCK_FEATURE, PIN_PASS_MS, PIN_TRIES, PIN_WAIT_MS, CONTROL_FRAMES, CONTROL_HZ, CONTROL_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, HAND_EMOJI_FEATURE, REACT_HZ, REACT_BURST,
   GHOST_MAGIC, inGhostArena, watchesGhost,
@@ -1986,8 +1986,10 @@ export class Room extends DurableObject {
   }
 
   async ensureSweep() {
-    if (!this.sweepAt) {
-      this.sweepAt = Date.now() + SWEEP_MS;
+    // A player arriving while only Commons members were here brings the five-minute sweep back to one a minute.
+    const due = Date.now() + SWEEP_MS;
+    if (!this.sweepAt || this.players.size && this.sweepAt > due) {
+      this.sweepAt = due;
       await this.ctx.storage.put("sweepAt", this.sweepAt);
     }
     await this.scheduleAlarm();
@@ -2071,7 +2073,7 @@ export class Room extends DurableObject {
         if (now - last > STALE_MS) this.evict(p, "stale");
       }
       await commonsRoom.sweep(this, now, (login, id) => this.memberOwns(login, id), STALE_MS);
-      this.sweepAt = now + SWEEP_MS;
+      this.sweepAt = now + (this.players.size || !commonsRoom.size(this) ? SWEEP_MS : MEMBER_SWEEP_MS);
       await this.ctx.storage.put("sweepAt", this.sweepAt);
     }
     const next = this.nextAlarm();

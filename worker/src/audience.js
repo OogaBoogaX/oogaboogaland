@@ -139,6 +139,8 @@ export class Audience extends DurableObject {
       this.model.commit();
       for (const zone of ZONES) this.model.zones[zone].rev = meta.revs && Number.isSafeInteger(meta.revs[zone]) ? meta.revs[zone] : 0;
       await this.media.restore();
+      // What the listeners already heard: a word from the Room that changes nothing tells nobody to sync.
+      this.media.settle();
       // The list the Room was last told, kept: a wake sends only what changed meanwhile (a deployment that dropped every
       // socket empties it), so the Room's own stored copy never stays stale.
       this.sourcesSig = (await ctx.storage.get("sourcesSig")) ?? null;
@@ -737,6 +739,11 @@ export class Audience extends DurableObject {
     const zones = {};
     for (const zone of ZONES) zones[zone] = { ...this.model.counts(zone), rows: this.model.zones[zone].rows.size, rev: this.model.zones[zone].rev };
     return { epoch: this.model.epoch, connections: this.model.conns.size, zones, watching: [...this.watching] };
+  }
+
+  // The Inspector, when a viewer connects: report now, as the Room does.
+  inspectWatch(until) {
+    this.inspect.watch(until);
   }
 
   // A world speaker's contribution total, for ordering only: Oogatron's counts, read at most every ten minutes.

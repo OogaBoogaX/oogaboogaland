@@ -307,6 +307,22 @@ test("cleanup is durable: a failed close is kept, retried by the alarm after eve
   woken.media.cleanup.splice(0);
 });
 
+test("regression: a woken Audience asks no listener to sync for the Room's unchanged word, so an idle tab costs no wake a minute", async () => {
+  const h = host(), a = await h.make();
+  const bea = await connect(a, who(2));
+  await media(a, bea, "receive/open");
+  await media(a, bea, "receive/sync");
+  const speakers = [{ id: "gh:40", zone: "main", mic: "on", login: "isle", pub: { session: "island-pub", track: "mic", gen: 1 } }];
+  await a.world(20, speakers, []);
+  const told = () => bea.ws.sent.filter((m) => m.type === "media").length;
+  const before = told();
+  const woken = await h.make();
+  await woken.world(21, speakers, []);
+  assert.equal(told(), before, "nothing changed while it slept, so nobody is asked to sync again");
+  await woken.world(22, [{ ...speakers[0], pub: { ...speakers[0].pub, gen: 2 } }], []);
+  assert.equal(told(), before + 1, "a new publication after the wake is still announced");
+});
+
 test("a wake restores each connection's media, and sweeps the sessions of a socket that went while it slept", async () => {
   const h = host(), a = await h.make();
   const amy = await connect(a, who(1)), bea = await connect(a, who(2));

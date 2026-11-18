@@ -167,7 +167,7 @@ export const createMediaBroker = (aud) => {
    * nothing; one that lost some already heard `prune`'s word.
    */
   const announced = new Map();
-  const announce = () => {
+  const published = () => {
     const now = new Map();
     for (const s of aud.island.speakers) if (s.pub && s.pub.session && s.pub.track) now.set(s.zone, `${now.get(s.zone) || ""}|${s.id}:${s.pub.gen || 0}`);
     for (const c of aud.model.conns.values()) {
@@ -175,6 +175,16 @@ export const createMediaBroker = (aud) => {
       const m = states.get(c.connId);
       if (m && m.pub && m.track) now.set(c.zone, `${now.get(c.zone) || ""}|${c.id}:${-m.gen - 1}`);
     }
+    return now;
+  };
+  // A woken object starts from what its listeners heard before it hibernated: every change was announced as it happened,
+  // so the Room's first unchanged word after a wake tells nobody to sync again.
+  const settle = () => {
+    announced.clear();
+    for (const [zone, sig] of published()) announced.set(zone, sig);
+  };
+  const announce = () => {
+    const now = published();
     const changed = new Set();
     for (const zone of new Set([...now.keys(), ...announced.keys()])) if ((now.get(zone) || "") !== (announced.get(zone) || "")) changed.add(zone);
     announced.clear();
@@ -360,7 +370,7 @@ export const createMediaBroker = (aud) => {
   };
 
   return {
-    request, restore, retirePublication, releaseAll, prune, announce, chatSources, authorizedFor, runCleanup,
+    request, restore, retirePublication, releaseAll, prune, announce, settle, chatSources, authorizedFor, runCleanup,
     /** The cleanup queue as the owner sees it: how many jobs and the oldest one's age. */
     backlog: (now = Date.now()) => ({ jobs: cleanup.length, oldestMs: cleanup.reduce((age, job) => Math.max(age, now - job.at), 0) }),
     get cleanup() { return cleanup; }, get states() { return states; }, get configured() { return !!sfu; },

@@ -85,7 +85,8 @@ export class Inspector extends DurableObject {
     // Ask every object heard from lately for its detail now, rather than at its next report.
     for (const row of this.rows.values()) {
       if (now - row.lastSeen > RECENT_MS) continue;
-      const stub = row.cls === "Room" ? this.env.ROOM.getByName(row.name) : row.cls === "GameHost" ? this.env.GAMES.getByName(row.name) : null;
+      const stub = row.cls === "Room" ? this.env.ROOM.getByName(row.name) : row.cls === "GameHost" ? this.env.GAMES.getByName(row.name)
+        : row.cls === "Audience" && this.env.AUDIENCE ? this.env.AUDIENCE.getByName(row.name) : null;
       if (stub) this.ctx.waitUntil(stub.inspectWatch(now + WATCH_MS).catch(() => {}));
     }
     return new Response(null, { status: 101, webSocket: client });

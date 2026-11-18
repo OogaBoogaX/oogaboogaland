@@ -2108,8 +2108,9 @@
     const spots = [[25, 260], [95, 330], [160, 240], [215, 300], [290, 280], [340, 360]];
     spots.forEach(([deg, r], i) => {
       const p = polar(deg, r);
-      // Scenery on the horizon: no outlines, sight tests or cover ever need it.
-      const node = createNode({ geometry: BL.dressing.islet(i % 3), position: { x: p.x, y: SEA_Y - 2, z: p.z }, rotation: { x: 0, y: deg * 0.7, z: 0 }, sightHidden: true });
+      // Scenery on the horizon: no outlines, sight tests or cover ever need it. The clear twin, so the clear-air
+      // haze leaves them their own colours against the sea, dark at night as the water round them is.
+      const node = createNode({ geometry: BL.dressing.islet(i % 3, true), position: { x: p.x, y: SEA_Y - 2, z: p.z }, rotation: { x: 0, y: deg * 0.7, z: 0 }, sightHidden: true });
       addChild(root, node);
       placed.push(node);
     });

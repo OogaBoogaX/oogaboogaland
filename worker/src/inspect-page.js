@@ -75,7 +75,7 @@ label { color: var(--soft); font-size: 13px; display: inline-flex; gap: 6px; ali
     <label><input type="checkbox" id="drops"> Drops and failures only</label>
   </div>
   <section class="log" id="log"></section>
-  <p class="note">Each object reports what it is doing to the Inspector, so this is the app's view, not Cloudflare's. An object only appears once it has reported since this was turned on. Sleep is inferred: a wake is the object's constructor running, and one that wakes with fewer sockets than it reported closed them while it slept or was reset. Rates are averaged since the object's previous report (every second while this page is open, every minute otherwise). Busy objects that go quiet for 5 minutes are marked stale. The log keeps the last 500 lines for 24 hours. CPU, memory and billing: the Cloudflare dashboard's Durable Objects metrics.</p>
+  <p class="note">Each object reports what it is doing to the Inspector, so this is the app's view, not Cloudflare's. An object only appears once it has reported since this was turned on. Sleep is inferred: a wake is the object's constructor running, and one that wakes with fewer sockets than it reported closed them while it slept or was reset. Rates are averaged since the object's previous report (every second while this page is open, every four minutes otherwise). Busy objects that go quiet for 5 minutes are marked stale. The log keeps the last 500 lines for 24 hours. CPU, memory and billing: the Cloudflare dashboard's Durable Objects metrics.</p>
 </main>
 <script nonce="__NONCE__">
 "use strict";
