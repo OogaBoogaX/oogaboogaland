@@ -59,18 +59,19 @@
   };
   // The sphere and its screen for each kind. The raked halls step down from the doorway's landing toward a focus in
   // front (`rake`): rows `depth` deep round it, seats `pitch` apart along them as far round as `psiMax` degrees, either
-  // side of an aisle `aisle` wide each way; with `halfSteps` the aisle has a half step in every riser (the theater's,
-  // and the Lecture Hall's, whose four broad terraces stand a riser too tall for a walker apart), and with `dais` a
-  // round stage stands at the focus.
+  // side of an aisle `aisle` wide each way; with `aisleSteps` the aisle has that many steps in every riser, each an
+  // equal share of the row's depth and of its riser (the theater's one, a half step; the Lecture Hall's two, a third
+  // each, its four broad terraces standing a riser too tall for a walker apart), and with `dais` a round stage stands
+  // at the focus.
   const shapeOf = (kind, R) => {
     if (kind === "planetarium") return { c: 1.6, yMin: 0, P: 0, edge: { flat: 1.6 } };
     if (kind === "lecture") {
       const P = 0.26 * R;
-      return { c: 0.1 * R, yMin: -P, P, edge: { A: [-R, -P + 2.3], B: [R, 3.7] }, rake: { focus: -0.45 * R, front: 0.94, back: 10, depth: 3.02, pitch: 2.9, psiMax: 58, seatTop: 0.42, halfSteps: true, dais: true, aisle: 1.1 } };
+      return { c: 0.1 * R, yMin: -P, P, edge: { A: [-R, -P + 2.3], B: [R, 3.7] }, rake: { focus: -0.45 * R, front: 0.94, back: 10, depth: 3.02, pitch: 2.9, psiMax: 58, seatTop: 0.42, aisleSteps: 2, dais: true, aisle: 1.1 } };
     }
     if (kind === "theater") {
       const P = 0.38 * R;
-      return { c: -0.145 * R, yMin: -P, P, edge: { A: [-R, -P + 0.6], B: [R, 4.3] }, rake: { focus: -0.6 * R, front: 0.05 * R, back: 0.74 * R, depth: 1.3, pitch: 1.3, psiMax: 72, seatTop: 0.44, halfSteps: true, aisle: 0.6 } };
+      return { c: -0.145 * R, yMin: -P, P, edge: { A: [-R, -P + 0.6], B: [R, 4.3] }, rake: { focus: -0.6 * R, front: 0.05 * R, back: 0.74 * R, depth: 1.3, pitch: 1.3, psiMax: 72, seatTop: 0.44, aisleSteps: 1, aisle: 0.6 } };
     }
     return { c: 0.3 * R, yMin: 0, P: 0, edge: { flat: 3.75 } };
   };
@@ -156,7 +157,7 @@
     layouts.set(room.id, value);
     return value;
   };
-  // The floor under (x, z): the landing at 0, a raked hall's terrace or the stage, the theater aisle's half steps.
+  // The floor under (x, z): the landing at 0, a raked hall's terrace or the stage, an aisle's steps.
   const floorAt = (L, x, z) => {
     const K = L.rake;
     if (!K) return 0;
@@ -165,9 +166,16 @@
     if (d < rows[0].rIn) return K.stage && d < K.stage ? K.stageTop : L.yMin;
     // Rows stand a little closer than their depth, so each runs to the midpoint between its centre and the next's.
     const k = Math.min(rows.length - 1, Math.max(0, Math.round((d - rows[0].d) / (rows[1].d - rows[0].d)))), row = rows[k];
-    // In an aisle with half steps the outer half of every row is half a riser up, so no step there is over a walker's.
-    if (K.halfSteps && Math.abs(x) < K.aisle && d > row.d) return row.y + ((k + 1 < rows.length ? rows[k + 1].y : 0) - row.y) / 2;
+    // In an aisle with steps each row's depth is shared between its own level and the steps up to the next row, so no
+    // step there is over a walker's.
+    if (K.aisleSteps && Math.abs(x) < K.aisle) return aisleStep(K, k, Math.min(K.aisleSteps, Math.max(0, Math.floor((d - row.rIn) * (K.aisleSteps + 1) / K.depth))));
     return row.y;
+  };
+  // The height of row `k`'s aisle step `j` in a raked hall: 0 the row's own level, then each step an equal share of
+  // the riser up to the next row (or the landing).
+  const aisleStep = (K, k, j) => {
+    const y = K.rows[k].y;
+    return y + j * ((k + 1 < K.rows.length ? K.rows[k + 1].y : 0) - y) / (K.aisleSteps + 1);
   };
   // How far out a body may stand with its feet at `y` and stay inside the sphere from its feet to its head.
   const wallAt = (L, y) => Math.min(radiusAt(L, y + 0.05), radiusAt(L, y + 1.9)) - L.wallGap;
@@ -210,5 +218,5 @@
     const D = Math.max(0.3, Math.min(width / (2 * h), (eye - floor) / v, (ceiling - eye) / v, reach));
     return { D, w: 2 * D * h, h: 2 * D * v };
   };
-  BL.timechainRooms = { COUNT, ROOMS, LOCKABLE, OPEN, EXTERIOR_ZONE, DOOR, BODY, STEP_UP, DEG, TAU, parse, get, layout, radiusAt, onSphere, edgeY, edgeEl, floorAt, wallAt, clearAt, ceilingAt, fill };
+  BL.timechainRooms = { COUNT, ROOMS, LOCKABLE, OPEN, EXTERIOR_ZONE, DOOR, BODY, STEP_UP, DEG, TAU, parse, get, layout, radiusAt, onSphere, edgeY, edgeEl, floorAt, aisleStep, wallAt, clearAt, ceilingAt, fill };
 })();
