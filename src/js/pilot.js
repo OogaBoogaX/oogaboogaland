@@ -606,11 +606,12 @@
       lockPending = false;
       if (externalControl && !disposed) return;
       carryCursor.endAim();
+      if (carryCursor.modal) carryCursor.stop();
       if (disposed) retireAimLock();
       if (!disposed && armed()) hud.hint("Mouse capture unavailable");
     };
     const lockAim = () => {
-      if (externalControl || menuOpen || coarse || disposed || !armed()) return;
+      if (externalControl || menuOpen && !carryCursor.modal || coarse || disposed || !armed()) return;
       lockCancelled = false;
       if (lockPending || document.pointerLockElement === canvas || !canvas.requestPointerLock) return;
       lockPending = true;
@@ -639,15 +640,25 @@
     // A menu releases mouse-look without changing carry/combat intent. Network
     // transitions can close it without a gesture: soft focus restores the
     // crosshair then, and the next real canvas click takes native lock again.
-    const setMenuOpen = (on, restore = true) => {
+    const setMenuOpen = (on, restore = true, centeredDialog = null) => {
       if (menuOpen === on) return;
+      const centered = on && centeredDialog && !coarse && armed() && (softAimFocused || lockPending || document.pointerLockElement === canvas);
       menuOpen = on;
       if (on) {
-        freeCursor();
+        if (centered) {
+          // The browser cannot warp a released native pointer. Hand relative motion to
+          // the menu pointer at the crosshair instead, with all combat input held.
+          controls.reset(); resetPointer(); clearRightGesture();
+          ads = mouseAds = false; aimLeftAccepted = aimLeftFocused = false;
+          setSoftAimFocus(false);
+          if (player()) { crew.stopBurst(player()); crew.releaseSwing(player(), true); }
+          carryCursor.startModal(centeredDialog); lockAim();
+        } else freeCursor();
         if (player()) { crew.thrust(false); crew.holdRocketJump(false); }
         attackReleaseBlocked = true;
         clearFeedback();
       } else {
+        if (carryCursor.modal) carryCursor.stop();
         controls.reset();
         resetPointer();
         if (restore && armed()) focusAim(!!navigator.userActivation?.isActive);
@@ -701,7 +712,7 @@
         const rect = canvas.getBoundingClientRect();
         carryCursor.start(rect.left + overheadX * rect.width / renderer.size.width,
           rect.top + overheadY * rect.height / renderer.size.height, false, false);
-      } else if (combat && !overhead && carryCursor.active) { carryCursor.stop(); resetPointer(preserveZoom); }
+      } else if (combat && !menuOpen && !overhead && carryCursor.active) { carryCursor.stop(); resetPointer(preserveZoom); }
       if (!combat && (carryCursor.active || softAimFocused || document.pointerLockElement === canvas)) unlockAim(preserveZoom);
       const cave = aimView() ? controlled : null;
       if (cave === aimCave) return;

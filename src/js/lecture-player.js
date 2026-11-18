@@ -6,8 +6,8 @@
 // read each sentence (`speech`, off on a test page), and the clock then waits for it. Everything a hall asks is a
 // function of that one time, so a room's shared clock can drive the same player later (`seek`, `time`). Where each
 // lecture was left, and which are finished, is this browser's own (localStorage `ooga-lectures`), checked on load.
-// A recording is heard from the direction the hall says (`hear(side, ahead)`: a head-related panner on the page's
-// sound graph), as loud from anywhere.
+// A recording is heard from the direction the hall says (`hear(side, ahead)`: a smooth equal-power panner on the
+// page's sound graph), as loud from anywhere.
 // At a question (lecture-kit.js `quiz`) the lecture waits (`waiting`, `quiz`) until `answer(k)`, then plays what he
 // says to that answer and passes over what he would have said to the others. Section jumps may skip unanswered
 // questions; going back asks again whatever then lies ahead.
@@ -38,14 +38,12 @@
     // The answers given on this run through, by question; the question being waited on; and the questions this browser
     // has answered before (a bit each), which may be skipped past.
     let answers = [], waiting = -1, passed = 0;
-    // A recording played through the page's sound graph, so it can be heard from a direction (`hear`): one context
-    // for the player's life, made only once the page has had a gesture, and a source a recording. The direction is a
-    // head's own (the panner's HRTF model: each ear hears him a little apart in time and tone, which is what places a
-    // voice in headphones, where a change of level alone only sounds louder or quieter), at no cost in loudness
-    // however far off he is.
+    // One context for the player's life, made after a gesture, and a source per recording. Equal-power panning
+    // keeps left/right direction without changing HRTF filters as the listener turns; those transitions can
+    // crackle under a sustained voice. The position parameters still ease on the audio clock.
     let ctx = null, pan = null, source = null, heardSide = 0, heardAhead = 1;
-    // Keep the mastered recording at full level, through either the sound graph or the element.
-    const LEVEL = 1;
+    // The mastered recording plays at 90%, through either the sound graph or the element.
+    const LEVEL = 0.9;
     const wire = () => {
       if (!audio || source || typeof AudioContext === "undefined" || typeof PannerNode === "undefined") return;
       if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
@@ -53,7 +51,7 @@
         if (!ctx) {
           ctx = new AudioContext();
           pan = ctx.createPanner();
-          pan.panningModel = "HRTF"; pan.distanceModel = "inverse"; pan.rolloffFactor = 0; pan.refDistance = 1;
+          pan.panningModel = "equalpower"; pan.distanceModel = "inverse"; pan.rolloffFactor = 0; pan.refDistance = 1;
           const level = ctx.createGain();
           level.gain.value = LEVEL;
           pan.connect(level); level.connect(BL.sound.output(ctx));

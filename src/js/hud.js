@@ -1062,7 +1062,8 @@
         pointOnBoard(e);
         if (!board.dragStart(screenPoint.x, screenPoint.y)) return;
         screenPointer = e.pointerId;
-        el.boardScreen.setPointerCapture(e.pointerId);
+        // The virtual menu cursor owns capture for the synthetic events it routes.
+        if (e.isTrusted) el.boardScreen.setPointerCapture(e.pointerId);
         e.preventDefault(); e.stopPropagation(); updateBoard();
       });
       on(el.boardScreen, "pointermove", e => {

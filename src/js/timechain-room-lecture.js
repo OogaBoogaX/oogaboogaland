@@ -127,7 +127,7 @@
     slide: (ctx) => LS.idleSlide(ctx, ctx.canvas.width, ctx.canvas.height, P, LK.courseOf(COURSE), HINT),
     caption: (ctx) => LS.caption(ctx, ctx.canvas.width, ctx.canvas.height, P, "", false),
     board: (ctx) => LS.boardIdle(ctx, ctx.canvas.width, ctx.canvas.height, P),
-    outline: (ctx) => LS.idleOutline(ctx, ctx.canvas.width, ctx.canvas.height, P, LK.courseOf(COURSE), null, null)
+    outline: (ctx) => LS.programme(ctx, ctx.canvas.width, ctx.canvas.height, P, LK.courseOf(COURSE), null, 0, [], l => l.available !== false)
   };
   const TIPS = { slide: "The slide · tap for a close-up", board: "The board · tap for a close-up", outline: "The lecture's outline · tap for the programme", caption: "" };
   // Where things stand on the stage, in the room's frame, from its focus `F`: the lectern off to one side of the middle
@@ -232,14 +232,19 @@
     // The dome's screens: the lecture's own, which `animate` repaints, and the latest blocks, which the scene keeps.
     const D = screens(L);
     for (const id of LECTURE_SCREENS) K.live({ id, tip: TIPS[id], ...D[id], key: () => "idle", paint: IDLE[id] });
-    // As many cards of the one size as the ribbon's length holds, the label first and then the tip and the blocks
-    // under it, newest nearest the label.
-    const slot = 10, count = Math.floor((D.cards1 - D.cards0) / slot), first = (D.cards0 + D.cards1 - (count - 1) * slot) / 2;
-    const cardW = (slot - 1.6) * DEG * L.R * Math.cos((D.cards + 2.5) * DEG), cardEl = cardW * CH.CARD_H / CH.CARD_W / (L.R * DEG);
+    // Twice the card and type size, with half as many slots spanning the same three screens. Paint at twice the
+    // resolution too, so the enlarged text stays sharp. The label comes first, then the newest blocks.
+    const scale = 2, slot = 10 * scale, inset = 0.8 * scale;
+    const count = Math.floor((D.cards1 - D.cards0) / slot), first = (D.cards0 + D.cards1 - (count - 1) * slot) / 2;
+    const cardW = (slot - 2 * inset) * DEG * L.R * Math.cos((D.cards + 2.5) * DEG), cardEl = cardW * CH.CARD_H / CH.CARD_W / (L.R * DEG);
     for (let i = 0; i < count; i++) {
       const az = first + i * slot;
-      K.live({ board: "charts", tip: "Latest blocks", az0: az - slot / 2 + 0.8, az1: az + slot / 2 - 0.8, el0: D.cards, el1: D.cards + cardEl, w: CH.CARD_W, h: CH.CARD_H,
-        key: (f, now) => cardKey(f.reader, i, now), paint: (ctx, f, now) => { if (i === 0) CH.ribbonLabel(ctx, f.reader.status("recent")); else CH.card(ctx, blockBack(f.reader, i - 1), now); } });
+      K.live({ board: "charts", tip: "Latest blocks", az0: az - slot / 2 + inset, az1: az + slot / 2 - inset, el0: D.cards, el1: D.cards + cardEl, w: CH.CARD_W * scale, h: CH.CARD_H * scale,
+        key: (f, now) => cardKey(f.reader, i, now), paint: (ctx, f, now) => {
+          ctx.save(); ctx.scale(scale, scale);
+          if (i === 0) CH.ribbonLabel(ctx, f.reader.status("recent")); else CH.card(ctx, blockBack(f.reader, i - 1), now);
+          ctx.restore();
+        } });
     }
 
     // Point lights, the fixed ones first: the stage, the dome's warm glow over the front, a pale fill from the back.
@@ -251,7 +256,7 @@
 
   // ---------- a visit ----------
   const BAR = ["lecture-programme", "lecture-toggle", "lecture-back", "lecture-next", "lecture-speed", "lecture-start", "lecture-stop"];
-  const animate = (nodes, built, feeds) => {
+  const animate = (nodes, built, feeds, menuOpen) => {
     const L = built.layout, course = LK.courseOf(COURSE), S = stageOf(L);
     const query = new URLSearchParams(location.search);
     const player = BL.lecturePlayer.create({ speech: !query.has("nosim") && query.get("lecturevoice") !== "0" });
@@ -264,8 +269,8 @@
     const bump = (id) => { live[id].node.geometry.imageSurface.version++; screensVersion++; };
     // What each screen last printed, so a frame that changes nothing paints nothing.
     const seen = { slide: "", caption: "", outline: "", board: "", boardAt: 0, boardTime: -1, version: -1 };
-    let hud = null, nearAction = null, drawing = false, motionTime = 0, boardGlow = 0, slideGlow = 0, hovered = -1, sectionHovered = -1, popupOpen = false;
-    const quizRows = [], sectionRows = [], inverse = BL.math.mat4.create(), screenPoint = { x: 0, y: 0 };
+    let hud = null, nearAction = null, drawing = false, motionTime = 0, boardGlow = 0, slideGlow = 0, hovered = -1, sectionHovered = -1, popupOpen = false, catalogueHovered = -1;
+    const quizRows = [], sectionRows = [], catalogueRows = [], inverse = BL.math.mat4.create(), screenPoint = { x: 0, y: 0 };
     let scrubOwner = null, scrubOffset = 0;
     const asking = () => player.playing && player.waiting >= 0;
     // Match the curved canvas shader at the exact face hit, including its vertical texture flip.
@@ -296,6 +301,7 @@
     };
     const answerAt = (owner, ray) => asking() && owner && owner.kind === "live" && owner.slot.spec.id === "slide" && pointOnScreen(owner, ray) ? rowAt(quizRows, screenPoint.x, screenPoint.y) : -1;
     const sectionAt = (owner, ray) => player.timeline && owner && owner.kind === "live" && owner.slot.spec.id === "outline" && pointOnScreen(owner, ray) ? rowAt(sectionRows, screenPoint.x, screenPoint.y) : -1;
+    const catalogueAt = (owner, ray) => !player.timeline && owner && owner.kind === "live" && owner.slot.spec.id === "outline" && pointOnScreen(owner, ray) ? rowAt(catalogueRows, screenPoint.x, screenPoint.y) : -1;
     const jumpSection = (i) => {
       if (!player.timeline || i < 0 || i >= player.timeline.sections.length || player.scrubbing) return false;
       player.seek(player.timeline.sections[i].start); seekScene(); label(); return true;
@@ -310,9 +316,18 @@
       const T = player.timeline;
       for (const id of LECTURE_SCREENS) if (!canvasOf(id)) return;
       if (!T) {
-        if (seen.slide === "idle") return;
-        for (const id of LECTURE_SCREENS) { const c = canvasOf(id), ctx = c.getContext("2d"); if (id === "outline") LS.idleOutline(ctx, c.width, c.height, P, course, player.progress, null); else IDLE[id](ctx); bump(id); }
-        seen.slide = "idle"; seen.caption = seen.outline = seen.board = ""; mark.epoch = -1; mark.settled = -1;
+        if (seen.slide !== "idle") {
+          for (const id of LECTURE_SCREENS) if (id !== "outline") { const c = canvasOf(id); IDLE[id](c.getContext("2d")); bump(id); }
+          seen.slide = "idle"; seen.caption = seen.outline = seen.board = ""; mark.epoch = -1; mark.settled = -1;
+          sectionRows.length = quizRows.length = 0;
+        }
+        const key = `catalogue|${player.version}|${catalogueHovered}`;
+        if (seen.outline !== key) {
+          seen.outline = key;
+          const c = canvasOf("outline");
+          LS.programme(c.getContext("2d"), c.width, c.height, P, course, player.progress, nextLecture(), catalogueRows, ready, catalogueHovered);
+          bump("outline");
+        }
         return;
       }
       const t = player.time, slide = T.slides[st.slide], local = slide && slide.beat === st.beat ? st.sentence - T.beats[st.beat].first : 99;
@@ -504,7 +519,7 @@
       get canvas() { return programmeCanvas || (programmeCanvas = CH.canvas(1400, 860)); },
       get version() { return programmeVersion; }, go() {},
       hover(x, y) { const i = rowAt(rows, x, y); if (i !== programmeHovered) { programmeHovered = i; paintProgramme(); } },
-      onClose() { programmeHovered = -1; },
+      onClose() { programmeHovered = -1; menuOpen?.(false); },
       pick(x, y) { const i = rowAt(rows, x, y); if (i < 0) return false; if (!ready(course.lectures[i])) return true; chosen = i; return start(i) ? "close" : true; },
       key(key) {
         const n = course.lectures.length, per = Math.ceil(n / 2);
@@ -522,6 +537,7 @@
       else chosen = Math.max(0, nextLecture());
       programmeHovered = -1; paintProgramme();
       h.openBoard(programme);
+      menuOpen?.(true, true, h.el.board);
       return true;
     };
     // The screens close up: the slide, the board and the outline, paged with the arrows.
@@ -572,12 +588,12 @@
         if (player.waiting >= 0 && k >= "1" && k <= "4") return act(`lecture-answer-${k}`);
         return k === "p" ? act("lecture-toggle") : k === "[" ? act("lecture-back") : k === "]" ? act("lecture-next") : false;
       },
-      onClose() { endScrub(true); popupOpen = false; hovered = sectionHovered = -1; }
+      onClose() { endScrub(true); popupOpen = false; hovered = sectionHovered = -1; menuOpen?.(false); }
     };
     const openScreen = (id, h) => {
       page = Math.max(0, PAGES.findIndex(p => p[0] === id)); pagesVersion++;
       hovered = sectionHovered = -1;
-      h.openBoard(closeUp); popupOpen = true; return true;
+      h.openBoard(closeUp); popupOpen = true; menuOpen?.(true, true, h.el.board); return true;
     };
     const act = (action, h) => {
       hud = h || hud;
@@ -634,11 +650,12 @@
       scrubMove(ray) { if (player.scrubbing && pointOnScreen(scrubOwner, ray, true)) moveScrubAt(screenPoint.x); },
       scrubEnd: endScrub,
       get question() { return asking(); },
-      get interactive() { return !!player.timeline; },
+      // The idle catalogue and screen close-ups accept the same carry/combat pointer path as a running lecture.
+      get interactive() { return true; },
       get hoverVersion() { return player.version; },
       hover(owner, ray) {
         if (popupOpen) return;
-        hovered = answerAt(owner, ray); sectionHovered = sectionAt(owner, ray);
+        hovered = answerAt(owner, ray); sectionHovered = sectionAt(owner, ray); catalogueHovered = catalogueAt(owner, ray);
       },
       tap(owner, h, ray) {
         hud = h;
@@ -650,7 +667,11 @@
             if (answer >= 0) { player.answer(answer); label(); }
             return true;
           }
-          if (!player.timeline) return openProgramme(h);
+          if (!player.timeline) {
+            const lecture = catalogueAt(owner, ray);
+            if (lecture >= 0 && ready(course.lectures[lecture])) { start(lecture); return true; }
+            return openProgramme(h);
+          }
           if (id === "outline" && jumpSection(sectionAt(owner, ray))) return true;
           return openScreen(id, h);
         }
@@ -685,7 +706,7 @@
         for (const b of buttons) if (b) b.hidden = true;
       },
       // For a debug page (`__ooga.timechain.motion`): the player, `start(i)`, the lecturer, the screens and the stage.
-      stats: { player, start, get focusScreen() { return focusScreen(); }, get quizHover() { return hovered; }, get sectionHover() { return sectionHovered; }, quizRows, sectionRows, view: viewLecturer, get lecturer() { return lecturer; }, screens: () => screens(L), stage: S, get aim() { return aimNow(); }, get cues() { return cues; } }
+      stats: { player, start, get focusScreen() { return focusScreen(); }, get quizHover() { return hovered; }, get sectionHover() { return sectionHovered; }, get catalogueHover() { return catalogueHovered; }, quizRows, sectionRows, catalogueRows, view: viewLecturer, get lecturer() { return lecturer; }, screens: () => screens(L), stage: S, get aim() { return aimNow(); }, get cues() { return cues; } }
     };
   };
   BL.timechainRoomKinds.lecture = { plan, animate, door, stageOf };

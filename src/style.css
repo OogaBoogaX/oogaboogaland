@@ -1301,6 +1301,7 @@ body[data-active-scene="block"] .mode-hud {
 }
 
 .modal-close:hover,
+.modal-close.virtual-hover,
 .modal-close:focus-visible {
   background: rgba(0, 0, 0, 0.38);
 }

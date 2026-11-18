@@ -237,7 +237,11 @@
     els = { dialog: $("model-modal"), title: $("model-title"), canvas: $("model-canvas"), kicker: $("model-kicker"), name: $("model-name"), text: $("model-text"),
       stats: $("model-stats"), note: $("model-note"), links: $("model-links"), count: $("model-count"), prev: $("model-prev"), next: $("model-next"), help: $("model-help"), close: $("model-close") };
     const c = els.canvas;
-    c.addEventListener("pointerdown", (e) => { c.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); pinch = 0; });
+    c.addEventListener("pointerdown", (e) => {
+      // The combat menu cursor captures its own synthetic drag under pointer lock.
+      if (e.isTrusted && !document.pointerLockElement) c.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); pinch = 0;
+    });
     c.addEventListener("pointermove", (e) => {
       const p = pointers.get(e.pointerId);
       if (!p) return;

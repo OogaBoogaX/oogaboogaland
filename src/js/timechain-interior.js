@@ -445,9 +445,9 @@
       follow: { y: 0.9, min: 3, max: 6, pitch: [0.2, 0.7] },
       clampTarget, clampCamera, observeOrbit: keepCameraInside, ceilingAt: (x, z) => roof(x, z, 0), coarse: COARSE, mayPossess: (cave) => BL.net.mayDrive(cave.traits.name),
       jetpackStatus: () => NO_JETPACK,
-      // Combat captures canvas clicks before interact; its free cursor and locked reticle use the same screen hit.
-      captureClick: (x, y) => quizTap(x, y),
-      primaryAction: (pressed, e) => pressed && quizTap(e ? e.clientX : window.innerWidth / 2, e ? e.clientY : window.innerHeight / 2, !e || !quizPressFree),
+      // Combat captures canvas clicks before interact; route every picked target through carry's tap handler.
+      captureClick: (x, y) => roomTap(x, y),
+      primaryAction: (pressed, e) => pressed && roomTap(e ? e.clientX : window.innerWidth / 2, e ? e.clientY : window.innerHeight / 2, !e || !quizPressFree),
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt }
     });
     const fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 4, z: 0 } });
@@ -536,7 +536,7 @@
     // what it lets go of on leaving (`dispose`, the Block Party's radio). `built.ear` is where the visitor hears from
     // (their Ooga, else the view's target), kept current every frame for a kind's sounds.
     const ear = built.ear = { x: 0, y: 0, z: 0 };
-    const motion = kind.animate ? kind.animate(built.nodes, built, feeds) : null;
+    const motion = kind.animate ? kind.animate(built.nodes, built, feeds, pilot.setMenuOpen) : null;
 
     const NO_ACTORS = [], actors = [];
 
@@ -897,9 +897,28 @@
       math.mat4.rayFromView(quizRay, quizCamera, renderer.size.width, renderer.size.height, camera.fov, camera.position, x, y, camera.orthoMix, camera.orthoHeight);
       return hit.owner;
     };
-    const quizTap = (x, y, reticle) => {
-      const owner = quizHit(x, y, reticle);
-      return !!owner && motion.tap(owner, hud, quizRay);
+    const tapPoint = { x: 0, y: 0 };
+    const releaseRoomPopup = () => {
+      const popup = document.querySelector("dialog:modal");
+      pilot.setMenuOpen(!!popup, true, popup);
+    };
+    const roomTap = (x, y, reticle = false) => {
+      if (guide.stage || document.querySelector("dialog:modal")) return false;
+      const rect = canvas.getBoundingClientRect();
+      tapPoint.x = reticle && pilot.aimFocused && !pilot.cursor.active ? rect.width / 2 : x - rect.left;
+      tapPoint.y = reticle && pilot.aimFocused && !pilot.cursor.active ? rect.height / 2 : y - rect.top;
+      const hit = input.pick(tapPoint.x, tapPoint.y, pilot.player, true);
+      if (!hit) return false;
+      math.mat4.lookAt(quizCamera, camera.position, camera.target, camera.up || quizUp);
+      math.mat4.rayFromView(tapRay, quizCamera, renderer.size.width, renderer.size.height, camera.fov, camera.position, tapPoint.x, tapPoint.y, camera.orthoMix, camera.orthoHeight);
+      hooks.onTap(hit, tapPoint, tapRay);
+      // Room-specific panels beyond lecture screens also need the menu pointer until they close.
+      const popup = document.querySelector("dialog:modal");
+      if (popup) {
+        pilot.setMenuOpen(true, true, popup);
+        popup.addEventListener("close", releaseRoomPopup, { once: true, signal: ctx.signal });
+      }
+      return true;
     };
     // Own a time-bar press before combat focus or the room's orbit gesture can consume it.
     let scrubPointer = null, scrubX = 0, scrubY = 0, scrubFocus = false, scrubCursor = false, scrubStyle = "";
@@ -993,7 +1012,7 @@
     Object.assign(hooks, {
       onHover: (hit, p) => { if (hit && !guide.stage && !lock.on && !(motion && motion.question)) hud.tooltip.show(tipFor(hit), p.x, p.y); else hud.tooltip.hide(); },
       onHoverMove: (hit, p) => { if (!guide.stage && !lock.on && !(motion && motion.question)) hud.tooltip.show(tipFor(hit), p.x, p.y); },
-      onTap: (hit, p) => {
+      onTap: (hit, p, ray = null) => {
         if (!hit || guide.stage) return;
         const o = hit.owner;
         if (o.kind === "exit") { if (nearExit()) walkOut(); else hud.toast("Walk up to the Exit button, then press it"); }
@@ -1013,7 +1032,7 @@
           const s = seats[o.index], p = avatar && avatar.root.position;
           if (!p || !s || s.sitter || nearChair() !== s || !people.sitPlayer(s)) hud.toast(COARSE ? "Walk up to a free seat, then tap SIT" : "Walk up to a free seat and press Space to sit");
         } else if (o.kind === "table") hud.toast(`${room.name} · ${shared ? "shared with whoever chose it" : "a solo copy, just for you"}`);
-        else if (motion && motion.tap && motion.tap(o, hud, p ? (renderer.ray(p.x, p.y, camera, tapRay), tapRay) : null)) return;
+        else if (motion && motion.tap && motion.tap(o, hud, ray || (p ? (renderer.ray(p.x, p.y, camera, tapRay), tapRay) : null))) return;
         else if (o.data && o.data.say) hud.toast(o.data.say);
       },
       ...pilot.hooks,

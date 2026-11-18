@@ -22927,7 +22927,50 @@ scene("timechain", { url: roomPage(0), steps: [timechainRoom, timechainRooms, ti
 scene("timechain", { label: "canvas2d", url: roomPage(1, "canvas2d=1"), steps: [timechainCanvas] });
 const timechainLectureScreens = {
   name: "timechain lecture screens", why: "regression: projected answers, screen focus, gestures, scrub holds, background sync and live popups follow the same lecture clock", run: async b => {
-  const check = (ok, message) => record(`lecture screen: ${message}`, ok);
+  const check = (ok, message, detail) => record(`lecture screen: ${message}`, ok, detail);
+  // The idle catalogue must accept the same real pointer in carry and combat, before any timeline exists.
+  await b.evaluate(`window.catalogueTest = {
+    point(i) {
+      const B=__ooga, M=B.timechain.motion, D=M.screens().outline, r=M.catalogueRows[i], deg=Math.PI/180;
+      const x=(r.x+r.w*.5)/D.w, y=(r.y+r.h*.5)/D.h;
+      const el=Math.asin(Math.sin(D.el1*deg)-y*(Math.sin(D.el1*deg)-Math.sin(D.el0*deg)));
+      const p=BL.timechainRooms.onSphere(B.timechain.layout,(D.az0+x*(D.az1-D.az0))*deg,el,.994);
+      return B.project(p.x,p.y,p.z);
+    }
+  }`);
+  for (const combat of [false, true]) {
+    await b.evaluate(`(() => {
+      const B=__ooga; B.timechain.motion.player.close();
+      if (B.pilot.aiming !== ${combat}) B.pilot.modeAction('mode-toggle');
+      B.pilot.navigate({position:{x:0,y:0,z:B.timechain.layout.arrival.z},yaw:Math.PI*.4,pitch:.04,dist:4});
+      B.pilot.freeCursor(); B.advance(.3,1/60);
+    })()`);
+    check(await b.evaluate(`(() => {
+      const rows=__ooga.timechain.motion.catalogueRows;
+      return rows.length===14 && rows[0].x===rows[6].x && rows[7].x>rows[0].x && rows[7].y===rows[0].y;
+    })()`), 'idle catalogue presents both lecture columns');
+    for (const i of [1, 7, 0]) {
+      // A preceding physical click can capture mouse-look. Release it before testing the free pointer again.
+      await b.evaluate('__ooga.pilot.freeCursor()'); await b.sleep(60);
+      const pt=await b.evaluate(`catalogueTest.point(${i})`);
+      await b.mouse('mouseMoved',pt.x,pt.y,{button:'none'});
+      await b.evaluate('__ooga.advance(.1,1/60)');
+      check(await b.evaluate(`__ooga.timechain.motion.catalogueHover===${i}`), `idle catalogue hover in ${combat ? 'combat' : 'carry'}, lecture ${i+1}`, JSON.stringify({pt, actual:await b.evaluate('__ooga.timechain.motion.catalogueHover')}));
+      await b.click(pt.x,pt.y);
+      if (i) {
+        check(await b.evaluate('!__ooga.timechain.motion.player.timeline && document.getElementById("board-modal").open'), 'unavailable wall lecture opens the catalogue without starting playback');
+        await b.evaluate('document.querySelector("#board-modal [data-action=board-close]").click()');
+      }
+      else check(await untilPage(b,'!!B.timechain.motion.player.timeline && B.timechain.motion.player.playing && !document.querySelector("dialog:modal")',10000), 'wall click starts Lecture 1 directly');
+      await b.evaluate('document.exitPointerLock?.()'); await b.sleep(60);
+    }
+  }
+  await b.evaluate(`(() => {
+    const B=__ooga; B.timechain.motion.player.close();
+    if (B.pilot.aiming) B.pilot.modeAction('mode-toggle');
+    B.pilot.navigate({position:{x:0,y:0,z:B.timechain.layout.arrival.z},yaw:0,pitch:.04,dist:4});
+    B.pilot.freeCursor(); B.advance(.3,1/60);
+  })()`);
   await b.evaluate(`(async () => {
     const B = __ooga, M = B.timechain.motion, P = M.player;
     await P.open(BL.lectures.courseOf('first-principles').lectures[0]);
@@ -23081,13 +23124,15 @@ const timechainLectureScreens = {
       B.pilot.navigate({ position: { x: 0, y: 0, z: B.timechain.layout.arrival.z }, yaw: Math.PI * .4, pitch: .04, dist: 4 });
       B.pilot.freeCursor(); P.pause(); P.seek(20); ${playing ? 'P.play();' : ''} B.advance(.1,1/60);
     })()`);
+    // Let the asynchronous pointer-lock release finish before starting a new captured drag.
+    await b.sleep(60);
     const start = await b.evaluate('quizTest.bar(.4)'), end = await b.evaluate('quizTest.bar(.55)');
     await b.mouse('mousePressed', start.x, start.y, { button: 'left', clickCount: 1 });
     check(await b.evaluate('__ooga.timechain.motion.player.scrubbing && !__ooga.timechain.motion.player.playing'), 'bar press captures and pauses in ' + (combat ? 'combat' : 'carry'));
     const held = await b.evaluate('__ooga.timechain.motion.player.time');
     await b.mouse('mouseMoved', end.x, end.y, { button: 'left', buttons: 1 });
     await b.evaluate('__ooga.advance(.2,1/60)');
-    check(await b.evaluate(`(() => { const p=__ooga.timechain.motion.player; return p.time === ${held} && Math.abs(p.scrubTime - Math.round(p.timeline.duration*.55)) < 3; })()`), 'drag previews the selected second while the cue clock stays frozen');
+    check(await b.evaluate(`(() => { const p=__ooga.timechain.motion.player; return p.time === ${held} && Math.abs(p.scrubTime - Math.round(p.timeline.duration*.55)) < 3; })()`), 'drag previews the selected second while the cue clock stays frozen', JSON.stringify({combat,playing,held,actual:await b.evaluate('({time:__ooga.timechain.motion.player.time,preview:__ooga.timechain.motion.player.scrubTime,expected:Math.round(__ooga.timechain.motion.player.timeline.duration*.55),scrubbing:__ooga.timechain.motion.player.scrubbing})')}));
     const target = await b.evaluate('__ooga.timechain.motion.player.scrubTime');
     await b.mouse('mouseReleased', end.x, end.y, { button: 'left', clickCount: 1 });
     check(await b.evaluate(`(() => { const p=__ooga.timechain.motion.player; return !p.scrubbing && p.playing === ${playing} && Math.abs(p.time - ${target}) < 1; })()`), 'release seeks and restores the previous playback state');
