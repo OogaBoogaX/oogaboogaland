@@ -258,7 +258,7 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let oogatronUnsub, renderer, game, world, go, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, totemSolids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, duels, npcSync, npcStatusBeams, npcGhosts, physics;
+  let oogatronUnsub, renderer, game, world, go, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, totemSolids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, duels, npcSync, propSync, npcStatusBeams, npcGhosts, physics;
   // GAME MODE (`setGameMode`): an island event holds the island still for play while it runs.
   let gameMode = false, gameCombatOnly = false;
   let cloudHopper = null, cloudIsland = null, cloudPile = null, cloudPileSolids = null, cloudFinishFruit = null;
@@ -856,7 +856,8 @@
     o.next = now + 0.6;
     // A loose piece (physics.js) is where its body lies now, and the poke knocks it away from the view, a die tumbling.
     if (o.body !== undefined && physics) {
-      physics.knock(o.body, camera.position.x, camera.position.z, o.piece === "die" ? 40 : 20);
+      const power = o.piece === "die" ? 40 : 20;
+      if (!propSync || !propSync.knock(o.body, camera.position.x, camera.position.z, power)) physics.knock(o.body, camera.position.x, camera.position.z, power);
       physics.position(o.body, o);
     }
     const words = PIECES[o.piece];
@@ -1551,6 +1552,8 @@
   let physicsPlayerX = NaN, physicsPlayerZ = NaN;
   const updatePhysics = (dt) => {
     if (!physics || !physics.count) return;
+    // Signed in under another page's host, the props are that page's to simulate and are played back here (prop-sync.js).
+    if (propSync && propSync.update(dt)) { physicsPlayerX = physicsPlayerZ = NaN; return; }
     physics.clearActors();
     const player = crew.player;
     if (player && player.root.visible) {
@@ -1562,13 +1565,14 @@
     if (remotes) for (const a of remotes.actors()) if (dt > 0) physics.actor(a.x, a.y, a.z, a.radius, a.height, a.dx / dt, a.dz / dt);
     physics.step(dt);
     physics.settle(dt, PHYSICS_HOME_AFTER, physicsHome);
+    if (propSync) propSync.publish(dt);
   };
   // A round's first loose prop stops it and is knocked along it; the driven Ooga's blow knocks what is in front of it.
-  const physicsShot = (from, to) => { if (physics) physics.shot(from, to); };
+  const physicsShot = (from, to) => { if (physics && !(propSync && propSync.shot(from, to))) physics.shot(from, to); };
   const physicsSwing = (cave, charge) => {
     if (!physics || cave !== pilot.player) return;
     const p = cave.root.position;
-    physics.blow(p.x, p.y - cave.baseY, p.z, cave.bodyHeight, cave.root.rotation.y, charge);
+    if (!propSync || !propSync.blow(p.x, p.y - cave.baseY, p.z, cave.bodyHeight, cave.root.rotation.y, charge)) physics.blow(p.x, p.y - cave.baseY, p.z, cave.bodyHeight, cave.root.rotation.y, charge);
   };
   const dressMouth = (slot, m, group) => {
     // The Canvas 2D fallback keeps the plain island, but the writable board remains available.
@@ -10966,6 +10970,7 @@
     remotes.dispose();
     muteHammockShots();
     npcSync.dispose(true);
+    propSync.suspend();
     npcStatusBeams?.clear();
     pilot.suspend();
     input.suspend();
@@ -11799,6 +11804,8 @@
     // Signed-in pages keep the crew in step: one runs it for everyone, the others follow its frames. The
     // crew's effects, shots and work hooks pass through the sync, which notes them while this page hosts;
     // a following page replays them into the same effects and gorillas.
+    // And the loose props with them: the same host simulates them, the others play them back.
+    propSync = BL.propSync.create({ physics: () => physics, onHome: physicsHome });
     npcSync = BL.npcSync.create({
       crew, fx, animationInterval,
       // The room's crew host runs another version: the crew holds still here rather than run a second copy.
@@ -11821,7 +11828,7 @@
       return workHit(cave);
     };
     // Duels (duel.js): a challenge is refused while the visitor is busy with something else.
-    duels = BL.duel.create({ root, remotes, pilot, crew, camera: () => camera, fx, clear: liveClear, ended: () => { if (physics) physics.reset(physicsHome); }, refusal: () =>
+    duels = BL.duel.create({ root, remotes, pilot, crew, camera: () => camera, fx, clear: liveClear, ended: () => { if (physics && !(propSync && propSync.reset())) physics.reset(physicsHome); }, refusal: () =>
       cloudHopper?.active ? "Not during Cloud Hopper" : gameMode ? "Not while a game runs" : clankerPlay?.active ? "Duels are fought as an Ooga"
         : !pilot.player ? "Drive your Ooga to duel" : pilot.player.camp.seat ? "Get up first" : pilot.player.health.stunned ? "Catch your breath first" : "" });
     shared.onSwing = (cave, charge) => { duels.swing(cave, charge); physicsSwing(cave, charge); };
@@ -12173,7 +12180,7 @@
         get shown() {
           return pile.shown;
         },
-        terrainSections, caveSections, cutawayPaths: CUTAWAY_PATH_STATE, terrainRampRoof, get cutawayTravelRamp() { return cutawayTravelRamp; }, get cutawayTravelChannel() { return cutawayTravelChannel; }, get cutawayTravelStation() { return cutawayTravelStation; }, island, mouths: island.mouths, labels, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, get hammock() { return hammock; }, altar, path: island.path.debug, headquarters, jumbotron, get repoIsland() { return repoIsland; }, get physics() { return physics; }, get npcSync() { return npcSync; }, get npcGhosts() { return npcGhosts; }, claimOwnOoga: () => { ownOogaClaimed = false; return claimOwnOoga(); }, accountChanged: () => onAccountChange(), clankers, clankerPlay, rageThrowMap, rageEdgeGoal, rageLandAt, rageCaptureLandAt, rageMapRouteClear, rageCaptureEligible, rageApproach, rageWarpRequired, rageGrab, rageCaptive, rageRelease, rageThrow, rageDragClear,
+        terrainSections, caveSections, cutawayPaths: CUTAWAY_PATH_STATE, terrainRampRoof, get cutawayTravelRamp() { return cutawayTravelRamp; }, get cutawayTravelChannel() { return cutawayTravelChannel; }, get cutawayTravelStation() { return cutawayTravelStation; }, island, mouths: island.mouths, labels, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, get hammock() { return hammock; }, altar, path: island.path.debug, headquarters, jumbotron, get repoIsland() { return repoIsland; }, get physics() { return physics; }, get propSync() { return propSync; }, get npcSync() { return npcSync; }, get npcGhosts() { return npcGhosts; }, claimOwnOoga: () => { ownOogaClaimed = false; return claimOwnOoga(); }, accountChanged: () => onAccountChange(), clankers, clankerPlay, rageThrowMap, rageEdgeGoal, rageLandAt, rageCaptureLandAt, rageMapRouteClear, rageCaptureEligible, rageApproach, rageWarpRequired, rageGrab, rageCaptive, rageRelease, rageThrow, rageDragClear,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -12452,7 +12459,8 @@
     zoneHeld = null;
     BL.net.setHub(false);
     npcSync.dispose();
-    remotes = duels = npcSync = null;
+    propSync.dispose();
+    remotes = duels = npcSync = propSync = null;
     npcGhosts.dispose(); npcGhosts = null;
     crew.dispose();
     critters.dispose();

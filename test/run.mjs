@@ -4630,6 +4630,180 @@ const canvasSurfaceCacheChecks = async () => {
   record("Canvas surface compatibility: the production painter needs no filter, readback or resize, keeps source and coverage draws, uses valid additive alpha for overbright light, and restores context state before reuse",
     rows.every(row => Object.values(row).every(Boolean)), JSON.stringify(rows));
 };
+// The island's loose props in step (prop-sync.js): two and three pages, each with its own physics world, joined by a
+// room that relays as worker/src/room.js does. rule: signed-in players see the same props in the same places.
+const propSyncChecks = async () => {
+  const sources = ["physics", "prop-sync"].map((name) => readFileSync(join(root, `src/js/${name}.js`), "utf8"));
+  // The room, as worker/src/room.js relays: frames from the host alone to every other page, inputs to the host alone.
+  const room = () => {
+    const pages = [], bus = { host: 0, epoch: 0, frames: 0, bytes: 0, inputs: [], drop: null, pages };
+    bus.tell = () => { bus.epoch++; for (const p of pages) { p.net.state.hostId = bus.host; p.net.state.followers = bus.host ? pages.length - 1 : 0; p.net.state.hostEpoch = bus.epoch; } };
+    bus.elect = (id) => { bus.host = id; bus.tell(); };
+    bus.join = (id, dice = 6) => {
+      const context = { window: { BL: {} }, Math, Float64Array, Float32Array, Uint8Array, Int16Array, Int32Array, ArrayBuffer, DataView, Array, Number, Error, Infinity, NaN };
+      for (const source of sources) runInNewContext(source, context);
+      const BL = context.window.BL, subscribers = new Set();
+      const world = BL.physics.create({ ground: () => 0, clear: () => true });
+      const nodes = [];
+      for (let i = 0; i < dice; i++) {
+        const node = { position: { x: 0, y: 0, z: 0 }, quaternion: new Float64Array(4) };
+        nodes.push(node);
+        world.add({ node, x: i * 1.5, y: 0.15, z: 0, half: [0.15, 0.15, 0.15], mass: 4 });
+      }
+      world.sync();
+      const net = {
+        state: { room: "live", props: true, hostId: 0, selfId: id, followers: 0, hostEpoch: 0 },
+        sendProps: (view) => {
+          if (bus.host !== id) return;
+          bus.frames++; bus.bytes += view.byteLength;
+          const data = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+          for (const p of pages) if (p.id !== id && !(bus.drop && bus.drop(p, data))) for (const fn of p.subscribers) fn(data.slice(0), null);
+        },
+        sendPropInput: (k, ...a) => {
+          const msg = JSON.parse(`{"t":"prop","k":"${k}","a":[${a.map((n) => +n.toFixed(2)).join(",")}]}`);
+          bus.inputs.push(msg.k);
+          for (const p of pages) if (p.id === bus.host && p.id !== id) for (const fn of p.subscribers) fn(null, msg);
+          return true;
+        },
+        subscribeProps: (fn) => { subscribers.add(fn); return () => subscribers.delete(fn); },
+      };
+      const homes = [];
+      const sync = BL.propSync.create({ physics: () => world, net, onHome: (i) => homes.push(i) });
+      const page = { id, BL, world, nodes, net, sync, subscribers, homes, stepped: 0,
+        tick: (dt) => { if (sync.update(dt)) return; page.stepped++; world.clearActors(); world.step(dt); world.settle(dt, 15); sync.publish(dt); } };
+      pages.push(page);
+      bus.tell();
+      return page;
+    };
+    bus.run = (seconds, each = null) => { for (let t = 0; t < seconds; t += 1 / 60) { for (const p of pages) p.tick(1 / 60); if (each) each(t); } };
+    return bus;
+  };
+  const S = new Float64Array(7), T = new Float64Array(7);
+  // The farthest any body lies from the same body on another page, in metres, and the least their turns agree (1: the same).
+  const apart = (a, b) => {
+    let far = 0, turn = 1;
+    for (let i = 0; i < a.world.count; i++) {
+      a.world.read(i, S); b.world.read(i, T);
+      far = Math.max(far, Math.hypot(S[0] - T[0], S[1] - T[1], S[2] - T[2]));
+      turn = Math.min(turn, Math.abs(S[3] * T[3] + S[4] * T[4] + S[5] * T[5] + S[6] * T[6]));
+    }
+    return { far, turn };
+  };
+  const resting = (p) => { for (let i = 0; i < p.world.count; i++) if (!p.world.asleep(i)) return false; return true; };
+  const same = (a, b) => { const d = apart(a, b); return d.far < 0.01 && d.turn > 0.9995; };
+  const detail = (a, b) => JSON.stringify(apart(a, b));
+
+  // 1. The host's knock, and nothing sent while nothing moves.
+  {
+    const bus = room(), host = bus.join(1), guest = bus.join(2);
+    bus.elect(1);
+    bus.run(0.5);
+    const quiet = bus.frames, quietBytes = bus.bytes;
+    record("prop sync: a follower stops simulating once the host has said where everything is, and resting props send nothing more",
+      guest.sync.following && host.sync.hosting && quiet <= 2 && quietBytes <= 20, JSON.stringify({ following: guest.sync.following, quiet, quietBytes }));
+    const before = guest.stepped;
+    host.world.knock(2, -3, -3, 40);
+    let lag = 0;
+    bus.run(9, () => { lag = Math.max(lag, apart(host, guest).far); });
+    record("prop sync: a die the host knocks tumbles and comes to rest in the same place and turn on a following page, which never steps it",
+      resting(host) && host.world.displaced(2) && same(host, guest) && guest.stepped === before && lag < 1.2, JSON.stringify({ ...apart(host, guest), lag, stepped: guest.stepped - before }));
+    const moving = bus.frames - quiet, perBody = (bus.bytes - quietBytes) / Math.max(1, moving);
+    record("prop sync: one tumbling die costs about a record a frame at no more than the send rate", moving <= 9 * 15 + 4 && perBody <= 10 + 14 * 6, JSON.stringify({ moving, perBody }));
+    // Left alone it goes home on the host's clock, and every page hears it.
+    bus.run(11);
+    const sent = bus.frames;
+    bus.run(5);
+    record("prop sync: a prop the host sends home goes home on the follower too, and then nothing is sent",
+      !host.world.displaced(2) && !guest.world.displaced(2) && same(host, guest) && guest.homes.includes(2) && bus.frames === sent, JSON.stringify({ ...apart(host, guest), homes: guest.homes, after: bus.frames - sent }));
+  }
+  // 2. A follower's own poke, round, blow and reset are the host's to apply.
+  {
+    const bus = room(), host = bus.join(1), guest = bus.join(2);
+    bus.elect(1);
+    bus.run(0.5);
+    const took = guest.sync.knock(1, -2, 2, 40);
+    guest.world.read(1, S);
+    const held = Math.abs(S[1] - 0.15) < 1e-9;
+    bus.run(4);
+    record("prop sync: a follower's poke is sent to the host, moves nothing here until the host says so, and ends the same on both",
+      took && held && bus.inputs.join("") === "k" && host.world.displaced(1) && resting(host) && same(host, guest), JSON.stringify({ took, held, inputs: bus.inputs, ...apart(host, guest) }));
+    const from = { x: 3, y: 0.15, z: -5 }, to = { x: 3, y: 0.15, z: 5 }, miss = { x: 40, y: 3, z: 5 };
+    const missed = guest.sync.shot({ x: 40, y: 3, z: -5 }, miss), inputs = bus.inputs.length;
+    const hit = guest.sync.shot(from, to);
+    bus.run(4);
+    record("prop sync: a follower's round stops on the prop it meets as shown here and knocks it on the host; a round that meets none sends nothing",
+      missed && miss.z === 5 && inputs === 1 && hit && to.z < 0 && bus.inputs[1] === "s" && host.world.displaced(2) && same(host, guest), JSON.stringify({ to, inputs: bus.inputs, ...apart(host, guest) }));
+    const far = guest.sync.blow(60, 0, 60, 1.4, 0, 0.5), count = bus.inputs.length;
+    host.world.read(4, S);
+    const near = guest.sync.blow(S[0], 0, S[2] - 0.9, 1.4, 0, 1);
+    bus.run(9);
+    record("prop sync: a follower's blow reaches the host only with a prop in reach", far && bus.inputs.length === count + 1 && near && bus.inputs[count] === "b" && host.world.displaced(4) && same(host, guest), JSON.stringify({ inputs: bus.inputs, ...apart(host, guest) }));
+    const reset = guest.sync.reset();
+    bus.run(0.5);
+    let out = 0;
+    for (let i = 0; i < host.world.count; i++) if (host.world.displaced(i) || guest.world.displaced(i)) out++;
+    record("prop sync: a follower's duel reset puts every prop home on every page", reset && out === 0 && same(host, guest), JSON.stringify({ out, ...apart(host, guest) }));
+    // What a page must refuse: a body that is not there, a wild number, a frame cut short.
+    let threw = "";
+    try {
+      for (const fn of host.subscribers) { fn(null, { t: "prop", k: "k", a: [99, 0, 0, 40, 0, 0] }); fn(null, { t: "prop", k: "k", a: [1.5, 0, 0, 1e9, 0, 0] }); fn(null, { t: "prop", k: "zz", a: [0, 0, 0, 0, 0, 0] }); }
+      for (const fn of guest.subscribers) { fn(new ArrayBuffer(3), null); fn(new ArrayBuffer(17), null); const bad = new ArrayBuffer(24), v = new DataView(bad); v.setUint32(0, host.BL.propSync.MAGIC, true); v.setUint32(4, 1, true); v.setUint8(9, 1); fn(bad, null); }
+    } catch (error) { threw = String(error); }
+    bus.run(1);
+    record("prop sync: an input for no body, a kind nobody knows and a frame cut short or of another cast change nothing and throw nothing", !threw && same(host, guest) && guest.sync.following, threw || detail(host, guest));
+  }
+  // 3. A page arriving late, and a host that hands over while a die is in the air.
+  {
+    const bus = room(), host = bus.join(1), guest = bus.join(2);
+    bus.elect(1);
+    bus.run(0.5);
+    host.world.knock(0, -3, 1, 40); host.world.knock(3, 5, -2, 30);
+    bus.run(4);
+    const late = bus.join(3);
+    bus.run(0.3);
+    record("prop sync: a page arriving while props lie out of place has them where the host does within a moment", late.sync.following && same(host, late) && same(host, guest), detail(host, late));
+    host.world.impulseAt(5, 7.5, 0.15, 0, 0, 60, 4);
+    bus.run(0.35);
+    guest.world.read(5, S);
+    const high = S[1];
+    bus.elect(2);
+    bus.run(5);
+    guest.world.read(5, S);
+    record("prop sync: a die in the air when the host changes falls on under the new host rather than hanging, and the old host follows it",
+      high > 0.6 && guest.sync.hosting && host.sync.following && late.sync.following && S[1] < 0.3 && resting(guest) && same(guest, host) && same(guest, late), JSON.stringify({ high, y: S[1], ...apart(guest, host) }));
+    // The room gone: each page simulates its own again, and a die heard moving is not left hanging.
+    host.world.read(5, T);
+    guest.world.impulseAt(5, T[0], T[1], T[2], 0, 60, 0);
+    bus.run(0.3);
+    for (const p of bus.pages) p.net.state.room = "off";
+    bus.run(4);
+    late.world.read(5, S);
+    record("prop sync: with the room gone every page simulates its own again and nothing hangs", !late.sync.following && !guest.sync.hosting && S[1] < 0.3 && resting(late), JSON.stringify({ y: S[1], mode: late.sync.stats.mode }));
+  }
+  // 4. Falling back: a host of another cast, and a first frame that never arrived.
+  {
+    const bus = room(), host = bus.join(1), other = bus.join(2, 5);
+    bus.elect(1);
+    host.world.knock(1, -2, 2, 40);
+    bus.run(3);
+    other.world.read(1, S);
+    record("prop sync: under a host with other props a page keeps simulating its own", !other.sync.following && other.stepped > 100 && Math.abs(S[1] - 0.15) < 1e-6 && !other.world.displaced(1), JSON.stringify({ following: other.sync.following, stepped: other.stepped }));
+    const lossy = room(), a = lossy.join(1), b = lossy.join(2);
+    let dropped = 0;
+    lossy.drop = (p, data) => new DataView(data).getUint8(8) === 1 && dropped < 1 && (dropped++, true);
+    lossy.elect(1);
+    a.world.knock(1, -2, 2, 40);
+    lossy.run(1.5);
+    const before = b.sync.following;
+    lossy.run(3);
+    record("prop sync: a page whose host's first frames were lost asks for one and then follows", dropped === 1 && !before && lossy.inputs.includes("f") && b.sync.following && same(a, b), JSON.stringify({ dropped, before, inputs: lossy.inputs, following: b.sync.following, ...apart(a, b) }));
+    // A kept island put away and brought back starts over, and still hears the room.
+    b.sync.suspend();
+    lossy.tell();
+    lossy.run(1);
+    record("prop sync: a kept island put away and brought back follows again", b.sync.following && same(a, b), JSON.stringify({ following: b.sync.following }));
+  }
+};
 // A door's far side readied ahead of the crossing: what it asks for, when, and that a failure neither traps nor loops.
 const doorReadyChecks = async () => {
   const source = await readFile(join(root, "src/js/door-ready.js"), "utf8"), flush = () => new Promise(setImmediate);
@@ -6330,7 +6504,7 @@ const hammockChecks = async () => {
       R.math.mat4.transformPoint(target, ham.bedNode.world, ...rope.ring);
       ropeError = Math.max(ropeError, Math.hypot(...at.map((v, k) => v - target[k])));
     }
-    const v = ham.restBed.verts;
+    const v = ham.bedNode.geometry.verts;
     for (let k = 0; k < v.length; k += 3) {
       R.math.mat4.transformPoint(at, ham.bedNode.world, v[k], v[k + 1], v[k + 2]);
       const dx = at[0] - fit.x, dz = at[2] - fit.z, along = dx * fit.ux + dz * fit.uz, side = dx * fit.nx + dz * fit.nz;
@@ -6562,14 +6736,14 @@ const hammockChecks = async () => {
   // through the real collision shell: its support, then its body above the step, as the hub's `walkable` asks.
   const STEP = Number(/WALK = \{[^}]*step: ([\d.]+)/.exec(await readFile(new URL("../src/js/pilot.js", import.meta.url), "utf8"))[1]);
   // The gap from a walker's footprint to the nearest drawn part of the resting bed (cloth, edge cords, spreaders), seen
-  // from above: every face edge of the bed at rest (`restBed`, the lowest its cloth lies occupied), in its frame (x along, z across).
+  // from above: every face edge of the bed's own mesh, in its frame (x along, z across).
   // Each face's corner indices, through the compact reader where a mesh is packed.
   const eachFace = (g, fn) => {
     const cursor = g.compactGeometry ? R.compactGeometry.createCursor(g) : null;
     for (let f = 0; f < g.faces.length; f++) fn(Array.from((cursor ? R.compactGeometry.readFace(g, f, cursor) : g.faces[f]).i));
   };
   const bedEdges = [];
-  { const g = ham.restBed, v = g.verts;
+  { const g = ham.bedNode.geometry, v = g.verts;
     eachFace(g, ids => { for (let k = 0; k < ids.length; k++) { const a = ids[k] * 3, b = ids[(k + 1) % ids.length] * 3; bedEdges.push(v[a], v[a + 2], v[b], v[b + 2]); } }); }
   const drawnGap = (along, across) => {
     let best = Infinity;
@@ -6624,10 +6798,10 @@ const hammockChecks = async () => {
   // This fixture runs the real equipment poser, without creating movement or NPC systems.
   R.pilot = { WALK: { speed: 0, gravity: 1, step: 0 } };
   runInNewContext(await readFile(new URL("../src/js/crew.js", import.meta.url), "utf8"), real);
-  // The drawn cloth's own footprint at rest, from the bed at rest (`restBed`) in its frame (x along, z across, the holder's too): as
+  // The drawn cloth's own footprint at rest, from the bed's mesh in its frame (x along, z across, the holder's too): as
   // long as the cloth and the spreaders' thickness, as wide as the cloth and its edge cords away from the spreaders.
   let clothLong = 0, clothWide = 0;
-  { const v = ham.restBed.verts;
+  { const v = ham.bedNode.geometry.verts;
     for (let k = 0; k < v.length; k += 3) if (Math.abs(v[k + 2]) < 0.3) clothLong = Math.max(clothLong, Math.abs(v[k]));
     for (let k = 0; k < v.length; k += 3) if (Math.abs(v[k]) < clothLong - 0.2) clothWide = Math.max(clothWide, Math.abs(v[k + 2])); }
   // Stowed gear as drawn, every visible triangle in the holder's frame: each part flat (no taller than it is wide),
@@ -6639,7 +6813,7 @@ const hammockChecks = async () => {
   const clothTriangles = (a) => {
     const turn = ham.bedNode.rotation.x;
     ham.bedNode.rotation.x = a; R.scene.updateWorld(root);
-    const g = ham.restBed, v = g.verts, w = [], tris = [];
+    const g = ham.bedNode.geometry, v = g.verts, w = [], tris = [];
     let lowest = Infinity;
     for (let k = 0; k < v.length; k += 3) {
       R.math.mat4.transformPoint(point, ham.bedNode.world, v[k], v[k + 1], v[k + 2]);
@@ -12704,7 +12878,7 @@ const hubHammockEntry = { name: "hub hammock entry", why: "regression: walking a
     // out to the spreader bars, the Ooga comes right up to the bed on foot (the hub may then lead it round), never into it.
     // The bed's drawn edges seen from above in its own frame (x along, z across the plan's n), for the gap from the
     // walker's 0.3 m footprint to the nearest drawn part while its feet are on the ground.
-    const g=H.restBed,v=g.verts,C=BL.compactGeometry,cur=g.compactGeometry?C.createCursor(g):null,edges=[];
+    const g=H.bedNode.geometry,v=g.verts,C=BL.compactGeometry,cur=g.compactGeometry?C.createCursor(g):null,edges=[];
     for(let f=0;f<g.faces.length;f++){const ids=(cur?C.readFace(g,f,cur):g.faces[f]).i;for(let k=0;k<ids.length;k++){const a0=ids[k]*3,b0=ids[(k+1)%ids.length]*3;edges.push(v[a0],v[a0+2],v[b0],v[b0+2]);}}
     const gapAt=(x,z)=>{const al=(x-p.x)*p.ux+(z-p.z)*p.uz,ac=(x-p.x)*p.nx+(z-p.z)*p.nz;let best=Infinity;
       for(let k=0;k<edges.length;k+=4){const dx=edges[k+2]-edges[k],dz=edges[k+3]-edges[k+1],l=dx*dx+dz*dz,t=l?Math.max(0,Math.min(1,((al-edges[k])*dx+(ac-edges[k+1])*dz)/l)):0;best=Math.min(best,Math.hypot(al-edges[k]-dx*t,ac-edges[k+1]-dz*t));}
@@ -35401,7 +35575,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
   await cloudHopperFailureChecks(BL);
-  await deferredLoadingChecks(); await doorReadyChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await mirrorRippleChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await partyRadioChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await hammockChecks(); await poolLayoutChecks(); await gameRulesChecks(); await highscoreClientChecks(); await ghostHuntChecks(); await donationClientChecks(); await donationResumeCheck(); await poolWildlifeChecks(); await totemFeedChecks();
+  await deferredLoadingChecks(); await doorReadyChecks(); await propSyncChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await mirrorRippleChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await partyRadioChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await hammockChecks(); await poolLayoutChecks(); await gameRulesChecks(); await highscoreClientChecks(); await ghostHuntChecks(); await donationClientChecks(); await donationResumeCheck(); await poolWildlifeChecks(); await totemFeedChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.

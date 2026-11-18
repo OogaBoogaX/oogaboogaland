@@ -37,7 +37,7 @@ const host = ({ stored: seed = {}, unreadable = [], failReads = {}, unwritable =
     ...protocol, ...studioPolicy, sha256Hex, getPlayer, sfuClient: () => null,
     CAST_ROWS: [{ handle: "a", github_login: "a" }, { handle: "b", github_login: "b" }],
     DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } },
-    WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, crypto, Date: Clock, Map, Set, setTimeout, clearTimeout,
+    WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, crypto, Date: Clock, Map, Set, ArrayBuffer, DataView, setTimeout, clearTimeout,
     console: { ...console, error: (...args) => logged.push(args.map(String).join(" ")) },
   };
   runInNewContext(source, context);
@@ -261,4 +261,61 @@ test("a helper that throws in both a handler and the departure still lets the ot
   // A plain close through the same fault does not escape either.
   assert.doesNotThrow(() => r.webSocketClose(b, 1001, "", true));
   assert.equal(r.players.size, 0);
+});
+
+test("the loose props' frames go from the host alone to the pages that read them, and a follower's input to the host alone", async () => {
+  const h = host(), r = h.room();
+  await h.restored();
+  const a = await h.join(r, 1, "a"), b = await h.join(r, 2, "b");
+  assert.ok(a.sent.find((m) => m.t === "welcome").features.includes(protocol.PROP_FEATURE), "the room says it relays them");
+  const frame = (records = 1) => {
+    const data = new ArrayBuffer(10 + 14 * records);
+    new DataView(data).setUint32(0, protocol.PROP_MAGIC, true);
+    return data;
+  };
+  const binary = (ws) => ws.sent.filter((m) => m instanceof ArrayBuffer);
+  const inputs = (ws) => ws.sent.filter((m) => m && m.t === "prop");
+  r.webSocketMessage(a, JSON.stringify({ t: "hub", on: true, props: true }));
+  // A tab from before this build shows the island but never asked for prop frames.
+  r.webSocketMessage(b, JSON.stringify({ t: "hub", on: true }));
+  assert.equal(r.hostId, 1);
+  assert.equal(a.store.props, true, "kept with the socket, so a woken room still knows");
+  r.webSocketMessage(a, frame());
+  assert.equal(binary(b).length, 0, "a page that never asked hears none, so it never takes one for a crew frame");
+  r.webSocketMessage(b, JSON.stringify({ t: "prop", k: "s", a: [0, 0, 0, 1, 1, 1] }));
+  assert.equal(inputs(a).length, 0, "nor is its input relayed");
+  // The same page on this build.
+  r.webSocketMessage(b, JSON.stringify({ t: "hub", on: false }));
+  r.webSocketMessage(b, JSON.stringify({ t: "hub", on: true, props: true }));
+  h.advance(1000);
+  r.webSocketMessage(a, frame());
+  assert.equal(binary(b).length, 1, "a follower that reads them hears the host's frame");
+  assert.equal(binary(b)[0].byteLength, 24, "unchanged");
+  assert.equal(binary(a).length, 0, "the host does not hear its own");
+  assert.equal(r.lastNpc, null, "and it is not kept as the crew's frame");
+  r.webSocketMessage(b, frame());
+  assert.equal(binary(a).length, 0, "a follower's frame goes nowhere");
+  r.webSocketMessage(a, frame(65));
+  assert.equal(binary(b).length, 1, "a frame over the cap is dropped");
+  for (let i = 0; i < 60; i++) r.webSocketMessage(a, frame());
+  assert.ok(binary(b).length > 2 && binary(b).length <= 2 + protocol.PROP_HZ, "and the host's frames are held to their rate");
+  // Inputs: only to the host, without the sender's name, bounded.
+  r.webSocketMessage(b, JSON.stringify({ t: "prop", k: "k", a: [2, 1.5, -3, 40, 0, 0] }));
+  assert.deepEqual(inputs(a), [{ t: "prop", k: "k", a: [2, 1.5, -3, 40, 0, 0] }]);
+  assert.equal(inputs(b).length, 0);
+  r.webSocketMessage(a, JSON.stringify({ t: "prop", k: "s", a: [0, 0, 0, 1, 1, 1] }));
+  assert.equal(inputs(a).length + inputs(b).length, 1, "the host's own is not relayed");
+  for (const bad of [{ k: "x", a: [0, 0, 0, 0, 0, 0] }, { k: "s", a: [0, 0, 0] }, { k: "s", a: [0, 0, 0, 0, 0, 1e9] }, { k: "s", a: [0, 0, 0, 0, 0, "1"] }, { k: "s" }])
+    assert.equal(protocol.parseClientMessage(JSON.stringify({ t: "prop", ...bad })), null, JSON.stringify(bad));
+  for (let i = 0; i < 60; i++) r.webSocketMessage(b, JSON.stringify({ t: "prop", k: "s", a: [0, 0, 0, 1, 1, 1] }));
+  assert.ok(inputs(a).length <= 1 + protocol.SHOT_BURST, "a follower's inputs are held to a shot's rate");
+  assert.equal(a.closed || b.closed, null, "nobody is closed for any of it");
+  // The host leaves the island: its frames stop being taken at once.
+  r.webSocketMessage(a, JSON.stringify({ t: "hub", on: false }));
+  assert.equal(r.hostId, 2);
+  h.advance(5000);
+  const heard = binary(b).length;
+  r.webSocketMessage(a, frame());
+  assert.equal(binary(b).length, heard);
+  assert.equal(r.players.get(1).props, false, "and it no longer reads them");
 });

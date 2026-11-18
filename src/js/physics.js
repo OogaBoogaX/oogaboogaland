@@ -771,7 +771,42 @@
     };
     const position = (i, out) => { out.x = P[3 * i]; out.y = P[3 * i + 1]; out.z = P[3 * i + 2]; return out; };
     const asleep = (i) => !!ASLEEP[i];
+    // ---- another page's simulation (prop-sync.js) ----
+    // Body i's centre and turn into out[o..o+6], and where it rests into out[o..o+2].
+    const read = (i, out, o = 0) => {
+      out[o] = P[3 * i]; out[o + 1] = P[3 * i + 1]; out[o + 2] = P[3 * i + 2];
+      out[o + 3] = Q[4 * i]; out[o + 4] = Q[4 * i + 1]; out[o + 5] = Q[4 * i + 2]; out[o + 6] = Q[4 * i + 3];
+    };
+    // Whether body i lies where it rests: one a neighbour nudged in passing is out of place without ever being hit.
+    const atHome = (i) => {
+      const b = 3 * i, q = 4 * i;
+      return Math.abs(P[b] - RP[b]) < 1e-3 && Math.abs(P[b + 1] - RP[b + 1]) < 1e-3 && Math.abs(P[b + 2] - RP[b + 2]) < 1e-3
+        && Math.abs(Q[q] * RQ[q] + Q[q + 1] * RQ[q + 1] + Q[q + 2] * RQ[q + 2] + Q[q + 3] * RQ[q + 3]) > 1 - 1e-6;
+    };
+    const restAt = (i, out, o = 0) => { out[o] = RP[3 * i]; out[o + 1] = RP[3 * i + 1]; out[o + 2] = RP[3 * i + 2]; };
+    // Body i held where another page's simulation has it: asleep there and out of place, still met by rays and feet.
+    const place = (i, x, y, z, qx, qy, qz, qw) => {
+      const b = 3 * i, q = 4 * i;
+      P[b] = PREV[b] = x; P[b + 1] = PREV[b + 1] = y; P[b + 2] = PREV[b + 2] = z;
+      Q[q] = qx; Q[q + 1] = qy; Q[q + 2] = qz; Q[q + 3] = qw;
+      V[b] = V[b + 1] = V[b + 2] = W[b] = W[b + 1] = W[b + 2] = 0;
+      ASLEEP[i] = 1; SLEEP_T[i] = 0; MOVED[i] = 1; SINCE_HIT[i] = 0; WET[i] = 0; DIRTY[i] = 1;
+      rotation(i);
+    };
+    // What two pages must agree on to speak of body i: how many bodies, and each one's shape, size and resting place.
+    const signature = () => {
+      let h = Math.imul(2166136261 ^ count, 16777619);
+      for (let i = 0; i < count; i++) {
+        h = Math.imul(h ^ SHAPE[i], 16777619);
+        for (let k = 0; k < 3; k++) {
+          h = Math.imul(h ^ Math.round(H[3 * i + k] * 50), 16777619);
+          h = Math.imul(h ^ Math.round(RP[3 * i + k] * 10), 16777619);
+        }
+      }
+      return h >>> 0;
+    };
     return {
+      read, restAt, atHome, place, signature, wake,
       add, addPiece, shot, blow, knock, reset, home, step, sync, settle, impulseAt, explode, shove, raycast, supportAt, clearActors, actor, dispose,
       position, asleep, displaced, tag: (i) => tags[i], node: (i) => nodes[i], radius: (i) => BR[i],
       get count() { return count; }, stats
