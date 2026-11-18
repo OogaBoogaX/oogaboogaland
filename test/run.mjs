@@ -26491,10 +26491,14 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
     W.welcome = () => W.room({ t: "welcome", you: { id: 71 }, now: Date.now(), features: ["chat-unicode-v1"], players: [{ id: 2, login: "anna", display: "Anna", zone: "outside" }] });
     W.read = () => {
       const bell = document.querySelector(".panel:not([hidden]) .sheet-bell"), detail = bell?.nextElementSibling;
-      const [players, chat] = detail ? detail.textContent.match(/[0-9]+[+]?(?= new)/g) : ["0", "0"];
+      // The bell lists the events, newest first: a line a sign-in or sign-out and one a run of chat lines, each with
+      // its kind's mark. The counts are the tabs' own.
+      const rows = detail ? [...detail.children].filter((row) => !row.hidden) : [];
+      const list = rows.map((row) => row.textContent), kinds = rows.map((row) => row.dataset.kind).join("|");
+      const players = String(BL.players.stats.unread), chat = String(BL.chat.stats.unread);
       const total = bell?.querySelector(".tab-count"), toast = document.getElementById("toast");
       const tab = document.querySelector("#players-tab .tab-count");
-      return { players: players === "0" ? "" : players, chat: chat === "0" ? "" : chat, tabBadge: tab.hidden ? "" : tab.textContent,
+      return { list, kinds, players: players === "0" ? "" : players, chat: chat === "0" ? "" : chat, tabBadge: tab.hidden ? "" : tab.textContent,
         total: !total || total.hidden ? "" : total.textContent, breakdown: !!detail && !detail.hidden, bell: bell?.getAttribute("aria-label"),
         toast: toast.hidden ? "" : toast.textContent, toastTags: toast.children.length,
         shown: BL.sheet.visible(document.getElementById("players-panel")), said: W.said.slice() };
@@ -26508,12 +26512,13 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
     signedOutBells.panels === BELL_PANELS && signedOutBells.shown === 0 && bellsCentred(signedInBells), JSON.stringify({ signedOutBells, signedInBells }));
   const joins = await b.evaluate(`(() => { const W = __joins, out = {};
     W.join(3, "<b>Bea</b>"); out.one = W.read();
-    W.join(3, "<b>Bea</b>"); W.room({ t: "leave", id: 3 }); W.join(3, "<b>Bea</b>"); out.again = W.read();
+    W.join(3, "<b>Bea</b>"); W.room({ t: "leave", id: 3 }); out.left = W.read(); W.join(3, "<b>Bea</b>"); out.again = W.read();
     W.join(4, "Cy"); out.two = W.read();
     return out; })()`);
-  record("join alerts: a join after arrival is named on screen as plain text and counted on the bell while the panel shows; those already there, a repeat and a quick rejoin are not, and close joins share one message",
-    arrived.players === "" && arrived.chat === "" && arrived.shown && arrived.bell === "Notifications" && arrived.total === "" && !arrived.toast.includes("online") && joins.one.toast === "<b>Bea</b> is online" && joins.one.toastTags === 0
-      && joins.one.players === "1" && joins.one.total === "1" && joins.one.tabBadge === "" && joins.again.players === "1" && joins.two.players === "2" && joins.two.toast === "<b>Bea</b> and Cy are online",
+  record("join alerts: a join after arrival is named on screen as plain text and counted and listed on the bell while the panel shows, as a leave is until a quick rejoin takes it back; those already there and a repeat are not, and close joins share one message",
+    arrived.players === "" && arrived.chat === "" && arrived.list.join("|") === "No new notifications" && arrived.shown && arrived.bell === "Notifications" && arrived.total === "" && !arrived.toast.includes("online") && joins.one.toast === "<b>Bea</b> is online" && joins.one.toastTags === 0
+      && joins.one.players === "1" && joins.one.total === "1" && joins.one.tabBadge === "" && joins.left.list.join("|") === "<b>Bea</b> signed out|<b>Bea</b> signed in" && joins.left.kinds === "out|in" && joins.left.total === "2"
+      && joins.again.list.join("|") === "<b>Bea</b> signed in" && joins.again.total === "1" && joins.two.players === "2" && joins.two.toast === "<b>Bea</b> and Cy are online",
     JSON.stringify({ arrived, joins }));
   const lines = await b.evaluate(`(() => { const W = __joins, out = {};
     W.line(11, "anna"); W.line(12, "Tester"); out.live = W.read();
@@ -26540,12 +26545,13 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
     return { hovered, restored, tapped, closed, reopened };
   })()`);
   const { hovered, restored, tapped, closed, reopened } = notifications;
-  record("join alerts: hover and tap reveal both unread counts without acknowledgement, and closing restores the tab badge",
-    hovered.breakdown && hovered.players === "2" && hovered.chat === "2" && hovered.total === ""
+  record("join alerts: hover and tap list the unread events, newest first, without acknowledgement, and closing restores the tab badge",
+    hovered.breakdown && hovered.list.join("|") === "2 new messages|Cy signed in|<b>Bea</b> signed in" && hovered.total === ""
       && !restored.breakdown && restored.total === "4" && tapped.breakdown && tapped.total === ""
       && closed.tabBadge === "2" && reopened.players === "" && reopened.chat === "2" && reopened.total === "2",
     JSON.stringify(notifications));
-  await b.evaluate(`__joins.join(26, "Flo"); __joins.join(27, "Gus")`);
+  // A line heard between two joins is a run of its own, apart from the two heard before them.
+  const split = await b.evaluate(`(() => { const W = __joins; W.join(26, "Flo"); W.line(14, "anna"); W.join(27, "Gus"); return W.read(); })()`);
   const tab = (name) => b.evaluate(`(() => { const r = document.getElementById("${name}-tab").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
   await b.focus(true);
   let viewed;
@@ -26553,14 +26559,15 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
     let at = await tab("chat");
     await b.click(at.x, at.y);
     const chatViewed = await b.evaluate(`__joins.read()`);
-    const typing = await b.evaluate(`(() => { const W = __joins; document.getElementById("chat-input").focus(); W.line(14, "anna"); const inPanel = W.read().chat;
-      document.activeElement.blur(); W.line(15, "anna"); return { inPanel, away: W.read().chat }; })()`);
+    const typing = await b.evaluate(`(() => { const W = __joins; document.getElementById("chat-input").focus(); W.line(15, "anna"); const inPanel = W.read().chat;
+      document.activeElement.blur(); W.line(16, "anna"); return { inPanel, away: W.read().chat }; })()`);
     at = await tab("players");
     await b.click(at.x, at.y);
-    viewed = { chatViewed, typing, playersViewed: await b.evaluate(`__joins.read()`) };
+    viewed = { split, chatViewed, typing, playersViewed: await b.evaluate(`__joins.read()`) };
   } finally { await b.focus(false); }
-  record("join alerts: looking at a tab clears its count alone, and a line heard while typing in the chat needs no count",
-    viewed.chatViewed.chat === "" && viewed.chatViewed.players === "2" && viewed.typing.inPanel === "" && viewed.typing.away === "1" && viewed.playersViewed.players === "" && viewed.playersViewed.chat === "1",
+  record("join alerts: chat lines heard one after another share a line under the bell and a notice between them starts another, each line with its kind's mark; looking at a tab clears its count alone, and a line heard while typing in the chat needs no count",
+    viewed.split.list.join("|") === "Gus signed in|1 new message|Flo signed in|2 new messages" && viewed.split.kinds === "in|chat|in|chat" && viewed.split.chat === "3" && viewed.chatViewed.list.join("|") === "Gus signed in|Flo signed in"
+      && viewed.chatViewed.chat === "" && viewed.chatViewed.players === "2" && viewed.typing.inPanel === "" && viewed.typing.away === "1" && viewed.playersViewed.players === "" && viewed.playersViewed.chat === "1",
     JSON.stringify(viewed));
   const settings = await b.evaluate(`(() => {
     const details = document.getElementById("players-settings"), summary = details.querySelector("summary"), r = summary.getBoundingClientRect(), range = document.getElementById("players-hearing-range");
