@@ -340,6 +340,36 @@ test("the Inspector keeps rows and the log across a restart, and tells objects w
   assert.equal(ws.closed.code, 4000, "taken off the allowlist, the page is closed");
 });
 
+test("the World Map reads who stands where from the room's memory alone, and the Inspector's objects without their rows", async () => {
+  const { room, join } = roomHost({ inspector: false });
+  const a = await join(1, "a");
+  await join(2, "b");
+  room.webSocketMessage(a, JSON.stringify({ t: "zone", name: "factory" }));
+  room.webSocketMessage(a, JSON.stringify({ t: "visible", on: true }));
+  await flush();
+  const storage = room.ctx.storage;
+  room.ctx.storage = new Proxy({}, { get: () => { throw new Error("the World Map read storage"); } });
+  const view = JSON.parse(JSON.stringify(room.worldView()));
+  room.ctx.storage = storage;
+  assert.deepEqual({ ...view, zones: undefined, load: undefined }, { name: "island", sockets: 2, players: 2, maxPlayers: protocol.MAX_PLAYERS, commons: 0, zones: undefined, load: undefined });
+  assert.ok(view.load.zones.factory.in >= 1, "a message counted in the zone its sender stood in");
+  assert.ok(Object.values(view.load.zones).some((z) => z.out > 0), "the welcomes and broadcasts counted where they went");
+  assert.ok(view.load.seconds > 0);
+  assert.deepEqual(view.zones.factory, [{ display: "a", login: "a" }]);
+  assert.equal(Object.values(view.zones).flat().length, 2, "everyone, in one zone each");
+  assert.ok(!JSON.stringify(view).includes('"x"'), "no positions");
+
+  const host = inspectorHost();
+  await host.object.report({ cls: "Room", name: "island", span: 1000, state: { status: "live", sockets: 3, maxPlayers: 32, rows: [{ login: "a" }] }, counters: { in: 12, out: 40 }, peaks: {}, events: [] });
+  await host.object.report({ cls: "GameHost", name: "ghost-hunt:arena:v1", span: 1000, state: { status: "running", sockets: 4, maxSockets: 32 }, counters: { in: 5 }, peaks: {}, events: [] });
+  const objects = JSON.parse(JSON.stringify(host.object.objects()));
+  assert.deepEqual(objects.map(({ lastSeen, ...o }) => o), [
+    { cls: "Room", name: "island", status: "live", sockets: 3, maxSockets: 32, rates: { in: 12, out: 40 } },
+    { cls: "GameHost", name: "ghost-hunt:arena:v1", status: "running", sockets: 4, maxSockets: 32, rates: { in: 5, out: 0 } }]);
+  assert.ok(objects.every((o) => Number.isFinite(o.lastSeen)));
+  assert.ok(!JSON.stringify(objects).includes("login"), "never a socket's row");
+});
+
 test("the page and its feed are a 404 to everyone the allowlist does not name", async () => {
   const SITE = "https://site.test", FAR = 4102444800;
   const database = (login, id) => {

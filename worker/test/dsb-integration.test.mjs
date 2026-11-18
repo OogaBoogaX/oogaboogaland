@@ -510,14 +510,15 @@ test("an inspection timeout still closes known tracks and retains unknown alloca
 test("cleanup retires confirmed expired SFU sessions but keeps other failures", async () => {
   const { room, storage } = studioRoom();
   const fail = (status, code) => async () => { const error = new Error("fixture"); error.status = status; error.code = code; throw error; };
-  for (const inspect of [true, false]) {
-    room.sfu.getSession = fail(410, "session_error");
-    room.sfu.closeTracks = fail(410, "session_error");
+  // Cloudflare documents 410 for `session_error` alone, so any 410 confirms it, its body's code or none (sfu.js `sessionGone`).
+  for (const [status, code] of [[410, "session_error"], [410, undefined], [410, "other"], [404, undefined]]) for (const inspect of [true, false]) {
+    room.sfu.getSession = fail(status, code);
+    room.sfu.closeTracks = fail(status, code);
     await room.queueClose("expired", ["0"], inspect);
     assert.equal(room.cleanupJobs.length, 0, "both inspection and close can confirm a retired session");
     assert.deepEqual(storage.get("voiceCleanup"), []);
   }
-  for (const [status, code] of [[410, "other"], [425, "session_error"], [503, "session_error"]]) {
+  for (const [status, code] of [[425, "session_error"], [503, "session_error"], [0, undefined]]) {
     room.sfu.getSession = fail(status, code); room.sfu.closeTracks = fail(status, code);
     await room.queueClose("unresolved", ["0"], true);
     assert.equal(room.cleanupJobs.length, 1, "an unrelated status/code must not release ownership");

@@ -103,7 +103,9 @@
     // Hosted games' socket connections per player: a page's reconnect backoff stays far under it.
     { "name": "GAME_LIMITER", "namespace_id": "1007", "simple": { "limit": 20, "period": 60 } },
     // GitHub profile pictures served from this origin (worker/src/avatar.js), per IP, counted only on an edge miss.
-    { "name": "AVATAR_LIMITER", "namespace_id": "1015", "simple": { "limit": 240, "period": 60 } }
+    { "name": "AVATAR_LIMITER", "namespace_id": "1015", "simple": { "limit": 240, "period": 60 } },
+    // The World Map's live layer (worker/src/world.js), per IP: a page asks every 10 s while it shows.
+    { "name": "WORLD_LIMITER", "namespace_id": "1016", "simple": { "limit": 30, "period": 60 } }
   ],
   // Daily: purge expired sessions and Tess's questions not asked for 90 days.
   "triggers": { "crons": ["0 4 * * *"] }

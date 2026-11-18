@@ -92,6 +92,15 @@ export class Inspector extends DurableObject {
     return new Response(null, { status: 101, webSocket: client });
   }
 
+  // The World Map's object list for an Inspector account (/api/world, world.js): each object's class, name, status,
+  // sockets and cap from its last report, its messages in and out a second, and when that was. Never its rows.
+  objects() {
+    const count = (v) => Number.isSafeInteger(v) ? v : null, rate = (v) => Number.isFinite(v) ? v : 0;
+    return [...this.rows.values()].map((row) => ({ cls: row.cls, name: row.name, status: row.status, lastSeen: row.lastSeen,
+      sockets: count(row.state && row.state.sockets), maxSockets: count(row.state && (row.state.maxSockets ?? row.state.maxPlayers)),
+      rates: { in: rate(row.rates && row.rates.in), out: rate(row.rates && row.rates.out) } }));
+  }
+
   // Viewers only listen; their pings are answered without waking this.
   webSocketMessage() {}
 

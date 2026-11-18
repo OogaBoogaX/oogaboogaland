@@ -30,7 +30,7 @@
 //   publish/close    stop publishing and go back to listening (the receive session stays)
 //   leave            give up everything
 
-import { sfuClient, turnCredentials } from "./sfu.js";
+import { sfuClient, turnCredentials, sessionGone, cleanupPass } from "./sfu.js";
 
 export const MEDIA_BODY_MAX = 256 * 1024;
 export const TRACKS_MAX = 64;
@@ -38,7 +38,6 @@ export const CLEANUP_MS = 60 * 60 * 1000;
 export const CLEANUP_RETRY_MS = 60 * 1000;
 export const CLEANUP_BACKLOG_MAX = 64;
 export const VOICE_TRACK = "mic";
-const sfuSessionGone = (err) => err.status === 404 || (err.status === 410 && err.code === "session_error");
 
 const answer = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 const refuse = (code, status, retryable = false) => answer({ error: { code, retryable } }, status);
@@ -88,31 +87,33 @@ export const createMediaBroker = (aud) => {
   // Two runs can hold the same job at once (the alarm's, and `queueClose`'s after a merge: an SFU call opens the object's
   // input gate), so a job leaves the queue only if it is still there, never by a stale index.
   const removeJob = (job) => { const i = cleanup.indexOf(job); if (i < 0) return false; cleanup.splice(i, 1); return true; };
-  const runCleanup = async (only = null) => {
-    for (const job of [...cleanup]) {
-      if (only && job !== only) continue;
-      if (!cleanup.includes(job)) continue;
-      // Given up after an hour: the one cleanup outcome that is an incident (docs/ooga-chat-operations.md, alerts).
-      if (Date.now() - job.at > CLEANUP_MS) { if (removeJob(job)) aud.inspect.count("cleanupExpired"); continue; }
-      job.tries++;
-      const v = job.v || 0;
-      try {
-        let mids = job.mids.slice();
-        if (job.all) {
-          const state = await sfu.getSession(job.session, true);
-          mids = [...new Set(mids.concat((state.tracks || []).filter((t) => t.status !== "inactive" && typeof t.mid === "string").map((t) => t.mid)))];
-        }
-        const res = mids.length ? await sfu.closeTracks(job.session, mids, true) : { tracks: [] };
-        // `close_track_error` confirms a track already gone; anything else unconfirmed is tried again, those `all` found
-        // included, and anything merged in meanwhile is kept.
-        const done = new Set((res.tracks || []).filter((t) => t && typeof t.mid === "string" && (!t.errorCode || t.errorCode === "close_track_error")).map((t) => t.mid));
-        job.mids = [...new Set(job.mids.concat(mids))].filter((mid) => !done.has(mid));
-        // Merged into meanwhile (its version moved): the run `queueClose` started finishes it, with `all` as asked.
-        if ((job.v || 0) === v) { if (!job.mids.length) { if (removeJob(job)) aud.inspect.count("cleanupDone"); } else job.all = false; }
-      } catch (err) {
-        if (sfuSessionGone(err) && removeJob(job)) aud.inspect.count("cleanupDone");
+  const cleanOne = async (job) => {
+    if (!cleanup.includes(job)) return;
+    // Given up after an hour: the one cleanup outcome that is an incident (docs/ooga-chat-operations.md, alerts).
+    if (Date.now() - job.at > CLEANUP_MS) { if (removeJob(job)) aud.inspect.count("cleanupExpired"); return; }
+    job.tries++;
+    const v = job.v || 0;
+    try {
+      let mids = job.mids.slice();
+      if (job.all) {
+        const state = await sfu.getSession(job.session, true);
+        mids = [...new Set(mids.concat((state.tracks || []).filter((t) => t.status !== "inactive" && typeof t.mid === "string").map((t) => t.mid)))];
       }
+      const res = mids.length ? await sfu.closeTracks(job.session, mids, true) : { tracks: [] };
+      // `close_track_error` confirms a track already gone; anything else unconfirmed is tried again, those `all` found
+      // included, and anything merged in meanwhile is kept.
+      const done = new Set((res.tracks || []).filter((t) => t && typeof t.mid === "string" && (!t.errorCode || t.errorCode === "close_track_error")).map((t) => t.mid));
+      job.mids = [...new Set(job.mids.concat(mids))].filter((mid) => !done.has(mid));
+      // Merged into meanwhile (its version moved): the run `queueClose` started finishes it, with `all` as asked.
+      if ((job.v || 0) === v) { if (!job.mids.length) { if (removeJob(job)) aud.inspect.count("cleanupDone"); } else job.all = false; }
+    } catch (err) {
+      if (sessionGone(err) && removeJob(job)) aud.inspect.count("cleanupDone");
     }
+  };
+  // One job (`queueClose`'s), or the alarm's pass over the queue, bounded in time and a few jobs at once (`cleanupPass`).
+  const runCleanup = async (only = null) => {
+    if (only) await cleanOne(only);
+    else await cleanupPass(cleanup, cleanOne);
     await persistCleanup();
   };
 

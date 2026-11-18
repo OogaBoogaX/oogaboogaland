@@ -16,6 +16,8 @@ export { commonsRoom };
 // The Durable Object inspector's reporter (inspect-report.js), here so the room and game host take it with the rest.
 export { inspectReporter, INSPECT_FEATURE } from "./inspect-report.js";
 import { BACK_WHY } from "./inspect-report.js";
+// The voice cleanup queue's rules (sfu.js), here so the room takes them with the rest.
+export { sessionGone, cleanupPass } from "./sfu.js";
 import "../../src/js/block-wire.js";
 export const BLOCK = globalThis.BL.blockWire;
 import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy.js";

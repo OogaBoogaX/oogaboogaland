@@ -32237,6 +32237,59 @@ const integrationChecks = async BL => {
 };
 
 // Staging must preserve exact recordings and hash the final script, including literal replacement tokens.
+// The World Map (/map, scripts/world-map.mjs): the tree is built from the game's own data and refuses to drift from it
+// (a zone the game names but the map neither places nor drops, a place under the wrong parent, an address missing),
+// and the staged page loads only its own two files, named by their content, under a policy with nothing unsafe in it.
+const worldMapChecks = async () => {
+  const W = await import(pathToFileURL(join(root, "scripts/world-map.mjs")).href);
+  const D = await import(pathToFileURL(join(root, "scripts/distribution-map.mjs")).href);
+  const game = W.load(), tree = W.buildTree(game), find = (n, id) => n.id === id ? n : n.children.reduce((hit, c) => hit || find(c, id), null);
+  const refused = (change, words) => {
+    const copy = structuredClone(tree);
+    change(copy);
+    try { W.check(copy, game); return false; } catch (error) { return error.message.includes(words); }
+  };
+  const routes = game.routes.list.filter((r) => r.path !== "donate").map((r) => `/${r.path}`), hrefs = [];
+  const walk = (n) => { if (n.href) hrefs.push(n.href); for (const i of n.items) if (i.href) hrefs.push(i.href); n.children.forEach(walk); };
+  walk(tree);
+  const drift = {
+    builds: (() => { try { return !!W.check(structuredClone(tree), game); } catch { return false; } })(),
+    unplaced: refused((t) => { find(t, "ghost-arena").zones = ["arcade-hunt", "arcade.arena"]; }, "ghost-arena is not on the map"),
+    misplaced: refused((t) => { find(t, "hq-basement").zones = []; find(t, "repos").zones.push("hq-basement"); }, "is not above it"),
+    unknown: refused((t) => { find(t, "library").zones = ["library-nook"]; }, "which the game never reports"),
+    unlinked: refused((t) => { find(t, "dsb").href = null; }, "/dsb is on the map 0 times"),
+    everyRoute: routes.every((path) => hrefs.filter((h) => h === path).length === 1),
+    dsbVenues: find(tree, "dsb").children.length === game.dsbInteriors.definitions.length && find(tree, "dsb").children.every((n) => n.zones.length === 1),
+    sphereRooms: find(tree, "sphere").children.map((n) => n.zones[0]).join() === game.timechainRooms.OPEN.map((id) => `sphere-${id}`).join()
+  };
+  record("World Map: every zone the game names is placed or dropped by name, each under its parent's place, every address once, DSB Land's venues and the Sphere's rooms from their own lists",
+    Object.values(drift).every(Boolean), JSON.stringify(drift));
+  const out = mkdtempSync(join(tmpdir(), "ooga-map-"));
+  try {
+    const { theme, css, js } = D.stageMap(root, out, '<meta name="test-head" content="1">');
+    const page = readFileSync(join(out, "map.html"), "utf8"), named = (path) => {
+      const text = readFileSync(join(out, path), "utf8"), [, base, digest, ext] = path.match(/^\/(?:js|css)\/(map|map-theme)-([0-9a-f]{16})\.(js|css)$/) || [];
+      return !!base && createHash("sha256").update(text, "utf8").digest("hex").slice(0, 16) === digest && ext === path.split(".").pop();
+    };
+    const policy = (page.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/) || [])[1] || "";
+    const staged = {
+      files: named(theme) && named(css) && named(js),
+      // The appearance is set by its own file before the stylesheet, so a dark choice never flashes light.
+      tags: (page.match(/<script /g) || []).length === 2 && page.includes(`<script src="${js}" defer></script>`) && page.includes(`<link rel="stylesheet" href="${css}">`)
+        && page.indexOf(`<script src="${theme}"></script>`) >= 0 && page.indexOf(`<script src="${theme}"></script>`) < page.indexOf(`href="${css}"`),
+      inline: !/<script>|<style|\sstyle=/.test(page),
+      policy: policy.includes("script-src 'self'") && policy.includes("style-src 'self'") && policy.includes("connect-src 'self'") && !policy.includes("unsafe"),
+      head: page.includes('<meta name="test-head" content="1">') && !/__MAP_|<!-- (head|tree) -->/.test(page),
+      list: routes.every((path) => page.includes(`href="${path}"`)),
+      data: readFileSync(join(out, js.slice(1)), "utf8").includes("window.BL.worldMap = {")
+    };
+    record("World Map page: map.html loads only its own hashed scripts and stylesheet (its appearance before the stylesheet), nothing inline, under a policy with nothing unsafe, with every address in its list for a reader without scripts",
+      Object.values(staged).every(Boolean), JSON.stringify(staged));
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+};
+
 const distributionAudioChecks = async () => {
   const out = mkdtempSync(join(tmpdir(), "ooga-audio-"));
   try {
@@ -35423,6 +35476,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   record("visibility separate bodies (#501): a driven Ooga or gorilla body is a registry character from before the registry exists, reads in sight in the open and covered behind a blocker, keeps both head states through refreshes with its sightHidden effects left out, and is forgotten before it is detached with nothing left take after take",
     Object.values(separateBodies).every(Boolean), JSON.stringify(separateBodies));
   await distributionAudioChecks();
+  await worldMapChecks();
   const canvasStub = () => ({
     width: 0, height: 0,
     getContext: () => ({

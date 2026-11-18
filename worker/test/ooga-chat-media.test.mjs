@@ -40,6 +40,8 @@ globalThis.fetch = async (input, init = {}) => {
     return reply({ sessionId });
   }
   const [, sessionId, what, verb] = rest.split("/");
+  // A session the SFU calls gone with a bare 410, no error code in its body (sfu.js `sessionGone`).
+  if (sfu.goneBare && sfu.goneBare.has(sessionId)) return new NodeResponse("gone", { status: 410 });
   const tracks = sfu.sessions.get(sessionId);
   if (!tracks) return reply({ errorCode: "session_error" }, 404);
   if (what === "tracks" && verb === "new") {
@@ -500,6 +502,16 @@ test("cleanup: two runs over one job never remove another, and tracks found thro
   sfu.failMids.clear();
   await a.media.runCleanup(jobC);
   assert.deepEqual([a.media.cleanup.length, openMids("sC")], [0, []]);
+});
+
+test("regression: the alarm's cleanup pass ends a job whose session the SFU calls gone with a bare 410", async () => {
+  const a = await host().make();
+  sfu.goneBare = new Set(["gone-1", "gone-2"]);
+  try {
+    a.media.cleanup.push({ session: "gone-1", mids: ["0"], all: false, at: Date.now(), tries: 0 }, { session: "gone-2", mids: [], all: true, at: Date.now(), tries: 0 });
+    await a.media.runCleanup();
+    assert.deepEqual(a.media.cleanup, [], "not retried every alarm for an hour");
+  } finally { sfu.goneBare = null; }
 });
 
 test("regression: a retired publication leaves the island's sources before it is closed, so no island listener pulls a closed session", async () => {
