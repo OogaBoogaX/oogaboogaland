@@ -199,9 +199,10 @@
         return K.node(o.name || null, flatPicture(canvas, w, h, o.emissive === undefined ? 0.9 : o.emissive), x, y, z, { ...o, glow: true });
       },
       // What a body cannot walk through, in this frame: a circle, or a box `hx` by `hz` either side turned with the frame.
+      // With `stay` a walker meeting it is never shouldered round it (a stage it climbs by its own steps).
       solid: (o) => {
-        const p = at(o.x || 0, 0, o.z || 0);
-        into.solids.push(o.r !== undefined ? { x: p.x, z: p.z, r: o.r, top: o.top, below: o.below } : { x: p.x, z: p.z, hx: o.hx, hz: o.hz, ry: K.yaw(o.ry || 0), top: o.top, below: o.below });
+        const p = at(o.x || 0, 0, o.z || 0), stay = !!o.stay;
+        into.solids.push(o.r !== undefined ? { x: p.x, z: p.z, r: o.r, top: o.top, below: o.below, stay } : { x: p.x, z: p.z, hx: o.hx, hz: o.hz, ry: K.yaw(o.ry || 0), top: o.top, below: o.below, stay });
       },
       // A seat for the visitor's Ooga: `y` its height over `floor`, what it stands on, facing `heading` in this frame;
       // standing up leaves it at `back` behind it.

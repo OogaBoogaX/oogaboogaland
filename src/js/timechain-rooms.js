@@ -34,7 +34,7 @@
     { kind: "temple", name: "Satoshi's Temple", tag: "A meditation temple; the bell rings every block", R: 15 },
     { kind: "workout", name: "Proof of Work-out", tag: "Pedal to find a fake block", R: 12 },
     { kind: "theater", name: "Movie Theater", tag: "The whole dome is the picture", R: 20 },
-    { kind: "party", name: "Block Party", tag: "The bass drops on every block", R: 13.5 },
+    { kind: "party", name: "Block Party", tag: "The bass drops on every block", R: 20 },
     { kind: "planetarium", name: "Planetarium", tag: "Tonight's sky over London", R: 8 },
     null,
     null

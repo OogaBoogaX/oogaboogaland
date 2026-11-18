@@ -272,6 +272,14 @@ export const ROOM_PIN = /^[0-9]{4}$/;
 export const PIN_PASS_MS = 60000;
 export const PIN_TRIES = 5;
 export const PIN_WAIT_MS = 60000;
+// The Block Party's radio (sphere-6, timechain-party-radio.js): the DJ changes the channel for everyone in the room
+// (PARTY_FEATURE in welcome's `features`). The room keeps the channel while anyone is in, on every occupant's
+// attachment so a hibernated room wakes with it, and tells each arrival (-1 when nobody has changed it yet). A player
+// may change it once every PARTY_GAP_MS; the page bounds the channel by its own station list.
+export const PARTY_FEATURE = "party-radio-v1";
+export const PARTY_ZONE = "sphere-6";
+export const PARTY_CHANNELS = 16;
+export const PARTY_GAP_MS = 800;
 // A driven Ooga's own shots and strikes, relayed for drawing only (nothing is hit and nothing is kept): a burst is
 // three bananas 0.09 s apart, every 0.44 s at most, and a shot never flies past SHOT_RANGE.
 export const SHOT_HZ = 12;
@@ -462,6 +470,7 @@ export const parseClientMessage = (text) => {
     if (![vx, vy, vz].every(v => finite(v) && Math.abs(v) <= 20)) return null;
     return { t: "wallet", k, u, f, x: round(x), y: round(y), z: round(z), vx: round(vx), vy: round(vy), vz: round(vz) };
   }
+  if (msg.t === "party") return Number.isInteger(msg.channel) && msg.channel >= 0 && msg.channel < PARTY_CHANNELS ? { t: "party", channel: msg.channel } : null;
   if (msg.t === "react") return globalThis.BL.reactionPolicy.valid(msg.e) ? { t: "react", e: msg.e } : null;
   if (msg.t === "hand") {
     const tone = msg.tone === undefined ? 0 : msg.tone;

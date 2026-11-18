@@ -4,7 +4,8 @@
 // entered is built; it starts its own readers, sound and inputs on entry and drops every one of them on leaving.
 //
 // First person, shoulder and orbit share the pilot's usual controls. The Ooga walks empty-handed, with no jetpack (a
-// built-in pack is taken off for the visit; the island gives the visitor's pack back on the way out). A guided arrival
+// built-in pack is taken off for the visit; the island gives the visitor's pack back on the way out) but in a room
+// whose kind says `jetpack` (the Block Party), where its own comes in with it and flies under the dome. A guided arrival
 // starts where the island's crossing handed over, from the same eye, and walks in from the vestibule as the doors
 // close behind; Space at the Exit button (or Leave, or Escape) walks back out through them into the vestibule, comes to
 // rest where the island's view out of its passage (hung at the vestibule's end) fills the eye, and hands the same Ooga
@@ -28,8 +29,9 @@
   // crossing keeps its pace through the hand over) and gives up after GUIDE_LIMIT.
   // The way out stands still EXIT_HOLD at the handover point before the island takes over.
   const DOOR_TIME = 0.7, WALK_SPEED = 0.6, GUIDE_LIMIT = 7, TURN_RATE = 6, EXIT_HOLD = 0.12;
-  // What the HUD's jetpack button shows in here: no pack at all.
-  const NO_JETPACK = { owned: false, equipped: false, fuel: 1, blocked: false };
+  // What the HUD's jetpack button shows in here: no pack at all, but in a room whose kind says `jetpack` (the Block
+  // Party), the visitor's own (`JETPACK`, written in place).
+  const NO_JETPACK = { owned: false, equipped: false, fuel: 1, blocked: false }, JETPACK = { owned: true, equipped: false, fuel: 1, blocked: false };
   // The light every room starts from; a kind's `render` changes what it needs (timechain-room-models.js `render`).
   const RENDER_BASE = {
     clear: [0.018, 0.016, 0.02], sky: [0.5, 0.46, 0.42], ground: [0.24, 0.2, 0.17], direct: [0.52, 0.46, 0.4], directStrength: 0.2,
@@ -339,7 +341,7 @@
       out.node = null;
       for (let i = 0; i < solids.length; i++) {
         const o = solids[i];
-        if (!blocks(o, feet)) continue;
+        if (o.stay || !blocks(o, feet)) continue;
         const dx = o.x - p.x, dz = o.z - p.z, along = dx * fx + dz * fz, across = dx * fz - dz * fx;
         let a0, a1, c0, c1, hit;
         if (o.r !== undefined) {
@@ -445,7 +447,11 @@
       renderer, canvas, camera, hud, presets: { entrance: view }, landing: "entrance", pitch: [-0.2, 1.2], dist: [3, 8],
       follow: { y: 0.9, min: 3, max: 6, pitch: [0.2, 0.7] },
       clampTarget, clampCamera, observeOrbit: keepCameraInside, ceilingAt: (x, z) => roof(x, z, 0), coarse: COARSE, mayPossess: (cave) => BL.net.mayDrive(cave.traits.name),
-      jetpackStatus: () => NO_JETPACK,
+      jetpackStatus: (who) => {
+        if (!kind.jetpack) return NO_JETPACK;
+        JETPACK.equipped = !!(who && who.jet); JETPACK.fuel = who ? who.jetFuel : 1;
+        return JETPACK;
+      },
       // Combat captures canvas clicks before interact; route every picked target through carry's tap handler.
       captureClick: (x, y) => roomTap(x, y),
       primaryAction: (pressed, e) => pressed && roomTap(e ? e.clientX : window.innerWidth / 2, e ? e.clientY : window.innerHeight / 2, !e || !quizPressFree),
@@ -723,8 +729,8 @@
       return true;
     };
     if (playerName) {
-      const sharedCtx = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt, walkable, useNear, jetpackAllowed: () => false,
-        shoulderObstacle, shoulderObstacleActive, shoulderPropClear };
+      const sharedCtx = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt, walkable, useNear, jetpackAllowed: () => !!kind.jetpack,
+        ceilingAt: (x, z) => roof(x, z, 0.3), shoulderObstacle, shoulderObstacleActive, shoulderPropClear };
       people = sharedCtx.crew = BL.crew.create(sharedCtx);
       pilot.bind(sharedCtx);
       avatar = people.cavemen.get(playerName);
@@ -734,6 +740,12 @@
       avatar.weapon.aiming = false;
       avatar.parts.club.visible = avatar.parts.gun.visible = false;
       if (avatar.jet) people.removeJetpack(avatar);
+      // Where a room allows it, the visitor's own jetpack comes in with them, on their back if it was, its fuel kept.
+      if (kind.jetpack) {
+        people.setJetpackOwnership(avatar, true, BL.hubModels.jetpack(), BL.hubModels.jetFlame());
+        if (visit.jetpack && visit.jetpack.equipped) people.wearJetpack(avatar, BL.hubModels.jetpack(), BL.hubModels.jetFlame());
+        if (visit.jetpack && Number.isFinite(visit.jetpack.fuel)) avatar.jetFuel = visit.jetpack.fuel;
+      }
       avatar.root.position.y = avatar.baseY;
       pilot.possess(avatar);
       pilot.enterClose();
@@ -778,7 +790,7 @@
       BL.net.setBody(avatar ? avatar.traits.name : null);
       if (avatar) {
         const p = avatar.root.position;
-        BL.net.sendPose(p.x, p.y - avatar.baseY, p.z, avatar.root.rotation.y, null, 0, 0, BL.crew.visualState(avatar));
+        BL.net.sendPose(p.x, p.y - avatar.baseY, p.z, avatar.root.rotation.y, null, BL.crew.jetFlags(avatar), 0, BL.crew.visualState(avatar));
       }
       BL.net.setZone(room.zone);
       if (guide.stage) BL.net.passDoor(room.zone, "in");
@@ -801,7 +813,8 @@
     }) : null;
     let leaving = false;
     // Leaving: the same Ooga goes back out to the island's passage behind the sphere's doors.
-    const exitNote = (signedOut) => ({ room: room.id, mode: signedOut ? "solo" : visit.mode, character: avatar ? avatar.traits.name : null, jetpack: visit.jetpack || null });
+    const exitNote = (signedOut) => ({ room: room.id, mode: signedOut ? "solo" : visit.mode, character: avatar ? avatar.traits.name : null,
+      jetpack: kind.jetpack && avatar ? { equipped: !!avatar.jet, fuel: avatar.jetFuel } : visit.jetpack || null });
     // The view and mode the room was in when the visitor pressed Exit, which the island gives back once the walk out
     // is done.
     let exitView = null;
@@ -1041,10 +1054,18 @@
       onDoubleTap: (hit, p) => { if (hit && (hit.owner.kind === "lockkey" || motion && motion.interactive)) hooks.onTap(hit, p); else pilot.hooks.onDoubleTap(hit, p); },
       onZoom: (factor, gesture, px, py) => { if (!guide.stage) pilot.hooks.onZoom(factor, gesture, px, py); }
     });
+    // The jetpack on or off the visitor's Ooga where the room allows it; elsewhere in the Sphere a word that it doesn't.
+    const toggleJetpack = () => {
+      const cave = people && people.player;
+      if (!kind.jetpack) { hud.toast("No jetpacks in this room"); return; }
+      if (!cave || guide.stage) return;
+      if (cave.jet) people.removeJetpack(cave);
+      else if (!people.wearJetpack(cave, BL.hubModels.jetpack(), BL.hubModels.jetFlame())) hud.toast("Stand up to put the jetpack on");
+    };
     hud.onAction((action) => {
       if (action === "leave") walkOut();
       else if (action === "reset-view" && !guide.stage) pilot.resetCamera();
-      else if (action === "jetpack-toggle") hud.toast("No jetpacks in the Sphere");
+      else if (action === "jetpack-toggle") toggleJetpack();
       else if (action.startsWith("mode-") && !guide.stage) pilot.modeAction(action);
       // A kind's own buttons in the banner (the Lecture Hall's).
       else if (motion && motion.action && !guide.stage) motion.action(action, hud);
@@ -1130,7 +1151,7 @@
         BL.net.setBody(driven ? driven.traits.name : null);
         if (driven) {
           const p = driven.root.position;
-          BL.net.sendPose(p.x, p.y - driven.baseY, p.z, driven.root.rotation.y, null, 0, 0, BL.crew.visualState(driven));
+          BL.net.sendPose(p.x, p.y - driven.baseY, p.z, driven.root.rotation.y, null, BL.crew.jetFlags(driven), 0, BL.crew.visualState(driven));
           BL.net.setHealth(driven.health.value, driven.health.stunned);
         }
       }
@@ -1167,6 +1188,7 @@
     const drawExtra = (ctx2d, project) => { if (motion && motion.draw) motion.draw(ctx2d, fx.projectRaw); if (remotes) remotes.drawNames(ctx2d, project); };
     const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
     const onKey = (e) => {
+      if (kind.jetpack && BL.controls.matches(e, "jetpack") && !e.repeat && !guide.stage) { toggleJetpack(); return true; }
       if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !guide.stage) return pilot.resetCamera();
       if (e.key.toLowerCase() === "x" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !guide.stage) {
         e.preventDefault();
@@ -1188,7 +1210,7 @@
     holdings.start();
 
     shell.controlsHelp = touch => {
-      const help = pilot.controlsHelp(touch);
+      const help = pilot.controlsHelp(touch, kind.jetpack ? ["jetpack"] : []);
       // The room intercepts these bindings before the pilot, including R/F in
       // free-camera mode. Keep its reference under the same input policy.
       help.rows = help.rows.flatMap(row => {
