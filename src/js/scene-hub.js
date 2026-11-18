@@ -4421,6 +4421,22 @@
     const ground = Math.max(island.supportAt(p.x, p.z, feet, 0, ABYSS_FLOOR, PLAYER_RADIUS), solids.supportAt(p.x, p.z, feet, 0, PLAYER_RADIUS));
     return feet > ground + 0.08;
   };
+  // Carvings stop only a body that comes at them clear. One already touching a carving where the frame finds it
+  // (perched with its rim under a brow, risen into one from the ground, turned into one by the island) is never
+  // held by it, so whoever lands among them can always walk out; its landing surfaces and headroom stay.
+  const TOTEM_TOUCH = new WeakMap();
+  let totemFrame = 0;
+  const totemsBlock = actor => {
+    if (!airborneTotems(actor)) return false;
+    let touch = TOTEM_TOUCH.get(actor);
+    if (!touch) TOTEM_TOUCH.set(actor, touch = { frame: -1, x: 0, y: 0, z: 0, clear: true });
+    const p = actor.root.position;
+    if (touch.frame !== totemFrame || touch.x !== p.x || touch.y !== p.y || touch.z !== p.z) {
+      touch.frame = totemFrame; touch.x = p.x; touch.y = p.y; touch.z = p.z;
+      touch.clear = totemSolids.clearAt(p.x, p.y - (actor.baseY || 0), p.z, PLAYER_RADIUS, (actor.bodyHeight || 1.5) + Math.max(0, actor.viewLift || 0));
+    }
+    return touch.clear;
+  };
   const propSupportAt = (x, z, y, rise, actor, ignoreClanker = false, passTraffic = false) => {
     const npc = actor?.contributor && actor !== pilot?.player;
     let floor = solids ? solids.supportAt(x, z, y, rise, PLAYER_RADIUS, null, null, passTraffic, npc ? npcTreeSupportAllowed : null, passTraffic) : -Infinity;
@@ -4474,7 +4490,7 @@
     passTraffic = rageThrown(actor), passRageProps = passTraffic) => {
     if (solids && !(escaping ? solids.segmentClear(x, y, z, toX, toY, toZ, radius, height, null, radius, height, false, false, true, passRageProps)
       : solids.segmentClear(x, y, z, toX, toY, toZ, radius, height, null, toRadius, toHeight, passTraffic, false, false, passRageProps))) return false;
-    if (airborneTotems(actor) && !totemSolids.segmentClear(x, y, z, toX, toY, toZ, radius, height, null, toRadius, toHeight, false, false, escaping)) return false;
+    if (totemsBlock(actor) && !totemSolids.segmentClear(x, y, z, toX, toY, toZ, radius, height, null, toRadius, toHeight, false, false, escaping)) return false;
     radius = Math.max(radius, toRadius); height = Math.max(height, toHeight);
     if (altar && !cylinderSegmentClear(x, y, z, toX, toY, toZ, radius, height, 0, 0, 0, ALTAR_HEIGHT, altar.platformRadius)) return false;
     if (crew && !passTraffic) for (let otherIndex = 0; otherIndex < crew.list.length; otherIndex++) {
@@ -4679,7 +4695,7 @@
   };
   const physicalClearAt = (x, y, z, radius, height, actor = pilot?.player) => island.clearAt(x, y, z, radius, height) && y + height <= Math.min(entranceCeilingAt(x, z, y, radius), bedCeilingAt(x, z, y, radius), propCeilingAt(x, z, y, radius, actor)) + 1e-7
     && (!solids || solids.segmentClear(x, y, z, x, y, z, radius, height, null, radius, height, rageThrown(actor), false, false, rageThrown(actor)))
-    && (!airborneTotems(actor) || totemSolids.clearAt(x, y, z, radius, height));
+    && (!totemsBlock(actor) || totemSolids.clearAt(x, y, z, radius, height));
   const JETPACK_COLUMN = { caveIndex: 0, floor: 0, ceiling: 0 };
   const jetpackAllowed = (cave) => {
     if (cloudHopper?.active) return !cloudHopper.held && cave === cloudHopper.actor;
@@ -8060,7 +8076,7 @@
     if (!cloudPlaying()) critters.update(dt, elapsed, RENDER_OPTS.day, RENDER_OPTS.stars, fire.k, 1);
     if (!gameMode && !cloudPlaying()) updateClouds(dt);
     updateGameRing(dt, elapsed);
-    solids.sync(); totemSolids.sync();
+    solids.sync(); totemSolids.sync(); totemFrame++;
     if (gameMode) updateRageThrowMap();
     updateSleepingSolids();
     if (!chalkboard.openNow) {
@@ -11486,6 +11502,8 @@
     shared.shoulderObstacle = (cave, fx, fz, reach, out) => {
       const p = cave.root.position;
       if (!solids.shoulderAt(p.x, p.y - cave.baseY + STEP_MAX, p.z, fx, fz, PLAYER_RADIUS, Math.max(0, cave.bodyHeight - STEP_MAX), reach, out, p.y - cave.baseY + 1e-7)) return false;
+      // A wall to stop at (Merge Rock's bridge parapets) is never passed round: its ends lead off the deck.
+      if (out.node.noPass) return false;
       if (!out.node.sightSolid && !mempoolIsland.walked.has(out.node)) return true;
       // A level probe can hit later stair treads, a bridge deck above the current feet, or the Mempool island's
       // own ground rising ahead: a terrace, the lake's bowl, a ramp. That ground is walked on, never passed round.
