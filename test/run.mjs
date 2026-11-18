@@ -21032,13 +21032,13 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
     } finally { P.release(true); P.goPreset("pile"); B.advance(0.1, 1 / 60); }
     return out;
   })()`);
-  record("hub distant effects: all 18 decorative clouds keep size, orbit and spacing for two full laps, keep the three speaker clouds above the rooftop trees and the other clouds in their inner -4..2m and outer 2..11m height bands, stay horizontal and tangent, and never become collision surfaces", clouds.initialized && clouds.persistent && clouds.decorative && clouds.horizontal && clouds.tangent
+  record("hub distant effects: all 18 decorative clouds keep size, orbit and spacing for two full laps, keep the three speaker clouds above the rooftop trees, rising half their lane's swing, and the other clouds in their inner -4..2m and outer 2..11m height bands, stay horizontal and tangent, and never become collision surfaces", clouds.initialized && clouds.persistent && clouds.decorative && clouds.horizontal && clouds.tangent
     && clouds.seconds > 145 && clouds.laps >= 2 && clouds.radialDrift < 1e-8
     && clouds.rings.length === 2 && clouds.rings.every(ring => ring.eachCloudDips && ring.eachCloudRises
       && ring.minHeight >= (ring.radius === 36 ? -4 : 2) && ring.maxHeight <= (ring.radius === 36 ? 2 : 11)
       && ring.maxVerticalSpeed <= (ring.radius === 36 ? 0.2 : 0.25))
-    && clouds.speakers.length === 3 && clouds.speakers.every(c => c.minBottom >= clouds.treetop + 2 && c.maxBottom <= clouds.treetop + (c.track === 36 ? 8 : 11)
-      && c.rise > (c.track === 36 ? 5.9 : 8.9) && c.maxVerticalSpeed <= (c.track === 36 ? 0.2 : 0.25))
+    && clouds.speakers.length === 3 && clouds.speakers.every(c => c.minBottom >= clouds.treetop + 2 && c.maxBottom <= clouds.treetop + (c.track === 36 ? 5 : 6.5)
+      && c.rise > (c.track === 36 ? 2.9 : 4.4) && c.rise <= (c.track === 36 ? 3 : 4.5) + 1e-6 && c.maxVerticalSpeed <= (c.track === 36 ? 0.1 : 0.125))
     && clouds.maxTravelExcess < 1e-7 && clouds.minGap > 0 && clouds.spacingDrift < 1e-8
     && clouds.cutaway?.selected && clouds.cutaway.view === "shoulder" && clouds.cutaway.combat && !clouds.cutaway.active && clouds.cutaway.mix === 0 && clouds.cutaway.heights
     && state.horizon.every(row => row.clouds.length === 18 && row.clouds.every(c => c.visible && c.moving)), JSON.stringify(clouds));
