@@ -173,6 +173,15 @@ export const audienceRoom = {
     return told;
   },
 
+  // A player held over a lost socket (room.js `hold`): still on the island, but its connection's grant goes now, as at a
+  // leave, and its page's next connection waits for that (`settled`) whether it takes the record back or not.
+  hold(room, p) {
+    if (!p.outdoor || p.outdoor.state === "none") return;
+    const told = audienceRoom.retire(room, p, "left").catch(() => false);
+    (room.retiring || (room.retiring = new Map())).set(p.id, told);
+    room.background(told);
+  },
+
   // Before a connection's welcome: the account's last connection's grants are taken back (bounded wait).
   async settled(room, id) {
     const pending = room.retiring && room.retiring.get(id);

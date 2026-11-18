@@ -2,7 +2,7 @@
 // becomes an object's row and log lines, and when rows go stale or are dropped.
 
 export const CLASSES = ["Room", "GameHost", "Worker", "Audience"];
-export const KINDS = ["wake-lost", "join", "full", "leave", "zone", "visible", "host", "back", "kick",
+export const KINDS = ["wake-lost", "join", "full", "leave", "hold", "resume", "zone", "visible", "host", "back", "kick",
   "voice-fail", "voice-refused", "voice-restart", "limited", "dropped", "error"];
 // Statuses that mean someone is there: a row that says so and then goes quiet this long is marked stale. The room
 // sweeps once a minute while anyone is in it, so five minutes without a word means it stopped answering.

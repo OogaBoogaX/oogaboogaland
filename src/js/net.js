@@ -265,6 +265,12 @@
   // this page's last socket ended (`ended`: why, the browser's close code, clean, when), said on the close frame and,
   // after the next welcome, in one `back` message, so a drop's cause reaches the inspector's log.
   let inspectOn = false, ended = null;
+  // A socket lost, or closed here to come straight back (CLOSE_RECONNECT), leaves this page's record held in the room for a
+  // few seconds (worker/src/protocol.js HOLD_MS). The next socket asks for it with the key the last welcome gave
+  // (`resume`), and the room hands it back with a welcome that says `resumed`: nobody else saw this page go, and its
+  // voice sessions are still the room's. The key proves only that it is the same page; a clean close forgets it.
+  const CLOSE_RECONNECT = 4001;
+  let resumeKey = "";
   // Opt-in local evidence for a brief disappearance; never retain payloads, names, tokens or raw close reasons.
   // No timers or network traffic. Only lifecycle events enter the bounded history, not pose snapshots.
   const DIAGNOSTIC_KEEP = 64;
@@ -642,6 +648,8 @@
       state.props = Array.isArray(msg.features) && msg.features.includes(PROP_FEATURE);
       state.selfId = msg.you.id;
       state.connectionToken = typeof msg.connectionToken === "string" ? msg.connectionToken : "";
+      resumeKey = typeof msg.resume === "string" && msg.resume.length <= 64 ? msg.resume : "";
+      const resumed = msg.resumed === true;
       state.cabinets = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.FEATURE);
       state.cabinetsOutdoor = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.OUTDOOR_FEATURE);
       state.tessShared = Array.isArray(msg.features) && msg.features.includes("tess-guide-v1");
@@ -695,7 +703,8 @@
       hubSent = visibleSent = null;
       sendHub();
       sendVisible();
-      BL.voice.restart(true);
+      // A record the room held for this page still has its voice sessions: voice still up stays as it is.
+      if (resumed) BL.voice.resumed(); else BL.voice.restart(true);
       if (restoredPose) poseAt = performance.now();
       else { poseAt = 0; px = NaN; gKnown = poseHasG = false; }
     } else if (msg.t === "join") {
@@ -897,11 +906,15 @@
       if (inspectOn) ended = { why, code, clean, at: Date.now() };
       ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
       if (ws.readyState <= WebSocket.OPEN) {
-        if (inspectOn) ws.close(1000, why);
-        else ws.close(1000);
+        // Closed only to open again at once: the room holds this page's record for the next socket.
+        const code = room === "connecting" ? CLOSE_RECONNECT : 1000;
+        if (inspectOn) ws.close(code, why);
+        else ws.close(code);
       }
       ws = null;
     }
+    // Out of the room for good: nothing held to come back to.
+    if (room !== "connecting") resumeKey = "";
     remotes.clear();
     setClouds(NO_CLOUDS);
     state.voiceElsewhere = false;
@@ -944,7 +957,7 @@
     // A tab opened in the background has no visibility change to arm this.
     if (document.hidden && !hiddenTimer) armHidden();
     openingAt = performance.now();
-    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room`);
+    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room${resumeKey ? "?resume=" + encodeURIComponent(resumeKey) : ""}`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = onMessage;
     ws.onopen = () => {

@@ -182,6 +182,12 @@ export const BLEND_HZ = 8;
 // whose handling threw, which ends that socket alone and leaves the page free to reconnect.
 export const CLOSE_KICK = 4000;
 export const CLOSE_ERROR = 1011;
+// A page that closes its own socket to come straight back (net.js: a heartbeat or a network change) says so with 4001.
+// That, or a socket lost without a close frame (1006: a network blip, an edge restart), holds the player's record
+// HOLD_MS, standing and heard as they were, for the same page to take back with the `resume` key its welcome gave, so
+// nobody else sees them leave and come back. A clean close (1000, 1001) is a leave, at once.
+export const CLOSE_RECONNECT = 4001;
+export const HOLD_MS = 10000;
 // NPC frames: the host sends about 4 a second, only while a page follows; a frame of every Ooga's pose is a few kilobytes.
 // Up to 128 bundled Oogas (112 floats each), plus the bounded event tail.
 // The former 16 KiB cap could not carry the org-wide roster after reconciliation.

@@ -232,9 +232,14 @@ function describe(e) {
       if (f.code) how += " " + f.code + (f.clean === true ? ", clean" : f.clean === false ? ", not clean" : "");
       if (f.said) how += ' · page said "' + f.said + '"';
       if (f.error) how += " · " + f.error;
-      return ["drop", "drop", who + " · " + how + (f.zone ? " · in " + f.zone : "") + (f.on !== undefined ? " · on " + dur(f.on) : "")
+      return ["drop", "drop", who + " · " + how + (f.held ? " · not back while held" : "") + (f.zone ? " · in " + f.zone : "") + (f.on !== undefined ? " · on " + dur(f.on) : "")
         + (f.heard !== undefined ? " · last heard " + dur(f.heard) + " before" : "") + (f.voice ? " · in voice" : "") + (f.mass ? " · mass drop (" + f.mass + ")" : "")];
     }
+    case "hold": {
+      var lost = f.error ? "socket error · " + f.error : (f.code ? "closed " + f.code + (f.clean ? ", clean" : ", not clean") : f.said === "resumed" ? "came back on a new socket" : "closed");
+      return ["drop", "held", who + " · " + lost + (f.said && f.said !== "resumed" ? ' · page said "' + f.said + '"' : "") + " · held for their page" + (f.zone ? " · in " + f.zone : "") + (f.voice ? " · in voice" : "")];
+    }
+    case "resume": return ["back", "resumed", who + " · back after " + dur(f.away) + ", nobody else saw them go"];
     case "back": return ["back", "back", who + " · down " + dur(f.down) + " · browser saw " + (f.code || "no close") + (f.clean ? ", clean" : f.code ? ", not clean" : "") + " · page says " + f.why];
     case "zone": return ["zone", "zone", who + " · " + f.from + " → " + f.to];
     case "visible": return ["zone", "tab", who + " · " + (f.visible ? "shown" : "hidden")];

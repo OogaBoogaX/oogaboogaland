@@ -179,9 +179,11 @@ test("the room tells the inspector who joined, moved and dropped, with what the 
   assert.deepEqual(lines.filter((e) => e.kind === "join").map((e) => e.login), ["a", "b"]);
   assert.deepEqual(lines.find((e) => e.kind === "zone").fields, { from: "outside", to: "factory" });
   assert.deepEqual(lines.find((e) => e.kind === "visible").fields, { visible: false });
-  const [first, second] = lines.filter((e) => e.kind === "leave");
-  assert.deepEqual([first.login, first.fields.reason, first.fields.code, first.fields.clean, first.fields.zone, first.fields.on], ["a", "closed", 1006, false, "factory", 65000]);
-  assert.deepEqual([second.fields.code, second.fields.said, second.fields.clean], [1000, "paused", true]);
+  // A socket lost without a close frame is held for its page (room.js `hold`); a clean close is a leave at once.
+  const held = lines.find((e) => e.kind === "hold");
+  assert.deepEqual([held.login, held.fields.code, held.fields.clean, held.fields.zone, held.fields.on], ["a", 1006, false, "factory", 65000]);
+  const [left] = lines.filter((e) => e.kind === "leave");
+  assert.deepEqual([left.login, left.fields.code, left.fields.said, left.fields.clean], ["b", 1000, "paused", true]);
 });
 
 test("the room counts every message it sends, NPC frames on counters of their own", async () => {

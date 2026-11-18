@@ -30381,8 +30381,8 @@ const menuShellChecks = BL => {
 const netFixture=(BL,response,step=200,cookie="")=>{
   const source=readFileSync(join(root,"src/js/net.js"),"utf8");
   const sockets=[],sent=[],events=new Map(),navigations=[],timers=[],intervals=[];let calls=0,tick=1000,savedViews=0;
-  class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"&&v!=="ping"?JSON.parse(v):v);}close(){this.readyState=3;}}
-  const voice={setPeers:()=>{},restart:()=>{},stop:()=>{},warnings:[],hangUps:0,playing:0,warnLeaving(stage){this.warnings.push(stage);},hangUp(){this.hangUps++;return this.playing;}};
+  class Socket {static OPEN=1;constructor(url){this.url=url;this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"&&v!=="ping"?JSON.parse(v):v);}close(code){this.closeCode=code;this.readyState=3;}}
+  const voice={setPeers:()=>{},restarts:0,resumes:0,restart(){this.restarts++;},resumed(){this.resumes++;},stop:()=>{},warnings:[],hangUps:0,playing:0,warnLeaving(stage){this.warnings.push(stage);},hangUp(){this.hangUps++;return this.playing;}};
   const location={protocol:"https:",host:"fixture.invalid",pathname:"/",search:"",assign:url=>navigations.push(url)},pilot={saveLoginView(){savedViews++;}};
   const context={window:{BL:{characters:BL.characters,accountIdentities:BL.accountIdentities,contributors:BL.contributors,donations:BL.donations,chatPolicy:BL.chatPolicy,reactionPolicy:BL.reactionPolicy,arcadeCabinets:BL.arcadeCabinets,chalkBoard:BL.chalkBoard,voiceBlend:BL.voiceBlend,audience:BL.audience,voice,pilot},setTimeout:(fn,ms)=>{timers.push({fn,ms});return 1;},clearTimeout(){},setInterval:(fn,ms)=>{intervals.push({fn,ms});return 1;},clearInterval(){},addEventListener(){},removeEventListener(){}},navigator:{},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
   runInNewContext(source,context);
@@ -30539,6 +30539,26 @@ const roomSocketChecks = async BL => {
   const heard = ws.readyState === 1 && f.sockets.length === 1;
   tick();
   record("room socket: pings that go unanswered end a half-open socket, and any answer resets the count", heard && ws.readyState === 3 && f.net.state.room === "connecting" && timers.length > 0, JSON.stringify({ ready: ws.readyState, room: f.net.state.room }));
+  // Regression (2026-11-18): every socket cut for a moment was a leave and a rejoin for everyone, and voice rebuilt. The
+  // page now closes to come straight back with CLOSE_RECONNECT, asks for its held record with the last welcome's key, and
+  // keeps its voice on a welcome that says the room handed it back.
+  const h = netFixture(BL, reply);
+  await h.net.start();
+  const firstSocket = h.sockets[0];
+  firstSocket.onopen();
+  firstSocket.onmessage({ data: JSON.stringify({ t: "welcome", you: { id: 71 }, players: [], now: Date.now(), features: [], connectionToken: "t1", resume: "key-1" }) });
+  const ping = h.intervals.at(-1).fn;
+  for (let i = 0; i < 4; i++) ping();
+  const closedToReturn = firstSocket.closeCode === 4001;
+  h.timers.at(-1).fn();
+  const again = h.sockets[1];
+  const asked = !!again && again.url.endsWith("/room?resume=key-1");
+  again.onopen();
+  const restartsBefore = h.voice.restarts;
+  again.onmessage({ data: JSON.stringify({ t: "welcome", you: { id: 71 }, players: [], now: Date.now(), features: [], connectionToken: "t2", resume: "key-2", resumed: true }) });
+  const kept = h.voice.resumes === 1 && h.voice.restarts === restartsBefore && h.net.state.connectionToken === "t2";
+  record("room socket: a socket closed to come straight back asks for its held record, and a resumed welcome keeps voice",
+    closedToReturn && asked && kept, JSON.stringify({ code: firstSocket.closeCode, url: again && again.url, resumes: h.voice.resumes, restarts: h.voice.restarts - restartsBefore }));
   // Regression #624: the old path discarded close/leave reasons, so a brief removal could not be classified.
   const capture = netFixture(BL, reply, 0);
   const D = capture.net, observed = [];
@@ -33611,6 +33631,18 @@ const studioVoiceLifecycleProof = async () => {
   await flaky.fire(1000);for(let i=0;i<10;i++)await drain();
   const networkRetries=flakyKept&&flaky.gum===1&&flaky.voice.stats.publishing&&!flaky.voice.stats.muted&&!flaky.voice.stats.reconnecting&&flaky.streams[0].track.enabled;
   flaky.voice.dispose();await drain();
+  // The room held the record over a lost socket and handed it back (net.js `resume`): voice whose connections stayed up
+  // stays as it is, asking nothing; voice that went down with the socket comes back as after any welcome.
+  const held=fixture();await speakerOn(held);
+  const heldUp=held.peers.filter(pc=>pc.connectionState==="connected").length,heldCalls=held.calls.length;
+  held.voice.resumed();await drain();
+  const resumedKeeps=heldUp>0&&held.voice.stats.publishing&&held.calls.length===heldCalls&&held.peers.filter(pc=>pc.connectionState==="connected").length===heldUp;
+  held.voice.dispose();await drain();
+  const heldDown=fixture();await speakerOn(heldDown);
+  heldDown.peers.find(pc=>pc.connectionState==="connected"&&pc.handlers.has("connectionstatechange")).connectionState="disconnected";
+  const downCalls=heldDown.calls.length;heldDown.voice.resumed();await drain();
+  const resumedRebuilds=heldDown.voice.stats.publishing&&heldDown.calls.slice(downCalls).some(c=>c.op==="session");
+  heldDown.voice.dispose();await drain();
   // Back later than a minute, an open microphone lands muted; with the microphone let go after its hold, the visitor is a
   // returning listener whose Unmute opens it again.
   const slowBack=fixture();slowBack.clock.at=1000;await speakerOn(slowBack);
@@ -33694,7 +33726,7 @@ const studioVoiceLifecycleProof = async () => {
   const turnKept = again.voice.stats.enabled && again.peers.length === 4 && again.peers.slice(2).every(pc => hasRelay(pc, "second"))
     && again.calls.filter(c => c.op === "ice").length === 2;
   again.voice.dispose(); await drain();
-  return {networkReturnsOpen,networkRetries,lateLandsMuted,longGapListens,givesUp,leaveEndsRecovery,slowGatherJoins,emptyGatherRefuses,unavailableProbeJoins,turnShared,turnRefreshed,turnPrefetched,turnMeasured,turnStopped,turnCancelled,bareAfterUnreached,turnAskedAgain,turnKept,publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[slow,blocked,unavailable,listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting,change,flaky,slowBack,gone,dead,quit].every(f=>f.timers.size===0)};
+  return {networkReturnsOpen,networkRetries,resumedKeeps,resumedRebuilds,lateLandsMuted,longGapListens,givesUp,leaveEndsRecovery,slowGatherJoins,emptyGatherRefuses,unavailableProbeJoins,turnShared,turnRefreshed,turnPrefetched,turnMeasured,turnStopped,turnCancelled,bareAfterUnreached,turnAskedAgain,turnKept,publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[slow,blocked,unavailable,listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting,change,flaky,held,heldDown,slowBack,gone,dead,quit].every(f=>f.timers.size===0)};
 };
 
 // The real controller runs against a bounded DOM/media double: no permission prompts or SFU.

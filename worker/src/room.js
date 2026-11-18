@@ -32,7 +32,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  CABINETS, hockey, block, BLOCK, duel, tessQueue, CLOSE_KICK, CLOSE_PROTOCOL, CLOSE_ERROR, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, MEMBER_SWEEP_MS, CLEANUP_MS, TICK_HZ,
+  CABINETS, hockey, block, BLOCK, duel, tessQueue, CLOSE_KICK, CLOSE_PROTOCOL, CLOSE_ERROR, CLOSE_RECONNECT, HOLD_MS, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, MEMBER_SWEEP_MS, CLEANUP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, PROP_MAGIC, PROP_FEATURE, PROP_FRAME_MAX, PROP_HZ, POSE_SAVE_MS, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
   DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, ROOM_LOCK_FEATURE, PIN_PASS_MS, PIN_TRIES, PIN_WAIT_MS, CONTROL_FRAMES, CONTROL_HZ, CONTROL_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, HAND_EMOJI_FEATURE, REACT_HZ, REACT_BURST,
   GHOST_MAGIC, inGhostArena, watchesGhost,
@@ -55,6 +55,9 @@ const CAST = castIndex(CAST_ROWS);
 const sfuSessionGone = err => err.status === 404 || (err.status === 410 && err.code === "session_error");
 // The voice cleanup queue's bound (`shedCleanup`).
 const CLEANUP_JOBS_MAX = 64;
+// A held player's socket while its page is away (`hold`): anything written to it goes nowhere, as to a socket closing,
+// so every path that sends to a player or saves its attachment needs no word about holds.
+const GONE = Object.freeze({ readyState: 3, send() { throw new Error("held"); }, serializeAttachment() {}, deserializeAttachment() { return null; }, close() {} });
 
 // Only explicit validation failures may discard a stored value; I/O and handler faults never do.
 class InvalidStoredValue extends TypeError {}
@@ -266,7 +269,7 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, block: p.block || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, props: !!p.props, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm, audienceZone: p.audienceZone || null, outdoor: p.outdoor || null, ...duel.saved(p) };
+    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, block: p.block || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, resumeKey: p.resumeKey, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, props: !!p.props, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm, audienceZone: p.audienceZone || null, outdoor: p.outdoor || null, ...duel.saved(p) };
   }
 
   view(p) {
@@ -568,10 +571,19 @@ export class Room extends DurableObject {
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server, [String(who.id)]);
 
-    const older = this.players.get(who.id);
-    if (older) this.evict(older, "replaced");
+    // The same page back with the key its last welcome gave (`hold`) takes its record again; any other connection of the
+    // account replaces it. The key is no credential: the session already lets this account replace its record.
+    const older = this.players.get(who.id), key = new URL(request.url).searchParams.get("resume");
+    const back = !!older && !!key && key === older.resumeKey;
+    if (back) this.reclaim(older);
+    else if (older) this.evict(older, "replaced");
     // The account's last connection's outdoor grants are taken back before this one's welcome (#667).
     await audienceRoom.settled(this, who.id);
+    if (back && this.players.get(who.id) === older) {
+      this.resume(older, server, who);
+      await this.ensureSweep();
+      return new Response(null, { status: 101, webSocket: client });
+    }
     if (this.players.size >= MAX_PLAYERS) {
       this.inspect.event("full", who);
       this.send(server, { t: "kick", reason: "full" });
@@ -580,7 +592,7 @@ export class Room extends DurableObject {
     }
 
     const spawn = spawnPoint(this.spawnSlot++);
-    const p = this.record(server, { ...who, connectionToken: crypto.randomUUID(), body: null, x: spawn.x, y: 0, z: spawn.z, yaw: spawn.yaw });
+    const p = this.record(server, { ...who, connectionToken: crypto.randomUUID(), resumeKey: crypto.randomUUID(), body: null, x: spawn.x, y: 0, z: spawn.z, yaw: spawn.yaw });
     const kept = this.pmAccounts.get(p.id);
     if (kept) p.pm.blocked = kept.blocked.slice();
     server.serializeAttachment(this.attachment(p));
@@ -590,10 +602,19 @@ export class Room extends DurableObject {
     this.players.set(p.id, p);
     this.sockets.set(server, p);
     if (this.inspect.on) this.inspect.event("join", p, { replaced: !!older });
+    this.welcome(p, false);
+    this.broadcast({ t: "join", p: this.view(p) }, server);
+    this.sendStudio(p);
+    this.updateVoice();
+    await this.ensureSweep();
+    return new Response(null, { status: 101, webSocket: client });
+  }
 
-    const others = [];
+  // Everything a page hears as its socket opens, a new record's or a resumed one's (`resumed`, its voice kept).
+  welcome(p, resumed) {
+    const server = p.ws, others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [PROP_FEATURE, tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, duel.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...audienceRoom.features(this), ...(this.inspect.on ? [INSPECT_FEATURE] : [])],
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, resume: p.resumeKey, ...(resumed ? { resumed: true } : {}), tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [PROP_FEATURE, tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, duel.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...audienceRoom.features(this), ...(this.inspect.on ? [INSPECT_FEATURE] : [])],
       // The account speaks from Ooga Chat on another device: this page's own voice waits for the visitor's word.
       ...(audienceRoom.elsewhere(this, p.id) ? { voiceElsewhere: true } : {}) });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
@@ -603,11 +624,88 @@ export class Room extends DurableObject {
     this.send(server, { t: "chalk-board", marks: this.chalk.marks, editor: this.chalkEditor ? this.chalkEditor.id : 0 });
     audienceRoom.welcome(this, p);
     duel.welcome(this, p);
-    this.broadcast({ t: "join", p: this.view(p) }, server);
+  }
+
+  // A socket lost without a word, or closed by its page to come straight back (CLOSE_RECONNECT): the player stays HOLD_MS,
+  // standing where they were and heard as they were, so nobody else sees them leave and come back. Their page, coming
+  // back with its welcome's key, takes the record again (`resume`); anything else, or nobody by then, ends it (`expire`).
+  // What only this connection held goes now, as the page lets go of it at its own close: a cabinet, a match, a duel, the
+  // doorway, the chalk, the Studio, a private conversation, the Tess queue's turn and an outdoor grant (#667: no public
+  // grant outlives its connection). They host no NPCs while away. `detail` is the close's, for the inspector.
+  hold(p, detail) {
+    if (this.players.get(p.id) !== p || p.held) return;
+    const step = (t, fn) => { try { fn(); } catch (error) { this.failed("hold", p, error, { t }); } };
+    this.sockets.delete(p.ws);
+    // A wake never rebuilds the player from the socket it lost (the constructor reads attachments).
+    try { p.ws.serializeAttachment(null); } catch { /* already closed */ }
+    p.ws = GONE;
+    p.held = { at: Date.now(), detail, timer: setTimeout(() => this.expire(p), HOLD_MS) };
+    if (this.inspect.on) step("inspect", () => this.inspect.event("hold", p, { ...detail, zone: p.zone, on: Date.now() - p.joinedAt, voice: inVoice(p) }));
+    step("cabinet", () => this.releaseCabinet(p));
+    step("hockey", () => hockey.leave(this, p.id));
+    step("block", () => block.leave(this, p.id));
+    step("duel", () => duel.leave(this, p));
+    step("door", () => this.cancelDoor(p));
+    step("passes", () => this.clearPasses(p));
+    step("studio", () => this.leaveStudio(p));
+    step("chalk", () => this.chalkLetGo(p));
+    step("pm", () => this.privateLeave(p));
+    step("tess", () => tessQueue.presence(this, p, true));
+    step("audience", () => audienceRoom.hold(this, p));
+    step("host", () => this.electHost());
+  }
+
+  // Its page is back for the record: a hold goes on until `resume`; a socket still open (half-open, or the page's own
+  // close not here yet) is ended quietly, its close finding no record, and held as a lost one would be.
+  reclaim(p) {
+    if (p.held) return;
+    const was = p.ws;
+    this.hold(p, { code: 0, said: "resumed", clean: false });
+    try { was.close(CLOSE_KICK, "resumed"); } catch { /* already closed */ }
+  }
+
+  // The held record on its page's new socket: the same Ooga, place and voice sessions, a new connection token, and a new
+  // key for the next time. Nobody else hears anything; the page hears a welcome that says so.
+  resume(p, server, who) {
+    clearTimeout(p.held.timer);
+    const away = Date.now() - p.held.at;
+    p.held = null;
+    p.ws = server;
+    p.login = who.login; p.display = who.display; p.contributor = who.contributor;
+    p.connectionToken = crypto.randomUUID();
+    p.resumeKey = crypto.randomUUID();
+    p.seenAt = Date.now();
+    // Its voice list is sent again whatever it was; its outdoor grants went with the hold, and it asks again as a new
+    // connection does.
+    p.sent = null;
+    p.outdoor = null;
+    server.serializeAttachment(this.attachment(p));
+    this.sockets.set(server, p);
+    if (this.inspect.on) this.inspect.event("resume", p, { away });
+    this.welcome(p, true);
+    this.rearrive(p);
+    tessQueue.presence(this, p);
     this.sendStudio(p);
+    this.electHost();
     this.updateVoice();
-    await this.ensureSweep();
-    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  // What arriving in its zone sends (the `zone` handler's), sent again to a resumed page: its own close forgot it all,
+  // and its `zone` repeats the zone the record already has, which the room takes as no change. The locked room's PIN
+  // while the room is still locked, the air hockey tables, a Block Frenzy match, and a doorway crossing under way.
+  rearrive(p) {
+    const lock = p.roomLock && this.roomOf(p.zone) === p.roomLock.room ? this.roomLocks.get(p.roomLock.room) : null;
+    if (lock) this.send(p.ws, { t: "door", op: "room-pin", room: p.roomLock.room, pin: lock.pin });
+    hockey.arrive(this, p);
+    block.arrive(this, p);
+    this.replayDoor(p);
+  }
+
+  // Not back in time: the leave everyone else would have heard at the close.
+  expire(p) {
+    if (this.players.get(p.id) !== p || !p.held) return;
+    const detail = p.held.detail;
+    this.drop(p, "closed", { ...detail, held: true });
   }
 
   // The map first; a socket it does not hold (an Ooga Chat member's) is looked up by its attachment, as before the map,
@@ -914,16 +1012,19 @@ export class Room extends DurableObject {
   }
 
   // The prototype's note stands: on this compatibility date close handlers must not call ws.close().
+  // A clean close is a leave; one without a close frame, or the page's own CLOSE_RECONNECT, is held for its page (`hold`).
   webSocketClose(ws, code, reason, wasClean) {
     if (commonsRoom.closed(this, ws)) return;
     const p = this.byWs(ws);
-    if (p) this.drop(p, "closed", { code, said: reason, clean: wasClean });
+    if (!p) return;
+    if (code === CLOSE_RECONNECT || wasClean === false) this.hold(p, { code, said: reason, clean: wasClean });
+    else this.drop(p, "closed", { code, said: reason, clean: wasClean });
   }
 
   webSocketError(ws, error) {
     if (commonsRoom.closed(this, ws)) return;
     const p = this.byWs(ws);
-    if (p) this.drop(p, "error", { error: String((error && error.message) || error || "") });
+    if (p) this.hold(p, { error: String((error && error.message) || error || "") });
   }
 
   sendCabinets(ws = null) {
@@ -973,6 +1074,7 @@ export class Room extends DurableObject {
   // often in the same helper that failed it, and so do a close and a socket error.
   drop(p, reason, detail = null) {
     if (this.players.get(p.id) !== p) return;
+    if (p.held) { clearTimeout(p.held.timer); p.held = null; }
     const step = (t, fn) => { try { fn(); } catch (error) { this.failed("drop", p, error, { t }); } };
     if (this.inspect.on) step("inspect", () => this.inspect.event("leave", p, { reason, ...detail, zone: p.zone, on: Date.now() - p.joinedAt, heard: Date.now() - this.heardAt(p), voice: inVoice(p) }));
     step("cabinet", () => this.releaseCabinet(p));
@@ -1293,9 +1395,11 @@ export class Room extends DurableObject {
   }
 
   // Also after any page's `hub` flag changes: the host sends frames only while someone follows.
+  // A player held over a lost socket (`hold`) neither hosts nor follows until its page is back.
   electHost() {
-    const id = electHost(this.players.values(), this.hostId);
-    const followers = npcFollowers(this.players.values(), id);
+    const here = [...this.players.values()].filter((p) => !p.held);
+    const id = electHost(here, this.hostId);
+    const followers = npcFollowers(here, id);
     if (id === this.hostId && followers === this.followers) return;
     if (this.inspect.on && id !== this.hostId) this.inspect.event("host", null, { login: id ? this.players.get(id).login : "", followers });
     this.hostId = id;
@@ -2093,9 +2197,8 @@ export class Room extends DurableObject {
           if (this.players.get(p.id) !== p) continue;
           if (player !== undefined && (!player || player.banned_at)) { this.evict(p, "revoked"); continue; }
         }
-        const pinged = this.ctx.getWebSocketAutoResponseTimestamp(p.ws);
-        const last = Math.max(p.seenAt, pinged ? pinged.getTime() : 0);
-        if (now - last > STALE_MS) this.evict(p, "stale");
+        // A held player has no socket to go stale: its hold ends it.
+        if (!p.held && now - this.heardAt(p) > STALE_MS) this.evict(p, "stale");
       }
       await commonsRoom.sweep(this, now, (login, id) => this.memberOwns(login, id), STALE_MS);
       this.sweepAt = now + (this.players.size || !commonsRoom.size(this) ? SWEEP_MS : MEMBER_SWEEP_MS);
@@ -2109,7 +2212,7 @@ export class Room extends DurableObject {
 
   // When the room last heard from a player: a message, or a ping the runtime answered without waking it.
   heardAt(p) {
-    const pinged = this.ctx.getWebSocketAutoResponseTimestamp(p.ws);
+    const pinged = p.ws === GONE ? null : this.ctx.getWebSocketAutoResponseTimestamp(p.ws);
     return Math.max(p.seenAt, pinged ? pinged.getTime() : 0);
   }
 

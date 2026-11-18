@@ -64,7 +64,7 @@
 // the voice comes back the moment the room confirms), `audience` counts the public listeners the room admitted, who keep
 // an outdoor speaker from being alone with no other player near, and `sources` names the bodyless public speakers the room
 // lists to be heard, who play at full whatever the hearing range or a crossing, as a voice link does.
-// Exports support, probe, ICE_BLOCKED, enable, listen, dropMic, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setMuted, toggle, leave, restart, stop,
+// Exports support, probe, ICE_BLOCKED, enable, listen, dropMic, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setMuted, toggle, leave, restart, resumed, stop,
 // setPeers, setOutdoor, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades,
 // RADIUS_MIN, RADIUS_MAX and stats.
 (() => {
@@ -1170,6 +1170,15 @@
     await attempt(token);
   };
 
+  // The room held this page's record over a lost socket and handed it back (net.js `resume`): its sessions are still the
+  // room's and every listener still pulls this microphone. Voice whose connections all stayed up stays as it is, the
+  // room's next list applied as any other; anything else comes back as after any welcome.
+  const resumed = () => {
+    const still = (pc) => !pc || pc.connectionState === "connected";
+    if (up() && !recover && !stats.joining && !passiveOpening && !BL.net.state.voiceElsewhere && subPc && still(subPc) && still(pubPc)) return;
+    restart(true);
+  };
+
   // Whom the room wants heard, and each one's publication count (`gens`; none from an older room).
   const setPeers = (ids, gens = null, listeners = null) => {
     syncPreferences();
@@ -1345,5 +1354,5 @@
     playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none", relay: relayConfig !== ICE, bare,
     relayRenewals: relayRenewals.map(sample => ({ ...sample })) });
 
-  BL.voice = { support, probe, ICE_BLOCKED, warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, stop, setPeers, setOutdoor, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
+  BL.voice = { support, probe, ICE_BLOCKED, warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, resumed, stop, setPeers, setOutdoor, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();
