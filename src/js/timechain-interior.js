@@ -286,7 +286,9 @@
   // The visit. `shell` is the scene object the director knows (scene-timechain.js), `visit` what the shell resolved.
   const create = (shell, ctx, visit) => {
     const { renderer, game, world, go, canvas } = ctx;
-    const room = ROOMS.get(visit.room), L = ROOMS.layout(room.id), shared = visit.mode === "shared", kind = RM.KINDS[room.kind];
+    const room = ROOMS.get(visit.room), L = ROOMS.layout(room.id), kind = RM.KINDS[room.kind], SPOT_PLACE = String(room.id);
+    // Shared until the visitor signs out in here, when the room becomes their solo copy (`accountChanged`).
+    let shared = visit.mode === "shared";
     const camera = createCamera({ fov: 58, near: 0.12, far: L.R * 3 + 20 });
     const root = createNode();
     const hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster });
@@ -735,9 +737,10 @@
       pilot.possess(avatar);
       pilot.enterClose();
     }
-    // In the room, as the visit has it: a guided arrival from the vestibule, or (a reload, a link, a history step)
-    // standing at the arrival facing the screens.
-    const arrive = (at, yaw = 0, pitch = 0.04) => pilot.navigate({ position: { x: at.x, y: 0, z: at.z }, yaw, pitch, dist: 4 });
+    // In the room, as the visit has it: a guided arrival from the vestibule, or (a link, a history step) standing at the
+    // arrival facing the screens; a reload stands where the Ooga stood and faces as it faced (visit-spot.js), while the
+    // room's floor is still there to walk on from.
+    const arrive = (at, yaw = 0, pitch = 0.04, y = 0) => pilot.navigate({ position: { x: at.x, y, z: at.z }, yaw, pitch, dist: 4 });
     const guide = { stage: visit.guided && avatar ? "arrive" : null, t: 0, hold: 0, quick: false };
     const doors = { open: guide.stage ? 1 : 0, want: guide.stage ? 1 : 0, until: 0 };
     const eyeForward = (cave, pitch) => 0.16 * cave.traits.height * Math.cos(pitch);
@@ -749,7 +752,11 @@
       // room through the open doors (`entry`, offset as the island's eye stood from its handover point), so the
       // crossing has no cut. A reload or a link lands at the old spots.
       if (e) arrive({ x: e.x + Math.sin(e.heading) * eyeForward(avatar, e.pitch), z: L.entry.z + e.dz + Math.cos(e.heading) * eyeForward(avatar, e.pitch) }, e.heading, -e.pitch);
-      else arrive(guide.stage ? L.threshold : L.arrival);
+      else {
+        const back = !guide.stage && ctx.from === null ? BL.visitSpot.take("timechain", SPOT_PLACE) : null;
+        if (back && Math.abs(groundAt(back.x, back.z, back.y, back.y, avatar) - back.y) < 0.05 && BL.visitSpot.holds(back, walkable, avatar)) arrive(back, back.yaw - Math.PI, 0.04, back.y);
+        else arrive(guide.stage ? L.threshold : L.arrival);
+      }
     }
     keepCameraInside();
     // The island's view back out of its passage (taken there before this crossing), hung at the vestibule's far end so
@@ -781,7 +788,7 @@
     const footsteps = BL.footsteps.create();
     const sound = ambience(room, ctx.signal);
     // Another player crossing this room's own doorway opens its doors here too (net.js `subscribeDoor`).
-    const unsubscribeDoor = shared ? BL.net.subscribeDoor((event) => {
+    let unsubscribeDoor = shared ? BL.net.subscribeDoor((event) => {
       if (event.op === "denied" && event.reason === "locked") {
         hud.toast(`${room.name} is locked from inside`);
         handOff();
@@ -841,11 +848,21 @@
       hud.tooltip.hide();
       if (shared) BL.net.passDoor(room.zone, "out");
     };
+    // Signed out in a shared room: the visitor stays where they stand, and the room is their solo copy from here on
+    // (nobody else in it, nothing published), as a reload signed out would find it.
     const accountChanged = () => {
-      if (shared && !BL.net.state.me && !leaving) {
-        hud.toast("Signed out · back outside");
-        handOff(true);
-      }
+      if (!shared || BL.net.state.me || leaving) return;
+      shared = false;
+      visit.mode = "solo";
+      visit.login = null;
+      shell.keep();
+      unsubscribeDoor();
+      unsubscribeDoor = null;
+      remotes.dispose();
+      remotes = null;
+      BL.net.setBody(null);
+      BL.net.setZone("none");
+      hud.toast("Signed out · this room is now your solo copy");
     };
     const unsubscribeAccount = BL.net.subscribe(accountChanged);
     // Weapon shortcuts do nothing in here (a dialog, such as the model viewer, keeps its own keys); right-click and
@@ -1099,6 +1116,7 @@
       }
       if (remotes) remotes.update(dt);
       footsteps.update(driven);
+      if (driven && !guide.stage && !leaving) BL.visitSpot.note("timechain", SPOT_PLACE, driven);
       lockUpdate(dt);
       if (avatar && !guide.stage) {
         let action = null;

@@ -2072,10 +2072,13 @@
       pilot.bind(shared);
       avatar = people.cavemen.get(playerName);
       buildZipline(shared);
-      // At a machine an Ooga plays, a step back from its spot, where that Ooga stands again.
+      // At a machine an Ooga plays, a step back from its spot, where that Ooga stands again. A reload of the hall
+      // stands where the Ooga stood, on whichever floor, while that floor is still there to walk on from (visit-spot.js).
       const spawn = DEBUG ? debugSpawn() : null;
-      const at = fromWatch ? AW.ARRIVAL : spawn ? spawn : fromBlockHall ? { x: BH.x, z: BH.z0 + 1, facing: 0 } : from >= 0 ? live.find((c) => c.game === from).play : retroFrom ? retroFrom.play : machineFrom ? (machineFrom.bot ? toHall({ x: machineFrom.play.x, z: machineFrom.play.z, turn: machineFrom.turn }, 0, 1.3, { facing: machineFrom.play.facing }) : machineFrom.play) : { x: 0, z: HALL.front - 1.5, facing: Math.PI };
-      Object.assign(avatar.root.position, { x: at.x, y: avatar.baseY + supportAt(at.x, at.z, fromBlockHall || at.deck || retroFrom || from >= 0 && live.find(c => c.game === from).y === MEZZ.y ? MEZZ.y : 1), z: at.z });
+      const stood = ctx.from === null && !ctx.place ? BL.visitSpot.take("arcade", "") : null;
+      const back = stood && Math.abs(supportAt(stood.x, stood.z, stood.y) - stood.y) < 0.05 && BL.visitSpot.holds(stood, walkableFor, avatar) ? stood : null;
+      const at = fromWatch ? AW.ARRIVAL : spawn ? spawn : fromBlockHall ? { x: BH.x, z: BH.z0 + 1, facing: 0 } : from >= 0 ? live.find((c) => c.game === from).play : retroFrom ? retroFrom.play : machineFrom ? (machineFrom.bot ? toHall({ x: machineFrom.play.x, z: machineFrom.play.z, turn: machineFrom.turn }, 0, 1.3, { facing: machineFrom.play.facing }) : machineFrom.play) : back ? { x: back.x, z: back.z, facing: back.yaw } : { x: 0, z: HALL.front - 1.5, facing: Math.PI };
+      Object.assign(avatar.root.position, { x: at.x, y: avatar.baseY + supportAt(at.x, at.z, back && !spawn ? back.y : fromBlockHall || at.deck || retroFrom || from >= 0 && live.find(c => c.game === from).y === MEZZ.y ? MEZZ.y : 1), z: at.z });
       avatar.root.rotation.y = at.facing;
       // Carry the view and record the outside loadout before parking its weapons for the visit.
       const carried = pilot.arrive(avatar);
@@ -2244,6 +2247,7 @@
     if (drivenHere) {
       const p = drivenHere.root.position;
       BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, BL.crew.weaponFlags(drivenHere), BL.crew.visualState(drivenHere));
+      if (!leaving && !(doorWalk && doorWalk.holding)) BL.visitSpot.note("arcade", "", drivenHere);
     }
     // The hallway joins Ooga Arcade to Ghost Hunter's Arena (#422), a voice group of its own: each half is a zone of the
     // land it leads to (`arcade.haunt`, `ghost-arena.haunt`), so the room hands both the hunt and a spectator there

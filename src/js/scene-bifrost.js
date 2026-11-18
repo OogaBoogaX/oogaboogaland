@@ -615,6 +615,11 @@
 
   const groundFor = (x, z) => BM.supportAt(x, z);
   const walkableFor = (ax, az, bx, bz, y, height, actor) => BM.walkable(ax, az, bx, bz, actor.bodyRadius || 0.35, scene.kinds);
+  // A reload of this tab stands where the Ooga stood (visit-spot.js), while the floor is still there to walk on from.
+  const stoodAt = (ctx) => {
+    const spot = ctx.from === null && !ctx.place ? BL.visitSpot.take("bifrost", "") : null;
+    return spot && Math.abs(groundFor(spot.x, spot.z, spot.y, spot.y, avatar) - spot.y) < 0.05 && BL.visitSpot.holds(spot, walkableFor, avatar) ? spot : null;
+  };
 
   const enter = (ctx) => {
     stopPictures();
@@ -743,6 +748,10 @@
       const from = scene.windows.find((w) => w.kind === "travel" && w.row.scene === ctx.from);
       if (from) standBefore(from, 2.8);
       else if (ctx.from === "hub") pilot.navigate(GATE);
+      else {
+        const stood = stoodAt(ctx);
+        if (stood) pilot.navigate({ position: stood, yaw: stood.yaw - Math.PI, pitch: GATE.pitch, dist: GATE.dist });
+      }
     }
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     // Other signed-in players in the chamber, as the Oogas they drive.
@@ -1021,6 +1030,7 @@
       const p = drivenHere.root.position;
       BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, BL.crew.weaponFlags(drivenHere), BL.crew.visualState(drivenHere));
       BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned);
+      if (!leaving) BL.visitSpot.note("bifrost", "", drivenHere);
     }
     remotes.update(dt);
     footsteps.update(drivenHere);

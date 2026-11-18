@@ -487,6 +487,8 @@
     let left;
     try { left = leaving.leave(); }
     finally { visitController.abort(); }
+    // Where the Ooga stood belongs to the scene just left (visit-spot.js); the next one notes its own.
+    window.BL.visitSpot.clear();
     if (DEBUG && leaving.root.children.length) throw new Error(`${leaving.id}.leave left ${leaving.root.children.length} nodes in its root`);
     if (DEBUG && left.targets) throw new Error(`${leaving.id}.leave left ${left.targets} input targets`);
     clearTweens();

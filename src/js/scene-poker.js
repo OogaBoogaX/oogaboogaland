@@ -292,7 +292,10 @@
     pilot.bind(shared); avatar = people.cavemen.get(name);
     avatar.root.position.x = 0; avatar.root.position.y = avatar.baseY; avatar.root.position.z = 29;
     avatar.root.rotation.y = Math.PI; pilot.possess(avatar);
-    pilot.navigate({ position: { x: 0, y: 0, z: 29 }, yaw: 0, pitch: 0.18, dist: 4 });
+    // A reload of this tab stands where the Ooga stood on the floor (visit-spot.js), while it can walk on from there.
+    const stood = ctx.from === null ? BL.visitSpot.take("poker", "") : null;
+    if (stood && Math.abs(stood.y) < 0.05 && BL.visitSpot.holds(stood, BL.pokerModels.walkable, avatar)) pilot.navigate({ position: stood, yaw: stood.yaw - Math.PI, pitch: 0.18, dist: 4 });
+    else pilot.navigate({ position: { x: 0, y: 0, z: 29 }, yaw: 0, pitch: 0.18, dist: 4 });
     keepCameraInside();
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     // Other signed-in players on the floor, as the Oogas they drive.
@@ -321,6 +324,7 @@
     const drivenHere = people.player;
     BL.net.setBody(drivenHere ? drivenHere.traits.name : null);
     if (drivenHere) { const p = drivenHere.root.position; BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, 0, BL.crew.visualState(drivenHere)); BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned); }
+    if (drivenHere && !leaving && seatTable < 0) BL.visitSpot.note("poker", "", drivenHere);
     remotes.update(dt);
     footsteps.update(drivenHere);
     mirror.phase.update(dt, elapsed); mirror.body.update(dt); mirror.body.time = mirror.phase.ripples.time;

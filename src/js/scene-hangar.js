@@ -1516,6 +1516,11 @@
     }
     return true;
   };
+  // A reload of this tab stands where the Ooga stood (visit-spot.js), while the floor is still there to walk on from.
+  const stoodAt = (ctx) => {
+    const spot = ctx.from === null && !ctx.place ? BL.visitSpot.take("hangar", "") : null;
+    return spot && Math.abs(groundFor(spot.x, spot.z, spot.y, spot.y, avatar) - spot.y) < 0.05 && BL.visitSpot.holds(spot, walkableFor, avatar) ? spot : null;
+  };
   // In the air, the same clearance without the floor within a step, as the Factory keeps it, so a jump carries an Ooga
   // over a deck's rail and it drops to whatever is below; on foot the edges still hold. A crate or a chest blocks the
   // whole body in the air (a step's foot's breadth is for walking), and the forklift holds in the air as on foot, a
@@ -1810,7 +1815,10 @@
       people.parkWeapons(avatar);
       pilot.refreshCombat();
       if (crossing) walkIn(crossing);
-      else pilot.navigate(arrival());
+      else {
+        const stood = stoodAt(ctx), at = arrival();
+        pilot.navigate(stood ? { yaw: stood.yaw - Math.PI, pitch: at.pitch, dist: at.dist, position: stood } : at);
+      }
       const heads = Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length);
       scene.gate.phase.body.track(avatar.root, avatar.traits.height * 2, heads);
       scene.launch.phase.body.track(avatar.root, avatar.traits.height * 2, heads);
@@ -1961,6 +1969,7 @@
       const p = drivenHere.root.position;
       BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, BL.crew.weaponFlags(drivenHere), BL.crew.visualState(drivenHere));
       BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned);
+      if (!walk.phase && !leaving) BL.visitSpot.note("hangar", "", drivenHere);
     }
     remotes.update(dt);
     footsteps.update(drivenHere);

@@ -1740,6 +1740,11 @@
   const reloadPolicy = { near: () => false, available: () => false };
   const walkableFor = (ax, az, bx, bz, y, height, actor) => actor === avatar && walkTunnel(bx, bz) || FM.walkable(ax, az, bx, bz, y, actor.bodyRadius || 0.35, height);
   const ceilingFor = (x, z, feet, actor) => FM.stairCeilingAt(x, z, feet, actor.bodyRadius || 0.35);
+  // A reload of this tab stands where the Ooga stood (visit-spot.js), while the floor is still there to walk on from.
+  const stoodAt = (ctx) => {
+    const spot = ctx.from === null && !ctx.place ? BL.visitSpot.take("factory", "") : null;
+    return spot && Math.abs(groundFor(spot.x, spot.z, spot.y, spot.y, avatar) - spot.y) < 0.05 && BL.visitSpot.holds(spot, walkableFor, avatar) ? spot : null;
+  };
   // In the air, keep the same obstacle clearance without requiring the floor to be within a step.
   const flyableFor = (ax, az, bx, bz, y, height, actor) => {
     const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.2)), radius = actor.bodyRadius || 0.35;
@@ -1970,7 +1975,10 @@
       // shield, it comes on through the gate's in its light instead, and walks on to that step.
       if (crossing) walkIn(crossing);
       else if (fromHangar && scene.hangar) walkInHangar(fromHangar);
-      else pilot.navigate(arrival);
+      else {
+        const stood = stoodAt(ctx);
+        pilot.navigate(stood ? { yaw: stood.yaw - Math.PI, pitch: arrival.pitch, dist: arrival.dist, position: stood } : arrival);
+      }
       scene.gate.phase.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
       for (const t of scene.tunnels) t.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
       if (scene.hangar) scene.hangar.phase.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
@@ -2234,6 +2242,7 @@
       const p = drivenHere.root.position;
       BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, BL.crew.weaponFlags(drivenHere), BL.crew.visualState(drivenHere));
       BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned);
+      if (!walk.phase && !leaving) BL.visitSpot.note("factory", "", drivenHere);
     }
     remotes.update(dt);
     footsteps.update(drivenHere);

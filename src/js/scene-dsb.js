@@ -434,6 +434,11 @@
     scene.renderOpts=renderOpts;
     Object.assign(scene,{root,camera,input,setInterior:weather.setInterior,debug:{get audio(){return entrance?.audio;},weather:weather.shared,renderOpts,daylight:clock,camera,pilot,crew,controls:pilot.controls,hud,dsb:{get presence(){return {zone:BL.net.state.zone,body:crew.player?.traits.name||null,...remotes.stats()};},land,vacancies,water,waterInteraction,weather,nature,detail,enrichment,groundAt:(x,z,feet)=>groundAt(x,z,feet,undefined,avatar),get town(){return town;},get atmosphere(){return atmosphere;},get entrance(){return entrance;},get olympus(){return olympus;},noderunner,tv,studioSession,shopMenu,inkMenu,bigMenu,memeMenu,stackchainMenu,svrnMenu,get wallets(){return wallets?.debug;},walletsMenu,takeWallet,get walletLine(){return walletLine;},get walletWalk(){return walletWalk.on?[walletWalk.x,walletWalk.z,walletWalk.slot]:null;},get rescue(){return rescue?.debug;},menuZone,openVenue,interiors,exterior,setInterior:weather.setInterior,gate,avatar,get phase(){return interiors?.active?"interior":"land";},overview:OVERVIEW}}});
     walk();
+    // A reload of this tab stands where the Ooga stood, in the venue it stood in (visit-spot.js), while the floor is
+    // still there to walk on from; a venue whose floor is not is entered at its door.
+    const stood=ctx.from===null?BL.visitSpot.take("dsb"):null;
+    if(stood&&(!stood.place||interiors.restore(stood.place))&&Math.abs(groundAt(stood.x,stood.z,stood.y,stood.y,avatar)-stood.y)<.05&&BL.visitSpot.holds(stood,walkable,avatar))
+      pilot.navigate({position:stood,yaw:stood.yaw-Math.PI,pitch:.22,dist:interiors.active?interiors.active.room.followDistance:7});
     unsubscribeAccount=BL.net.subscribe(accountChanged);accountChanged();
     if(ctx.from==="bifrost"||DEBUG&&params.has("entrance"))entrance=BL.dsbEntrance.create({root,camera,avatar,pilot,fx,exterior,scene,renderOpts,land,gate,hold:on=>{held=on;},muted:()=>weather.shared.state.muted,onArrive:walk,onLeave:()=>{if(leaving)return;world.pilot=avatar.traits.name;leaving=go("bifrost");}});
     if(DEBUG&&params.get("view")==="clearing") {
@@ -568,6 +573,7 @@
     context.classList.toggle("ink-context-browse",!!inkRoom()&&!!zone&&!nearbySeat&&!door);
     if(inkLayoutPending&&inkRoom()){inkLayoutPending=false;layoutInkBrowse();}
     sharePresence();remotes.update(dt);footsteps.update(crew.player);
+    if(crew.player===avatar&&!leaving&&!interiors.transitioning&&!gate.isOpen)BL.visitSpot.note("dsb",interiors.active?interiors.active.definition.id:"",avatar);
     context.hidden=!!avatar.camp.seat||crew.player!==avatar||pilot.looking||interiors.transitioning||gate.isOpen||menuOpen()||(!studioLabel&&!nearTv()&&!door&&(interiors.active||!nearGate()));fx.update(dt);
   };
   const leave=()=>{

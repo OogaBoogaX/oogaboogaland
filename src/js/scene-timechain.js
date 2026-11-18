@@ -8,7 +8,10 @@
 // visit this tab made (sessionStorage) and repeats it only as it was: shared needs the same account still signed in,
 // and solo is repeated only while still signed out. Otherwise a signed-out visitor gets a solo copy, while a signed-in
 // one (back from signing in, say), or one whose account could not be looked up, goes to the keypad outside with the
-// room chosen, so a solo visit never turns shared and joining a shared room is always a deliberate Enter.
+// room chosen, so a solo visit never turns shared and joining a shared room is always a deliberate Enter. Signing out
+// inside a shared room leaves the visitor standing where they are: the room turns into their solo copy (`keep` writes
+// the visit again as it now is). The visit's age runs from when the page last hid, so a reload of a long stay still
+// finds it.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -74,6 +77,7 @@
     onDonation: (donation, bananas) => impl.onDonation(donation, bananas),
     onKey: (e) => impl.onKey(e),
     stay: () => { if (impl) impl.stay(); },
+    keep: () => { if (visit) store(visit); },
     leave() {
       const out = impl.leave();
       impl = null;
@@ -83,6 +87,8 @@
     stats: () => impl.stats(),
     liveGeometry: (set) => impl.liveGeometry(set)
   };
+  window.addEventListener("pagehide", scene.keep);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") scene.keep(); });
   BL.scenes = BL.scenes || {};
   BL.scenes.timechain = scene;
 })();

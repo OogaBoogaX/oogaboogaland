@@ -535,9 +535,11 @@
   // they drive, noted each frame while it stands free (`noteSpot`) and written when the page hides or closes, as pilot.js
   // keeps the view. An arrival on the island's own view comes back there (signing in is a full page load); with nothing
   // saved, or nowhere to stand there now, it arrives at random round the pile. Debug pages neither read nor write it, so
-  // fixtures and the suite start at the pile.
+  // fixtures and the suite start at the pile. A reload of this tab comes back to where this tab's own Ooga stood
+  // (visit-spot.js, noted under `spotPlace`, the routed place this visit arrived at), at a routed place's address too:
+  // out of a Timechain room the address is the Sphere's doors, and a reload after walking on is not a trip back to them.
   const SPOT_KEY = "ooga-spot", SPOT_MAX = 1e3, SPOT = { x: 0, y: 0, z: 0, yaw: 0 };
-  let spotKnown = false;
+  let spotKnown = false, spotPlace = "";
   if (!DEBUG) {
     let v = null;
     try { v = JSON.parse(localStorage.getItem(SPOT_KEY)); } catch { /* Storage may be unavailable. */ }
@@ -7140,8 +7142,9 @@
       }
       const radius = gorilla ? Math.max(BL.clankers.WALK_RADIUS, gorilla.gorilla.bodyRadius + 0.1) : Math.max(PLAYER_RADIUS, player?.bodyRadius || 0);
       const height = gorilla ? Math.max(BL.agent.LAB_HEIGHT, BL.clankers.WALK_HEIGHT, gorilla.gorilla.bodyHeight + 0.04) : player ? player.bodyHeight : 1.6;
-      // A remembered spot was walked to, so only the body has to fit; a prop's box may hold more than the prop does.
-      if (!(saved ? physicalClearAt(p.x, p.y + 1e-5, p.z, radius, height) : navigationClearAt(p.x, p.y + 1e-5, p.z, radius, height))) continue;
+      // A remembered spot was walked to, so only the body has to fit; a prop's box may hold more than the prop does. A
+      // body left resting against a wall stands exactly its own width from it, so the fit is asked with a little to spare.
+      if (!(saved ? physicalClearAt(p.x, p.y + 1e-5, p.z, radius - BL.visitSpot.SLACK, height) : navigationClearAt(p.x, p.y + 1e-5, p.z, radius, height))) continue;
       if (gorilla && !clankerCylinderClear(p.x, p.y, p.z, p.x, p.y, p.z, radius, height, gorilla)) continue;
       if (travel) {
         let occupied = false;
@@ -8367,6 +8370,7 @@
     const p = cave.root.position;
     SPOT.x = p.x; SPOT.y = p.y - cave.baseY; SPOT.z = p.z; SPOT.yaw = cave.root.rotation.y;
     spotKnown = true;
+    BL.visitSpot.note("hub", spotPlace, cave);
   };
   // The visitor arrives awake where they last stood, else round the pile: their authenticated Ooga, remembered local
   // likeness, or Ooga. Claim once per arrival. Returning actors keep their exit.
@@ -11058,6 +11062,7 @@
     bindArcadeEntrance(ctx);
     BL.players.setDoors(doorToward);
     BL.players.setCloudSpot(cloudSpotOf);
+    spotPlace = ctx.place || "";
     const donate = ctx.place === "donate", routedPlace = donate || ctx.place === "cloud-hopper-return" ? null : ctx.place;
     const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
     world.sphereExit = null;
@@ -12068,8 +12073,13 @@
     crew.refreshStates(true);
     yield* pause(slice);
     unsubscribeActivity = contributors.subscribe(() => crew.refreshStates());
+    // A reload of this tab, at whichever address the island had: where its Ooga stood, in place of the routed place.
+    spotPlace = ctx.place || "";
+    const stood = ctx.from === null ? BL.visitSpot.take("hub", spotPlace) : null;
+    if (stood) { SPOT.x = stood.x; SPOT.y = stood.y; SPOT.z = stood.z; SPOT.yaw = stood.yaw; spotKnown = true; }
+    const resumed = !!stood && !!ctx.place;
     // Sign-in returns to the bare page; a routed hub place (a shared link, the Sphere's keypad) is still honoured.
-    const signedInArrival = ctx.from === null && (!ctx.place || ctx.place === "donate") && !!BL.net.ownCharacter();
+    const signedInArrival = ctx.from === null && (!ctx.place || ctx.place === "donate" || resumed) && !!BL.net.ownCharacter();
     let initialCharacter = ctx.from === null && !signedInArrival && preloadedCharacter ? contributors.activeRoster.find((entry) => entry.name.toLowerCase() === preloadedCharacter) : null;
     if (ctx.from === null && !signedInArrival && (preloadedJetpackWear || preloadedEquipment) && !params.has("character") && !initialCharacter) initialCharacter = contributors.activeRoster.find((entry) => crew.stateOf(crew.cavemen.get(entry.name)) === "working") || contributors.activeRoster[0];
     const initialGorilla = initialCharacter && preloadedGorilla ? crew.cavemen.get(initialCharacter.name) : null;
@@ -12097,7 +12107,7 @@
     // Every arrival drives the visitor's Ooga: the one carried back in, else their own or assigned one, claimed here.
     // A page that lands on the island's own view claims it in the view this browser last chose (pilot.js `arrive`).
     ownOogaClaimed = !!pilot.player;
-    claimArrival = ctx.from === null && (!ctx.place || ctx.place === "donate");
+    claimArrival = ctx.from === null && (!ctx.place || ctx.place === "donate" || resumed);
     claimView = claimArrival && !Number.isFinite(yawParam);
     claimOwnOoga();
     claimView = claimArrival = false;
@@ -12109,7 +12119,7 @@
     if (initialFirstPerson) pilot.enterClose(true);
     // The /donate route: the island's own view with the donation popup open. As a routed place it keeps Tess from
     // greeting over the dialog.
-    const donate = ctx.place === "donate", routedPlace = donate || ctx.place === "cloud-hopper-return" ? null : ctx.place;
+    const donate = ctx.place === "donate", routedPlace = donate || resumed || ctx.place === "cloud-hopper-return" ? null : ctx.place;
     // Out of a Timechain room: behind the Sphere's curtain, to walk out through its doors.
     const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
     world.sphereExit = null;
