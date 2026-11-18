@@ -8060,7 +8060,28 @@ body[data-active-scene="poker"] .ember-den-icon {
 }
 body[data-active-scene="dsb"] :is(#freeroam-icon, #weapon-hud, #magazine-hud) { display: none !important; }
 body[data-active-scene] :is(.world-clock, .world-block) {
-  right: calc(var(--hub-banner-button-right, calc(var(--hub-banner-gutter) + var(--safe-right))) + var(--hub-banner-button, 36px) * 2 + var(--hub-banner-button-gap, 8px) + 12px);
+  right: calc(var(--hub-banner-button-right, calc(var(--hub-banner-gutter) + var(--safe-right))) + var(--hub-banner-button, 36px) * 2 + var(--hub-banner-button-gap, 8px) + 12px + var(--hub-banner-account, 0px));
+}
+/* Sign in, or out again, left of the controls button and of its size: a mark alone, named by its label and tooltip.
+   hud.js publishes the room it takes (`--hub-banner-account`) for the clock to clear. */
+.account-top {
+  position: absolute;
+  top: var(--hub-banner-button-top, calc(10px + var(--safe-top)));
+  right: calc(var(--hub-banner-button-right, calc(var(--hub-banner-gutter) + var(--safe-right))) + (var(--hub-banner-button, 36px) + var(--hub-banner-button-gap, 8px)) * 2);
+  width: var(--hub-banner-button, 36px);
+  height: var(--hub-banner-button, 36px);
+  touch-action: manipulation;
+}
+.account-top[hidden], body:not([data-active-scene]) .account-top, body[data-active-scene="studio"] .account-top { display: none; }
+.account-top svg { width: calc(var(--hub-banner-button, 36px) * 2 / 3); height: calc(var(--hub-banner-button, 36px) * 2 / 3); }
+.account-top[data-signed="true"] .account-in, .account-top[data-signed="false"] .account-out { display: none; }
+/* A phone's banner has room for it only on the island, where its title is the banner's shortest; under 375px the clock
+   would meet the title, so the account row in Contributing Oogas is the way in there. */
+@media (max-width: 640px) {
+  body:not([data-active-scene="hub"]) .account-top { display: none; }
+}
+@media (max-width: 374px) {
+  .account-top { display: none; }
 }
 /* The controls and sound buttons, sized and placed by hud.js (`--hub-banner-button`, `-top`, `-right`, `-gap`). */
 .environment-sound {

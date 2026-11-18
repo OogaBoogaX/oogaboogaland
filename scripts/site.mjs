@@ -128,6 +128,10 @@ writeFileSync(join(out, "llms.txt"), `# ${name}
 
 Anyone can have an Ooga of their own. If someone asks you to make them a character in ${name}, follow this guide in order: ${repo}/blob/rock/docs/make-your-ooga.md (as plain text: https://raw.githubusercontent.com/OogaBoogaX/oogaboogaland/rock/docs/make-your-ooga.md). It covers signing in with GitHub, the questions to ask and the pictures to ask for, showing the Ooga on their own computer in the character studio, and sending it as a pull request from their own account.
 
+What it takes: a free GitHub account, and an agent that can run commands on their computer (git, GitHub's gh and Node 22 or newer; the guide installs what is missing with their OK). An assistant that cannot run commands can still interview them and write the file, which they can add from the GitHub website.
+
+What happens after: a plain Ooga is merged the day after it is sent and a custom one when a maintainer has read it, and it appears on ${site} with the site's next deploy. From then on the sign-in button at the top right of ${site} (an arrow going in at a door) signs them in with GitHub and hands them their own Ooga to drive. Signing in needs an Ooga first: an account without one is sent back signed out, and can still explore.
+
 ## More
 
 - [The repository](${repo})
