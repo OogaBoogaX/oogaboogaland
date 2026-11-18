@@ -53,6 +53,8 @@ import CAST_ROWS from "./characters.gen.json";
 const CAST = castIndex(CAST_ROWS);
 // A retired SFU session cannot own usable tracks. Other 410 responses are not proof of session expiry.
 const sfuSessionGone = err => err.status === 404 || (err.status === 410 && err.code === "session_error");
+// The voice cleanup queue's bound (`shedCleanup`).
+const CLEANUP_JOBS_MAX = 64;
 
 // Only explicit validation failures may discard a stored value; I/O and handler faults never do.
 class InvalidStoredValue extends TypeError {}
@@ -1449,7 +1451,7 @@ export class Room extends DurableObject {
       // No body.
     }
     if (this.players.get(p.id) !== p || (p.connectionToken && request.headers.get("x-room-token") !== p.connectionToken)) return json({ error: "connection replaced" }, 409);
-    if ((this.cleanupJobs || []).length >= 64 && !["leave", "unpublish", "close"].includes(op)) return json({ error: "media cleanup backlog; try later" }, 503);
+    if (!["leave", "unpublish", "close"].includes(op) && !(await this.shedCleanup())) return json({ error: "media cleanup backlog; try later" }, 503);
     const was = inVoice(p);
     const voice = p.voice;
     let generation = voice.version || 0;
@@ -1463,7 +1465,11 @@ export class Room extends DurableObject {
         await this.clearVoiceKind(p, kind);
         generation = voice.version || 0;
         const { sessionId } = await this.sfu.newSession();
-        if (!current() || (kind === "pub" && !mayPublish())) return json({ error: "connection or permission changed" }, 409);
+        if (!current() || (kind === "pub" && !mayPublish())) {
+          // Nobody will hold it: swept, as any session given up, rather than left open at the SFU.
+          await this.queueClose(sessionId, [], true, true);
+          return json({ error: "connection or permission changed" }, 409);
+        }
         p.voice[kind] = sessionId;
         if (kind === "pub") p.voice.track = p.voice.pending = null;
         // A receive session the page opened by itself to overhear the public conversation (voice.js `overhear`), until a
@@ -1906,6 +1912,25 @@ export class Room extends DurableObject {
     else await this.retryCleanup(session);
   }
 
+  // A full queue lets go of its oldest jobs for sessions no player holds any more, rather than refuse everyone's voice
+  // while the SFU stops answering. The page closed those connections (a restart or a leave tears both down), so nothing
+  // flows on them, and the SFU ends them in time. A session still held, or one a cleanup run has in hand, is kept: only
+  // a queue full of those refuses. True when there is room.
+  async shedCleanup() {
+    const jobs = this.cleanupJobs || [];
+    if (jobs.length < CLEANUP_JOBS_MAX) return true;
+    const held = new Set();
+    for (const p of this.players.values()) { if (p.voice.pub) held.add(p.voice.pub); if (p.voice.sub) held.add(p.voice.sub); }
+    const busy = this.cleanupTasks || new Map();
+    const free = jobs.filter(job => !held.has(job.session) && !busy.has(job.session)).sort((a, b) => (a.at || 0) - (b.at || 0));
+    const shed = free.slice(0, jobs.length - CLEANUP_JOBS_MAX + 1);
+    if (!shed.length) return false;
+    // In place: a cleanup run walking the queue checks each job is still in it before taking it.
+    for (const job of shed) jobs.splice(jobs.indexOf(job), 1);
+    if (this.ctx && this.ctx.storage) await this.ctx.storage.put("voiceCleanup", this.cleanupJobs);
+    return true;
+  }
+
   async retryCleanup(session = null, background = !session) {
     if (!this.sfu || !this.cleanupJobs || !this.cleanupJobs.length) return;
     if (!session && this.cleanupRunning) return this.cleanupRunning;
@@ -2110,7 +2135,7 @@ export class Room extends DurableObject {
     const host = this.players.get(this.hostId);
     return { status: this.players.size ? "live" : "empty", players: this.players.size, maxPlayers: MAX_PLAYERS, sockets: this.ctx.getWebSockets().length,
       zones, hub, hidden, driving, host: host ? host.login : null, followers: this.followers, speaking, listening, pulled, maxPulled, pullCap: 64,
-      cleanup: this.cleanupJobs.length, cleanupCap: 64, doors: this.doorQueue.length + (this.doorActive ? 1 : 0), tickHz: TICK_HZ,
+      cleanup: this.cleanupJobs.length, cleanupCap: CLEANUP_JOBS_MAX, doors: this.doorQueue.length + (this.doorActive ? 1 : 0), tickHz: TICK_HZ,
       cleanupAttempt: this.cleanupAttempt || null, cleanupBusy: this.cleanupTasks ? this.cleanupTasks.size : 0,
       alarmStarted: this.alarmStarted || 0, alarmFinished: this.alarmFinished || 0,
       alarmRegisteredAt: this.alarmRegisteredAt || 0,

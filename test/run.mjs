@@ -28915,6 +28915,15 @@ const voiceFailureChecks = async () => {
   const waiting=blip.timers.filter(t=>t.ms===1000).at(-1);
   blip.failing.clear();if(waiting)waiting.fn();await settle();
   record("voice recovery: a restart whose first calls fail tries again and the speaker is back",!!waiting&&blip.V.stats.publishing&&!blip.V.stats.muted&&blip.V.stats.micError==="",JSON.stringify({waited:!!waiting,publishing:blip.V.stats.publishing,micError:blip.V.stats.micError}));
+  // regression: a reconnect's welcome landed while a join was still on its way: the join finished on the old connection,
+  // whose room record held its publication, and the page went on looking in voice, hearing everyone, heard by nobody.
+  const joiner=page();
+  let goLive;joiner.holds.set("live",new Promise(r=>{goLive=r;}));
+  const joining=joiner.V.enable();await settle();
+  const sent=joiner.calls.length,beforeWelcome=joiner.calls.slice();
+  joiner.V.restart(true);joiner.holds.delete("live");goLive();await joining;await settle();
+  const later=joiner.calls.slice(sent);
+  record("voice recovery: a welcome during a join publishes again on the new connection rather than finishing on the old one",beforeWelcome.includes("publish")&&later.includes("publish")&&joiner.V.stats.publishing&&!joiner.V.stats.joining,JSON.stringify({beforeWelcome,later,publishing:joiner.V.stats.publishing,joining:joiner.V.stats.joining}));
   // A microphone that goes away ends its track with no error anywhere: the speaker comes back on the device that is left.
   const unplugged=page();
   await unplugged.V.enable();await settle();

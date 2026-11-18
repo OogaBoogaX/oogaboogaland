@@ -265,7 +265,11 @@ export class Audience extends DurableObject {
     const sig = `${counts.main > 0}|${counts.dsb > 0}`;
     if (sig === this.listenersSig || !this.env.ROOM) return;
     this.listenersSig = sig;
-    this.roomQueue = this.roomQueue.then(() => this.env.ROOM.getByName("island").audienceListeners(counts)).catch(() => {});
+    this.roomQueue = this.roomQueue.then(() => this.env.ROOM.getByName("island").audienceListeners(counts)).catch(() => {
+      // Not delivered: the next check sends it again rather than counting it as told. A Room left believing nobody
+      // listens tells its outdoor speakers so, and a speaker with no island peers then holds its microphone as alone.
+      if (this.listenersSig === sig) this.listenersSig = null;
+    });
     this.background(this.roomQueue);
   }
 
@@ -408,6 +412,10 @@ export class Audience extends DurableObject {
       }
     }
     await this.flush();
+    // A word the Room missed while it was unreachable goes again (each is sent only when it differs from what was told).
+    this.sourcesChanged();
+    this.listenersChanged();
+    this.cloudsChanged();
     if (this.media.cleanup.length) await this.media.runCleanup();
     this.confirmRetired();
     this.inspect.peak("cleanupJobs", this.media.cleanup.length);
@@ -676,6 +684,9 @@ export class Audience extends DurableObject {
       for (const connId of p.conns.keys()) if (!told.has(connId)) this.tellYou(connId);
     }
     await this.flush();
+    // The Room's own word is when it can hear: anything it was not told before (a lost call) goes again now.
+    this.sourcesChanged();
+    this.listenersChanged();
     // A world publication gone or replaced: every subscription to the old one is closed at once. The answer names the
     // speakers whose subscriptions the SFU has not yet confirmed closed: the Room's `closed` for them waits (#667).
     await this.media.prune();

@@ -217,15 +217,38 @@ export const createMediaBroker = (aud) => {
     if (!s) return;
     const had = !!s.pub;
     await forget(connId);
+    // Its sessions are no longer held, so a retirement that waited on them is done now, not after the closes below,
+    // which wait on the SFU.
+    if (typeof aud.confirmRetired === "function") aud.confirmRetired();
     if (had) { aud.sourcesChanged(); await prune(); announce(); }
     if (s.sub) await queueClose(s.sub, Object.keys(s.mids), !Object.keys(s.mids).length);
     if (s.pub) await queueClose(s.pub, s.pubMid ? [s.pubMid] : [], !s.pubMid);
   };
 
+  // Sessions a live connection still holds: its page may still be receiving or sending on them. One no connection holds
+  // belongs to a page that closed it (Ooga Chat closes its media with its socket, on a leave and before opening another),
+  // so nothing flows on it, whether or not the SFU has confirmed the close yet.
+  const heldSessions = () => {
+    const held = new Set();
+    for (const s of states.values()) { if (s.sub) held.add(s.sub); if (s.pub) held.add(s.pub); }
+    return held;
+  };
+  // A full queue lets go of its oldest jobs for sessions nobody holds, rather than refuse every speaker and listener
+  // while the SFU stops answering; only a queue full of held sessions refuses. True when there is room.
+  const shed = async () => {
+    if (cleanup.length < CLEANUP_BACKLOG_MAX) return true;
+    const held = heldSessions();
+    const free = cleanup.filter((job) => !held.has(job.session)).sort((a, b) => a.at - b.at).slice(0, cleanup.length - CLEANUP_BACKLOG_MAX + 1);
+    if (!free.length) return false;
+    for (const job of free) if (removeJob(job)) aud.inspect.count("cleanupExpired");
+    await persistCleanup();
+    return true;
+  };
+
   // --- one op ---
   const operation = async (op, conn, body) => {
     if (!sfu) return refuse("voice_unavailable", 503, true);
-    if (cleanup.length >= CLEANUP_BACKLOG_MAX && !["leave", "publish/close", "receive/close"].includes(op)) return refuse("cleanup_pending", 503, true);
+    if (!["leave", "publish/close", "receive/close"].includes(op) && !(await shed())) return refuse("cleanup_pending", 503, true);
     const s = stateOf(conn.connId);
     const current = () => aud.model.conns.get(conn.connId) === conn;
     const leaseOk = () => !!conn.lease && conn.lease.generation === body.generation;
@@ -374,8 +397,15 @@ export const createMediaBroker = (aud) => {
     /** The cleanup queue as the owner sees it: how many jobs and the oldest one's age. */
     backlog: (now = Date.now()) => ({ jobs: cleanup.length, oldestMs: cleanup.reduce((age, job) => Math.max(age, now - job.at), 0) }),
     get cleanup() { return cleanup; }, get states() { return states; }, get configured() { return !!sfu; },
-    /** Speakers some outdoor subscription to whom is not yet confirmed closed at the SFU. */
-    pending: () => new Set(cleanup.flatMap((job) => job.participants || [])),
+    /**
+     * Speakers some outdoor subscription to whom is not yet confirmed closed at the SFU, on a session a live connection
+     * still holds. A job for a session nobody holds (its listener left) holds nobody's microphone: until it is given up,
+     * after an hour, it would otherwise keep the island's `closed` from coming and the speaker's microphone held off.
+     */
+    pending: () => {
+      const held = heldSessions();
+      return new Set(cleanup.flatMap((job) => (held.has(job.session) ? job.participants || [] : [])));
+    },
     nextCleanup: () => (cleanup.length ? Date.now() + CLEANUP_RETRY_MS : Infinity),
   };
 };

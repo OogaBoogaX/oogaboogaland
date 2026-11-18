@@ -108,7 +108,8 @@ test("the Room admits a scope only where its own view agrees, and refuses everyt
   assert.deepEqual(h.frames(a).at(-1), { op: "refused", epoch: 1, reason: "scope" }, "standing on the island is not DSB Land");
   await h.outdoor(a, { op: "enter", epoch: 2, scope: "main" });
   await h.settle();
-  assert.deepEqual(h.frames(a).at(-1), { op: "open", epoch: 2, scope: "main", listeners: 0, sources: [] });
+  // Its count is the one the Audience's answer to the island's word carried (3 in this harness), never a stale zero.
+  assert.deepEqual(h.frames(a).find((f) => f.op === "open" && f.epoch === 2), { op: "open", epoch: 2, scope: "main", listeners: 3, sources: [] });
   assert.deepEqual(h.audience.calls.at(-1).speakers.map((s) => [s.id, s.zone, s.pub.session]), [["gh:1", "main", "pub1"]], "now an outdoor speaker, by reference");
   const b = await h.join(2, "b", "hq");
   await h.outdoor(b, { op: "enter", epoch: 1, scope: "main" });
@@ -219,6 +220,11 @@ test("an open grant hears its listeners and its Ooga Chat sources; a redeploy wi
   await h.outdoor(a, { op: "enter", epoch: 1, scope: "main" });
   h.room.audienceListeners({ main: 4, dsb: 0 });
   assert.deepEqual(h.frames(a).at(-1), { op: "audience", epoch: 1, listeners: 4, sources: [] });
+  // regression: the Room kept the counts on a property named as this method, so every call after the first failed and
+  // the Room went on believing the first count until it was next rebuilt.
+  h.room.audienceListeners({ main: 0, dsb: 0 });
+  assert.deepEqual(h.frames(a).at(-1), { op: "audience", epoch: 1, listeners: 0, sources: [] });
+  h.room.audienceListeners({ main: 4, dsb: 0 });
   h.room.audienceSources([{ id: 777, zone: "main", session: "chat", track: "mic", gen: 2 }]);
   assert.deepEqual(h.frames(a).at(-1), { op: "audience", epoch: 1, listeners: 4, sources: [777] });
   // The island redeployed with OOGA_CHAT_FEATURES lacking `outdoor`: the attachment's grant is taken back on wake.
@@ -408,4 +414,19 @@ test("a retirement finished by a later close, not the alarm, is still confirmed 
   await settle();
   assert.deepEqual(answer.pending, []);
   assert.ok(room.confirmed.includes("gh:1"), "gh:1's retirement, finished by that run, is confirmed without waiting for an alarm");
+
+  // regression: the listener leaves while the SFU still refuses the close. Its page closed its connection with its
+  // socket, so nothing flows on that session: the speaker's retirement is done, rather than holding their island
+  // microphone off for the hour the stuck job lasts.
+  room.confirmed.length = 0;
+  await a.world(103, [speaker(1)], ["gh:1"]);
+  await call("receive/sync");
+  sfu.failClose = true;
+  assert.deepEqual((await a.world(104, [], ["gh:1"])).pending, ["gh:1"], "a live listener's unconfirmed close still holds");
+  await a.webSocketClose(ws);
+  await settle();
+  assert.ok(a.media.cleanup.length > 0, "the close is still owed to the SFU");
+  assert.deepEqual((await a.world(105, [], ["gh:1"])).pending, [], "a session nobody holds holds nobody's microphone");
+  assert.ok(room.confirmed.includes("gh:1"), "and the Room hears so as the listener goes");
+  sfu.failClose = false;
 });

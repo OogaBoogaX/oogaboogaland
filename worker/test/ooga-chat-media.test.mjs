@@ -279,7 +279,7 @@ test("anything that changes while the SFU call is in flight keeps nothing it sho
   assert.deepEqual(openMids(sub), [], "and the one the SFU made is closed");
 });
 
-test("cleanup is durable: a failed close is kept, retried by the alarm after everyone left, and blocks new publishing past its bound", async () => {
+test("cleanup is durable: a failed close is kept, retried by the alarm after everyone left, and past its bound blocks new publishing only for sessions still held", async () => {
   const h = host(), a = await h.make();
   const amy = await connect(a, who(1));
   await speak(a, amy);
@@ -297,13 +297,25 @@ test("cleanup is durable: a failed close is kept, retried by the alarm after eve
   await woken.alarm();
   assert.deepEqual(openMids(pub), []);
   assert.deepEqual(h.storage.get("mediaCleanup"), []);
-  // Past the bound, publishing waits for cleanup while giving things up still works.
+  // Past the bound, with every session still held by a live connection, publishing waits for cleanup while giving
+  // things up still works.
   const bea = await connect(woken, who(2));
-  for (let i = 0; i < 64; i++) woken.media.cleanup.push({ session: `stuck${i}`, mids: ["0"], all: false, at: Date.now(), tries: 0 });
+  for (let i = 0; i < 64; i++) {
+    woken.media.cleanup.push({ session: `stuck${i}`, mids: ["0"], all: false, at: Date.now() - 64 + i, tries: 0 });
+    woken.media.states.set(`holder${i}`, { sub: `stuck${i}`, mids: {}, pub: null, pubMid: null, pending: false, track: null, gen: 0, lease: 0 });
+  }
   await woken.webSocketMessage(bea.ws, JSON.stringify({ type: "setRole", requestId: 1, role: "speaker" }));
   const generation = woken.model.conns.get(bea.connection).lease.generation;
   assert.equal((await media(woken, bea, "publish/open", { generation })).body.error.code, "cleanup_pending");
+  // regression: a queue full of jobs for sessions nobody holds (their pages closed them, and the SFU stopped answering)
+  // refused every speaker and listener for an hour. It lets go of the oldest such job instead, keeping its bound.
+  for (let i = 0; i < 64; i += 2) woken.media.states.delete(`holder${i}`);
+  assert.equal((await media(woken, bea, "publish/open", { generation })).status, 200);
+  assert.equal(woken.media.cleanup.length, 63);
+  assert.ok(!woken.media.cleanup.some((job) => job.session === "stuck0"), "the oldest job nobody holds is the one let go");
+  assert.ok(woken.media.cleanup.some((job) => job.session === "stuck1"), "a held session's job is kept");
   assert.equal((await media(woken, bea, "leave")).status, 200);
+  for (let i = 0; i < 64; i++) woken.media.states.delete(`holder${i}`);
   woken.media.cleanup.splice(0);
 });
 

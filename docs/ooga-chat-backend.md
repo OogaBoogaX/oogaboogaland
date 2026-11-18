@@ -421,8 +421,13 @@ new voice without polling. A mute changes no publication and asks nobody to sync
 the SFU confirms (`close_track_error` counts as gone) or an hour has passed, after every client has left too. A
 session whose tracks are unknown (a failed call) is swept whole, and any track that sweep finds and fails to close is
 kept for the next try. Two runs over one job (the alarm's and a new close merged into it) never remove another job. With
-64 jobs pending, publishing and receiving wait
-(`cleanup_pending`) while giving things up still works. A woken object restores each connection's media from
+64 jobs pending, the oldest jobs for sessions no live connection holds are let go to make room: their pages closed those
+connections (Ooga Chat closes its media with its socket, on a leave and before opening another), so nothing flows on
+them while the SFU stops answering. Only a queue full of sessions still held makes publishing and receiving wait
+(`cleanup_pending`), while giving things up still works. The island's Room keeps its own voice cleanup queue to the
+same bound and rule. Likewise an outdoor subscription counts as unconfirmed (the Room's `closed` waits on it) only while
+a live connection holds its session: a listener that leaves releases the speaker's grant at once, without waiting the
+hour a close the SFU keeps refusing would take. A woken object restores each connection's media from
 `media:<connId>` and sweeps the sessions of a socket that went while it slept.
 
 **Ops** (`POST /api/chat/media/<op>`, body `{ connection, generation?, sdp?, mid?, mids? }`, at most 256 KiB, one at a

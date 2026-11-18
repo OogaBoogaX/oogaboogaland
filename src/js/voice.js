@@ -118,7 +118,7 @@
   const subs = new Map();
   // Each wanted voice's publication count from the room: a new count is a microphone published again.
   const wantedGen = new Map();
-  const stats = { enabled: false, passive: false, muted: false, alone: false, micWanted: false, returning: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, micLevel: 0, receiveState: "off", radius: 0, held: false, reconnecting: false };
+  const stats = { enabled: false, passive: false, muted: false, alone: false, micWanted: false, returning: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, micLevel: 0, receiveState: "off", radius: 0, held: false, reconnecting: false, yielded: 0 };
   const samples = new Float32Array(SAMPLES);
   const preferences = new Map();
   const duels = BL.duelListening.create();
@@ -659,9 +659,10 @@
     const s = support(), missing = s.secure ? s.webrtc ? "" : "this browser has no WebRTC" : "voice needs a secure page (https)";
     if (missing) { stats.error = missing; emit(); return; }
     activate();
+    // Already in voice, or joining it: ending the overheard session here would cancel that join and leave it joining.
+    if (stats.enabled || stats.joining) return;
     // A session the visitor asked for replaces the overheard one, which the room treats differently.
     if (passive || passiveOpening) endPassive();
-    if (stats.enabled || stats.joining) return;
     const token = lifecycle;
     stats.joining = true; stats.error = ""; emit();
     try {
@@ -1133,8 +1134,12 @@
     dropWhy = "";
     // The account began speaking from Ooga Chat while this page was away: that voice stands, and this page's waits for
     // the visitor's word (voice-handoff.js), as a page out of voice does.
-    if (welcomed && BL.net.state.voiceElsewhere && (stats.enabled || recover)) { stop(); elsewhere(); return; }
-    if (!stats.enabled && !recover) {
+    if (welcomed && BL.net.state.voiceElsewhere && (stats.enabled || recover)) { stop(); elsewhere(); stats.yielded++; emit(); return; }
+    // A join or a listen under way is in voice too, once it may have asked the room for anything (a join captures the
+    // microphone before its first call): its sessions may be the old connection's, which a new room record no longer
+    // holds, so it goes on through the recovery rather than finishing as a publication nobody can pull.
+    const underway = stats.joining && (!microphoneWanted || !!mic);
+    if (!stats.enabled && !recover && !underway) {
       // An overheard session that dropped, or belonged to the connection before this one, is opened afresh.
       if (passive || passiveOpening) { lifecycle++; abortRequests(); teardown(); passiveOpening = false; emit(); }
       if (welcomed) resume();
