@@ -30,7 +30,7 @@
           { slide: { k: "title", kicker: "Lecture 1", title: "The Problem of Digital Cash", sub: "Why money on the internet was hard, and what was tried" },
             at: "lectern", g: "rest",
             say: [
-              { s: "Welcome. Come in, find a seat.", m: "warm" },
+              { s: "Welcome.", m: "warm" },
               { s: "I want to start with something that sounds far too easy to be a problem.", m: "wry" },
               { s: "Send somebody money over the internet. Without a bank or payment company keeping the ledger. How long could that possibly take to figure out?", g: "rest", m: "wry" },
               { s: "Twenty-six years.", g: "lean", m: "grave", land: true },
