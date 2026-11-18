@@ -563,6 +563,7 @@
   const CHIME_NOTES = [1568, 1760, 2093, 2349, 2637, 3136], CHIME_OVERTONE = 2.76;
   const sounds = () => {
     let ctx = null, disposed = false, nextChime = 0;
+    const soundChannel = BL.sound.channel("temple");
     const voices = {}, chimes = [];
     // A pooled gain taken from wherever it is now to `peak` over `attack`, then let die away over `fade` seconds.
     const envelope = (param, t, peak, attack, fade) => {
@@ -573,7 +574,7 @@
     const build = () => {
       ctx = new AudioContext();
       const out = ctx.createGain();
-      out.connect(BL.sound.output(ctx));
+      out.connect(soundChannel.node(ctx));
       const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), data = buffer.getChannelData(0);
       let seed = 2140;
       for (let i = 0; i < data.length; i++) { seed = (Math.imul(seed, 1103515245) + 12345) | 0; data[i] = (seed >>> 0) / 2147483648 - 1; }
@@ -627,7 +628,7 @@
         const level = (name) => voices[name] ? +voices[name].parts.reduce((sum, p) => sum + p.g.gain.value, 0).toFixed(4) : 0;
         return { contexts: ctx ? 1 : 0, state: ctx ? ctx.state : "none", voices: Object.keys(voices).length, chimes: chimes.length, levels: { bell: level("bell"), gong: level("gong"), bowl: level("bowl") } };
       },
-      dispose() { disposed = true; if (ctx) ctx.close().catch(() => {}); ctx = null; }
+      dispose() { disposed = true; soundChannel.release(); if (ctx) ctx.close().catch(() => {}); ctx = null; }
     };
   };
 

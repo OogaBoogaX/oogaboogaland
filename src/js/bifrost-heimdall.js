@@ -565,12 +565,14 @@
     let ctx = null, gain = null, filter = null, lfo = null, until = 0, asleep = false;
     const oscs = [];
     const muted = () => BL.sound.muted;
+    let soundChannel = BL.sound.channel("horn");
     const init = () => {
       if (typeof AudioContext === "undefined") return;
       ctx = new AudioContext();
+      if (!soundChannel) soundChannel = BL.sound.channel("horn");
       const master = ctx.createGain(), depth = ctx.createGain();
       master.gain.value = SOUND.master;
-      master.connect(BL.sound.output(ctx));
+      master.connect(soundChannel.node(ctx));
       gain = ctx.createGain();
       gain.gain.value = 0.0001;
       gain.connect(master);
@@ -642,6 +644,7 @@
       }
     };
     const dispose = () => {
+      if (soundChannel) { soundChannel.release(); soundChannel = null; }
       if (!ctx) return;
       for (const osc of oscs) osc.stop();
       lfo.stop();

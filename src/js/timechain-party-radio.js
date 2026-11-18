@@ -147,9 +147,11 @@
     let whole = null, bins = null, signal = null, edges = null;
     let mode = enabled ? "waiting" : "off", plain = false, disposed = false, timer = 0, watchdog = 0, epoch = 0;
     let failures = 0, quiet = 0, lastTime = -1, starts = 0, channel = 0;
+    const soundChannel = BL.sound.channel("party");
+    if (!enabled) soundChannel.show(false);
     const applyVolume = () => {
       if (gain) gain.gain.setTargetAtTime(plain || BL.sound.muted ? 0 : VOLUME, context.currentTime, 0.4);
-      if (element && plain) { element.muted = BL.sound.muted; element.volume = VOLUME; }
+      if (element && plain) { element.muted = BL.sound.muted; element.volume = VOLUME * soundChannel.gain; }
     };
     const dropElement = () => {
       epoch++; clearTimeout(watchdog); watchdog = 0;
@@ -175,7 +177,7 @@
       if (navigator.userActivation && !navigator.userActivation.hasBeenActive) { mode = "waiting"; return; }
       if (!context) {
         context = new AudioContext();
-        gain = context.createGain(); gain.gain.value = 0; gain.connect(context.destination);
+        gain = context.createGain(); gain.gain.value = 0; gain.connect(soundChannel.node(context));
         filter = context.createBiquadFilter(); filter.type = "lowpass"; filter.frequency.value = KICK_HZ;
         analyser = context.createAnalyser(); analyser.fftSize = WAVE;
         // The analyser reaches the speakers through a silent gain, so every browser keeps running it.
@@ -214,6 +216,7 @@
     };
     if (enabled) { document.addEventListener("pointerdown", gesture); document.addEventListener("keydown", gesture); }
     const offSound = BL.sound.subscribe(() => applyVolume());
+    soundChannel.subscribe(() => applyVolume());
     start();
     // Once a frame: the newest stretch of the stream into the tracker, and what the room should show now. Where Web
     // Audio hands only silence for a stream that is playing, the plain element takes over.
@@ -295,7 +298,7 @@
         clearTimeout(timer); timer = 0;
         document.removeEventListener("pointerdown", gesture);
         document.removeEventListener("keydown", gesture);
-        offSound();
+        offSound(); soundChannel.release();
         dropElement();
         for (const node of [filter, analyser, whole, sink, gain]) if (node) node.disconnect();
         if (context) context.close().catch(() => {});

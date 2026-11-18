@@ -18,13 +18,14 @@
     let ctx = null, master = null, scuffs = null, thumps = null, muted = false;
     let walker = null, lastPhase = 0, foot = 0, steps = 0;
     muted = BL.sound.muted;
+    const soundChannel = BL.sound.channel("footsteps");
 
     const open = () => {
       if (ctx || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
       ctx = new AudioContext();
       master = ctx.createGain();
       master.gain.value = muted ? 0 : MASTER;
-      master.connect(ctx.destination);
+      master.connect(soundChannel.node(ctx));
       const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
       const data = buffer.getChannelData(0);
       for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
@@ -94,7 +95,7 @@
       if (master) master.gain.setTargetAtTime(on ? 0 : MASTER, ctx.currentTime, 0.015);
     });
     const dispose = () => {
-      offSound();
+      offSound(); soundChannel.release();
       if (ctx) ctx.close().catch(() => {});
       ctx = master = scuffs = thumps = walker = null;
     };

@@ -60,6 +60,8 @@
       musicOn = true;
     }
     muted = BL.sound.muted;
+    const soundChannel = BL.sound.channel("hunt"), musicChannel = BL.sound.channel("hunt-music");
+    let fx = null;
 
     const open = () => {
       if (ctx) return true;
@@ -67,7 +69,8 @@
       ctx = new AudioContext();
       master = ctx.createGain();
       master.gain.value = MASTER * hearing;
-      master.connect(ctx.destination);
+      master.connect(BL.sound.output(ctx));
+      fx = soundChannel.node(ctx, master);
       const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), data = buffer.getChannelData(0);
       for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
       noise = ctx.createBufferSource();
@@ -79,10 +82,10 @@
         const lfo = ctx.createOscillator(), wobble = ctx.createGain(), sweep = ctx.createGain();
         const band = ctx.createBiquadFilter(), hiss = ctx.createGain();
         gain.gain.value = hiss.gain.value = wobble.gain.value = sweep.gain.value = 0;
-        osc.connect(filter); filter.connect(gain); gain.connect(master);
+        osc.connect(filter); filter.connect(gain); gain.connect(fx);
         lfo.connect(wobble); wobble.connect(osc.frequency);
         lfo.connect(sweep); sweep.connect(filter.frequency);
-        noise.connect(band); band.connect(hiss); hiss.connect(master);
+        noise.connect(band); band.connect(hiss); hiss.connect(fx);
         osc.start(); lfo.start();
         voices.push({ osc, filter, gain, lfo, wobble, sweep, band, hiss });
       }
@@ -140,7 +143,7 @@
       const src = ctx.createBufferSource(), g = ctx.createGain();
       src.buffer = buffer;
       g.gain.value = Math.min(1, level * LEVEL);
-      src.connect(g); g.connect(master);
+      src.connect(g); g.connect(fx);
       src.start(ctx.currentTime + delay);
       return src;
     };
@@ -467,7 +470,7 @@
         decode(ctx, bytes).then((b) => { if (disposed || loading !== k) return; song = b; loaded = k; loading = -1; startMusic(); }, () => { loading = -1; place++; });
         return;
       }
-      if (!musicGain) { musicGain = ctx.createGain(); musicGain.gain.value = 0.7; musicGain.connect(master); }
+      if (!musicGain) { musicGain = ctx.createGain(); musicGain.gain.value = 0.7; musicGain.connect(musicChannel.node(ctx, master)); }
       music = ctx.createBufferSource();
       music.buffer = song;
       music.connect(musicGain);
@@ -529,11 +532,11 @@
     });
     const dispose = () => {
       disposed = true;
-      offSound();
+      offSound(); soundChannel.release(); musicChannel.release();
       document.removeEventListener("visibilitychange", update);
       setMusic(false);
       if (ctx) ctx.close().catch(() => {});
-      ctx = master = noise = voices = null;
+      ctx = master = fx = noise = voices = null;
     };
     return { open: () => !muted && live(), play, level, hush, get hearing() { return hearing; }, get played() { return played; }, get musicWanted() { return musicWanted; }, get playing() { return !!music; }, music: setMusic, newPlaylist, toggleMusic, skip, get tracks() { return order.length; }, get musicOn() { return musicOn; },
       get nowPlaying() { return TRACKS[current()]; }, update, dispose, get opened() { return !!ctx; } };

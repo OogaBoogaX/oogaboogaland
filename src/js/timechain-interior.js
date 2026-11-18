@@ -53,10 +53,11 @@
   const ambience = (room, signal) => {
     let context = null, bus = null, sources = [], nodes = [], connected = false, disposed = false, muted = false;
     muted = BL.sound.muted;
+    const soundChannel = room.kind === "lecture" ? null : BL.sound.channel("room");
     const gate = () => {
       if (!bus) return;
       const on = !muted && !disposed;
-      if (on && !connected) { bus.connect(context.destination); connected = true; }
+      if (on && !connected) { bus.connect(soundChannel.node(context)); connected = true; }
       if (!on && connected) { bus.disconnect(); connected = false; }
     };
     const wake = () => {
@@ -90,7 +91,7 @@
     return {
       get stats() { return { contexts: context ? 1 : 0, sources: sources.length, connected }; },
       dispose() {
-        offSound();
+        offSound(); soundChannel?.release();
         disposed = true;
         gate();
         document.removeEventListener("pointerdown", gesture);

@@ -316,6 +316,7 @@
     // Sound: one beep and one boom voice, synthesized, opened after a gesture. The context runs only while a device is
     // out (and a boom rings on, TAIL seconds) and DSB's sound is on; otherwise it is suspended.
     let audio = null, audible = false, tail = 0, out = 0;
+    const soundChannel = BL.sound.channel("wallets");
     const hear = (on) => {
       if (!audio || on === audible) return;
       audible = on;
@@ -326,7 +327,7 @@
       if (audio || muted() || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return !!audio;
       const ctx = new AudioContext(), master = ctx.createGain();
       master.gain.value = 0.25;
-      master.connect(BL.sound.output(ctx));
+      master.connect(soundChannel.node(ctx));
       const tone = ctx.createOscillator(), beep = ctx.createGain();
       tone.type = "square";
       tone.frequency.value = 1760;
@@ -713,6 +714,7 @@
       carriers.fill(null);
       picks.length = 0;
       flash.t = 0;
+      soundChannel.release();
       if (audio) audio.ctx.close().catch(() => {});
       audio = null; audible = false;
     };

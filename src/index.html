@@ -316,7 +316,8 @@
         </svg>
       </button>
       <button type="button" class="mode-hud environment-sound" id="environment-sound"
-        aria-label="Mute environment sounds" title="Mute environment sounds · M" aria-pressed="false">
+        aria-label="Mute environment sounds" title="Mute environment sounds · M" aria-pressed="false"
+        aria-haspopup="dialog" aria-controls="sound-mixer" aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path fill="currentColor" d="M3 9h4l5-4v14l-5-4H3z"/>
           <path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>
@@ -1930,8 +1931,10 @@
           <li><b>Walk and watch</b><small data-coarse="Move with the sticks; tap a table to watch.">WASD and drag to explore; click a table to watch.</small></li>
           <li><b>Local or live</b><small>Local practice with computer opponents. Live poker when connected to the poker service.</small></li>
         </ul>
-        <button type="button" class="game-intro-go" data-action="intro-go">Enter The Ember Den</button>
-        <button type="button" data-action="leave">Exit Game</button>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Enter The Ember Den</button>
+          <button type="button" data-action="leave">Exit Game</button>
+        </div>
       </section>
     </div>
     <!-- The donation dialog (#donation-popup) is built here by donation-popup.js, shared with Ooga Chat. -->
@@ -1942,8 +1945,10 @@
         <h2 id="controls-help-title">Controls</h2>
         <button type="button" class="modal-close" id="controls-help-close" aria-label="Close controls">&times;</button>
       </div>
-      <p id="controls-help-context"></p>
-      <p id="controls-help-note">Try the keys here. Your character stays still while this panel is open.</p>
+      <div class="slab controls-help-about">
+        <p id="controls-help-context"></p>
+        <p id="controls-help-note">Try the keys here. Your character stays still while this panel is open.</p>
+      </div>
       <button type="button" class="controls-help-pad" id="controls-help-pad">Controller settings</button>
       <div class="controls-list" id="controls-help-list"></div>
       <button type="button" id="controls-learn" hidden>Learn by exploring</button>
@@ -1962,8 +1967,10 @@
             <svg id="destination-atlas-overlay" viewBox="0 0 720 600" aria-hidden="true"></svg>
             <div id="destination-atlas-pins" role="group" aria-label="Preview a zone on the map"></div>
           </div>
-          <p class="destination-map-key"><span id="destination-map-origin">◉ Your position</span><span>◎ Selected zone</span><span>North up · Landmark numbers match the list</span></p>
-          <p class="destination-map-mapnote" id="destination-map-mapnote"></p>
+          <div class="slab destination-map-legend">
+            <p class="destination-map-key"><span id="destination-map-origin">◉ Your position</span><span>◎ Selected zone</span><span>North up · Landmark numbers match the list</span></p>
+            <p class="destination-map-mapnote" id="destination-map-mapnote"></p>
+          </div>
         </section>
         <div id="destination-map-list" aria-label="All destinations"></div>
       </div>
@@ -2226,13 +2233,33 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
         <button type="button" class="ghost-spectate-next" id="ghost-spectate-next" aria-label="Next player">Next ▶</button>
       </div>
     </div>
+    <!-- The speaker button's long press (sound-panel.js): a level for everything and one for each sound this place holds. -->
+    <section class="sound-mixer" id="sound-mixer" role="dialog" aria-labelledby="sound-mixer-title" tabindex="-1" hidden>
+      <div class="sound-mixer-head">
+        <h2 id="sound-mixer-title">Sound</h2>
+        <button type="button" class="sound-mixer-toggle" id="sound-mixer-toggle" aria-pressed="true">Sound on</button>
+        <button type="button" class="sound-mixer-close" id="sound-mixer-close" aria-label="Close sound levels">&times;</button>
+      </div>
+      <div class="slab sound-mixer-slab">
+        <div id="sound-mixer-all"></div>
+        <h3 class="sound-mixer-here">Around you</h3>
+        <div id="sound-mixer-list"></div>
+        <p class="sound-mixer-empty" id="sound-mixer-empty" hidden>Nothing here has a level of its own.</p>
+      </div>
+      <div class="sound-mixer-foot">
+        <p>Saved in this browser</p>
+        <button type="button" class="sound-mixer-reset" id="sound-mixer-reset">Reset all</button>
+      </div>
+    </section>
     <section class="hangar-sound" id="hangar-sound" aria-label="Hangar sound" hidden>
       <div class="hangar-sound-head">
         <h3>Sound</h3>
         <button type="button" class="hangar-sound-toggle" id="hangar-sound-toggle" aria-pressed="true">Sound on</button>
       </div>
-      <label class="hangar-sound-row" for="hangar-volume"><span>Volume</span><input type="range" id="hangar-volume" min="0" max="100" step="5" value="100"></label>
-      <label class="hangar-sound-row" for="hangar-vibration"><span>Vibration</span><input type="range" id="hangar-vibration" min="0" max="100" step="5" value="100"></label>
+      <div class="slab hangar-sound-slab">
+        <label class="hangar-sound-row" for="hangar-volume"><span>Volume</span><input type="range" id="hangar-volume" min="0" max="100" step="5" value="100"></label>
+        <label class="hangar-sound-row" for="hangar-vibration"><span>Vibration</span><input type="range" id="hangar-vibration" min="0" max="100" step="5" value="100"></label>
+      </div>
       <p class="hangar-sound-note">Pad vibration: Chrome and Edge</p>
     </section>
     <dialog class="hangar-keypad" id="hangar-keypad" aria-label="Door keypad" data-state="idle" tabindex="-1">
@@ -2694,6 +2721,7 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
   <script src="js/controls-help.js"></script>
   <script src="js/destination-atlas.js"></script>
   <script src="js/destination-map.js"></script>
+  <script src="js/sound-panel.js"></script>
   <script src="js/pad-focus.js"></script>
   <script src="js/pad-settings.js"></script>
   <script src="js/arcade-view.js"></script>

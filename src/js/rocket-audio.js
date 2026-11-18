@@ -12,6 +12,7 @@
   const create = () => {
     let ctx = null, master = null, noise = null, ready = false, muted = false;
     muted = BL.sound.muted;
+    const soundChannel = BL.sound.channel("orbit");
     const voices = [];
     let voiceNext = 0;
     const layers = { roar: null, roarFilter: null, rumble: null, rumbleGain: null, wind: null, windFilter: null, hiss: null, rush: null };
@@ -22,7 +23,7 @@
       ctx = new AudioContext();
       master = ctx.createGain();
       master.gain.value = muted ? 0 : MASTER;
-      master.connect(ctx.destination);
+      master.connect(soundChannel.node(ctx));
       const filter = (type, freq, q = 1) => {
         const f = ctx.createBiquadFilter();
         f.type = type;
@@ -210,7 +211,7 @@
     };
     const offSound = BL.sound.subscribe(setMuted);
     const dispose = () => {
-      offSound();
+      offSound(); soundChannel.release();
       if (!ctx) return;
       quiet();
       ctx.close();

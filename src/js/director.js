@@ -63,7 +63,7 @@
   const showSound = () => {
     const label = sound.muted ? "Unmute environment sounds" : "Mute environment sounds";
     const voice = window.BL.voice.stats;
-    soundButton.setAttribute("aria-label", label); soundButton.title = voice.enabled || voice.joining || voice.returning ? label : `${label} · M`;
+    soundButton.setAttribute("aria-label", label); soundButton.title = `${voice.enabled || voice.joining || voice.returning ? label : `${label} · M`} · hold for levels`;
     soundButton.setAttribute("aria-pressed", String(sound.muted));
   };
   BL.destinationMap = BL.destinationMap.create({ current: () => active, ready: () => !!active && !transition, offerCoach: params.get("coach") === "1" });
@@ -92,7 +92,8 @@
     }
   });
   const offSound = sound.subscribe(showSound);
-  soundButton.addEventListener("click", sound.toggle);
+  // The button's press mutes and its long press opens each sound's level (sound-panel.js).
+  const soundPanel = window.BL.soundPanel.create({ button: soundButton });
   showSound();
   // Reserve M before scene capture listeners and transition holds; editable fields keep it for typing.
   const onVoiceMuteKey = (e) => {
@@ -361,6 +362,7 @@
     for (const el of intros) el.hidden = el.dataset.intro !== next.id || place === "zipline" || place === BL.blockWire.WATCH_DECK_PLACE;
     // Arcade games share the hall's controls and start with folded social panels.
     document.body.dataset.activeScene = next.id;
+    soundPanel.close();
     document.body.classList.toggle("arcade-game", arcadeScenes.has(next.id) || next.id === "hub" && place === "cloud-hopper");
     window.BL.net.setBody(null);
     window.BL.net.setBlend(null, 0);
@@ -1219,7 +1221,7 @@
     window.BL.voice.dispose();
     window.BL.highscores.dispose();
     net.dispose();
-    offSound(); soundButton.removeEventListener("click", sound.toggle);
+    offSound(); soundPanel.dispose();
     window.removeEventListener("keydown", onVoiceMuteKey, true);
     offPad();
     padSettings.dispose();

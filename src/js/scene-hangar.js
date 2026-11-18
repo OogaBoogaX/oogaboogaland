@@ -1850,21 +1850,24 @@
     const panel = document.getElementById("hangar-sound"), onOff = document.getElementById("hangar-sound-toggle");
     const volume = document.getElementById("hangar-volume"), vibration = document.getElementById("hangar-vibration");
     let closedAt = -Infinity;
+    // How far along its track a slider's amber runs (the stylesheet's `--fill`).
+    const fill = (range) => range.style.setProperty("--fill", `${range.value}%`);
     const show = () => {
       onOff.textContent = audio.muted ? "Sound off" : "Sound on";
       onOff.setAttribute("aria-pressed", String(!audio.muted));
       volume.value = String(Math.round(audio.volume * 100));
       vibration.value = String(Math.round(BL.gamepad.strength * 100));
+      fill(volume); fill(vibration);
     };
     const onToggle = () => {
       audio.setMuted(!audio.muted);
       show();
       onOff.blur();
     };
-    const onVolume = () => audio.setVolume(Number(volume.value) / 100);
+    const onVolume = () => { audio.setVolume(Number(volume.value) / 100); fill(volume); };
     // A taste of the new strength, on a pad that has one.
     const onVibration = () => {
-      BL.gamepad.setStrength(Number(vibration.value) / 100);
+      BL.gamepad.setStrength(Number(vibration.value) / 100); fill(vibration);
       BL.gamepad.rumble(0.6, 0.6, 160);
     };
     const blur = (e) => e.target.blur();

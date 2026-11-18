@@ -1175,7 +1175,7 @@ body[data-active-scene="block"] .mode-hud {
 }
 .voice-handoff[hidden] { display: none; }
 .voice-handoff-title { margin: 0 0 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5); }
-.voice-handoff-body { margin: 0 0 14px; font-size: 12px; line-height: 1.45; }
+.voice-handoff-body { margin: 0 0 12px; padding: 9px 12px; background: var(--slab-dark); border: 2px solid var(--stone-dk); border-radius: 9px 7px 10px 8px; box-shadow: var(--tablet-shadow); font-size: 12px; line-height: 1.45; }
 .voice-handoff-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 @media (pointer: coarse) {
   .cloud-mic { padding: 6px; margin: -6px; }
@@ -3394,15 +3394,15 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   position: absolute;
   top: calc(58px + var(--safe-top));
   right: calc(16px + var(--safe-right, 0px));
-  width: min(240px, calc(100vw - 32px));
-  padding: 9px 11px 10px;
+  width: min(300px, calc(100vw - 32px));
+  padding: 10px 12px 10px;
   background: var(--planks);
   border: 3px solid var(--wood-edge);
   border-radius: var(--radius);
   box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 8px 20px rgba(0, 0, 0, 0.35);
   color: var(--paper);
   pointer-events: auto;
-  z-index: 6;
+  z-index: 20;
 }
 
 .hangar-sound[hidden] {
@@ -3419,21 +3419,25 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 
 .hangar-sound-head h3 {
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.06em;
-  color: var(--accent-text);
+  color: var(--paper);
   white-space: nowrap;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.6));
 }
 
 .hangar-sound-toggle {
   flex: none;
-  padding: 4px 9px;
+  min-width: 84px;
+  min-height: 28px;
+  padding: 0 10px;
   border: 2px solid var(--wood-edge);
   border-radius: 6px;
   background: linear-gradient(#f0b05a, var(--accent));
   color: var(--ink);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -3442,30 +3446,32 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   color: var(--paper);
 }
 
-.hangar-sound-row {
-  display: grid;
-  grid-template-columns: 62px 1fr;
-  align-items: center;
-  gap: 8px;
-  font-size: 9px;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
+.hangar-sound-slab {
+  padding: 2px 12px;
 }
 
-.hangar-sound-row input[type="range"] {
-  width: 100%;
-  margin: 0;
-  height: 26px;
-  accent-color: var(--accent);
-  cursor: pointer;
+.hangar-sound-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: rgba(243, 239, 228, 0.88);
+}
+
+.hangar-sound-row + .hangar-sound-row {
+  border-top: 1px solid rgba(243, 239, 228, 0.07);
 }
 
 .hangar-sound-note {
-  margin: 4px 0 0;
-  font-size: 9.5px;
+  margin: 8px 0 0;
+  font-size: 10px;
   line-height: 1.3;
   color: var(--accent-text);
   white-space: nowrap;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.6));
 }
 
 /* A hangar door's keypad on screen (`hangar-keypad.js`), in the steel of the one on the wall: the room's name, its
@@ -4948,6 +4954,22 @@ body.tess-touring #joy-look {
   line-height: 1;
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
 }
+
+/* A results or pause card's heading is plain bold text: carved lettering reads thin at this size, so its lettering
+   (hud.js) is hidden and the words it carries as its label are shown in its place, whoever letters it and when. A
+   title card keeps its big carved name. */
+.race-results:not(.game-intro) > h2:has(> [data-sign]),
+.race-pause > h2:has(> [data-sign]) {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.04em;
+  color: var(--paper);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55);
+}
+
+:is(.race-results:not(.game-intro), .race-pause) > h2 [data-sign] .sign { display: none; }
+:is(.race-results:not(.game-intro), .race-pause) > h2 [data-sign]::after { content: attr(aria-label); }
 
 .garage-head .help {
   margin: 6px 0 0;
@@ -8095,6 +8117,93 @@ body[data-active-scene] :is(.world-clock, .world-block) {
 .environment-sound svg path:not(:first-child) { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .environment-sound .sound-muted, .environment-sound[aria-pressed="true"] .sound-waves { display: none; }
 .environment-sound[aria-pressed="true"] .sound-muted { display: block; }
+
+/* The speaker button's long press (sound-panel.js): a level for everything and one for each sound this place holds.
+   It hangs under the button, which places it (`--sound-mixer-top`, `-right`), over the side panels' tabs in a game
+   (sheet.js lifts them to 90); its slab scrolls when the rows outgrow the window. */
+.sound-mixer {
+  position: fixed;
+  top: var(--sound-mixer-top, calc(58px + var(--safe-top)));
+  right: max(8px, var(--sound-mixer-right, 16px));
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 16px));
+  max-height: calc(100dvh - var(--sound-mixer-top, 58px) - 12px - var(--safe-bottom));
+  padding: 10px 12px 10px;
+  background: var(--planks);
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 12px 28px rgba(0, 0, 0, 0.45);
+  color: var(--paper);
+  pointer-events: auto;
+  outline: none;
+}
+.sound-mixer[hidden] { display: none; }
+.sound-mixer-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.sound-mixer-head h2 { margin: 0 auto 0 0; font-size: 14px; font-weight: 700; line-height: 1; letter-spacing: 0.06em; white-space: nowrap; color: var(--paper); filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.6)); }
+.sound-mixer-toggle, .sound-mixer-close, .sound-mixer-reset {
+  flex: none;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sound-mixer-toggle { min-width: 84px; background: linear-gradient(#f0b05a, var(--accent)); color: var(--ink); }
+.sound-mixer-toggle[aria-pressed="false"] { background: var(--wood-edge); color: var(--paper); }
+.sound-mixer-close, .sound-mixer-reset { background: var(--stone); color: var(--paper); }
+.sound-mixer-close { width: 28px; padding: 0; font-size: 16px; line-height: 1; }
+.sound-mixer-close:hover, .sound-mixer-reset:hover { background: var(--stone-lt); }
+.sound-mixer :is(button, input):focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.sound-mixer-slab { flex: 0 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 2px 12px 4px; scrollbar-width: thin; scrollbar-color: rgba(243, 239, 228, 0.2) transparent; }
+.sound-mixer-row {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+}
+.sound-mixer-row + .sound-mixer-row { border-top: 1px solid rgba(243, 239, 228, 0.07); }
+.sound-mixer-row label { font-size: 12px; line-height: 1.2; white-space: nowrap; color: rgba(243, 239, 228, 0.88); }
+.sound-mixer-row output { font-family: var(--mono); font-size: 11px; text-align: right; color: var(--accent-text); white-space: nowrap; }
+.sound-mixer-everything { min-height: 44px; border-bottom: 2px solid var(--stone-dk); }
+.sound-mixer-everything label { font-size: 13px; font-weight: 700; color: var(--paper); }
+.sound-mixer-here { margin: 10px 0 2px; font-size: 9px; font-weight: 700; line-height: 1; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; color: rgba(243, 239, 228, 0.5); }
+.sound-mixer-empty { margin: 8px 0 10px; font-size: 12px; line-height: 1.4; color: rgba(243, 239, 228, 0.6); }
+.sound-mixer-empty[hidden] { display: none; }
+.sound-mixer[data-muted="true"] .sound-mixer-slab { opacity: 0.5; }
+.sound-mixer-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sound-mixer-foot p { margin: 0; font-size: 10px; line-height: 1; white-space: nowrap; color: var(--accent-text); filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.6)); }
+:is(.sound-mixer, .hangar-sound) input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 30px; margin: 0; background: transparent; cursor: pointer; }
+:is(.sound-mixer, .hangar-sound) input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right, var(--accent) var(--fill, 100%), rgba(243, 239, 228, 0.16) var(--fill, 100%));
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+:is(.sound-mixer, .hangar-sound) input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+:is(.sound-mixer, .hangar-sound) input[type="range"]::-moz-range-track { height: 6px; border-radius: 3px; background: rgba(243, 239, 228, 0.16); }
+:is(.sound-mixer, .hangar-sound) input[type="range"]::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--accent); }
+:is(.sound-mixer, .hangar-sound) input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border: 2px solid var(--wood-edge); border-radius: 50%; background: var(--paper); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5); }
+@media (max-width: 380px) {
+  .sound-mixer-row { grid-template-columns: minmax(0, 1fr) 38px; gap: 0 10px; padding: 6px 0 2px; }
+  .sound-mixer-row input[type="range"] { grid-row: 2; grid-column: 1 / -1; }
+}
 body[data-active-scene="dsb"] #destination-hud:disabled { opacity: 1; cursor: default; }
 .dsb-panel { position: absolute; z-index: 5; right: 20px; top: 104px; width: 300px; max-height: calc(100% - 230px); overflow: auto; padding: 18px; background: rgba(25, 15, 42, 0.92); border: 1px solid #8863a5; border-radius: 10px; box-shadow: 0 8px 35px #0005; }
 .dsb-panel h2 { margin: 4px 0 12px; color: #ffdf38; font-size: 25px; }
@@ -9053,6 +9162,7 @@ body[data-active-scene="dsb"] #destination-hud:disabled { opacity: 1; cursor: de
   font-weight: 700;
   letter-spacing: 0.3em;
   text-transform: uppercase;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
 }
 
 .game-intro .game-intro-title {
@@ -9065,7 +9175,7 @@ body[data-active-scene="dsb"] #destination-hud:disabled { opacity: 1; cursor: de
   display: block;
   width: 58px;
   height: 58px;
-  margin: 12px auto 8px;
+  margin: 12px auto;
   image-rendering: pixelated;
   filter: drop-shadow(0 0 12px rgba(247, 147, 26, 0.7));
   animation: game-coin 2.6s ease-in-out infinite;
@@ -9089,10 +9199,23 @@ body[data-active-scene="dsb"] #destination-hud:disabled { opacity: 1; cursor: de
   color: #f5c542;
 }
 
+/* A card's words sit on stone, as the sound panel's rows do, never on the planks: the goal on a slab of its own, and
+   the line under it in the planks' own lettering colour. The cabinet's glass and the cards with their own layout
+   (Cloud Hopper's, the ghost hunt's results) keep theirs. */
+.game-intro:not(.cloud-hopper-panel, .ghost-results) > .game-intro-goal {
+  margin: 0 0 8px;
+  padding: 9px 12px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+}
+
 .game-intro-who {
   margin: 4px 0 12px;
-  color: var(--muted);
+  color: var(--accent-text);
   font-size: 11px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
 }
 
 .game-rules {
@@ -9171,8 +9294,8 @@ body[data-active-scene="dsb"] #destination-hud:disabled { opacity: 1; cursor: de
 }
 
 @keyframes game-coin {
-  0%, 100% { transform: translateY(0) rotateY(0deg); }
-  50% { transform: translateY(-5px) rotateY(180deg); }
+  0%, 100% { transform: translateY(2.5px) rotateY(0deg); }
+  50% { transform: translateY(-2.5px) rotateY(180deg); }
 }
 
 @keyframes game-rule-in {
@@ -10060,7 +10183,12 @@ body[data-active-scene="stacker"] .joysticks {
 }
 
 .prize-balance {
-  margin: 6px 0 10px;
+  margin: 8px 0 10px;
+  padding: 6px 12px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
   font-size: 14px;
 }
 
@@ -12054,12 +12182,16 @@ body[data-active-scene] #controls-help-button { display: flex; align-items: cent
 .controls-help-button { position: absolute; top: var(--hub-banner-button-top, calc(10px + var(--safe-top))); right: calc(var(--hub-banner-button-right, calc(var(--hub-banner-gutter) + var(--safe-right))) + var(--hub-banner-button, 36px) + var(--hub-banner-button-gap, 8px)); width: var(--hub-banner-button, 36px); height: var(--hub-banner-button, 36px); }
 .controls-help-button svg { width: calc(var(--hub-banner-button, 36px) * 2 / 3); height: calc(var(--hub-banner-button, 36px) * 2 / 3); }
 .controls-help { width: min(480px, calc(100vw - 24px)); padding: 16px; max-height: calc(100dvh - 32px - var(--safe-top) - var(--safe-bottom)); overflow-y: auto; overscroll-behavior: contain; }
-#controls-help-context { margin: 8px 0 4px; color: var(--gold, #ffd84a); font-size: 12px; }
-#controls-help-note { margin: 4px 0 8px; font-size: 12px; line-height: 1.4; opacity: .8; }
-.controls-list { margin-top: 8px; }
-.controls-row { display: grid; grid-template-columns: 174px minmax(0, 1fr); align-items: center; gap: 12px; padding: 5px 0; border-top: 1px solid #f3efe424; font-size: 12px; line-height: 1.4; }
+/* Its words and its keys sit on stone slabs, as the sound panel's rows do, never on the planks. */
+.controls-help-about { margin: 0 0 10px; padding: 9px 12px; }
+#controls-help-context { margin: 0 0 4px; color: var(--gold, #ffd84a); font-size: 12px; }
+#controls-help-note { margin: 0; font-size: 12px; line-height: 1.4; color: rgba(243, 239, 228, 0.78); }
+.controls-list { margin-top: 10px; padding: 3px 12px; background: var(--slab-dark); border: 2px solid var(--stone-dk); border-radius: 9px 7px 10px 8px; box-shadow: var(--tablet-shadow); }
+.controls-list:empty { display: none; }
+.controls-row { display: grid; grid-template-columns: 174px minmax(0, 1fr); align-items: center; gap: 12px; padding: 6px 0; border-top: 1px solid rgba(243, 239, 228, 0.07); font-size: 12px; line-height: 1.4; }
+.controls-row:first-child { border-top: 0; }
 .controls-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.controls-keys kbd, .controls-gesture { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 2px 5px; border: 1px solid #f3efe465; border-bottom-width: 3px; border-radius: 4px; background: var(--slab-dark); color: #f3efe4; font: inherit; }
+.controls-keys kbd, .controls-gesture { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 2px 5px; border: 1px solid #f3efe465; border-bottom-width: 3px; border-radius: 4px; background: var(--stone); color: #f3efe4; font: inherit; }
 .controls-keys kbd[data-pressed="true"] { background: #ffd84a; color: #171308; border-color: transparent; }
 .controls-key-cluster { display: grid; grid-template-columns: repeat(3, 24px); gap: 3px; }
 .controls-key-cluster :is([data-key="w"], [data-key="arrowup"]) { grid-area: 1 / 2; }
@@ -12190,7 +12322,7 @@ body[data-cabinet-phase]:not([data-cabinet-phase="idle"]):not([data-cabinet-phas
 .cabinet-display .game-intro > * { flex-shrink: 0; }
 .cabinet-display .game-intro :is(.game-intro-coin, .game-intro-kicker, .game-intro-who, .game-intro-glow) { display: none; }
 .cabinet-display .game-intro .game-intro-title { margin: 0; font-size: clamp(20px, 4cqw, 40px); line-height: 1.15; }
-.cabinet-display .game-intro .game-intro-goal { margin: 0; font-size: clamp(11px, 2cqw, 18px); line-height: 1.35; }
+.cabinet-display .game-intro .game-intro-goal { margin: 0; padding: 0; background: none; border: 0; box-shadow: none; font-size: clamp(11px, 2cqw, 18px); line-height: 1.35; }
 .cabinet-display .game-intro .game-rules {
   flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 2px 0; align-content: center;
@@ -12297,21 +12429,49 @@ body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-scores-title {
 }
 .arcade-game :is(.race, .presets) button:is(:hover, .virtual-hover):not(:disabled) { background: var(--arcade-button-hover); }
 .arcade-game :is(.race, .presets) button:disabled { opacity: 0.55; cursor: default; }
+/* The same palette on Block Frenzy's and The Ember Den's cards and the arcade hall's prize counter, none of them an
+   arcade game's scene, so every game card's buttons match: gold plays, green chooses, light stone goes back, dark
+   stone leaves. The Den's own button look stays off its title card. */
+:is(#block, #poker, #arcade-ui) :is(.race-results, .race-pause) .actions button {
+  --arcade-button: linear-gradient(#a6d97f, #5f9e3f);
+  --arcade-button-hover: linear-gradient(#c2e8a3, #a6d97f);
+  background: var(--arcade-button); color: #13260b;
+}
+:is(#block, #poker, #arcade-ui) :is(.race-results, .race-pause) .actions button:is(.game-intro-go, [data-action$="-start"], [data-action$="-again"], [data-action$="-next"]) {
+  --arcade-button: linear-gradient(#ffe27a, #f0b62a);
+  --arcade-button-hover: linear-gradient(#fff0a8, #ffe27a); color: var(--ink);
+}
+:is(#block, #poker, #arcade-ui) :is(.race-results, .race-pause) .actions button[data-action="leave"] {
+  --arcade-button: linear-gradient(#77706a, #4a4541);
+  --arcade-button-hover: linear-gradient(#8a837c, #77706a); color: var(--paper);
+}
+:is(#block, #poker, #arcade-ui) :is(.race-results, .race-pause) .actions button.prize-close {
+  --arcade-button: linear-gradient(#bdb8b0, #87827b);
+  --arcade-button-hover: linear-gradient(#d1cdc6, #bdb8b0); color: var(--ink);
+}
+:is(#block, #poker, #arcade-ui) :is(.race-results, .race-pause) .actions button:is(:hover, .virtual-hover):not(:disabled) { background: var(--arcade-button-hover); }
+#poker .game-intro .actions button { min-height: 38px; border: 2px solid var(--wood-edge); border-radius: 6px; box-shadow: 0 3px 0 var(--nail); white-space: nowrap; }
+#poker .game-intro .actions button:not(:disabled):hover { border-color: var(--wood-edge); }
 .cabinet-exit { background: linear-gradient(#77706a, #4a4541); color: var(--paper); }
 .cabinet-exit:hover { background: linear-gradient(#8a837c, #77706a); }
 
 /* Arcade player controls remain reachable above game cards, including Cloud Hopper. */
 body.arcade-game .cloud-hopper-panel { z-index: 40; }
 
-/* A destination is a named action using the scene's existing travel rules. */
-.destination-map { width: min(1120px, calc(100vw - 24px)); max-height: calc(100dvh - 24px - var(--safe-top) - var(--safe-bottom)); overflow: auto; overscroll-behavior: contain; padding: 18px; border: 1px solid #9e8959; border-radius: 18px; background: #192a29; color: #f2eddd; box-shadow: 0 24px 90px #000b; }
-.destination-map::backdrop { background: #061314c9; }
-.destination-map .panel-head { position: sticky; top: -18px; z-index: 4; margin: -1px 0 0; padding: 10px 0; background: #192a29; }
-.destination-map .panel-head h2 { color: #f2eddd; font-size: clamp(18px, 2.4vw, 26px); }
-.destination-map-mode { color: #c3d6ca; font-size: 12px; line-height: 1.5; margin: 0 0 14px; letter-spacing: .06em; }
-.destination-map-layout { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 18px; align-items: start; }
+/* A destination is a named action using the scene's existing travel rules. The dialog is the page's pop-up: the
+   modal's planked frame, its mode line, legend, list and choice each on a stone slab, stone buttons and one amber action. Its
+   title and choice stay in view as it scrolls, each on a plank of its own; the map's own colours are the atlas's. */
+.destination-map { width: min(1120px, calc(100vw - 24px)); max-height: calc(100dvh - 24px - var(--safe-top) - var(--safe-bottom)); overflow: auto; overscroll-behavior: contain; padding: 18px; }
+.destination-map .panel-head { position: sticky; top: -18px; z-index: 4; align-items: center; margin: -18px -18px 12px; padding: 12px 18px 10px; background: var(--plank); border-bottom: 2px solid var(--wood-edge); }
+.destination-map .panel-head h2 { margin: 0; color: var(--paper); font-size: clamp(16px, 2vw, 20px); letter-spacing: 0.04em; }
+.destination-map-mode { color: rgba(243, 239, 228, 0.88); font-size: 12px; line-height: 1.5; margin: 0 0 12px; padding: 7px 12px; letter-spacing: .06em; background: var(--slab-dark); border: 2px solid var(--stone-dk); border-radius: 9px 7px 10px 8px; box-shadow: var(--tablet-shadow); }
+.destination-map-mode:empty { display: none; }
+/* The map's column is as wide as the map the window's height allows (never so wide the list has under 270px), and
+   the list takes the rest, its groups side by side where two fit: no bare wood stands beside either. */
+.destination-map-layout { display: grid; grid-template-columns: min(calc((100dvh - 305px) * 1.2), calc(100% - 288px)) minmax(0, 1fr); gap: 18px; align-items: start; }
 .destination-map-survey { min-width: 0; }
-.destination-atlas { width: min(100%, calc((100dvh - 275px) * 1.2)); margin-inline: auto; position: relative; aspect-ratio: 6 / 5; overflow: hidden; border: 1px solid #52706b; border-radius: 12px; background: #112d35; isolation: isolate; }
+.destination-map-legend { margin-top: 10px; padding: 8px 12px; }
+.destination-atlas { width: min(100%, calc((100dvh - 305px) * 1.2)); margin-inline: auto; position: relative; aspect-ratio: 6 / 5; overflow: hidden; border: 2px solid var(--stone-dk); border-radius: 6px; background: #112d35; isolation: isolate; }
 .destination-atlas[hidden] { display: none; }
 .destination-atlas canvas, .destination-atlas svg, #destination-atlas-pins { position: absolute; inset: 0; width: 100%; height: 100%; }
 .destination-atlas svg { pointer-events: none; }
@@ -12329,23 +12489,28 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
 .atlas-selected { fill: #e8cc5622; stroke: #f6d67d; stroke-width: 3; }
 .atlas-origin { fill: #102e39; stroke: #9de9eb; stroke-width: 3; }
 .atlas-origin-core { fill: #9de9eb; }
-.destination-map-key { display: flex; flex-wrap: wrap; gap: 5px 14px; margin: 10px 0 6px; color: #d3ddcf; font-size: 11px; line-height: 1.5; }
+.destination-map-key { display: flex; flex-wrap: wrap; gap: 5px 14px; margin: 0; color: rgba(243, 239, 228, 0.78); font-size: 11px; line-height: 1.5; }
 .destination-map-key span:first-child { color: #9de9eb; }.destination-map-key span:nth-child(2) { color: #f6d67d; }
-.destination-map-mapnote { margin: 0; font-size: 11px; line-height: 1.5; color: #b6c9be; }
-#destination-map-list { display: grid; gap: 8px; max-height: 590px; overflow-y: auto; scrollbar-width: thin; padding: 3px; }
+.destination-map-mapnote { margin: 4px 0 0; font-size: 11px; line-height: 1.5; color: rgba(243, 239, 228, 0.62); }
+.destination-map-mapnote:empty { display: none; }
+#destination-map-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); align-content: start; gap: 8px 10px; max-height: 590px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(243, 239, 228, 0.2) transparent; padding: 8px 10px; background: var(--slab-dark); border: 2px solid var(--stone-dk); border-radius: 9px 7px 10px 8px; box-shadow: var(--tablet-shadow); }
 #destination-map-list section { min-width: 0; }
-#destination-map-list h3 { color: #d9c28c; margin: 2px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .12em; }
-#destination-map-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%; min-height: 52px; padding: 9px 12px; margin-bottom: 5px; text-align: left; white-space: normal; color: #f2eddd; background: #233a35; border: 1px solid #496158; border-radius: 8px; }
-#destination-map-list button:hover, #destination-map-list button:focus-visible { background: #345145; }
+#destination-map-list section[data-group="Play"] { grid-column: 1 / -1; }
+#destination-map-list h3 { color: rgba(243, 239, 228, 0.5); margin: 4px 0 6px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; }
+#destination-map-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%; min-height: 52px; padding: 9px 12px; margin-bottom: 5px; text-align: left; white-space: normal; color: var(--paper); background: var(--stone-dk); border: 1px solid var(--stone-lt); border-radius: 6px; cursor: pointer; }
+#destination-map-list button:hover, #destination-map-list button:focus-visible { background: var(--stone); }
 #destination-map-list button strong { font-size: 13px; }
-#destination-map-list button span { color: #c2d0bd; font-size: 11px; line-height: 1.4; font-weight: normal; }
-#destination-map-list button[aria-current] { border-color: #85aca0; }
-#destination-map-list button[aria-pressed="true"] { background: #435342; border-color: #f4d687; box-shadow: inset 3px 0 #f4d687; }
-.destination-map-preview { position: sticky; bottom: -18px; z-index: 3; display: flex; align-items: center; gap: 18px; justify-content: space-between; margin: 16px -1px 0; padding: 15px 0 12px; border-top: 1px solid #658072; background: #192a29; }
+#destination-map-list button span { color: rgba(243, 239, 228, 0.7); font-size: 11px; line-height: 1.4; font-weight: normal; }
+#destination-map-list button[aria-current] { border-color: rgba(243, 239, 228, 0.5); }
+#destination-map-list button[aria-pressed="true"] { background: var(--stone); border-color: var(--accent); box-shadow: inset 3px 0 var(--accent); }
+.destination-map-preview { position: sticky; bottom: -8px; z-index: 3; display: flex; align-items: center; gap: 18px; justify-content: space-between; margin: 12px 0 0; padding: 10px 14px; background: var(--slab-dark); border: 2px solid var(--stone-dk); border-radius: 9px 7px 10px 8px; box-shadow: var(--tablet-shadow); }
 .destination-map-tools, #destination-map-layers, .destination-map-tabs, .destination-map-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .destination-map-tools { justify-content: space-between; margin-bottom: 10px; }
-.destination-map-tools button, #destination-map-guide { min-height: 44px; min-width: 44px; margin: 0; padding: 8px 12px; color: #f2eddd; background: #233a35; border: 1px solid #658072; border-radius: 8px; }
-.destination-map-tools button[aria-pressed="true"] { outline: 2px solid #f6d67d; outline-offset: -2px; }
+.destination-map-tools button, #destination-map-guide { min-height: 44px; min-width: 44px; margin: 0; padding: 8px 12px; color: var(--paper); background: var(--stone); border: 2px solid var(--wood-edge); border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.destination-map-tools button:hover, #destination-map-guide:not(:disabled):hover { background: var(--stone-lt); }
+.destination-map-tools button[aria-pressed="true"] { background: linear-gradient(#f0b05a, var(--accent)); color: var(--ink); }
+#destination-map-guide { border-color: var(--stone-lt); }
+#destination-map-guide:disabled { opacity: .5; cursor: default; }
 .destination-map-tabs { display: none; }
 #destination-map-layers[hidden], #destination-map-list button[hidden], #destination-map-list section[hidden] { display: none; }
 #destination-return, #destination-waypoint { position: fixed; z-index: 46; left: 50%; transform: translateX(-50%); max-width: calc(100vw - 24px); padding: 8px 12px; border: 1px solid #d9c28c; border-radius: 10px; background: #192a29f5; color: #fff1cc; }
@@ -12355,13 +12520,17 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
 #destination-waypoint-stop { min-width: 44px; min-height: 44px; margin: 0; }
 #destination-return[hidden], #destination-waypoint[hidden], #destination-waypoint-arrow[hidden] { display: none; }
 .destination-map-preview > div { min-width: 0; }
-.destination-map-eyebrow { margin: 0 0 5px; font-size: 10px; letter-spacing: .14em; color: #e8cc8d; }
-#destination-map-selection { margin: 0 0 4px; font-size: 19px; color: #fff1cc; }
-#destination-map-detail { margin: 0; max-width: 650px; line-height: 1.5; color: #c7d6c7; font-size: 12px; }
-#destination-map-go { flex-shrink: 0; max-width: 260px; min-height: 48px; white-space: normal; padding: 12px 18px; border: 1px solid #fce4a0; border-radius: 9px; background: #ead08c; color: #192a29; font-size: 14px; font-weight: bold; }
-#destination-map-go:disabled { opacity: .5; }
-#destination-map-status { min-height: 1.5em; margin: 8px 0 0; color: #e4dcc5; font-size: 12px; line-height: 1.5; }
-.destination-map button:focus-visible, .explore-coach button:focus-visible { outline: 3px solid #b3f3ff; outline-offset: 3px; }
+.destination-map-eyebrow { margin: 0 0 5px; font-size: 9px; font-weight: 700; letter-spacing: .14em; color: var(--accent-text); }
+#destination-map-selection { margin: 0 0 4px; font-size: 17px; color: var(--paper); }
+#destination-map-detail { margin: 0; max-width: 650px; line-height: 1.5; color: rgba(243, 239, 228, 0.78); font-size: 12px; }
+#destination-map-go { flex-shrink: 0; max-width: 260px; min-height: 44px; white-space: normal; padding: 8px 18px; border: 2px solid var(--wood-edge); border-radius: 6px; background: linear-gradient(#e2a04a, var(--accent)); color: var(--ink); font-size: 14px; font-weight: bold; box-shadow: 0 3px 0 var(--nail); cursor: pointer; }
+#destination-map-go:not(:disabled):hover { background: linear-gradient(#f0b05a, #e2a04a); }
+#destination-map-go:disabled { opacity: .5; cursor: default; }
+#destination-map-status { margin: 10px 0 0; font-size: 12px; line-height: 1.5; }
+/* Empty, the status keeps its place in the page for screen readers and takes none on screen. */
+#destination-map-status:empty { margin: 0; padding: 0; border: 0; background: none; box-shadow: none; }
+.destination-map button:focus-visible { outline: 3px solid var(--accent-text); outline-offset: 2px; }
+.explore-coach button:focus-visible { outline: 3px solid #b3f3ff; outline-offset: 3px; }
 #destination-map-close, #controls-learn { min-width: 44px; min-height: 44px; }
 .destination-map-receipt { position: fixed; z-index: 46; top: calc(68px + var(--safe-top)); left: 50%; transform: translateX(-50%); width: max-content; max-width: min(470px, calc(100vw - 32px)); padding: 13px 18px; border: 1px solid #e9d189; border-radius: 12px; background: #192a29ed; color: #fff1ce; box-shadow: 0 5px 24px #0008; font-size: 13px; line-height: 1.5; pointer-events: none; animation: map-arrival .32s ease-out; }
 .destination-map-receipt[hidden] { display: none; }
@@ -12375,14 +12544,16 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
   .destination-map-tools button { padding: 6px; font-size: 11px; }
   #destination-map-guide { font-size: 13px; }
   .destination-map-tabs { display: flex; }
+  .destination-map-tabs, #destination-map-layers { width: 100%; flex-wrap: nowrap; }
+  .destination-map-tabs button, #destination-map-layers button { flex: 1 1 0; min-width: 0; }
   .destination-map[data-display="map"] #destination-map-list, .destination-map[data-display="list"] .destination-map-survey { display: none; }
   .destination-map-actions { width: 100%; flex-wrap: nowrap; }
   .destination-map-actions button { flex: 1; }
-  .destination-map { padding: 12px; }.destination-map .panel-head { top: -12px; }
+  .destination-map { padding: 12px; }.destination-map .panel-head { top: -12px; margin: -12px -12px 10px; padding: 10px 12px 8px; }
   .destination-map-layout { grid-template-columns: 1fr; gap: 12px; }
   #destination-map-list { max-height: none; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   #destination-map-list section[data-group="Play"] { grid-column: 1 / -1; }
-  .destination-map-preview { position: static; gap: 10px; flex-direction: column; align-items: stretch; }
+  .destination-map-preview { position: static; gap: 10px; flex-direction: column; align-items: stretch; padding: 10px 12px; }
   #destination-map-go { max-width: none; width: 100%; }
   #destination-map-detail { font-size: 11px; }
 }

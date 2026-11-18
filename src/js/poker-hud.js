@@ -40,6 +40,7 @@
     const themeSelects = Array.from(el.querySelectorAll("[data-poker-theme-select]")), themeButtons = [];
     const auto = el.querySelector('[data-poker-option="auto"]'), sound = el.querySelector('[data-poker-option="sound"]');
     const history = Array.from({ length: 10 }, () => []), recorded = new Int32Array(10);
+    const soundChannel = BL.sound.channel("poker");
     let snapshot = null, lastIndex = -1, lastHand = -1, turnKey = "", focused = false, paused = false, audio = null, lastClock = "", lastHistory = "";
     let live = null;
     let filter = "all", viewBusy = false, lastLog = "", viewerId = null;
@@ -97,7 +98,7 @@
       oscillator.type = "sine"; oscillator.frequency.setValueAtTime(kind === "turn" ? 660 : kind === "win" ? 880 : 260, now);
       oscillator.frequency.exponentialRampToValueAtTime(kind === "win" ? 1174 : 220, now + 0.11);
       gain.gain.setValueAtTime(0.0001, now); gain.gain.exponentialRampToValueAtTime(0.035, now + 0.008); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
-      oscillator.connect(gain); gain.connect(BL.sound.output(audio)); oscillator.start(now); oscillator.stop(now + 0.15);
+      oscillator.connect(gain); gain.connect(soundChannel.node(audio)); oscillator.start(now); oscillator.stop(now + 0.15);
       oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
     };
     const setAmount = (value, preset = "") => {
@@ -294,7 +295,7 @@
       by("tables").replaceChildren(); seatRoot.replaceChildren(); board.replaceChildren(); hand.replaceChildren(); by("history").replaceChildren();
       by("theme-choices").replaceChildren(); for (const picker of themeSelects) picker.replaceChildren();
       tableSelect.replaceChildren(); el.removeAttribute("data-your-turn"); el.removeAttribute("data-connection");
-      sound.checked = false; setFocused(false); if (audio) { audio.close().catch(() => {}); audio = null; }
+      sound.checked = false; setFocused(false); soundChannel.release(); if (audio) { audio.close().catch(() => {}); audio = null; }
     } };
   };
   BL.pokerHud = { create, betAmount, position, resultText };

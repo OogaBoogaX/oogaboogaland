@@ -6462,9 +6462,9 @@ const environmentSoundChecks = async () => {
   const local={root:S.createNode({position:{x:1,y:0,z:0}})};reaction.update(owner,local,pool,.1);const closestLocal=reaction.target===local;
   local.root.visible=false;near.root.position.x=4;far.root.visible=false;reaction.update(owner,local,pool,.1);
   const boundary=reaction.target===near;near.root.position.x=4.001;reaction.update(owner,local,pool,.1);
-  const outOfRange=!reaction.target&&barkContext.gains.slice(1).every(n=>n.gain.value===0);
+  const outOfRange=!reaction.target&&barkContext.gains.slice(2).every(n=>n.gain.value===0);
   near.root.position.x=2;reaction.update(owner,null,pool,.1);sound.setMuted(true);
-  const quietBark=barkContext.gains.slice(1).every(n=>n.gain.value===0),heard=reaction.barks;
+  const quietBark=barkContext.gains.slice(2).every(n=>n.gain.value===0),heard=reaction.barks;
   for(let i=0;i<30;i++)reaction.update(owner,null,pool,.1);
   const heldMute=reaction.barks===heard;sound.setMuted(false);reaction.update(owner,null,pool,.1);
   const unmuted=reaction.barks===heard+1&&contexts.length===before+1;
@@ -22034,7 +22034,7 @@ const partyRadioChecks = async () => {
   const elements = [], level = { now: 0.2 }, node = () => ({ gain: { value: 0, setTargetAtTime() {} }, frequency: {}, connect() {}, disconnect() {} });
   const audio = { currentTime: 0, sampleRate: SR, state: "running", destination: {}, createGain: node, createBiquadFilter: node, createMediaElementSource: node, close: async () => {},
     createAnalyser: () => ({ ...node(), getFloatTimeDomainData: (a) => a.fill(level.now), getByteFrequencyData() {} }) };
-  const page = { window: { BL: { sound: { muted: false, subscribe: () => () => {} } } }, location: { search: "" }, navigator: {}, URLSearchParams, setTimeout, clearTimeout, Date,
+  const page = { window: { BL: { sound: { muted: false, subscribe: () => () => {}, channel: () => ({ gain: 1, level: 1, node: (context, to) => to || context.destination, subscribe: () => () => {}, show() {}, release() {} }) } } }, location: { search: "" }, navigator: {}, URLSearchParams, setTimeout, clearTimeout, Date,
     document: { addEventListener() {}, removeEventListener() {} }, AudioContext: function () { return audio; },
     Audio: function () { const e = { currentTime: 0, play: async () => {}, pause() {}, removeAttribute() {}, load() {} }; elements.push(e); return e; } };
   runInNewContext(await readFile(new URL("../src/js/timechain-party-radio.js", import.meta.url), "utf8"), page);
@@ -29257,7 +29257,7 @@ const ghostAudioChecks = async () => {
   for(const name of ["wave","kaboom","screech","freeze","apples","double","banana","ooga","landing","network","fiatRush","tessZap","tessScream","monkeyGet","choir","gameOver1","gameOver2","gameOver3","gameOver4","gameOverLast"])clips[name]="AA==";
   for(const key of ["boss","colt","martial","nightmare","synthed","nr"])music[key]="AA==";
   let soundFn=null;
-  const window={BL:{sound:{muted:false,subscribe:fn=>{soundFn=fn;return()=>{soundFn=null;};}},ghostAudioData:clips,ghostMusic:music,deferred:{load:g=>{loads.push(g);return null;}}},setTimeout:()=>0};
+  const window={BL:{sound:{muted:false,subscribe:fn=>{soundFn=fn;return()=>{soundFn=null;};},output:context=>context.destination,channel:() => ({ gain: 1, level: 1, node: (context, to) => to || context.destination, subscribe: () => () => {}, show() {}, release() {} })},ghostAudioData:clips,ghostMusic:music,deferred:{load:g=>{loads.push(g);return null;}}},setTimeout:()=>0};
   const context={window,document:{hidden:false,addEventListener(){},removeEventListener(){}},navigator:{userActivation:{hasBeenActive:true}},AudioContext:Ctx,localStorage:{getItem:()=>null,setItem(){}},atob,Math,Float32Array,Uint8Array,Promise};
   runInNewContext(readFileSync(join(root,"src/js/ghost-audio.js"),"utf8"),context);
   const A=window.BL.ghostAudio.create(),out={};
@@ -35093,7 +35093,7 @@ const lecturePlayerChecks = async () => {
       removeAttribute() {}
       load() {}
     }
-    const BL = { lectures: L, deferredScripts: recorded ? {} : null, deferred: { load: async () => {} }, sound: { muted: false, subscribe: () => () => {} } };
+    const BL = { lectures: L, deferredScripts: recorded ? {} : null, deferred: { load: async () => {} }, sound: { muted: false, subscribe: () => () => {}, channel: () => ({ gain: 1, level: 1, node: (context, to) => to || context.destination, subscribe: () => () => {}, show() {}, release() {} }) } };
     runInNewContext(source, { window: { BL }, Audio, localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } });
     const player = BL.lecturePlayer.create(), entry = { id: 'btc-01', group: 'lecture-btc-a', audio: 'btc-01.m4a' };
     assert.equal(media.length, 0);

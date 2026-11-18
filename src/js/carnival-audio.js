@@ -244,6 +244,7 @@
     let ctx = null, master = null, send = null, ready = false, muted = false, level = 1, pan = 0, bend = 1;
     let bed = null, bedOn = false, beatAt = 0, beatStep = 0, cricketAt = 0, cricketI = 0, crackAt = 0, roarAt = 0, birdAt = 0, callI = 0, chantAt = 0, gruntI = 0, tapI = 0;
     muted = BL.sound.muted;
+    const soundChannel = BL.sound.channel("arcade");
     const voices = [], noises = [], drums = [], throats = [], running = [];
     let voiceNext = 0, noiseNext = 0, drumNext = 0, throatNext = 0;
     // The chip's four channels (two pulses, the triangle, the noise: { f, gain, osc, wave, vib, lp, until }, `until`
@@ -258,7 +259,7 @@
       ctx = new AudioContext();
       master = ctx.createGain();
       master.gain.value = muted ? 0 : MASTER;
-      master.connect(ctx.destination);
+      master.connect(soundChannel.node(ctx));
       // A started source, kept to stop on dispose.
       const run = (node) => { node.start(); running.push(node); return node; };
       // The cave's echo: a feedback delay darkening on each return, which the bed, the drums and the throats feed.
@@ -1000,7 +1001,7 @@
       cue, chip, music, pause, activate, setMuted, room, tick,
       get muted() { return muted; },
       dispose() {
-        offSound();
+        offSound(); soundChannel.release();
         stopBackground();
         document.removeEventListener("visibilitychange", onVisibility);
         M.tune = null;
