@@ -96,6 +96,8 @@
   let bhSky = null, zipline = null, promptZip = null;
   let ghostEntry = null, ghosts = null, ghostChannel = null, tess = null, gameMode = false, fence = null, fenceK = 0, totemsAt = [], totemLife = [], lasers = [], armed = false, inArena = false, rifleWas = false;
   let zoneNow = "arcade.hall", zoneHeld = 0, exitButton = null, hallwayFar = false, hallwayAlong = 0, huntHearing = 0;
+  // The seats whose levers this visit registered (remote-players.js `joystick`).
+  let levers = [];
   let stations = null, blocks = null, carnival = null, staff = null, orders = 0, ticketBoard = null, prizeUi = null;
   let crowd = null, spin = null;
   let unwatchHockey = null, hockeyPlayers = null;
@@ -381,18 +383,25 @@
     stations.push({ kind: "wheel", play: W.play, label: "the jackpot wheel" });
     // The cabinets: each loops its game with the best under it, then blinks PRESS START; the stage's open the Ooga
     // games, the mezzanine's their retro games (`retro`, a station on the deck at `MEZZ.y`).
-    screens = [];
+    screens = []; levers = [];
     // What powers up on arrival, each with its delay: the machines light in a wave from the doorway inward.
     power = [];
     const wave = (node, x, z) => power.push({ node, delay: 0.15 + Math.max(0, HALL.front - 1 - z) * 0.09 + Math.abs(x) * 0.02 });
     for (const c of LAYOUT.cabinets) {
       const on = c.game >= 0, named = on ? GAMES[c.game] : AM.RETRO[c.retro], MQ = AM.MARQUEE;
-      const frames = on ? AM.attractFrames(c.game) : AM.retroFrames(c.retro), node = framed(c), body = createNode({ geometry: AM.cabinet(c.index) });
+      const frames = on ? AM.attractFrames(c.game) : AM.retroFrames(c.retro), node = framed(c), body = createNode({ geometry: c.service ? AM.cabinet(c.index) : AM.cabinetBare(c.index) });
       const screen = createNode({ position: { x: 0, y: SCREEN.y, z: SCREEN.z }, rotation: { x: SCREEN.lean, y: 0, z: 0 }, geometry: frames[0], sightHidden: true, depthBias: -0.1 });
       const best = createNode({ geometry: on ? AM.bestLine(c.game, bestOf(named.id)) : AM.retroLine(c.retro, bestOf(named.id)), sightHidden: true, depthBias: -0.12 });
       addChild(screen, best);
       screens.push({ node: screen, best, frames, start: on ? AM.attractStart(c.game) : AM.retroStart(c.retro) });
       addChild(node, body, signNode(named.title, named.icon, MQ.w, 0, MQ.y, MQ.z), screen);
+      // Its lever on a node of its own, which whoever plays this cabinet works (remote-players.js).
+      if (!c.service) {
+        const lever = AM.joystick(), seat = BL.arcadeCabinets.entries[c.index].id;
+        addChild(node, lever.node);
+        BL.remotePlayers.joystick(seat, lever.stick);
+        levers.push(seat);
+      }
       if (c.service) {
         const bay = createNode({ geometry: AM.rallyRepairBay() });
         const panel = createNode({ geometry: AM.cabinetPanel(c.index), position: { x: -1.08, y: 0.1, z: 0.28 }, rotation: { x: -0.22, y: -0.4, z: -0.12 } });
@@ -417,7 +426,9 @@
       wave(body, c.x, c.z); wave(screen, c.x, c.z);
       target(body, on ? { kind: "cabinet", game: c.game } : { kind: "retro", retro: c.retro }, 1.3);
       blocks.push(blockOf(c, -CAB.w / 2, CAB.w / 2, -CAB.d / 2, CAB.d / 2, c.y === MEZZ.y ? DECK_FEET : FLOOR_FEET));
-      stations.push(on ? { kind: "cabinet", game: c.game, play: c.play, y: c.y, label: named.name + (named.unavailable ? " · out of order" : "") } : { kind: "retro", retro: c.retro, id: named.id, play: c.play, y: c.y, label: named.name });
+      // Played standing on its box (arcadeModels.PLATFORM), whose top is the station's level.
+      const level = c.y + (c.service ? 0 : PF.h);
+      stations.push(on ? { kind: "cabinet", game: c.game, play: c.play, y: level, label: named.name + (named.unavailable ? " · out of order" : "") } : { kind: "retro", retro: c.retro, id: named.id, play: c.play, y: level, label: named.name });
     }
     // Every game in the hall: each machine in its frame with its game over nodes under it, and a station in front of
     // it that opens that game at that machine.
@@ -1148,6 +1159,8 @@
   // mezzanine's deck and the stair up to it (a ramp, running a little on past both ends), and the haunted hallway's
   // and the arena's floor, level with the deck. Allocation-free.
   const STEP = 0.6, STAIRS = MEZZ.stairs.map(([x, foot, , head]) => ({ x0: x - MEZZ.stairW / 2, x1: x + MEZZ.stairW / 2, foot, head, run: foot - head }));
+  // The platforms in front of the cabinets (arcadeModels.PLATFORM), each its cabinet's place and turn.
+  const PF = AM.PLATFORM, PLATFORMS = LAYOUT.cabinets.filter(c => !c.service).map(c => ({ x: c.x, z: c.z, y: c.y + PF.h, c: Math.cos(c.turn), s: Math.sin(c.turn) }));
   const supportAt = (x, z, feet) => {
     const reach = feet + STEP;
     if (x > BH.x0 - 0.5 && x < BH.x1 + 0.5 && z < HALL.back + 0.5 && z > BH.ledge - 0.5 && BH.y <= reach) return BH.y;
@@ -1162,6 +1175,10 @@
       if (x < st.x0 || x > st.x1 || z > st.foot + 0.3 || z < st.head - 0.3) continue;
       const y = MEZZ.y * Math.min(1, Math.max(0, (st.foot - z) / st.run));
       if (y > best && y <= reach) best = y;
+    }
+    for (let i = 0; i < PLATFORMS.length; i++) {
+      const p = PLATFORMS[i], dx = x - p.x, dz = z - p.z, lx = p.c * dx - p.s * dz, lz = p.s * dx + p.c * dz;
+      if (p.y > best && p.y <= reach && Math.abs(lx) <= PF.w / 2 && lz >= PF.z0 && lz <= PF.z1) best = p.y;
     }
     return best;
   };
@@ -1711,6 +1728,19 @@
     for (let i = 0; i < staff.length; i++) { const o = staff[i].spot; if (staff[i] !== g && o && Math.abs(o.x - s.x) + Math.abs(o.z - s.z) < 2.2) return true; }
     return false;
   };
+  // Whether an Ooga is at a job's spot, playing that machine: a player's (or the visitor's own) within PLAYER_CLEAR of
+  // it on its level. The staff never take a job there, and leave one as a player comes.
+  const PLAYER_CLEAR = 1.8;
+  const playedAt = (s, deck) => {
+    const r2 = PLAYER_CLEAR * PLAYER_CLEAR;
+    for (const rec of BL.net.remotes.values()) {
+      if (!rec.body || !HALL_ZONES.has(rec.zone) || (rec.y >= MEZZ.y - 0.5) !== deck) continue;
+      if ((rec.x - s.x) * (rec.x - s.x) + (rec.z - s.z) * (rec.z - s.z) < r2) return true;
+    }
+    if (!avatar || (feetOf() >= MEZZ.y - 0.5) !== deck) return false;
+    const p = avatar.root.position;
+    return (p.x - s.x) * (p.x - s.x) + (p.z - s.z) * (p.z - s.z) < r2;
+  };
   const candidates = (g, near, far) => {
     const p = g.agent.root.position, jobs = g.role.jobs;
     let n = 0;
@@ -1719,7 +1749,7 @@
       if (g.role.id === "runner" && (job === JOBS.serve) !== g.carrying) continue;
       for (let k = 0; k < job.spots.length && n < CAND.length; k++) {
         const s = job.spots[k], d = (s.x - p.x) * (s.x - p.x) + (s.z - p.z) * (s.z - p.z);
-        if (s.taken || s === g.last || claimedNear(g, s) || d < near * near || d > far * far) continue;
+        if (s.taken || s === g.last || claimedNear(g, s) || d < near * near || d > far * far || playedAt(s, g.deck)) continue;
         CAND[n++] = s;
       }
     }
@@ -1882,7 +1912,8 @@
         g.stuck = g.skip = 0;
         g.ax = p.x; g.az = p.z;
         if (g.phase === "work") work(g, dt);
-        if (g.t >= g.dur) finish(g);
+        if (g.phase === "work" && g.spot && playedAt(g.spot, g.deck)) nextJob(g);
+        else if (g.t >= g.dur) finish(g);
       }
       const standing = g.phase !== "walk" && g.phase !== "wait" && !a.beating;
       g.blend += ((standing ? 1 : 0) - g.blend) * Math.min(1, dt * 7);
@@ -2385,6 +2416,8 @@
     captureOnArrival = false;
     doors = doorWalk = caveCopy = null;
     if (caveYard) { caveYard.dispose(); caveYard = null; }
+    for (const seat of levers) BL.remotePlayers.joystick(seat, null);
+    levers = [];
     revealCabinetPlayers();
     openingRequest++;
     if (!openingGame) BL.net.leaveCabinet();

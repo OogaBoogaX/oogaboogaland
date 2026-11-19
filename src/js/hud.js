@@ -215,7 +215,7 @@
       donationMessageLabel: $("donation-message-label"),
       bananaPanel: $("bananas-panel"),
       subtitle: $("subtitle"),
-      topbar: document.querySelector(".topbar"), brand: document.querySelector(".brand"),
+      topbar: document.querySelector(".topbar"), brand: document.querySelector(".brand"), stage: $("stage"),
       clock: $("world-clock"), block: $("world-block"),
       equipment: $("equipment-hud"), equipmentRow: document.querySelector(".weapon-equipment-row"), leave: $("leave-hud"),
       micNote: $("mic-note"),
@@ -319,12 +319,23 @@
       const bannerStyle = (node, property, value) => {
         if (node.style.getPropertyValue(property) !== value) node.style.setProperty(property, value);
       };
+      // A box measured in the stage's own layout, which the banner's controls are placed in: a cabinet zoom's scale and
+      // offset on the stage (Cloud Hopper's ride up out of the glass) never reach them, and nothing measures again once
+      // the zoom lets go, since a transform resizes nothing the observers watch.
+      const stage = { left: 0, top: 0, k: 1 };
+      const inStage = (node) => {
+        const r = node.getBoundingClientRect();
+        return { left: (r.left - stage.left) / stage.k, right: (r.right - stage.left) / stage.k,
+          top: (r.top - stage.top) / stage.k, bottom: (r.bottom - stage.top) / stage.k, width: r.width / stage.k };
+      };
       const fitBanner = () => {
         bannerFrame = 0;
         if (document.body.dataset.activeScene !== bannerScene) return;
         // The Sign in button's room, set before the clock is measured: the clock stands clear of it.
         bannerStyle(el.topbar, "--hub-banner-account", `${accountTop().offsetWidth ? accountTop().offsetWidth + 8 : 0}px`);
-        const brand = el.brand.getBoundingClientRect(), clock = el.clock.getBoundingClientRect(), block = el.block.getBoundingClientRect();
+        const box = el.stage.getBoundingClientRect();
+        stage.left = box.left; stage.top = box.top; stage.k = el.stage.offsetWidth ? box.width / el.stage.offsetWidth : 1;
+        const brand = inStage(el.brand), clock = inStage(el.clock), block = inStage(el.block);
         const topbar = getComputedStyle(el.topbar), row = getComputedStyle(el.equipmentRow);
         const fontSize = parseFloat(getComputedStyle(el.clock).fontSize) || 22;
         const scale = Math.max(0.7, Math.min(0.85, 0.7 + (fontSize - 13) / 60));
@@ -375,7 +386,7 @@
           const presetTop = banner === "below" ? top + equipmentHeight + (count ? 8 : 0) : (topEdge + bottomEdge - 28) / 2;
           const equipmentWidth = (compactWidth + (banner === "full" && expanded ? 140 : 0)) * scale;
           const presetLeft = banner === "below" ? belowLeft : leftEdge + equipmentWidth + (count ? 12 : 0);
-          bannerStyle(presets, "--banner-equipment-right", `${el.equipmentRow.getBoundingClientRect().left + equipmentWidth + 8}px`);
+          bannerStyle(presets, "--banner-equipment-right", `${inStage(el.equipmentRow).left + equipmentWidth + 8}px`);
           bannerStyle(presets, "--banner-presets-top", `${presetTop}px`);
           bannerStyle(presets, "--banner-presets-left", `${presetLeft}px`);
           bannerStyle(presets, "--banner-presets-width", `${Math.max(0, window.innerWidth - presetLeft - paddingRight)}px`);
