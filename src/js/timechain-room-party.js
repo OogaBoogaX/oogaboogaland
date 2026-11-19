@@ -15,8 +15,12 @@
 // be read (a stream heard but not analysed, or the radio off) the room plays its own arrangement on the room's clock,
 // so everyone sees it alike. A new block on the chain drops the bass: a ring of light falls down the dome, a wave runs out
 // across the floor, the lasers strobe white and the sign over the booth says so. The DJ booth stands up on a stage
-// across the front with steps up each end; line arrays hang off the walls all the way round between the lasers and
-// thump, the mirror ball turns under the crown, and the latest block hangs on the dome.
+// across the front, dressed as a club's is (a velour skirt with the subs behind grilles, stage stairs with handrails
+// each end, booth monitors on stands, road cases); line arrays hang off the walls all the way round between the lasers and
+// thump, the mirror ball turns under the crown, and the latest block hangs on the dome. Oogas standing still on the
+// floor groove to the beat, closer to standing than dancing (`dance`). Two glass balconies, one over the
+// other, run round the wall over the line arrays and lasers, all but the front of the room, with no stair: a jetpack
+// gets an Ooga up there.
 (() => {
   "use strict";
   const BL = window.BL;
@@ -82,6 +86,12 @@
   // so the decks stand at an Ooga's waist rather than its chest; DJ_IN degrees short of the booth's ends each side.
   const DJ_UP = 0.4, DJ_IN = 1.5;
   const STAGE = { H: 0.8, W: 7, FRONT: 6, STEPS: 2, TREAD: 0.45, STEP_W: 2.4, DOWN: 0.4 };
+  // The stage dressed as a club's is: a velour skirt along its front in folds PLEAT apart and DEPTH deep, the sub bays
+  // built into it (SUBS: each w by h, at x), its deck in platforms PLATFORM square, a monitor either side of the booth on a
+  // stand MON out from its ends, road cases at the back, and the colours of all of it.
+  const SKIRT = { PLEAT: 0.09, DEPTH: 0.025 }, SUBS = { w: 1.3, h: 0.5, y: 0.12, at: [-4.5, -1.5, 1.5, 4.5] }, PLATFORM = 1.22, MON = 0.75;
+  const STAGE_C = { skirt: "#141017", fold: "#1e1923", nosing: "#45474f", seam: "#0d0a11", tape: "#c9c4b6", grille: "#0b0b0e", slat: "#1a1a1f",
+    frame: "#2a2b31", tread: "#1d1a22", riser: "#121016", lamp: "#ffcf9a", alu: "#8a8f98", led: "#3aff7a" };
   // The dome: its looks repainted DOME_FPS times a second on a canvas DOME_W by DOME_H drawn up smooth; its LED dots a
   // cell a fortieth of a radian round, about one in seven lit, in DOT_GROUPS nodes, sorted DOT_BIAS metres nearer for
   // Canvas 2D; the LED wall WALL_BIAS.
@@ -92,6 +102,23 @@
   const GREEN = 0, RED = 1, BLUE = 2, CYAN = 3, MAGENTA = 4, YELLOW = 5, WHITE = 6;
   const SHOW_COLORS = [[GREEN, GREEN], [CYAN, MAGENTA], [RED, RED], [BLUE, CYAN], [GREEN, CYAN], [MAGENTA, BLUE]];
   const NB = 10, PHRASE = 16, BEAM_W = 0.007, BEAM_LEN = 8;
+  // An Ooga standing still in the room grooves to the beat, closer to standing than dancing: after STILL seconds it eases
+  // in over EASE, a two-step (its weight shifting side to side over two beats, a leg opening STEP and the body leaning
+  // LEAN toward it, a small dip NOD on every beat), and now and then the arms join in, in one of a few small ways
+  // (`GROOVES`), picked afresh from its name every PHRASE beats so neighbours differ and nobody does the same thing
+  // all night. Every movement's size is in radians and grows a little with the music (QUIET at its quietest).
+  const DANCE = { STILL: 0.8, EASE: 1.2, STEP: 0.055, LEAN: 0.03, NOD: 0.025, QUIET: 0.6 };
+  // Each groove's arms: `sway` (the upper arms swinging with the step), `lift` (the forearms bent up from hanging),
+  // `pump` (both forearms on every beat), `alt` (the forearms in turn, beat by beat), `one` (the right forearm alone,
+  // on the beat), `fwd` (the upper arms brought forward). The hands-still groove comes up more often than the rest.
+  const GROOVES = [
+    { sway: 0.03, lift: 0, pump: 0, alt: 0, one: 0, fwd: 0 },
+    { sway: 0.03, lift: 0, pump: 0, alt: 0, one: 0, fwd: 0 },
+    { sway: 0.06, lift: 0.1, pump: 0.08, alt: 0, one: 0, fwd: 0 },
+    { sway: 0.02, lift: 0.5, pump: 0.12, alt: 0, one: 0, fwd: 0.12 },
+    { sway: 0.02, lift: 0.65, pump: 0, alt: 0.1, one: 0, fwd: 0.15 },
+    { sway: 0.04, lift: 0.05, pump: 0, alt: 0, one: 0.6, fwd: 0.05 }
+  ];
   // The lasers' looks a show turns through: on the beat while a strong kick drives the music, and flowing (the level
   // sheet, the liquid sky and the mesh) while nothing kicks, turning half as often.
   const PULSE_LOOKS = [0, 1, 2, 4, 5, 7, 8, 10, 12, 13], FLOW_LOOKS = [3, 6, 9, 11];
@@ -110,6 +137,14 @@
   // BOX big hung from a bracket HANG_OUT from the wall at HANG_Y, each splayed SPLAY degrees further down than the one
   // above; the mains either side of the stage, fills round the room to the doors.
   const ARRAYS = [{ b: 141, n: 5 }, { b: 101, n: 4 }, { b: 62, n: 4 }, { b: 24, n: 3 }], BOX = { w: 1.15, h: 0.34, d: 0.6 }, HANG_Y = 6.8, HANG_OUT = 0.95, SPLAY = [2, 3, 4, 5, 6];
+  // The balconies: glass decks on steel round the wall, one over the other, each LEVELS' floor at Y1 and its inner
+  // edge R in (the dome closing in over the upper one), its underside (for collision) DEPTH under its floor: the lower
+  // over the line arrays and the lasers hung under it, the upper as high again over it. All the way round but the
+  // front of the room (OPEN degrees either side of the booth), a glass balustrade RAIL high round each, with no stair:
+  // an Ooga gets up there by jetpack. A beam every BEAM degrees; the floor's glass GLASS see-through and the
+  // balustrade's RAIL_GLASS; collision in boxes SEG degrees round.
+  const BALCONY = { LEVELS: [{ R: 16.4, Y1: 8.15 }, { R: 13.2, Y1: 16.3 }], DEPTH: 0.35, OPEN: 34, RAIL: 1.05, SEG: 4, BEAM: 6, GLASS: 0.16, RAIL_GLASS: 0.1 };
+  const BALCONY_C = { steel: "#2a2d34", edge: "#33363e", joint: "#101116", shoe: "#1c1e23", rail: "#b3b8c0", lamp: "#ffd9a8", glass: "#cfe6e2", railGlass: "#dcefee" };
   // The booth's screen: a canvas W by H wrapped round the booth's face from Y0 to Y1, repainted at most FPS times a
   // second: BARS bars of ROWS segments either side of the name, and a wave.
   const SCREEN = { W: 1024, H: 144, Y0: 0.16, Y1: 0.92, FPS: 60, BARS: 40, ROWS: 14, LOGO_W: 300, LOGO_H: 104, TAG: 4 };
@@ -607,6 +642,152 @@
       }
       y -= BOX.h * c; z -= BOX.h * s;
     }
+  };
+
+  // ---------- the stage ----------
+  // The velour skirt along the stage's straight front (z = zs, facing the room) from x0 to x1 and y0 to y1, as faces
+  // into `geo`: a fold every PLEAT in two shades, so the light catches one side of each, left open over the `gaps`.
+  const skirt = (geo, zs, x0, x1, y0, y1, gaps) => {
+    const n = Math.round((x1 - x0) / SKIRT.PLEAT), za = zs + 0.006, zm = za + SKIRT.DEPTH;
+    for (let i = 0; i < n; i++) {
+      const a = x0 + (x1 - x0) * i / n, b = x0 + (x1 - x0) * (i + 1) / n, m = (a + b) / 2;
+      if (gaps.some(([g0, g1]) => b > g0 && a < g1)) continue;
+      face(geo, [[a, y0, za], [m, y0, zm], [m, y1, zm], [a, y1, za]], STAGE_C.skirt, 0, [-SKIRT.DEPTH, 0, m - a]);
+      face(geo, [[m, y0, zm], [b, y0, za], [b, y1, za], [m, y1, zm]], STAGE_C.fold, 0, [SKIRT.DEPTH, 0, b - m]);
+    }
+  };
+  // A sub bay in the stage's front at x: a steel frame, the grille's black mesh and its slats.
+  const subBay = (K, x, zs) => {
+    const { w, h, y } = SUBS, cy = y + h / 2;
+    K.box(w + 0.07, h + 0.07, 0.03, STAGE_C.frame, x, cy, zs + 0.015);
+    K.box(w, h, 0.02, STAGE_C.grille, x, cy, zs + 0.03);
+    for (let k = 1; k * 0.045 < h; k++) K.box(w - 0.02, 0.011, 0.012, STAGE_C.slat, x, y + k * 0.045, zs + 0.046);
+  };
+  // A booth monitor on a tripod stand on the deck at (x, z), turned to face (tx, tz) and tipped a little down: the
+  // cabinet, its baffle, woofer and horn, a power lamp, and the stand's pole and legs.
+  const boothMonitor = (K, x, y, z, tx, tz) => {
+    const ry = Math.atan2(tx - x, tz - z), top = y + 1.02;
+    for (let k = 0; k < 3; k++) {
+      const a = ry + k * TAU / 3;
+      rod(K, [x, y + 0.42, z], [x + 0.36 * Math.sin(a), y + 0.01, z + 0.36 * Math.cos(a)], 0.012, C.rig);
+    }
+    K.cyl(0.02, 0.02, top - y, C.rig, x, (y + top) / 2, z, { seg: 8 });
+    const g = K.group(x, top + 0.34, z, ry, 0.12);
+    g.box(0.42, 0.66, 0.4, C.cab, 0, 0, 0);
+    g.box(0.38, 0.62, 0.012, C.grille, 0, 0, 0.204);
+    g.torus(0.135, 0.012, "#26262c", 0, -0.1, 0.212, { rx: Math.PI / 2, seg: 20, sides: 4 });
+    g.cyl(0.12, 0.07, 0.03, "#08080a", 0, -0.1, 0.205, { rx: Math.PI / 2, seg: 18 });
+    g.box(0.22, 0.1, 0.025, C.horn, 0, 0.2, 0.212);
+    g.box(0.014, 0.014, 0.008, STAGE_C.led, 0.16, -0.28, 0.212, { emissive: 1, glow: true });
+    K.solid({ x, z, r: 0.34 });
+  };
+  // A road case on castors on the deck at (x, z), turned by ry: the box, aluminium on every edge, ball corners,
+  // latches and handles on its front, and castors under it; something to stand on.
+  const roadCase = (K, x, y, z, ry, w, h, d) => {
+    const g = K.group(x, y, z, ry), c = 0.08, cy = c + h / 2, e = 0.022;
+    g.box(w, h, d, "#151519", 0, cy, 0);
+    for (const sy of [-1, 1]) for (const sz of [-1, 1]) g.box(w + 0.01, e, e, STAGE_C.alu, 0, cy + sy * h / 2, sz * d / 2);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.box(e, h + 0.01, e, STAGE_C.alu, sx * w / 2, cy, sz * d / 2);
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) g.box(e, e, d + 0.01, STAGE_C.alu, sx * w / 2, cy + sy * h / 2, 0);
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) g.ball(0.03, STAGE_C.alu, sx * w / 2, cy + sy * h / 2, sz * d / 2, { seg: 6 });
+    for (const sx of [-0.3, 0.3]) g.box(0.07, 0.05, 0.02, STAGE_C.alu, sx * w, cy + h * 0.32, d / 2 + 0.012);
+    g.box(0.16, 0.05, 0.03, "#0c0c0f", 0, cy, d / 2 + 0.014);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      g.box(0.07, 0.03, 0.07, C.rig, sx * (w / 2 - 0.08), c - 0.015, sz * (d / 2 - 0.08));
+      g.cyl(0.03, 0.03, 0.025, "#0a0a0c", sx * (w / 2 - 0.08), 0.03, sz * (d / 2 - 0.08), { rz: Math.PI / 2, seg: 8 });
+    }
+    const p = g.at(0, 0, 0);
+    K.solid({ x: p.x, z: p.z, hx: w / 2, hz: d / 2, ry, top: y + c + h });
+  };
+
+  // ---------- the balcony ----------
+  // A steel member along bearing `b` (degrees) from radius v0 to v1, `w` either side of its line, its top at t0 and
+  // its bottom at d0 at v0, tapering to t1 and d1 at v1, as faces into `geo`.
+  const member = (geo, b, v0, v1, t0, t1, d0, d1, w, color) => {
+    const s = Math.sin(b * DEG), c = Math.cos(b * DEG), p = (v, u, y) => [v * s + u * c, y, v * c - u * s];
+    const A = [p(v0, -w, d0), p(v0, w, d0), p(v1, w, d1), p(v1, -w, d1)], B = [p(v0, -w, t0), p(v0, w, t0), p(v1, w, t1), p(v1, -w, t1)];
+    face(geo, A, color, 0, [0, -1, 0]);
+    face(geo, B, color, 0, [0, 1, 0]);
+    face(geo, [A[0], A[3], B[3], B[0]], color, 0, [-c, 0, s]);
+    face(geo, [A[1], A[2], B[2], B[1]], color, 0, [c, 0, -s]);
+    face(geo, [A[0], A[1], B[1], B[0]], color, 0, [-s, 0, -c]);
+    face(geo, [A[3], A[2], B[2], B[3]], color, 0, [s, 0, c]);
+  };
+  // Whether a bearing (degrees) keeps clear of the line arrays and the lasers hung on the wall, which keep the wall
+  // under the balcony to themselves.
+  const clearOfHangings = (b) => {
+    const at = ((b % 360) + 540) % 360 - 180;
+    for (const h of [...ARRAYS.map((a) => a.b), ...PROJ.BEARINGS]) if (Math.abs(Math.abs(at) - h) < 4) return false;
+    return true;
+  };
+  // A balcony (LEVELS' `i`) as a real one is built: a steel ledger bolted along the wall; a tapered I-beam out from it every BEAM
+  // degrees, deep at the wall and shallow at the edge, each held up by a raking strut down to a plate on the wall
+  // (but where a line array or a laser hangs under the lower one); a ring joist halfway out and a channel along the edge, lit along its
+  // face, with warm downlights under it; on them the floor's laminated glass, a dark joint over every beam and along
+  // the joist; and a frameless glass balustrade in a steel shoe along the edge and across both ends, a brushed steel
+  // cap along its top. Then the boxes that hold an Ooga up on it, keep one under it from flying up through it, and
+  // keep one on it from walking off over the balustrade.
+  const balcony = (K, L, i) => {
+    const { DEPTH, OPEN, RAIL, SEG, BEAM, GLASS, RAIL_GLASS } = BALCONY, { R, Y1 } = BALCONY.LEVELS[i], Y0 = Y1 - DEPTH, S = BALCONY_C, span = 360 - 2 * OPEN;
+    const wall = ROOMS.radiusAt(L, Y1) - 0.12, deep = wall + 0.1, a0 = (180 + OPEN) * DEG, a1 = a0 + span * DEG, mid = (R + wall) / 2;
+    const under = Y1 - 0.045, edge = R + 0.1, rail = R + 0.05, top = Y1 + RAIL, geo = blank();
+    // The ledger, the edge channel with its lit face, and the ring joist.
+    K.sector(0, wall - 0.12, deep, a0, a1, Y1 - 0.6, under, S.steel);
+    K.sector(0, R, edge, a0, a1, Y1 - 0.3, under, S.edge);
+    K.sector(0, R - 0.01, R, a0, a1, Y1 - 0.2, Y1 - 0.17, PURPLE, { emissive: 1, glow: true });
+    K.sector(0, mid - 0.05, mid + 0.05, a0, a1, under - 0.16, under, S.steel);
+    const n = Math.round(span / BEAM);
+    for (let k = 0; k <= n; k++) {
+      const b = 180 + OPEN + span * k / n, d0 = under - 0.24, d1 = under - 0.55;
+      // The beam: its web, deep at the wall, and its flanges top and bottom.
+      member(geo, b, edge, deep, under, under, d0, d1, 0.02, S.steel);
+      member(geo, b, edge, deep, under, under, under - 0.025, under - 0.025, 0.08, S.steel);
+      member(geo, b, edge, deep, d0 + 0.025, d1 + 0.025, d0, d1, 0.08, S.steel);
+      // The joint over it in the glass, and a downlight under the edge.
+      member(geo, b, edge, wall, Y1 + 0.003, Y1 + 0.003, Y1 - 0.006, Y1 - 0.006, 0.012, S.joint);
+      const lamp = polar(R + 0.35, b);
+      K.cyl(0.07, 0.07, 0.03, S.steel, lamp.x, d0 - 0.005, lamp.z, { seg: 10 });
+      K.cyl(0.05, 0.05, 0.01, S.lamp, lamp.x, d0 - 0.02, lamp.z, { seg: 10, emissive: 1, glow: true });
+      if (i === 0 && !clearOfHangings(b)) continue;
+      // The strut, from a plate on the wall (which leans in as the dome closes) up to the beam's underside a third of
+      // the way out.
+      const foot = polar(ROOMS.radiusAt(L, Y1 - 1.7) - 0.12, b), head = polar(wall - (wall - R) * 0.62, b), hy = d1 + (d0 - d1) * 0.62, fy = Y1 - 1.7;
+      rod(K, [foot.x, fy, foot.z], [head.x, hy, head.z], 0.045, S.steel);
+      K.group(foot.x, fy, foot.z, b * DEG + Math.PI).box(0.24, 0.34, 0.03, S.steel, 0, 0, 0.015);
+    }
+    K.add(geo);
+    // The floor: one sheet of glass from the edge channel to the wall, its joint along the joist.
+    const floor = K.node(`balconyGlass${i}`, (k) => k.sector(0, edge - 0.02, deep, a0, a1, under, Y1, S.glass), 0, 0, 0).geometry;
+    floor.glass = GLASS; floor.castShadow = false;
+    K.sector(0, mid - 0.012, mid + 0.012, a0, a1, Y1 - 0.006, Y1 + 0.003, S.joint);
+    // The balustrade: its shoe, a pane a bay, and the cap; and across each end the same from the edge to the wall.
+    K.sector(0, rail - 0.045, rail + 0.045, a0, a1, Y1, Y1 + 0.1, S.shoe);
+    K.sector(0, rail - 0.028, rail + 0.028, a0, a1, top - 0.06, top, S.rail);
+    const gap = 0.012 / rail;
+    const panes = K.node(`balconyRail${i}`, (k) => {
+      for (let j = 0; j < n; j++) {
+        const b0 = a0 + (a1 - a0) * j / n, b1 = a0 + (a1 - a0) * (j + 1) / n;
+        k.sector(0, rail - 0.008, rail + 0.008, b0 + gap, b1 - gap, Y1 + 0.1, top - 0.06, S.railGlass, { steps: 2 });
+      }
+      for (const b of [a0, a1]) {
+        const g = k.group(0, 0, 0, b);
+        g.box(0.016, RAIL - 0.16, wall - rail - 0.1, S.railGlass, 0, Y1 + 0.1 + (RAIL - 0.16) / 2, (rail + wall) / 2);
+      }
+    }, 0, 0, 0).geometry;
+    panes.glass = RAIL_GLASS; panes.castShadow = false;
+    for (const b of [a0, a1]) {
+      const g = K.group(0, 0, 0, b);
+      g.box(0.09, 0.1, wall - rail, S.shoe, 0, Y1 + 0.05, (rail + wall) / 2);
+      g.box(0.056, 0.06, wall - rail, S.rail, 0, top - 0.03, (rail + wall) / 2);
+    }
+    // Collision: the deck, the balustrade along the edge and across the ends.
+    const m = Math.ceil(span / SEG), step = span / m, half = (wall - R) / 2;
+    for (let j = 0; j < m; j++) {
+      const b = 180 + OPEN + (j + 0.5) * step, deck = polar((R + wall) / 2, b), at = polar(rail, b);
+      K.solid({ x: deck.x, z: deck.z, hx: wall * Math.sin(step / 2 * DEG) + 0.05, hz: half, ry: b * DEG, top: Y1, below: Y0, deck: true });
+      K.solid({ x: at.x, z: at.z, hx: rail * Math.sin(step / 2 * DEG) + 0.02, hz: 0.05, ry: b * DEG, top, below: Y1 });
+    }
+    for (const b of [a0, a1]) { const c = polar((R + wall) / 2, b / DEG); K.solid({ x: c.x, z: c.z, hx: 0.05, hz: half, ry: b, top, below: Y1 }); }
   };
 
   // ---------- the booth's screen ----------
@@ -1575,25 +1756,52 @@
       floor.paint(colors, 0, 0.3);
     }, { scale: FLOOR_PX, emissive: 1 });
 
-    // The stage across the front: a deck from its straight front edge back to the wall, a violet strip along its lip
-    // and its foot and footlights all along between, which glow with the music, and steps up each end, each nosed in
-    // amber. Its top and the steps' are solids' tops, so an Ooga steps up them, or jumps up onto the deck anywhere.
+    // The stage across the front: a deck from its straight front edge back to the wall, in platforms whose seams show,
+    // white tape along its lip under an aluminium nosing, a velour skirt down its front with the subs built in behind
+    // grilles, and a violet cove light under the nosing and along the foot, which glow with the music; stage stairs up
+    // each end, their treads taped white, a dim step light in each riser and a handrail either side. Its top and the
+    // steps' are solids' tops, so an Ooga steps up them, or jumps up onto the deck anywhere.
     const H = STAGE.H, W = STAGE.W, zs = stageZ(L), rw = ROOMS.radiusAt(L, 0) - 0.05, back = Math.asin(W / rw) / DEG, deck = [[-W, zs], [W, zs]];
     for (let i = 0; i <= 12; i++) { const p = polar(rw, 180 - back + 2 * back * i / 12); deck.push([p.x, p.z]); }
     K.slab(deck.reverse(), 0, H, C.stage);
     K.slab(deck.map(([x, z]) => [x * 0.999, z + (z > zs - 0.01 ? -0.02 : 0)]), H, H + 0.012, C.stageTop);
+    const seamY = H + 0.0135;
+    for (let z = zs - PLATFORM; z > -rw; z -= PLATFORM) { const half = Math.min(W, Math.sqrt(rw * rw - z * z)); K.box(2 * half, 0.003, 0.012, STAGE_C.seam, 0, seamY, z); }
+    for (let x = 0; x < W; x += PLATFORM) for (const sx of x ? [-1, 1] : [1]) {
+      const zw = -Math.sqrt(rw * rw - x * x);
+      K.box(0.012, 0.003, zs - zw, STAGE_C.seam, sx * x, seamY, (zs + zw) / 2);
+    }
+    K.box(2 * W, 0.003, 0.05, STAGE_C.tape, 0, seamY, zs - 0.04);
+    K.box(2 * W + 0.04, 0.05, 0.075, STAGE_C.nosing, 0, H - 0.019, zs + 0.03);
+    const skirtGeo = blank(), bays = SUBS.at.map((x) => [x - SUBS.w / 2 - 0.035, x + SUBS.w / 2 + 0.035]);
+    skirt(skirtGeo, zs, -W, W, 0.07, H - 0.045, bays);
+    K.add(skirtGeo);
+    for (const x of SUBS.at) subBay(K, x, zs);
     K.node("stageEdge", (k) => {
-      k.box(2 * W, 0.035, 0.035, PURPLE, 0, H - 0.02, zs + 0.02, { emissive: 1, glow: true });
-      k.box(2 * W, 0.03, 0.03, PURPLE, 0, 0.03, zs + 0.02, { emissive: 1, glow: true });
-      for (let x = -W + 0.5; x < W; x += 1) k.box(0.18, 0.06, 0.02, "#ffb04d", x, H * 0.5, zs + 0.012, { emissive: 1, glow: true });
+      k.box(2 * W, 0.012, 0.014, PURPLE, 0, H - 0.055, zs + 0.05, { emissive: 1, glow: true });
+      k.box(2 * W, 0.02, 0.02, PURPLE, 0, 0.035, zs + 0.03, { emissive: 1, glow: true });
     }, 0, 0, 0, { glow: true });
     K.solid({ x: 0, z: zs - 4, hx: W, hz: 4, top: H, stay: true });
-    const sz = zs - STAGE.DOWN - STAGE.STEP_W / 2;
-    for (const side of [-1, 1]) for (let s = 1; s <= STAGE.STEPS; s++) {
-      const top = H * s / (STAGE.STEPS + 1), x0 = W + (STAGE.STEPS - s) * STAGE.TREAD, x1 = x0 + STAGE.TREAD;
-      K.box(x1 - W, top, STAGE.STEP_W, C.stage, side * (W + x1) / 2, top / 2, sz);
-      K.box(0.05, 0.012, STAGE.STEP_W, "#ffb04d", side * (x1 - 0.03), top + 0.006, sz, { emissive: 0.8, glow: true });
-      K.solid({ x: side * (x0 + x1) / 2, z: sz, hx: STAGE.TREAD / 2, hz: STAGE.STEP_W / 2, top });
+    const sz = zs - STAGE.DOWN - STAGE.STEP_W / 2, out = W + STAGE.STEPS * STAGE.TREAD, rail = STAGE.STEP_W / 2 - 0.04;
+    for (const side of [-1, 1]) {
+      for (let s = 1; s <= STAGE.STEPS; s++) {
+        const top = H * s / (STAGE.STEPS + 1), x0 = W + (STAGE.STEPS - s) * STAGE.TREAD, x1 = x0 + STAGE.TREAD;
+        K.box(x1 - W, top, STAGE.STEP_W, STAGE_C.riser, side * (W + x1) / 2, top / 2, sz);
+        K.box(x1 - x0, 0.012, STAGE.STEP_W, STAGE_C.tread, side * (x0 + x1) / 2, top + 0.006, sz);
+        K.box(0.045, 0.003, STAGE.STEP_W, STAGE_C.tape, side * (x1 - 0.03), top + 0.0135, sz);
+        for (const dz of [-0.6, 0.6]) K.box(0.004, 0.025, 0.09, STAGE_C.lamp, side * (x1 + 0.002), top * 0.55, sz + dz, { emissive: 0.55, glow: true });
+        K.solid({ x: side * (x0 + x1) / 2, z: sz, hx: STAGE.TREAD / 2, hz: STAGE.STEP_W / 2, top });
+      }
+      // The handrails: a post at the foot on the lowest tread and one on the deck, a rail and a mid rail between.
+      const lo = H / (STAGE.STEPS + 1), xb = side * (out - 0.08), xt = side * (W - 0.08), up = 0.95;
+      for (const dz of [-rail, rail]) {
+        const z = sz + dz;
+        K.cyl(0.024, 0.024, up, STAGE_C.alu, xb, lo + up / 2, z, { seg: 8 });
+        K.cyl(0.024, 0.024, up, STAGE_C.alu, xt, H + up / 2, z, { seg: 8 });
+        rod(K, [xb, lo + up, z], [xt, H + up, z], 0.02, STAGE_C.alu);
+        rod(K, [xb, lo + up * 0.5, z], [xt, H + up * 0.5, z], 0.014, STAGE_C.alu);
+        K.solid({ x: (xb + xt) / 2, z, hx: Math.abs(xb - xt) / 2 + 0.03, hz: 0.04 });
+      }
     }
 
     // The DJ booth on the stage: a curved desk, its face an LED screen in a dark bezel lit violet along its edges, its
@@ -1610,18 +1818,27 @@
     // The desk stands in the way of feet below its top, so an Ooga walks round it on the stage to the DJ's place
     // behind, or jumps up onto it and over.
     arcSolids(K, (rb0 + rb1) / 2, 180 - ah, 180 + ah, 0.42, U);
-    // The DJ's platform behind it, from the desk back to the wall, its top a solid's in slices along it; amber nosing
+    // The DJ's platform behind it, from the desk back to the wall, its top a solid's in slices along it; white tape
     // along its open ends, where an Ooga steps up.
     const pr0 = rb1 + 0.01, pr1 = rw - 0.05, pb = ah - DJ_IN, P = H + DJ_UP, da0 = (180 - pb) * DEG, da1 = (180 + pb) * DEG;
     K.sector(0, pr0, pr1, da0, da1, H, P, C.stage);
     K.sector(0, pr0 + 0.01, pr1, da0 + 0.001, da1 - 0.001, P, P + 0.012, C.stageTop);
-    for (const a of [da0, da1 - 0.004]) K.sector(0, pr0, pr1, a, a + 0.004, P + 0.004, P + 0.016, "#ffb04d", { emissive: 0.8, glow: true });
+    for (const a of [da0, da1 - 0.004]) K.sector(0, pr0, pr1, a, a + 0.004, P + 0.004, P + 0.016, STAGE_C.tape);
     const rows = 3, slices = Math.ceil(2 * pb * DEG * (pr0 + pr1) / 2 / 0.5), depth = (pr1 - pr0) / rows;
     for (let i = 0; i < rows; i++) for (let j = 0; j < slices; j++) {
       const rm = pr0 + depth * (i + 0.5), b = 180 - pb + 2 * pb * (j + 0.5) / slices, c = polar(rm, b);
       K.solid({ x: c.x, z: c.z, hx: pb * DEG * rm / slices - 0.02, hz: depth / 2 - 0.02, top: P, stay: true });
     }
     djGear(K.group(0, U, BZ + 0.05, Math.PI));
+    // A monitor either side of the booth turned to the DJ, its cable taped along the deck to the booth's end; and two
+    // road cases at the back corners of the stage.
+    const dj = -(pr0 + pr1) / 2, mx = BOOTH_W / 2 + MON;
+    for (const sx of [-1, 1]) {
+      boothMonitor(K, sx * mx, H + 0.012, BZ + 0.1, 0, dj);
+      rod(K, [sx * (mx - 0.3), H + 0.022, BZ + 0.1], [sx * (BOOTH_W / 2 - 0.1), H + 0.022, BZ + 0.3], 0.01, "#0a0a0c");
+      const c = polar(rw - 1.1, 180 + sx * (back - 4));
+      roadCase(K, c.x, H + 0.012, c.z, (sx * (back - 4)) * DEG, 1.1, 0.7, 0.6);
+    }
 
     // The lasers on the walls: each projector on its bracket, and every projector's beams and their dots, built shrunk
     // to nothing (the room starts dark) and in every colour among them, so all of them stay with the room.
@@ -1647,6 +1864,8 @@
       const b = s * a.b * DEG;
       lineArray(K.group(rh * Math.sin(b), 0, rh * Math.cos(b), b + Math.PI), a.n, `woofer${i}${s < 0 ? "l" : "r"}`, shared, tip);
     }
+
+    for (let i = 0; i < BALCONY.LEVELS.length; i++) balcony(K, L, i);
 
     // The mirror ball under the crown on its line; the ring of light a drop sends down the dome and the sign over the
     // booth that a block's drop shows, both kept under the floor until then.
@@ -1698,6 +1917,9 @@
       beam.visible = hit.visible = false;
       beam.scale.x = beam.scale.y = beam.scale.z = 1; hit.scale.x = hit.scale.y = hit.scale.z = 1;
     }
+    // Each Ooga's groove: how long it has stood still, how far its groove has eased in, and whether it has one going;
+    // kept weakly, so a body let go (a player gone) takes its groove with it.
+    const grooves = new WeakMap(), STAND = BL.crew.GAIT.stand;
     const projectors = rigs.map((_, p) => nodes[`projector${p}`]), look = { dir: new Float32Array(count * 3), on: new Uint8Array(count), color: new Uint8Array(count) };
     const dots = [];
     for (let g = 0; nodes[`dots${g}`]; g++) dots.push(nodes[`dots${g}`]);
@@ -2146,6 +2368,56 @@
           },
           palette: (i) => { colorFrom = colorTo = i % PALETTES.length; colorFade = 1; } };
       },
+      // An Ooga standing still on the floor grooves (DANCE): called after the crew and the other players are posed, for
+      // each Ooga shown, `off` for one that should stand still now (the visitor's own, seen from its own eyes). Every
+      // joint it moves is written whole from the standing pose, and put back as it was once the groove has eased out.
+      dance(cave, dt, off) {
+        let g = grooves.get(cave);
+        if (!g) grooves.set(cave, g = { still: 0, k: 0, on: false, phrase: -1, name: "", groove: GROOVES[0], fR: 0, fL: 0 });
+        const parts = cave.parts, standing = !off && cave.root.visible && cave.gait === STAND && !(cave.camp && cave.camp.seat)
+          && !(cave.hop > 0) && !(cave.jet && cave.jet.thrust) && !cave.grabbedBy;
+        g.still = standing ? g.still + dt : 0;
+        g.k = standing && g.still > DANCE.STILL ? Math.min(1, g.k + dt / DANCE.EASE) : 0;
+        // The forearms hang at whatever bend the body gives them standing, read as the groove starts.
+        const fore = parts.forearmR && parts.forearmL;
+        if (g.k <= 0) {
+          if (g.on) {
+            g.on = false;
+            if (standing) {
+              parts.legR.rotation.z = parts.legL.rotation.z = parts.torso.rotation.x = parts.torso.rotation.z = 0;
+              parts.armR.rotation.x = parts.armL.rotation.x = -0.2; parts.armR.rotation.z = cave.armRZ; parts.armL.rotation.z = cave.armLZ;
+            }
+            if (fore) { parts.forearmR.rotation.x = g.fR; parts.forearmL.rotation.x = g.fL; }
+          }
+          return;
+        }
+        if (!g.on && fore) { g.fR = parts.forearmR.rotation.x; g.fL = parts.forearmL.rotation.x; }
+        g.on = true;
+        const b = M.beat, frac = b - Math.floor(b), k = smooth(g.k) * (DANCE.QUIET + (1 - DANCE.QUIET) * M.I);
+        const s = Math.sin(Math.PI * b), dip = Math.exp(-frac * 5), turn = Math.floor(b) & 1 ? 1 : -1;
+        const phrase = Math.floor(b / PHRASE);
+        if (phrase !== g.phrase || cave.traits.name !== g.name) {
+          g.phrase = phrase; g.name = cave.traits.name;
+          g.groove = GROOVES[BL.math.fnv1a(g.name + ":" + phrase) % GROOVES.length];
+        }
+        const G = g.groove;
+        const sideR = parts.legR.position.x >= 0 ? 1 : -1, open = DANCE.STEP * k;
+        parts.legR.rotation.z = sideR * open * Math.max(0, s);
+        parts.legL.rotation.z = -sideR * open * Math.max(0, -s);
+        parts.torso.rotation.z = -sideR * DANCE.LEAN * k * s;
+        parts.torso.rotation.x = DANCE.NOD * k * dip;
+        parts.armR.rotation.x = -0.2 - (G.fwd + G.sway * s) * k;
+        parts.armL.rotation.x = -0.2 - (G.fwd - G.sway * s) * k;
+        parts.armR.rotation.z = cave.armRZ; parts.armL.rotation.z = cave.armLZ;
+        if (fore) {
+          const both = G.lift + G.pump * dip;
+          parts.forearmR.rotation.x = g.fR - (both + G.alt * dip * (turn > 0 ? 1 : 0) + G.one * (0.7 + 0.3 * dip)) * k;
+          parts.forearmL.rotation.x = g.fL - (both + G.alt * dip * (turn < 0 ? 1 : 0)) * k;
+        }
+      },
+      // The visitor walking out: the music fades out on the way to the doors, and back in if they stay after all.
+      fadeOut() { radio.fadeOut(); },
+      fadeBack() { radio.fadeBack(); },
       dispose() { offParty(); radio.dispose(); playing.song = playing.station = ""; }
     };
   };

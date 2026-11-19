@@ -190,18 +190,24 @@
     // Reaching back a body's width, so it overlaps the room's own edge below whatever the walker's size.
     if (door && Math.abs(x) < DOOR.halfW - r && z >= L.doorZ - 0.6 - r && z <= L.doorZ + DOOR.vestibule - r) return true;
     // Where the sphere widens over the floor a body in the air keeps to where it can stand, so no jump comes down held
-    // by the wall.
-    if (Math.hypot(x, z) > Math.min(wallAt(L, feet), wallAt(L, floorAt(L, x, z))) - r || z > L.doorZ - 0.12 - r) return false;
+    // by the wall: the floor, or a solid's top under its feet (the Block Party's balcony).
+    let ground = floorAt(L, x, z);
+    if (solids) for (const o of solids) {
+      if (o.top === undefined || o.top > feet + 1e-3 || o.top <= ground) continue;
+      if (o.r !== undefined ? Math.hypot(x - o.x, z - o.z) < o.r : inBox(o, x, z, 0)) ground = o.top;
+    }
+    if (Math.hypot(x, z) > Math.min(wallAt(L, feet), wallAt(L, ground)) - r || z > L.doorZ - 0.12 - r) return false;
     if (solids) for (const o of solids) {
       if (o.top !== undefined && feet >= o.top - STEP_UP) continue;
       if (o.below !== undefined && feet + 1.8 <= o.below) continue;
-      if (o.r !== undefined) { if (Math.hypot(x - o.x, z - o.z) < o.r + r) return false; }
-      else {
-        const c = o.ry ? Math.cos(o.ry) : 1, s = o.ry ? Math.sin(o.ry) : 0, dx = x - o.x, dz = z - o.z;
-        if (Math.abs(dx * c - dz * s) < o.hx + r && Math.abs(dx * s + dz * c) < o.hz + r) return false;
-      }
+      if (o.r !== undefined ? Math.hypot(x - o.x, z - o.z) < o.r + r : inBox(o, x, z, r)) return false;
     }
     return true;
+  };
+  // Whether (x, z) is within `r` of a box solid, in its own turned frame.
+  const inBox = (o, x, z, r) => {
+    const c = o.ry ? Math.cos(o.ry) : 1, s = o.ry ? Math.sin(o.ry) : 0, dx = x - o.x, dz = z - o.z;
+    return Math.abs(dx * c - dz * s) < o.hx + r && Math.abs(dx * s + dz * c) < o.hz + r;
   };
   // The height of the ceiling over (x, z): the sphere's inner face as its flat facets lie, a little inside the curve.
   const ceilingAt = (L, x, z) => {
@@ -218,5 +224,5 @@
     const D = Math.max(0.3, Math.min(width / (2 * h), (eye - floor) / v, (ceiling - eye) / v, reach));
     return { D, w: 2 * D * h, h: 2 * D * v };
   };
-  BL.timechainRooms = { COUNT, ROOMS, LOCKABLE, OPEN, EXTERIOR_ZONE, DOOR, BODY, STEP_UP, DEG, TAU, parse, get, layout, radiusAt, onSphere, edgeY, edgeEl, floorAt, aisleStep, wallAt, clearAt, ceilingAt, fill };
+  BL.timechainRooms = { COUNT, ROOMS, LOCKABLE, OPEN, EXTERIOR_ZONE, DOOR, BODY, STEP_UP, DEG, TAU, parse, get, layout, radiusAt, onSphere, edgeY, edgeEl, floorAt, aisleStep, wallAt, clearAt, inBox, ceilingAt, fill };
 })();

@@ -18,7 +18,9 @@
 // through the low-pass to an analyser and, whole, to a second analyser, so the room reads the music LOOKAHEAD seconds
 // before it is heard: what is heard now (the beat, `energy`, and the spectrum and wave the booth's screen shows,
 // `spectrum`, `scope`) and what is coming (`ahead`). It reads the station's now-playing feed too (`song`). A context
-// only after a gesture, the page-wide mute on the gain (the lights still follow a muted room), a watchdog and
+// only after a gesture, the page-wide mute on the gain (the lights still follow a muted room), the music fading in as
+// it first reaches the speakers and out as the visitor leaves (an `entry` gain after it, `fadeOut`, `fadeBack`, and a
+// short fade on disposal before the context closes), a watchdog and
 // retries with backoff. Where a browser hands Web Audio silence for a live stream (Safari has), or the stream stops
 // answering cross-origin, it falls back to a plain element: heard, not analysed, the lights on their own steady beat.
 // Off under `nosim` (unless `timechain=1`) and `timechain=0`, with the room's other feeds.
@@ -56,7 +58,10 @@
   // tab's gap). What's playing: each station's own feed, asked every META_MS while the radio plays, a song at most
   // SONG_MAX characters.
   // A change of channel fades over FADE seconds (a time constant), and the old stream is let go FADE_MS after that.
-  const FADE = 0.25, FADE_MS = 1500;
+  // Arriving, the music fades in over FADE_IN seconds from when it first reaches the speakers; walking out, it fades
+  // out over FADE_OUT, back in over FADE_BACK if the visitor stays after all, and gone any other way, it fades over
+  // TAIL before the context closes.
+  const FADE = 0.25, FADE_MS = 1500, FADE_IN = 4, FADE_OUT = 2.5, FADE_BACK = 1, TAIL = 0.8;
   const LOOKAHEAD = 8, GAP_S = 0.015, STALE = 0.5, HISTORY = Math.ceil((LOOKAHEAD + 2 * STALE) / GAP_S), BANDS = 96, POINTS = 512, META_MS = 20000, SONG_MAX = 90;
   const TAU = Math.PI * 2;
 
@@ -168,6 +173,11 @@
     let song = "", songNext = "", songAt = 0, metaTimer = 0, metaAsk = null;
     let mode = enabled ? "waiting" : "off", plain = false, disposed = false, timer = 0, watchdog = 0, epoch = 0;
     let failures = 0, quiet = 0, lastTime = -1, starts = 0, channel = 0, fader = null, line = null;
+    // The fade in and out: the gain after the volume; the start whose music has reached (or is on its way to) the
+    // speakers and when it does (`arriveAt`, on the audio's clock, or in performance time on the plain element); on the
+    // plain element (which has no gain of its own) when it began to fade in; and when the visitor began to leave
+    // (performance time, 0 none).
+    let entry = null, arrivedEpoch = -1, arriveAt = 0, fadeInAt = 0, leaving = 0;
     // `channel` is the one dialled, `on` the one streaming; the speakers reach `on` at `onAt` (performance time), until
     // then playing `was`. Silence from Web Audio once (`hushed`) keeps later channels on the plain element.
     let on = 0, was = 0, onAt = 0, hushed = false, refused = -1;
@@ -176,9 +186,37 @@
     const going = [];
     const soundChannel = BL.sound.channel("party");
     if (!enabled) soundChannel.show(false);
+    // The plain element's share of its volume now, as it fades in and as the visitor leaves.
+    const plainK = () => {
+      const t = performance.now();
+      let k = fadeInAt ? Math.min(1, (t - fadeInAt) / (FADE_IN * 1000)) : 0;
+      if (leaving) k = Math.min(k, Math.max(0, 1 - (t - leaving) / (FADE_OUT * 1000)));
+      return k;
+    };
     const applyVolume = () => {
       if (gain) gain.gain.setTargetAtTime(plain || BL.sound.muted ? 0 : VOLUME, context.currentTime, 0.4);
-      if (element && plain) { element.muted = BL.sound.muted; element.volume = VOLUME * soundChannel.gain; }
+      if (element && plain) { element.muted = BL.sound.muted; element.volume = VOLUME * soundChannel.gain * plainK(); }
+    };
+    // A start's music first playing: when it will reach the speakers (LOOKAHEAD behind the stream through Web Audio, at
+    // once on the plain element), noted only once a start, so a stall's recovery plays on at its level; it fades in
+    // from then unless the visitor is leaving (`fadeBack` brings it in if they stay).
+    const arrive = (attempt) => {
+      if (attempt === arrivedEpoch) return;
+      arrivedEpoch = attempt;
+      arriveAt = plain ? performance.now() : context.currentTime + LOOKAHEAD;
+      if (!leaving) fadeIn();
+    };
+    // The fade in from silence, from when the music reaches the speakers.
+    const fadeIn = () => {
+      if (plain) { fadeInAt = arriveAt; applyVolume(); return; }
+      const p = entry.gain, t = context.currentTime, at = Math.max(t, arriveAt);
+      p.cancelScheduledValues(t); p.setValueAtTime(0, t); p.setValueAtTime(0, at); p.linearRampToValueAtTime(1, at + FADE_IN);
+    };
+    // The entry gain from where it stands to `to` over `seconds`.
+    const rampEntry = (to, seconds) => {
+      if (!entry) return;
+      const p = entry.gain, t = context.currentTime;
+      p.cancelScheduledValues(t); p.setValueAtTime(p.value, t); p.linearRampToValueAtTime(to, t + seconds);
     };
     // An element, its source and its own delay line and fader let go.
     const release = (el, src, ln, fad) => {
@@ -215,7 +253,7 @@
     };
     // The streaming element's failures and stalls, from `attempt` on.
     const watch = (attempt) => {
-      element.onplaying = () => { if (attempt !== epoch) return; clearTimeout(watchdog); watchdog = 0; mode = "live"; failures = 0; applyVolume(); askSong(); };
+      element.onplaying = () => { if (attempt !== epoch) return; clearTimeout(watchdog); watchdog = 0; mode = "live"; failures = 0; applyVolume(); arrive(attempt); askSong(); };
       element.onerror = element.onended = () => { if (attempt === epoch) failed(); };
       element.onwaiting = element.onstalled = () => {
         if (attempt === epoch && !watchdog) watchdog = setTimeout(() => { if (attempt === epoch) failed(); }, STALL_MS);
@@ -249,7 +287,8 @@
       if (navigator.userActivation && !navigator.userActivation.hasBeenActive) { mode = "waiting"; return; }
       if (!context) {
         context = new AudioContext();
-        gain = context.createGain(); gain.gain.value = 0; gain.connect(soundChannel.node(context));
+        gain = context.createGain(); gain.gain.value = 0;
+        entry = context.createGain(); entry.gain.value = 0; gain.connect(entry); entry.connect(soundChannel.node(context));
         filter = context.createBiquadFilter(); filter.type = "lowpass"; filter.frequency.value = KICK_HZ;
         analyser = context.createAnalyser(); analyser.fftSize = WAVE;
         // The analyser reaches the speakers through a silent gain, so every browser keeps running it.
@@ -309,6 +348,7 @@
     // plain element takes over.
     const sample = (out) => {
       heard = -1;
+      if (plain && element && (leaving || fadeInAt && performance.now() - fadeInAt < FADE_IN * 1000 + 100)) applyVolume();
       if (mode !== "live" || plain || !analyser) { out.live = false; out.level = 0; return out; }
       analyser.getFloatTimeDomainData(wave);
       const sounding = beats.take(wave, Math.round(context.currentTime * context.sampleRate), track);
@@ -429,8 +469,15 @@
           going.push(g); retire(g);
         }
       }
+      const wasPlain = plain;
       element = next; source = nextSource; line = nextLine; fader = nextFader; plain = nextPlain;
       next = nextSource = nextLine = nextFader = null; nextEpoch++;
+      // The room hears the new channel through the crossfade at the level it was at: it counts as arrived, so its first
+      // buffering hiccup never fades it in again, and a plain element taking over plays at once. A Web Audio stream
+      // taking over from the plain element finds the entry gain never raised, so it fades in as it reaches the speakers.
+      arrivedEpoch = epoch; arriveAt = plain ? performance.now() : t;
+      if (plain && !fadeInAt) fadeInAt = performance.now() - FADE_IN * 1000;
+      if (wasPlain && !plain) { arriveAt = t + wait; if (!leaving) fadeIn(); }
       if (source) { source.connect(filter); source.connect(whole); fader.gain.setTargetAtTime(1, t + wait, FADE); }
       // What the speakers play until the new channel reaches them is what they play now (a change made inside the
       // last one's lookahead keeps naming the station still heard).
@@ -501,6 +548,22 @@
     return {
       sample, energy, ahead, spectrum, scope, waveform, words, tune,
       next: () => tune(channel + 1),
+      // The visitor walking out: the music fades out over FADE_OUT, so disposal finds it silent; `fadeBack` if they stay.
+      fadeOut() {
+        if (disposed || leaving) return;
+        leaving = performance.now();
+        if (!plain) rampEntry(0, FADE_OUT);
+      },
+      fadeBack() {
+        if (disposed || !leaving) return;
+        leaving = 0;
+        // A stream not playing yet fades in when it arrives; one playing comes back, or fades in from its arrival if
+        // it started on the way out and has yet to reach the speakers.
+        if (arrivedEpoch !== epoch) return;
+        if (plain) { fadeInAt = performance.now() - FADE_IN * 1000 * (1 - FADE_BACK / FADE_IN); applyVolume(); }
+        else if (context.currentTime >= arriveAt) rampEntry(1, FADE_BACK);
+        else fadeIn();
+      },
       // How far ahead of the speakers the readings run (0 where they are not delayed), whether the speakers have yet to
       // reach the first reading, and the song playing now, as the station's feed named it ("" for none yet).
       get lookahead() { return mode === "live" && !plain ? LOOKAHEAD : 0; },
@@ -517,11 +580,22 @@
         if (metaAsk) metaAsk.abort();
         document.removeEventListener("pointerdown", gesture);
         document.removeEventListener("keydown", gesture);
-        offSound(); soundChannel.release();
-        dropElement();
-        for (const node of [filter, analyser, whole, sink, gain]) if (node) node.disconnect();
-        if (context) context.close().catch(() => {});
-        context = filter = analyser = whole = sink = gain = wave = beats = bins = signal = null;
+        offSound();
+        // Still heard (left any way but walking out): the stream stops, the delay line plays on what it holds while the
+        // music fades over TAIL, and then the context closes and the channel goes. Otherwise both go now.
+        const ctx = context, ch = soundChannel, tail = !plain && !!entry && !!ctx && ctx.state === "running" && entry.gain.value > 0.01;
+        if (tail) {
+          rampEntry(0, TAIL);
+          epoch++; clearTimeout(watchdog); watchdog = 0; dropNext(); dropGoing();
+          release(element, null, null, null); element = source = line = fader = null;
+          setTimeout(() => { ctx.close().catch(() => {}); ch.release(); }, TAIL * 1000 + 100);
+        } else {
+          ch.release();
+          dropElement();
+          for (const node of [filter, analyser, whole, sink, gain, entry]) if (node) node.disconnect();
+          if (ctx) ctx.close().catch(() => {});
+        }
+        context = filter = analyser = whole = sink = gain = entry = wave = beats = bins = signal = null;
         hAt = hLevel = hLive = hLoud = hBass = hBands = hWave = null; hCount = 0; heard = -1;
         mode = "disposed";
       }
