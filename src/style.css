@@ -12174,8 +12174,7 @@ body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex;
   .cloud-hopper-scores-title { font-size: 11px; }
 }
 
-body.cloud-hopper-active #destination-hud,
-body.cloud-hopper-active #mode-hud { display: none; }
+body.cloud-hopper-active #destination-hud { display: none; }
 
 /* Block Frenzy's board: one short line of keys, the full list folded under "All controls" and scrolled within a
    bounded height, so the choices above stay in view. */

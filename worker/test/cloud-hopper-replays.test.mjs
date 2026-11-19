@@ -164,7 +164,7 @@ test("retirement grace and orphan maintenance keep current winners and reclaim b
   assert.equal(f.DB.sql.prepare("SELECT count(*) n FROM cloud_hopper_replay_objects").get().n, 1);
 });
 
-test("client keeps the active ghost fixed while numeric boards and post-finish results stay live, loads lazily and clears on level/exit", async () => {
+test("client keeps the active ghost fixed while numeric boards and post-finish results stay live, loads lazily, remembers the choice for later attempts and clears on level/exit", async () => {
   const r = recording(), bytes = codec.encode(r), hash = createHash("sha256").update(new Uint8Array(bytes)).digest("hex");
   const pointer = { hash, score: 1000, username: "winner", courseVersion: 1 }, board = { game: GAME, highscores: { winner: 1000 }, achieved: { winner: 1 }, replay: pointer };
   const fetches = [], states = [], plays = [], boards = []; let hiding = 0, fail = false;
@@ -188,8 +188,16 @@ test("client keeps the active ghost fixed while numeric boards and post-finish r
   const finished = { ...next, highscores: { other: 800, winner: 500 }, achieved: { other: 2, winner: 3 },
     replay: { ...pointer, score: 500, hash: "e".repeat(64) } };
   player.update(finished); assert.equal(boards.at(-1), finished); assert.equal(fetches.length, 1);
-  player.start(); assert.equal(states.at(-1), "off"); assert.equal(boards.at(-1), finished);
-  fail = true; await player.toggle(); assert.equal(states.at(-1), "error"); assert.equal(plays.length, 2);
+  // The choice carries to the next attempt, which loads the newest winner by itself; a failed load leaves it chosen.
+  const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+  fail = true; player.start(); assert.equal(player.wanted, true); assert.equal(states.at(-1), "loading"); assert.equal(boards.at(-1), finished);
+  await settle(); assert.equal(states.at(-1), "error"); assert.equal(fetches.length, 2); assert.equal(plays.length, 2);
+  player.end(); fail = false;
+  player.select(GAME, 1, board); assert.equal(states.at(-1), "off"); // Cards between attempts load nothing.
+  player.start(); await settle(); assert.equal(states.at(-1), "on"); assert.equal(plays.length, 3); assert.equal(fetches.length, 2);
+  // Turned off, it stays off for the attempts after.
+  await player.toggle(); assert.equal(player.wanted, false); player.end(); player.start();
+  assert.equal(states.at(-1), "off"); assert.equal(plays.length, 3); assert.equal(fetches.length, 2);
   player.select("cloud-hopper-l2", 1, { replay: null }); await player.toggle(); assert.equal(states.at(-1), "unavailable");
   assert.equal(fetches.length, 2); player.clear(); assert.ok(hiding >= 4); assert.equal(player.enabled, false);
 });

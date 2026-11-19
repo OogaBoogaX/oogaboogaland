@@ -80,12 +80,15 @@
     record.setAttribute("role", "status"); record.append(recordText, recordTail);
     const toggleGhost = event => { event.stopPropagation(); onGhost?.(); };
     recordGhost.addEventListener("click", toggleGhost);
+    // The ghost is set before a run, so its button rests while one runs (`syncGhost` from `show`).
+    let replayState = "unavailable";
+    const syncGhost = () => { recordGhost.disabled = replayState === "unavailable" || phase === "running"; };
     const setReplayState = state => {
-      recordGhost.disabled = state === "unavailable";
+      replayState = state; syncGhost();
       recordGhost.setAttribute("aria-pressed", String(state === "on" || state === "loading"));
       recordGhost.setAttribute("aria-busy", String(state === "loading"));
       recordGhost.title = state === "unavailable" ? "No winning replay yet" : state === "error" ? "Replay unavailable · retry"
-        : state === "loading" ? "Loading winning replay · click to cancel" : state === "on" ? "Hide global record ghost" : "Show global record ghost · historical route";
+        : state === "loading" ? "Loading winning replay · click to cancel" : state === "on" ? "Hide global record ghost · G" : "Show global record ghost · historical route · G";
       recordGhost.setAttribute("aria-label", recordGhost.title);
     };
     const help = node("p", "cloud-hopper-help"), panel = node("dialog", "race-results game-intro cloud-hopper-panel");
@@ -308,6 +311,12 @@
       if (e.key.toLowerCase() === "m") return;
       e.stopPropagation();
       if (e.key === "Shift") { clearActivation(); e.preventDefault(); return; }
+      // G sets the record ghost for the next run from the cards too.
+      if (e.key.toLowerCase() === "g" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !e.isComposing) {
+        e.preventDefault();
+        if (e.type === "keydown" && !e.repeat) onGhost?.(true);
+        return;
+      }
       if (e.key === "Enter" || e.key === " ") {
         // A fresh Enter or Space on a level card plays that level, as Play would (a locked one stays put).
         const card = e.target.closest?.(".cloud-hopper-level"), modifiedCard = e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || e.isComposing;
@@ -479,6 +488,7 @@
       help.textContent = copy[1];
       hud.hidden = intro || to === "lifting" || briefing || ended;
       hud.classList.toggle("cloud-hopper-running", to === "running");
+      syncGhost();
       if (briefing) {
         // The ascent frames for the ready HUD even while the guide covers it.
         // This synchronous measurement never paints the waiting race clock.
