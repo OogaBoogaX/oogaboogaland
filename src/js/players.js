@@ -525,6 +525,14 @@
     if (unread) setUnread(0);
     leftAt.clear(); hush();
   });
+  // The keyboard noise filter (voice.js `setKeyFilter`), offered only where the page has its worklet to load.
+  const keys = $("players-keys"), keysBox = $("players-keys-input");
+  if (V.stats.keyFilterOffered) {
+    keysBox.checked = V.stats.keyFilter;
+    keys.hidden = false;
+    keysBox.addEventListener("change", () => V.setKeyFilter(keysBox.checked));
+    keysBox.addEventListener("click", (e) => { if (e.detail) keysBox.blur(); });
+  }
   if (synth) {
     try { speakOn = localStorage.getItem(SPEAK_KEY) === "on"; } catch { /* Storage may be unavailable. */ }
     speakBox.checked = speakOn;

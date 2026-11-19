@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 const hash = (text, encoding) => createHash("sha256").update(text, "utf8").digest(encoding);
-export function externalizeModules(html, out, deferred, block, terrainWorker = null, transform = (src, text) => text, inline = []) {
+export function externalizeModules(html, out, deferred, block, terrainWorker = null, transform = (src, text) => text, inline = [], micFilter = null) {
   const script = html.match(/<script>([\s\S]*?)<\/script>/);
   if (!script) throw new Error("distribution: no inline script");
   const oldPolicy = `script-src 'sha256-${hash(script[1], "base64")}'`;
@@ -45,7 +45,8 @@ export function externalizeModules(html, out, deferred, block, terrainWorker = n
     body = body.split(text).join(transform(src, text));
   }
   const worker = terrainWorker ? `window.BL.terrainWorker = ${JSON.stringify(terrainWorker)};\n` : "";
-  const updated = `\nwindow.BL = window.BL || {};\nwindow.BL.deferredScripts = ${JSON.stringify(named)};\n${worker}${body.replace(/^\n/, "")}`;
+  const filter = micFilter ? `window.BL.micFilter = ${JSON.stringify(micFilter)};\n` : "";
+  const updated = `\nwindow.BL = window.BL || {};\nwindow.BL.deferredScripts = ${JSON.stringify(named)};\n${worker}${filter}${body.replace(/^\n/, "")}`;
   return html.replace(script[0], () => `<script>${updated}</script>`)
     .replace(oldPolicy, `script-src 'self' 'sha256-${hash(updated, "base64")}'`);
 }

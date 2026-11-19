@@ -65,7 +65,7 @@
 // an outdoor speaker from being alone with no other player near, and `sources` names the bodyless public speakers the room
 // lists to be heard, who play at full whatever the hearing range or a crossing, as a voice link does.
 // Exports support, probe, ICE_BLOCKED, enable, listen, dropMic, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setPlayersLevel, setMuted, toggle, leave, restart, resumed, stop,
-// setPeers, setOutdoor, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades,
+// setPeers, setOutdoor, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, setKeyFilter, falloff, fades,
 // RADIUS_MIN, RADIUS_MAX and stats.
 (() => {
   "use strict";
@@ -108,6 +108,11 @@
   const JOINED_KEY = "oogaboogaland.voice-joined.", STUDIO_ZONE = "dsb-studio";
   // Hearing range: the radius in metres (0 is no limit), a crossing share's most change per meter read.
   const RADIUS_KEY = "oogaboogaland.voice-radius", RADIUS_MIN = 1, RADIUS_MAX = 60, NEAR_STEP = 0.15;
+  // The keyboard noise filter (`setKeyFilter`, below): this browser's choice, and its worklet module, which only a
+  // staged site names (`BL.micFilter`, scripts/distribution-mic.mjs). Without one there is no filter to offer.
+  const KEY_FILTER_KEY = "oogaboogaland.voice-key-filter";
+  const KEY_FILTER_URL = BL.micFilter && /^\/js\/mic-filter-[0-9a-f]{16}\.js$/.test(BL.micFilter.url)
+    && typeof window.AudioWorkletNode === "function" && typeof window.AudioContext === "function" ? BL.micFilter.url : "";
   // Every other player's voice at once (the speaker button's panel, sound-panel.js), for this browser on every visit.
   const PLAYERS_KEY = "oogaboogaland.voice-players-level";
   // Gains support a modest +6 dB boost on desktop as well as iOS, whose elements ignore their volume.
@@ -120,7 +125,7 @@
   const subs = new Map();
   // Each wanted voice's publication count from the room: a new count is a microphone published again.
   const wantedGen = new Map();
-  const stats = { enabled: false, passive: false, muted: false, alone: false, micWanted: false, returning: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, playersLevel: 1, micLevel: 0, receiveState: "off", radius: 0, held: false, reconnecting: false, yielded: 0 };
+  const stats = { enabled: false, passive: false, muted: false, alone: false, micWanted: false, returning: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, playersLevel: 1, micLevel: 0, receiveState: "off", radius: 0, held: false, reconnecting: false, yielded: 0, keyFilter: false, keyFilterOffered: !!KEY_FILTER_URL };
   const samples = new Float32Array(SAMPLES);
   const preferences = new Map();
   const duels = BL.duelListening.create();
@@ -196,6 +201,11 @@
     if (saved !== null && level >= 0 && level <= 1) stats.playersLevel = level;
   } catch {
     // Storage is off: no limit.
+  }
+  try {
+    stats.keyFilter = !!KEY_FILTER_URL && localStorage.getItem(KEY_FILTER_KEY) === "on";
+  } catch {
+    // Storage is off: no filter.
   }
 
   const emit = () => {
@@ -296,6 +306,42 @@
     micMeter.source.disconnect();
     if (micMeter.tap) for (const t of micMeter.tap.getTracks()) t.stop();
     micMeter = null;
+  };
+
+  // The keyboard noise filter: the microphone through mic-filter-worklet.js, a gate that opens on a voice and stays
+  // shut on key and mouse clicks, published in place of the raw track while the choice is on. The raw microphone stays
+  // the capture, the meter's source and what a mute or hold disables; the filter's track is disabled with it (`gate`),
+  // since its delay line would otherwise still let sound out. Voice never depends on it: a module that will not load,
+  // a node that will not build or a context that is not running sends the raw track instead.
+  let filter = null, filterModule = null, pubSender = null;
+  const sendTrack = () => filter && filter.stream === mic && stats.keyFilter && audio && audio.state === "running" ? filter.track : mic.getAudioTracks()[0];
+  const resend = () => { if (pubPc && pubSender && mic) pubSender.replaceTrack(sendTrack()).catch(() => {}); };
+  const dropFilter = () => {
+    if (!filter) return;
+    filter.node.port.postMessage(0);
+    filter.source.disconnect(); filter.node.disconnect();
+    filter.track.stop();
+    filter = null;
+  };
+  const buildFilter = async () => {
+    if (filter && filter.stream !== mic) dropFilter();
+    if (!stats.keyFilter || filter || !mic || !audio) return;
+    const stream = mic, context = audio;
+    try {
+      await (filterModule || (filterModule = context.audioWorklet.addModule(KEY_FILTER_URL)));
+      if (mic !== stream || audio !== context || filter || !stats.keyFilter) return;
+      const source = context.createMediaStreamSource(stream), out = context.createMediaStreamDestination();
+      const node = new AudioWorkletNode(context, "mic-filter", { channelCount: 1, channelCountMode: "explicit", outputChannelCount: [1] });
+      out.channelCount = 1;
+      // A processor that throws would send silence from a running context: back to the microphone as it is.
+      node.onprocessorerror = () => { if (filter && filter.node === node) { dropFilter(); resend(); } };
+      source.connect(node); node.connect(out);
+      filter = { stream, source, node, track: out.stream.getAudioTracks()[0] };
+      gate();
+    } catch {
+      // No filter this time: the microphone goes out as it is.
+      if (audio === context) filterModule = null;
+    }
   };
 
   // One read of a meter; true when its speaking flag changed.
@@ -560,7 +606,8 @@
         const was = bare;
         pc = new RTCPeerConnection(shaped(config));
         pubPc = pc;
-        const tx = pc.addTransceiver(mic.getAudioTracks()[0], { direction: "sendonly" });
+        const tx = pc.addTransceiver(sendTrack(), { direction: "sendonly" });
+        pubSender = tx.sender;
         const offer = await pc.createOffer(); valid();
         await pc.setLocalDescription(offer); valid();
         await gathered(pc, config !== ICE); valid();
@@ -609,6 +656,7 @@
     if (!audio && window.AudioContext) {
       audio = new AudioContext();
       if (GAIN_PLAY) audio.addEventListener("statechange", reflectBlocked);
+      if (KEY_FILTER_URL) audio.addEventListener("statechange", resend);
     }
     if (audio) audio.resume().catch(() => {});
     for (const s of subs.values()) playSub(s);
@@ -725,7 +773,7 @@
     if (stats.publishing || microphoneWanted) return;
     micGeneration++;
     if (mic) for (const track of mic.getTracks()) track.stop();
-    mic = null;
+    mic = null; dropFilter();
     dropMeter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
     if (!up()) { window.clearInterval(speakTimer); speakTimer = 0; }
@@ -768,12 +816,26 @@
     subs.forEach(nearSub);
     emit();
   };
+  // The keyboard noise filter, for this browser on every visit; a speaker's track changes over where it stands.
+  const setKeyFilter = (on) => {
+    const wanted = !!on && !!KEY_FILTER_URL;
+    if (wanted === stats.keyFilter) return;
+    stats.keyFilter = wanted;
+    try {
+      localStorage.setItem(KEY_FILTER_KEY, wanted ? "on" : "off");
+    } catch {
+      // Storage off: the choice lasts this page.
+    }
+    if (wanted) buildFilter().then(resend);
+    else { resend(); dropFilter(); }
+    emit();
+  };
   // The microphone itself went (unplugged, a headset switched off): the speaker would go on hearing everyone and sending
   // nothing, with nothing to say so. Back in on the device that is there.
   const micLost = () => {
     if (!stats.publishing) return;
     if (mic) for (const track of mic.getTracks()) track.stop();
-    mic = null;
+    mic = null; dropFilter();
     stats.deviceId = "";
     dropMeter();
     restart();
@@ -797,6 +859,8 @@
       mic = stream; stats.permission = "granted";
       for (const track of mic.getAudioTracks()) { track.enabled = !stats.muted; track.onended = micLost; }
       micMeter = micMeter || ownMeter(mic);
+      // Never awaited: the join publishes the raw track and changes over once the filter stands.
+      buildFilter().then(resend);
       gate();
       // No candidates means the SFU can never reach this page: say why rather than wait out the publish. A gather
       // that could not run says nothing, so the publish goes ahead.
@@ -882,6 +946,7 @@
     stats.alone = microphoneWanted && (stats.publishing || stats.joining) && (listenerCount ?? desired.length) === 0 && !outdoorAudience;
     stats.held = microphoneWanted && outdoorHeld;
     if (mic) for (const t of mic.getAudioTracks()) t.enabled = !stats.muted && !stats.alone && !outdoorHeld;
+    if (filter) filter.track.enabled = !stats.muted && !stats.alone && !outdoorHeld;
   };
   // The outdoor bridge's whole word, applied at once (synchronously, so a hold lands before the next private word).
   // `scope` is the public conversation the body stands in now ("main", "dsb" or null): the main island's is overheard.
@@ -1053,11 +1118,11 @@
     disarmPassive();
     stats.joining = false; teardown();
     if (mic) for (const t of mic.getTracks()) t.stop();
-    mic = null; stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
+    mic = null; dropFilter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
     dropMeter();
     if (audio) audio.close().catch(() => {});
-    audio = null;
+    audio = null; filterModule = null;
     cueOsc = cueGain = null;
     stats.muted = stats.alone = stats.held = false; stats.micError = "";
     BL.net.setMuted(false);
@@ -1076,7 +1141,7 @@
     micGeneration++; microphoneWanted = stats.micWanted = false; stats.joining = false;
     if (!stats.enabled) clearRelay();
     if (mic) for (const track of mic.getTracks()) track.stop();
-    mic = null; stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
+    mic = null; dropFilter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
     dropMeter();
     if (pubPc) pubPc.close();
@@ -1106,7 +1171,7 @@
     recover.wanted = false; recover.returning = true;
     micGeneration++; microphoneWanted = stats.micWanted = false;
     if (mic) for (const track of mic.getTracks()) track.stop();
-    mic = null; stats.micLevel = 0;
+    mic = null; dropFilter(); stats.micLevel = 0;
     dropMeter();
     emit();
   };
@@ -1373,5 +1438,5 @@
     playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none", relay: relayConfig !== ICE, bare,
     relayRenewals: relayRenewals.map(sample => ({ ...sample })) });
 
-  BL.voice = { support, probe, ICE_BLOCKED, warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setPlayersLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, resumed, stop, setPeers, setOutdoor, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
+  BL.voice = { support, probe, ICE_BLOCKED, warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setPlayersLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, resumed, stop, setPeers, setOutdoor, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, setRadius, setKeyFilter, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();
