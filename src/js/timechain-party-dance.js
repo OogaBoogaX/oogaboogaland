@@ -296,16 +296,17 @@
     };
 
     return {
-      // Called after the crew and the other players are posed, for each Ooga shown: `off` for one that should stand
-      // still now (the visitor's own, seen from its own eyes), `level` its player's number (0 to 9), `M` the room's music.
-      dance(cave, dt, off, level, M) {
+      // Called after the crew and the other players are posed, for each Ooga shown: `eyes` for one seen from its own
+      // eyes (the visitor's own in first person), which dances on but holds its slide, so the body stays under the
+      // view; `level` its player's number (0 to 9), `M` the room's music.
+      dance(cave, dt, eyes, level, M) {
         let st = dancers.get(cave);
         if (!st) dancers.set(cave, st = state(cave));
         level = Number.isInteger(level) ? Math.max(0, Math.min(DANCE.MAX, level)) : DANCE.DEFAULT;
         // A number just chosen starts at once, without the wait for the body to stand still a moment.
         if (level !== st.asked) { st.asked = level; st.quick = level > 0; }
         const G = BL.crew.GAIT, burning = !!(cave.jet && (cave.jet.thrust || cave.jet.power > 0));
-        const can = !off && level > 0 && cave.root.visible && !(cave.camp && cave.camp.seat) && !burning && !cave.grabbedBy;
+        const can = level > 0 && cave.root.visible && !(cave.camp && cave.camp.seat) && !burning && !cave.grabbedBy;
         const standing = can && cave.gait === G.stand && !(cave.hop > 0);
         // A jump (off its feet, no jetpack burning) holds the dance where it is, so a dancer dances on through it.
         st.air = can && st.k > 0 && !standing && (cave.hop > 0 || cave.gait === G.fly || cave.gait === G.fall);
@@ -335,6 +336,7 @@
           const q = pose(st.other, st.from, b - st.fromOff, st.fromA * energy, st.fromFlip);
           for (let i = 0; i < N; i++) o[i] = q[i] + (o[i] - q[i]) * w;
         }
+        if (eyes) o[SLIDE] = 0;
         // The pose shown follows the target, so even a change of level or a jump in the beat eases in.
         // A spin's end is where it began, so the shown spin takes the short way round to its target.
         const f = 1 - Math.exp(-dt * DANCE.FOLLOW), shown = st.shown;

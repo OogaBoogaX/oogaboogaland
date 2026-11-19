@@ -2837,7 +2837,7 @@
       // An Ooga standing still on the floor dances (timechain-party-dance.js) at its player's level: called after the
       // crew and the other players are posed, for each Ooga shown, `off` for one that should stand still now (the
       // visitor's own, seen from its own eyes); `undance` takes every pose off again before anything moves the bodies.
-      dance(cave, dt, off, level) { dancer.dance(cave, dt, off, level, M); },
+      dance(cave, dt, eyes, level) { dancer.dance(cave, dt, eyes, level, M); },
       undance() { dancer.undance(); },
       liveGeometry(set) { dancer.liveGeometry(set); },
       danceLevel: () => BL.partyDance.level(),

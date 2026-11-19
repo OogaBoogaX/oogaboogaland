@@ -1285,7 +1285,7 @@
       if (motion) motion.update(dt, elapsed);
       if (musicOut && !leaving && !guide.stage) { musicOut = false; motion.fadeBack(); }
       // A kind that moves the Oogas to its music (the Block Party's groove) poses each one, after the crew and the other
-      // players are posed: the visitor's own (standing still, but not seen from its own eyes) and every other shown.
+      // players are posed: the visitor's own (standing still, from its own eyes too, held under them) and every other shown.
       if (motion && motion.dance) {
         if (avatar && !guide.stage) motion.dance(avatar, dt, pilot.mode === "first-person", danceLevel());
         if (remotes) {
