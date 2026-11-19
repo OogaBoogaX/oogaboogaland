@@ -444,7 +444,8 @@
   // The account row the island keeps at the foot of Contributing Oogas, Online Oogas and The Commons (hud.js
   // `showAccount`): while signed out, the sign-in screen's own Continue with GitHub (the design's sign-in button, in
   // place of the island's Contributor sign-in), else the name (a green dot while The Commons is live, with how many are
-  // on the island), Join voice (Mute or Unmute once speaking), Leave voice and Sign out.
+  // on the island), and as the cloud tab's footer: the microphone, shown and off until speaking, Join voice (Leave voice
+  // once speaking) and Sign out.
   const accountRow = ({ actions, media, commons: { model } }) => {
     const listeners = new AbortController(), { signal } = listeners;
     const login = button("oc-provider oc-account-signin", PROVIDERS.github[0]);
@@ -452,17 +453,20 @@
     login.title = "Contributors can sign in with GitHub to speak from a cloud.";
     login.addEventListener("click", () => actions.signIn("github"), { signal });
     const name = make("span", "account-name"), room = make("span", "account-room");
-    const voice = button("foot-button", "Join voice"), leave = button("foot-button", "Leave voice"), out = button("link", "Sign out");
+    const mute = button("foot-button account-mute", "Unmute"), voice = button("foot-button account-voice", "Join voice"), out = button("link", "Sign out");
     const voiceWhy = explain(voice);
-    voice.setAttribute("aria-pressed", "false");
+    mute.setAttribute("aria-pressed", "false");
+    mute.addEventListener("click", (event) => {
+      if (event.detail) mute.blur();
+      actions.mute();
+    }, { signal });
     voice.addEventListener("click", (event) => {
       if (event.detail) voice.blur();
-      if (last?.voice.role === "speaker") actions.mute();
+      if (last?.voice.role === "speaker") actions.leaveVoice();
       else actions.joinVoice();
     }, { signal });
-    leave.addEventListener("click", () => actions.leaveVoice(), { signal });
     out.addEventListener("click", () => actions.signOut(), { signal });
-    const node = make("div", "account", login, make("span", "account-who", name, room), make("span", "account-actions", voice, leave, out), voiceWhy);
+    const node = make("div", "account", login, make("span", "account-who", name, room), make("span", "account-actions", mute, voice, out), voiceWhy);
     let last = null;
     const update = (state) => {
       last = state;
@@ -481,21 +485,23 @@
       set(room, "hidden", !here);
       if (node.dataset.live !== String(here)) node.dataset.live = String(here);
       if (!who) {
+        set(mute, "hidden", true);
         set(voice, "hidden", true);
-        set(leave, "hidden", true);
         return;
       }
       set(name, "textContent", who.identity.display);
       const speaker = state.voice.role === "speaker", allowed = gates(state, Date.now()), join = joining(state, allowed, media);
+      set(mute, "hidden", false);
+      set(mute, "disabled", !speaker || !!state.busy || state.voice.busy);
+      set(mute, "textContent", speaker && !state.voice.muted ? "Mute" : "Unmute");
+      attr(mute, "aria-pressed", String(speaker && state.voice.muted));
+      micLook(mute, !mute.disabled && speaker, state.voice.muted);
       set(voice, "hidden", false);
-      set(voice, "textContent", speaker ? state.voice.muted ? "Unmute" : "Mute" : join.words || "Join voice");
+      set(voice, "textContent", speaker ? "Leave voice" : join.words || "Join voice");
       set(voice, "disabled", speaker ? !!state.busy : join.disabled);
-      attr(voice, "aria-pressed", String(speaker && !state.voice.muted));
-      micLook(voice, !voice.disabled && speaker, state.voice.muted);
       const why = speaker ? "" : join.why;
       set(voiceWhy, "textContent", why);
       set(voice, "title", why);
-      set(leave, "hidden", !speaker);
     };
     const off = model.subscribe((kind) => { if (last && (kind === "players" || kind === "welcome")) update(last); });
     const dispose = () => {

@@ -33969,9 +33969,9 @@ const listenOnlyMicStatusProof = async () => {
   const account={BL:{voice},document:{querySelectorAll:()=>[]},$:element};
   runInNewContext(source.slice(accountStart,accountEnd)+";globalThis.showAccount=showAccount;",account);
   const live={backend:true,me:{display:"Listener"},room:"live",online:1};account.showAccount(live);
-  const blockedReturn=element("account-voice").textContent==="Voice: WebRTC blocked"&&!element("account-voice").disabled&&!!element("account-voice").title;
+  const blockedReturn=element("account-mute").textContent==="Voice: WebRTC blocked"&&!element("account-mute").disabled&&!!element("account-mute").title;
   voice.stats.error="";account.showAccount(live);
-  const clearedReturn=element("account-voice").textContent==="Unmute"&&element("account-voice").title==="";
+  const clearedReturn=element("account-mute").textContent==="Unmute"&&element("account-mute").title==="";
   return {listening,listeningAlone,listeningMuted,afterDrop,speakerAlone,speakerMuted,speakerOn,back,blockedReturn,clearedReturn};
 };
 

@@ -1739,7 +1739,7 @@
       else if (b.dataset.action === "account-login") BL.net.login();
       else if (b.dataset.action === "account-logout") BL.net.logout();
       else if (b.dataset.action === "account-rejoin") BL.net.rejoin();
-      else if (b.dataset.action === "account-voice") BL.voice.toggle();
+      else if (b.dataset.action === "account-voice" || b.dataset.action === "account-mute") BL.voice.toggle();
       else if (b.dataset.action === "account-voice-leave") BL.voice.leave();
       else actionHandler && actionHandler(b.dataset.action);
     });
@@ -2064,20 +2064,33 @@
     const iceBlocked = voice.error === BL.voice.ICE_BLOCKED;
     const voiceFailure = iceBlocked ? voice.error : voice.returning ? voice.micError : voice.enabled ? "" : voice.error || voice.micError;
     const reason = voiceReason();
-    const voiceWords = reason ? reason : voice.reconnecting ? "Reconnecting voice" : voice.joining ? "Joining voice" : voiceFailure ? `Voice: ${voiceFailure}` : !voice.enabled && !voice.returning ? "Join voice" : voice.muted ? "Unmute" : "Mute";
-    writeAccount("account-voice", "hidden", !live);
-    writeAccount("account-voice", "textContent", voiceWords);
+    // As Ooga Chat's footer: the microphone always first, off and reading Unmute until in voice, then Join voice or Leave
+    // voice. In voice the microphone is Mute or Unmute in Ooga Chat's colours (green while live, red while muted), says
+    // Reconnecting voice while a dropped voice comes back (still setting the mute it lands with), and says why a
+    // returning visitor's voice failed rather than offering an unexplained Unmute.
+    const inVoice = voice.enabled || voice.returning || voice.reconnecting, micOn = inVoice && !reason;
+    const failed = micOn && !voice.reconnecting && voiceFailure, asMic = micOn && !voice.reconnecting && !voiceFailure;
+    writeAccount("account-mute", "hidden", !live);
+    writeAccount("account-mute", "disabled", !micOn);
+    writeAccount("account-mute", "textContent", micOn && voice.reconnecting ? "Reconnecting voice" : failed ? `Voice: ${voiceFailure}` : asMic && !voice.muted ? "Mute" : "Unmute");
+    writeAccount("account-voice", "hidden", !live || inVoice);
+    writeAccount("account-voice", "textContent", reason ? reason : voice.joining ? "Joining…" : voiceFailure ? `Voice: ${voiceFailure}` : "Join voice");
     writeAccount("account-voice", "disabled", !!reason);
     // A blocked WebRTC explains itself in a tooltip, and only while it is the reason: a VPN's leak protection is what
     // usually does it, by turning off non-proxied UDP (Brave's "WebRTC IP handling policy").
     const voiceTip = iceBlocked
       ? "A VPN's leak protection can block WebRTC by setting the browser's IP handling policy to disable non-proxied UDP (Brave specific). Allow WebRTC for this site, or turn that protection off."
       : "";
-    writeAccount("account-voice", "title", voiceTip);
-    writeAccount("account-voice-leave", "hidden", !live || !voice.enabled && !voice.returning && !voice.reconnecting);
-    const pressed = String(voice.enabled && !voice.muted), onlineDot = String(live);
+    writeAccount("account-voice", "title", inVoice ? "" : voiceTip);
+    writeAccount("account-mute", "title", failed ? voiceTip : "");
+    writeAccount("account-voice-leave", "hidden", !live || !inVoice);
+    const pressed = String(asMic && voice.muted), onlineDot = String(live);
     for (const row of fieldsFor("account")) if (row.dataset.live !== onlineDot) row.dataset.live = onlineDot;
-    for (const button of fieldsFor("account-voice")) if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
+    const mic = asMic ? voice.muted ? "muted" : "live" : "";
+    for (const button of fieldsFor("account-mute")) {
+      if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
+      if (button.dataset.mic !== mic) button.dataset.mic = mic;
+    }
   };
   // The microphone's note (#181), page-level as the account line is: muted in voice, it stays until unmuted;
   // alone in voice (nobody here to hear, so the microphone is held off), it says so until someone comes; held (Ooga Chat's

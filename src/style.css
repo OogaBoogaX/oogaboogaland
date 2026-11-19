@@ -1177,9 +1177,10 @@ body[data-active-scene="block"] .mode-hud {
 }
 .cloud-foot-actions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
 .cloud-foot-actions .foot-button { white-space: nowrap; }
-.cloud-mute { width: 84px; padding: 0; }
-/* Join and Leave Voice (and Joining…, Leaving…) at one width, the widest's, so the footer never shifts. */
-.cloud-voice { width: 100px; padding: 0; }
+/* Every panel's voice buttons, the island's and Ooga Chat's, at one width, the widest's, so no footer shifts: Mute or
+   Unmute (shown and off until in voice) beside Join or Leave Voice (and Joining…, Leaving…), wider only for a longer
+   reason (Reconnecting voice). */
+.cloud-mute, .cloud-voice, .account-mute, .account-voice, .account-leave { min-width: 100px; padding: 0 8px; }
 .cloud-foot-actions [hidden] { display: none; }
 /* The voice switch prompt (voice-handoff.js), the island's and Ooga Chat's alike: a planked card floating under the
    banner, over the panels, that takes no focus by itself; Not now beside the amber Switch here. */
@@ -2646,7 +2647,7 @@ body[data-active-scene="block"] .mode-hud {
 .foot-primary:focus-visible { background: linear-gradient(#f0b05a, #e2a04a); }
 
 /* In voice with the microphone live, the voice button wears the presence green. A microphone button that says so in
-   `data-mic` (Ooga Chat's, both apps) is green on Mute and red on an enabled Unmute, and plain while disabled. */
+   `data-mic` (the account rows' and Ooga Chat's footers, both apps) is green on Mute and red on an enabled Unmute, and plain while disabled. */
 .foot-button[aria-pressed="true"]:not([data-mic]),
 .foot-button[data-mic="live"]:not(:disabled) { border-color: rgba(34, 197, 94, 0.75); }
 .foot-button[data-mic="muted"]:not(:disabled) { border-color: rgba(239, 68, 68, 0.8); }

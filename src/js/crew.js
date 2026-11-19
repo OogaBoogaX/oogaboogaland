@@ -1216,6 +1216,10 @@
   math.quat.fromAxisAngle(SWING_TURN, 0, 1, 0, Math.PI / 2);
   math.quat.fromAxisAngle(SWING_CLUB, 0, 0, 1, Math.PI / 2);
   math.quat.multiply(SWING_CLUB, SWING_TURN, SWING_CLUB);
+  // A blade resting in the fist of a body sitting on the ground turns a quarter about its length, so its flat faces
+  // sideways and its edge forward, as it does in the hand standing or in a chair.
+  const SIT_BLADE = math.quat.create();
+  math.quat.fromAxisAngle(SIT_BLADE, 0, 1, 0, Math.PI / 2);
   // The arm hanging at rest, as the other one hangs, the turn the swing lifts from.
   math.quat.fromEuler(SWING_REST, -0.2, 0, -0.1);
   // The weapon in the right fist, at its middle, square to the forearm bent by `flex`, the hand turned on its forearm
@@ -1625,7 +1629,11 @@
         if (!parts.snack.visible) sitArm(cave, parts.armL, parts.forearmL, cave.reachL, ground);
         sitArm(cave, parts.armR, parts.forearmR, cave.reachR, ground);
         // The right arm mirrors the left, its hand unturned, and the weapon in it stands where that hand holds it.
-        if (parts.club.parent === parts.armR) { restInFist(cave, -parts.forearmR.rotation.x); restingClub = true; }
+        if (parts.club.parent === parts.armR) {
+          restInFist(cave, -parts.forearmR.rotation.x);
+          if (parts.club.geometry.slingTurn !== undefined) math.quat.multiply(cave.axeRotation, cave.axeRotation, SIT_BLADE);
+          restingClub = true;
+        }
       }
       parts.forearmR.highlight = parts.armR.highlight;
       parts.forearmL.highlight = parts.armL.highlight;
