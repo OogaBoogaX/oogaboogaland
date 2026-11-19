@@ -1822,49 +1822,50 @@
       P.pix(ctx, `${1 + Math.floor(rand() * 12)}A`, x0 + cw * 0.92, y + h * 0.025, h * 0.02, PADS[r], "left");
     }
   };
-  // A laptop on its stand, its back toward the dancers, black like the decks: its body with a backlit keyboard, a trackpad and speaker
-  // grilles, ports down its side, the lid on its hinge with a black bezel, a camera and the screen, a glowing logo on
-  // its back, and a cable across the desk into the player beside it.
+  // A laptop on its stand, its back toward the dancers, black like the decks, twice a real one's size: its body with a
+  // backlit keyboard, a trackpad and speaker grilles, ports down its side, the lid on its hinge with a black bezel, a
+  // camera and the screen, the Bananas panel's banana glowing on its back, and a cable across the desk into the player
+  // beside it.
   const laptop = (G, x, z, plug) => {
     const slate = "#17171c", stand = GEAR.edge, tilt = 0.32, lean = -0.57;
     // The stand: two side plates on the desk rising toward the back, a top plate under the laptop and a front lip.
     for (const sx of [-1, 1]) {
-      rod(G, [x + sx * 0.13, 0.004, z + 0.1], [x + sx * 0.13, 0.11, z - 0.11], 0.006, stand);
-      rod(G, [x + sx * 0.13, 0.004, z + 0.1], [x + sx * 0.13, 0.004, z - 0.12], 0.005, stand);
-      rod(G, [x + sx * 0.13, 0.004, z - 0.12], [x + sx * 0.13, 0.11, z - 0.11], 0.005, stand);
+      rod(G, [x + sx * 0.26, 0.008, z + 0.2], [x + sx * 0.26, 0.22, z - 0.22], 0.012, stand);
+      rod(G, [x + sx * 0.26, 0.008, z + 0.2], [x + sx * 0.26, 0.008, z - 0.24], 0.01, stand);
+      rod(G, [x + sx * 0.26, 0.008, z - 0.24], [x + sx * 0.26, 0.22, z - 0.22], 0.01, stand);
     }
-    const D = G.group(x, 0.072, z, 0, tilt);
-    D.box(0.3, 0.004, 0.22, stand, 0, -0.012, 0);
-    D.box(0.3, 0.014, 0.008, stand, 0, -0.004, 0.112);
+    const D = G.group(x, 0.144, z, 0, tilt);
+    D.box(0.6, 0.008, 0.44, stand, 0, -0.024, 0);
+    D.box(0.6, 0.028, 0.016, stand, 0, -0.008, 0.224);
     // The body: its slate shell, rubber feet, the keyboard well with its backlight and keys, the trackpad, grilles
     // either side of the keys and ports down the left side.
-    D.box(0.34, 0.016, 0.24, slate, 0, 0, 0);
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) D.box(0.02, 0.003, 0.012, GEAR.rubber, sx * 0.14, -0.009, sz * 0.1);
-    // Each layer of the keyboard 2.5 mm or more over the last: the well, its backlight, the keys.
-    D.box(0.29, 0.0025, 0.118, "#0b0b0e", 0, 0.00925, -0.04);
-    D.box(0.286, 0.0015, 0.114, "#7a4dff", 0, 0.01275, -0.04, { emissive: 0.5, glow: true });
+    D.box(0.68, 0.032, 0.48, slate, 0, 0, 0);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) D.box(0.04, 0.006, 0.024, GEAR.rubber, sx * 0.28, -0.018, sz * 0.2);
+    // Each layer of the keyboard 5 mm or more over the last: the well, its backlight, the keys.
+    D.box(0.58, 0.005, 0.236, "#0b0b0e", 0, 0.0185, -0.08);
+    D.box(0.572, 0.003, 0.228, "#7a4dff", 0, 0.0255, -0.08, { emissive: 0.5, glow: true });
     for (let row = 0; row < 5; row++) for (let k = 0; k < 13; k++) {
-      const kx = -0.13 + k * 0.0217 + (row % 2) * 0.005, kz = -0.088 + row * 0.022;
+      const kx = -0.26 + k * 0.0434 + (row % 2) * 0.01, kz = -0.176 + row * 0.044;
       if (row === 4 && k > 3 && k < 9) continue;
-      D.box(0.018, 0.004, 0.018, "#0e0e12", kx, 0.0155, kz);
+      D.box(0.036, 0.008, 0.036, "#0e0e12", kx, 0.031, kz);
     }
-    D.box(0.1, 0.004, 0.018, "#0e0e12", 0, 0.0155, 0.0);
-    D.box(0.11, 0.002, 0.07, "#24242c", 0, 0.0095, 0.072);
-    for (const sx of [-1, 1]) for (let k = 0; k < 6; k++) D.box(0.008, 0.002, 0.004, "#24242c", sx * 0.158, 0.0095, -0.09 + k * 0.018);
-    for (let k = 0; k < 3; k++) D.box(0.004, 0.006, 0.012, k ? "#121218" : "#3a8cff", -0.172, 0, -0.06 + k * 0.03, { emissive: k ? 0 : 0.8 });
-    // The lid on its hinge, leaning back; its picture's node turns by the deck's tilt and the lid's lean together.
-    D.cyl(0.008, 0.008, 0.28, slate, 0, 0.006, -0.12, { rz: Math.PI / 2, seg: 10 });
-    const Lg = D.group(0, 0.008, -0.12, 0, lean);
-    Lg.box(0.34, 0.232, 0.008, slate, 0, 0.116, -0.004);
-    Lg.box(0.334, 0.226, 0.003, "#08080c", 0, 0.116, 0.0015);
-    Lg.ball(0.003, "#3a3a44", 0, 0.222, 0.0025, { seg: 6 });
-    Lg.cyl(0.03, 0.03, 0.002, "#ff9b2e", 0, 0.125, -0.009, { rx: Math.PI / 2, emissive: 1, glow: true, seg: 20 });
-    Lg.torus(0.038, 0.003, "#ffd34d", 0, 0.125, -0.0085, { rx: Math.PI / 2, emissive: 0.8, glow: true, seg: 20, sides: 3 });
+    D.box(0.2, 0.008, 0.036, "#0e0e12", 0, 0.031, 0.0);
+    D.box(0.22, 0.004, 0.14, "#24242c", 0, 0.019, 0.144);
+    for (const sx of [-1, 1]) for (let k = 0; k < 6; k++) D.box(0.016, 0.004, 0.008, "#24242c", sx * 0.316, 0.019, -0.18 + k * 0.036);
+    for (let k = 0; k < 3; k++) D.box(0.008, 0.012, 0.024, k ? "#121218" : "#3a8cff", -0.344, 0, -0.12 + k * 0.06, { emissive: k ? 0 : 0.8 });
+    // The lid on its hinge, leaning back; its picture's node turns by the deck's tilt and the lid's lean together. The
+    // banana faces +z as built, so it is turned round to face out of the lid's back, standing 1.5 mm proud of it.
+    D.cyl(0.016, 0.016, 0.56, slate, 0, 0.012, -0.24, { rz: Math.PI / 2, seg: 10 });
+    const Lg = D.group(0, 0.016, -0.24, 0, lean);
+    Lg.box(0.68, 0.464, 0.016, slate, 0, 0.232, -0.008);
+    Lg.box(0.668, 0.452, 0.006, "#08080c", 0, 0.232, 0.003);
+    Lg.ball(0.006, "#3a3a44", 0, 0.444, 0.005, { seg: 6 });
+    Lg.add(BL.bananaIcon.geometry(0.15, 0.004), 0, 0.25, -0.0195, { ry: Math.PI, glow: true });
     const canvas = CH.canvas(LAPTOP.W, LAPTOP.H);
     paintLaptop(canvas.getContext("2d"), "", "");
-    Lg.node("laptopScreen", RM.flatPicture(canvas, 0.31, 0.194, 0.85), 0, 0.12, 0.006, { rx: tilt + lean, glow: true });
+    Lg.node("laptopScreen", RM.flatPicture(canvas, 0.62, 0.388, 0.85), 0, 0.24, 0.012, { rx: tilt + lean, glow: true });
     // The cable from its right side down across the desk and into the player.
-    const a = [x + 0.171, 0.072 + 0.02 * Math.sin(tilt), z - 0.02 * Math.cos(tilt)];
+    const a = [x + 0.342, 0.144 + 0.04 * Math.sin(tilt), z - 0.04 * Math.cos(tilt)];
     const pts = [a, [a[0] + 0.03, 0.02, a[2]], [a[0] + 0.06, 0.004, a[2] - 0.04], [plug[0] - 0.05, 0.004, plug[2]], plug];
     for (let k = 1; k < pts.length; k++) rod(G, pts[k - 1], pts[k], 0.0035, "#18181e");
   };
@@ -2086,7 +2087,7 @@
   };
   const djGear = (G) => {
     const span = RIG.MW / 2 + RIG.GAP + RIG.PW, B = RIG.BASE;
-    laptop(G, -span - 0.32, 0.02, [-span, B + 0.06, -0.12]);
+    laptop(G, -span - 0.49, 0.02, [-span, B + 0.06, -0.12]);
     G.box(2 * span + 0.04, B, RIG.D + 0.04, GEAR.black, 0, B / 2, 0);
     G.box(2 * span + 0.04, 0.008, 0.004, PURPLE, 0, B * 0.5, -RIG.D / 2 - 0.021, { emissive: 1, glow: true });
     const R = G.group(0, B, 0);
@@ -2405,7 +2406,7 @@
     const wallSurface = nodes.wall.geometry.imageSurface, wall = wallOf(wallSurface.canvas), music = new Float32Array(MUSIC.BANDS), shape = new Float32Array(MUSIC.WAVE);
     const e0 = ROOMS.edgeEl(L, 0) / DEG;
     const floorRgb = built.lights[2].slice(4, 7), screenRgb = built.lights[8].slice(4, 7);
-    const radio = BL.timechainPartyRadio.create(), heard = { live: false, bpm: 0, phase: 0, level: 0, conf: 0 }, E = { loud: 0, bass: 0 }, E2 = { loud: 0, bass: 0 }, bulbs = RM.bulbsOf(nodes);
+    const radio = BL.timechainPartyRadio.take(), heard = { live: false, bpm: 0, phase: 0, level: 0, conf: 0 }, E = { loud: 0, bass: 0 }, E2 = { loud: 0, bass: 0 }, bulbs = RM.bulbsOf(nodes);
     const setLight = (lights, i, r, g, b) => { const o = i * 8; lights[o + 4] = r; lights[o + 5] = g; lights[o + 6] = b; };
     // The room's clock for its own arrangement: the island room's where there is one, so everyone sees it alike.
     const clock = () => (BL.net.state.room === "live" ? BL.net.serverNow() : Date.now()) / 1000 + shift;

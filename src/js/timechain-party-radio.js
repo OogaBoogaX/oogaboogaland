@@ -19,6 +19,13 @@
 // retries with backoff. Where a browser hands Web Audio silence for a live stream (Safari has), or the stream stops
 // answering cross-origin, it falls back to a plain element: heard, not analysed, the lights on their own steady beat.
 // Off under `nosim` (unless `timechain=1`) and `timechain=0`, with the room's other feeds.
+//
+// The radio can start before the room exists (`warm`): the keypad outside calls it as the Block Party's number is
+// chosen (a gesture), so the stream connects and its LOOKAHEAD fills while the room readies and the visitor walks in.
+// Started so it is `held`: silent and off the sound panel, sampled each frame by the keypad's `tick` so the room's
+// readings are there on arrival, until the room takes it (`take`, which makes a fresh one when none was warmed) and
+// fades it in. `cool` lets it go; one nobody takes within WARM_MS goes by itself. This module is a deferred group of
+// its own (`party-radio`), the base of the rooms' group, so the keypad can load it without loading the rooms.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -46,7 +53,7 @@
   // SONG_MAX characters. Arriving, the music fades in over FADE_IN seconds from when it first reaches the speakers; walking out, it fades
   // out over FADE_OUT, back in over FADE_BACK if the visitor stays after all, and gone any other way, it fades over
   // TAIL before the context closes.
-  const FADE_IN = 4, FADE_OUT = 2.5, FADE_BACK = 1, TAIL = 0.8;
+  const FADE_IN = 4, FADE_OUT = 2.5, FADE_BACK = 1, TAIL = 0.8, WARM_MS = 90000;
   const LOOKAHEAD = 8, GAP_S = 0.015, STALE = 0.5, HISTORY = Math.ceil((LOOKAHEAD + 2 * STALE) / GAP_S), BANDS = 96, POINTS = 512, META_MS = 20000, SONG_MAX = 90;
   const TAU = Math.PI * 2;
 
@@ -144,7 +151,7 @@
     return { take, block };
   };
 
-  const create = () => {
+  const create = (held = false) => {
     const q = new URLSearchParams(location.search);
     const enabled = q.get("timechain") !== "0" && (!q.has("nosim") || q.get("timechain") === "1");
     let track = tracker();
@@ -162,9 +169,10 @@
     // speakers and when it does (`arriveAt`, on the audio's clock, or in performance time on the plain element); on the
     // plain element (which has no gain of its own) when it began to fade in; and when the visitor began to leave
     // (performance time, 0 none).
-    let entry = null, arrivedEpoch = -1, arriveAt = 0, fadeInAt = 0, leaving = 0;
+    // Held (started early), it counts as leaving from the start, so its music waits silent for `unhold`.
+    let entry = null, arrivedEpoch = -1, arriveAt = 0, fadeInAt = 0, leaving = held ? performance.now() : 0;
     const soundChannel = BL.sound.channel("music");
-    if (!enabled) soundChannel.show(false);
+    if (!enabled || held) soundChannel.show(false);
     // The plain element's share of its volume now, as it fades in and as the visitor leaves.
     const plainK = () => {
       const t = performance.now();
@@ -426,6 +434,13 @@
     };
     return {
       sample, energy, ahead, spectrum, scope, waveform, words,
+      // A held radio taken by the room: back on the sound panel, its music in as `fadeBack` brings it.
+      unhold() {
+        if (disposed || !held) return;
+        held = false;
+        if (enabled) soundChannel.show(true);
+        this.fadeBack();
+      },
       // The visitor walking out: the music fades out over FADE_OUT, so disposal finds it silent; `fadeBack` if they stay.
       fadeOut() {
         if (disposed || leaving) return;
@@ -477,5 +492,25 @@
     };
   };
 
-  BL.timechainPartyRadio = { STATION, RATE, CONF, LOOKAHEAD, BANDS, POINTS, tracker, meter, create };
+  let early = null, earlyTimer = 0;
+  const earlyReading = { live: false, bpm: 0, phase: 0, level: 0, conf: 0 };
+  const cool = () => {
+    clearTimeout(earlyTimer); earlyTimer = 0;
+    if (early) { early.dispose(); early = null; }
+  };
+  const warm = () => {
+    if (early) return;
+    early = create(true);
+    earlyTimer = setTimeout(cool, WARM_MS);
+  };
+  const take = () => {
+    if (!early) return create();
+    const radio = early;
+    early = null; clearTimeout(earlyTimer); earlyTimer = 0;
+    radio.unhold();
+    return radio;
+  };
+  const tick = () => { if (early) early.sample(earlyReading); };
+
+  BL.timechainPartyRadio = { STATION, RATE, CONF, LOOKAHEAD, BANDS, POINTS, tracker, meter, create, warm, cool, take, tick, get warmed() { return !!early; } };
 })();

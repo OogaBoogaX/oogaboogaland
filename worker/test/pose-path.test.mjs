@@ -151,3 +151,41 @@ test("a failed deferred attachment closes only that socket and still saves every
     assert.ok(!woken.players.has(1));
   }
 });
+
+test("every player sees every other's dance number, a late joiner and a woken room too", async () => {
+  const h = host(), r = h.room();
+  const a = await h.join(r, 1, "a"), b = await h.join(r, 2, "b");
+  h.send(r, a, { t: "body", name: "a" });
+  h.send(r, b, { t: "body", name: "b" });
+  const states = (ws) => ws.sent.filter((m) => m.t === "state");
+  const dancesIn = (m) => { const out = {}; for (let i = 0; m.ds && i < m.ds.length; i += 2) out[m.ds[i]] = m.ds[i + 1]; return out; };
+  h.advance(100);
+  h.send(r, a, { t: "pose", x: 1, y: 0, z: 0, yaw: 0, d: 5 });
+  h.send(r, b, { t: "pose", x: 2, y: 0, z: 0, yaw: 0, d: 0 });
+  h.advance(100);
+  assert.deepEqual(dancesIn(states(b).at(-1)), { 1: 5, 2: 0 }, "b sees a's move, and its own standing still");
+  assert.deepEqual(dancesIn(states(a).at(-1)), { 1: 5, 2: 0 }, "a sees b's");
+  // A new move standing still is a pose of its own, relayed as any other.
+  h.send(r, a, { t: "pose", x: 1, y: 0, z: 0, yaw: 0, d: 9 });
+  h.advance(100);
+  assert.equal(dancesIn(states(b).at(-1))[1], 9);
+  // Someone arriving later (b again, from a page opened afresh) is told it in the welcome, before any pose.
+  const c = await h.join(r, 2, "b");
+  h.send(r, c, { t: "body", name: "b" });
+  const welcome = c.sent.find((m) => m.t === "welcome");
+  assert.ok(welcome.features.includes(protocol.DANCE_FEATURE));
+  assert.equal(welcome.players.find((p) => p.id === 1).d, 9);
+  // A woken room still has it on the next snapshot.
+  h.advance(1000);
+  const woken = h.room();
+  await h.restored();
+  h.send(woken, c, { t: "pose", x: 3, y: 0, z: 0, yaw: 0, d: 2 });
+  h.advance(100);
+  assert.deepEqual(dancesIn(states(a).at(-1)), { 1: 9, 2: 2 });
+  // A gorilla never dances, whatever its page says.
+  h.send(woken, a, { t: "body", name: "gorilla:a" });
+  h.advance(100);
+  h.send(woken, a, { t: "pose", x: 1, y: 0, z: 0, yaw: 0, d: 4 });
+  h.advance(100);
+  assert.equal(dancesIn(states(c).at(-1))[1], undefined);
+});

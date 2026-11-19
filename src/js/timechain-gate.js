@@ -76,6 +76,8 @@
     const localZ = (x, z) => (x - place.x) * sin + (z - place.z) * cos, localX = (x, z) => (x - place.x) * cos - (z - place.z) * sin;
     // idle, keypad, account, preparing, waiting, opening, crossing, gone, arriving, leaving.
     const g = {
+      // `radio`: the Block Party's number is chosen, so its radio is wanted early (`radioFor`).
+      radio: false,
       state: "idle", selection: NONE, room: null, mode: null, prep: 0, stage: null, prepared: null, picture: null, t: 0, ask: 0,
       cycle: null, exp: 0, starting: false, dir: null, open: 0, want: 0, remoteUntil: 0, hintAt: -Infinity, jetpack: null, exit: null, failures: 0, login: null,
       // The keypad used by clicks from the bridge (`fromBridge`), the Ooga and the view still the player's; and whether a
@@ -195,6 +197,7 @@
       g.pinRoom = room; g.pin = ""; g.pinSent = 0;
       g.selection = NONE;
       site.choose(room);
+      radioFor(NONE);
       show(`Room ${room} is locked from inside · enter its 4-digit PIN`);
     };
     // Back to choosing, with no room selected; a wrong PIN says so in the window first.
@@ -247,6 +250,14 @@
       const cave = crew.player, p = cave.root.position;
       return Math.atan2(KEYPAD.y - KEYPAD_AIM - (p.y - cave.baseY + eyeRise(cave)), Math.max(0.3, Math.hypot(KEYPAD.x - p.x, KEYPAD.z - p.z) - 0.1));
     };
+    // The Block Party's radio, started as its number is chosen (a gesture) so its music is under way by the time the
+    // visitor walks in (timechain-party-radio.js `warm`): only its own small module loads, never the rooms'. Any other
+    // choice, or none, lets it go; the room takes it on arrival.
+    const radioFor = (room) => {
+      g.radio = room !== NONE && ROOMS.ROOMS[room].kind === "party";
+      if (!g.radio) { if (BL.timechainPartyRadio) BL.timechainPartyRadio.cool(); return; }
+      Promise.resolve(BL.deferred.load("party-radio")).then(() => { if (g.radio) BL.timechainPartyRadio.warm(); }, () => {});
+    };
     // The keypad in use, its choice starting from a room chosen in advance.
     const startKeypad = () => {
       g.state = "keypad";
@@ -255,6 +266,7 @@
       g.pass = NONE; g.noteLeft = 0;
       showLocks();
       site.choose(g.selection);
+      radioFor(g.selection);
     };
     // The view into the Ooga's eyes from wherever it is now, the Ooga held: at the keypad, or for Enter from the bridge.
     const zoomIn = () => {
@@ -297,6 +309,7 @@
       if (g.state !== "keypad" && g.state !== "account" && g.state !== "pin") return;
       g.state = "idle";
       site.choose(NONE);
+      radioFor(NONE);
       if (g.remote) { g.remote = false; g.selection = g.pinRoom = NONE; g.pin = ""; g.pinSent = 0; return; }
       if (crew.player) hideHead(crew.player, false);
       lens("back");
@@ -305,10 +318,11 @@
     // The room already chosen, chosen again, clears the choice.
     const choose = (digit) => {
       if (g.state !== "keypad" || ROOMS.parse(digit) === null) return;
-      if (digit === g.selection) { g.selection = NONE; site.choose(NONE); show(CHOOSE); return; }
+      if (digit === g.selection) { g.selection = NONE; site.choose(NONE); radioFor(NONE); show(CHOOSE); return; }
       if (lockedRoom(digit) && g.pass !== digit) { askPin(digit); return; }
       g.selection = digit;
       site.choose(digit);
+      radioFor(digit);
       show(`${roomWords(digit)} selected · press Enter`);
     };
     // Enter: the room, the account's answer, then the turn to the doors while the room readies.
@@ -335,6 +349,8 @@
       g.settledAt = 0;
       g.pitchTo = 0;
       show(`Preparing Room ${room.id}… · Back cancels`);
+      // Its radio again, should one warmed long ago have gone by itself.
+      radioFor(room.id);
       prepare();
     };
     const retryAccount = () => {
@@ -351,7 +367,7 @@
     // The room's code (deferred on a hosted page) and the room itself, built and painted over frames by its module;
     // then, a step a frame, its picture from the handover point, a frame for that picture to reach the GPU, and the
     // island's view out of the passage for the way back. A cancel or a newer preparation makes an older one's answer
-    // moot. Nothing of the room loads before Enter.
+    // moot. Nothing of the room loads before Enter (the Block Party's radio, alone, as its number is chosen: `radioFor`).
     const prepare = () => {
       const stamp = ++g.prep;
       g.stage = "load";
@@ -522,7 +538,7 @@
       world.sphereVisit = { room: g.room.id, mode: g.mode, login: g.login, character: cave.traits.name, guided: true, jetpack: g.jetpack, prepared: g.prepared, entry, view: g.view };
       world.sphereKeep = h.keep();
       world.pilot = cave.traits.name;
-      if (go("timechain", String(g.room.id), true)) { g.prepared = null; g.state = "gone"; g.t = 0; }
+      if (go("timechain", String(g.room.id), true)) { g.prepared = null; g.state = "gone"; g.t = 0; g.radio = false; }
       else { world.sphereVisit = null; world.sphereKeep = null; }
     };
 
@@ -537,6 +553,7 @@
       // Back out, the keypad starts over: the room gone into is no longer chosen.
       g.selection = preselect = NONE;
       site.choose(NONE);
+      radioFor(NONE);
       g.exit = exit;
       g.room = ROOMS.get(exit.room);
       g.mode = exit.mode;
@@ -618,6 +635,7 @@
     const update = (dt) => {
       const cave = crew.player, now = performance.now();
       g.t += dt;
+      if (g.radio && BL.timechainPartyRadio) BL.timechainPartyRadio.tick();
       g.noteLeft = Math.max(0, g.noteLeft - dt);
       if (g.pinSent > 0 && (g.pinSent -= dt) <= 0 && g.state === "pin") pinAnswer(false, "wrong");
       if (g.state !== "idle" && g.state !== "gone" && !cave) {
@@ -799,6 +817,8 @@
       else if (g.cycle !== null || g.ask) BL.net.cancelDoor();
       g.starting = false;
       dropPrepared();
+      // Handed over, the room takes the radio as it opens; left any other way, it goes.
+      if (g.state !== "gone") radioFor(NONE);
       if (crew.player) hideHead(crew.player, false);
       g.state = "idle";
       g.remote = g.bridged = false;

@@ -22129,6 +22129,33 @@ const partyRadioChecks = async () => {
       && fade.tail && fade.tail[0] === "ramp" && fade.tail[1] === 0 && Math.abs(fade.tail[2] - (audio.currentTime + 0.8)) < 1e-9 && fade.closedLater === 0, JSON.stringify(fade));
   record("party radio: the stream's next playing never fades the music in again, and walking back from the doors brings the music back",
     fade.again && fade.back && fade.back[0] === "ramp" && fade.back[1] === 1 && Math.abs(fade.back[2] - (audio.currentTime + 1)) < 1e-9, JSON.stringify(fade));
+  // Rule: started early at the keypad outside (`warm`, as the Block Party's number is chosen), the radio plays silent
+  // and off the sound panel however often it is warmed, until the room takes it (`take`): then, its music already at
+  // the speakers, it comes in over a second. Let go (`cool`), it closes.
+  const shows = [], channelOf = page.window.BL.sound.channel, warmed = {};
+  page.window.BL.sound.channel = (id) => ({ ...channelOf(id), show(on) { shows.push(on); } });
+  audio.createGain = () => { const n = makeGain(); made.push(n); return n; };
+  audio.close = async () => { closes++; };
+  try {
+    const P = page.window.BL.timechainPartyRadio, count = elements.length;
+    made.length = 0;
+    P.warm(); P.warm();
+    warmed.one = elements.length === count + 1 && P.warmed;
+    elements.at(-1).onplaying();
+    audio.currentTime += 9;
+    for (let i = 0; i < 30; i++) P.tick();
+    warmed.silent = made.every((n) => !n.gain.log.some(([k, v]) => k === "ramp" && v === 1));
+    warmed.hidden = shows[0] === false;
+    const r = P.take(), up = made.find((n) => n.gain.log.some(([k, v]) => k === "ramp" && v === 1));
+    warmed.taken = !P.warmed && elements.length === count + 1 && shows.at(-1) === true;
+    warmed.in = up && up.gain.log.at(-1);
+    r.dispose();
+    const before = closes;
+    P.warm(); P.cool();
+    warmed.cooled = !P.warmed && closes > before;
+  } finally { page.window.BL.sound.channel = channelOf; audio.createGain = makeGain; audio.close = closeAudio; }
+  record("party radio: warmed at the keypad it plays silent and hidden, once, until the room takes it and brings it in over a second; cooled, it closes",
+    warmed.one && warmed.silent && warmed.hidden && warmed.taken && warmed.in && warmed.in[0] === "ramp" && Math.abs(warmed.in[2] - (audio.currentTime + 1)) < 1e-9 && warmed.cooled, JSON.stringify(warmed));
 };
 
 // Rule: a room id is validated at every boundary, and the three sizes are one design whose doorway, arrival, button and

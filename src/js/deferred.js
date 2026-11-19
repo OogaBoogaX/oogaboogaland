@@ -19,15 +19,16 @@
   const BL = window.BL = window.BL || {};
   const TIMEOUT_MS = 20000;
   // How each group shows it has arrived: the module that runs last in it.
-  const PRESENT = { "cloud-hopper": () => !!BL.cloudHopper, "terrain-cache": () => !!BL.terrainCache, "lab-wallpaper": () => !!BL.labWallpaper?.src, canvas: () => !!BL.canvasRenderer, timechain: () => !!BL.timechainInterior, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio,
+  const PRESENT = { "cloud-hopper": () => !!BL.cloudHopper, "terrain-cache": () => !!BL.terrainCache, "lab-wallpaper": () => !!BL.labWallpaper?.src, canvas: () => !!BL.canvasRenderer, timechain: () => !!BL.timechainInterior, "party-radio": () => !!BL.timechainPartyRadio, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio,
     "block-viewer": () => !!BL.blockViewer, race: () => !!BL.raceAudio, mine: () => !!BL.mineCrew, orbit: () => !!BL.rocketAudio,
     // Each lecture of the Lecture Hall's course, a group of its own (lecture-btc.js names them a to n).
     ...Object.fromEntries([..."abcdefghijklmn"].map((k, i) => [`lecture-btc-${k}`, () => !!(BL.lectures && BL.lectures.get(`btc-${String(i + 1).padStart(2, "0")}`))])),
     // HALLOWEEN: the arcade's ghost hunt, and each track of its playlist.
     halloween: () => !!BL.halloween, ...Object.fromEntries(["boss", "colt", "martial", "nightmare", "synthed", "nr"].map((k) => [`halloween-track-${k}`, () => !!(BL.ghostMusic && BL.ghostMusic[k])])) };
-  // Only scene implementation groups depend on a base group; no base group depends on a scene shell. The Lightning Jet
+  // Only scene implementation groups depend on a base group, and the Timechain rooms on the Block Party's radio, which
+  // the keypad outside loads alone to start it early; no base group depends on a scene shell. The Lightning Jet
   // Hangar, walked into from the Factory and left back into it, builds on the Factory's scene group.
-  const SCENE_BASE = { "arcade-scene": "arcade", "carnival-scene": "arcade", "drop-scene": "drop", "race-scene": "race", "mine-scene": "mine", "orbit-scene": "orbit", "hangar-scene": "factory-scene" };
+  const SCENE_BASE = { "arcade-scene": "arcade", "carnival-scene": "arcade", "drop-scene": "drop", "race-scene": "race", "mine-scene": "mine", "orbit-scene": "orbit", "hangar-scene": "factory-scene", timechain: "party-radio" };
   const loading = new Map(), attempts = new Map();
   let stale = false, staleHandler = null;
   // A file that answers 404 is gone for good: the site was deployed since this page loaded.
