@@ -7971,6 +7971,7 @@
     job.handle = job.idle ? requestIdleCallback(start, { timeout: 250 }) : setTimeout(start, 0);
   };
   const update = (dt, elapsed) => {
+    if (rockGuidesSteps) advanceRockGuides();
     // Every system reads the real models; the ghosts are painted back once the frame's poses are final.
     npcGhosts.restore();
     cloudHopper?.preUpdate(dt);
@@ -8966,10 +8967,70 @@
     const player = controlledGuideActor();
     return guideSegmentClear(ax, ay, az, bx, by, bz) && objectGuides.cameraClear(ax, ay, az, bx, by, bz, player, player.root);
   };
-  // Built with the visit; deferring past first paint was tried and reverted.
-  // The build blocks the main thread ~0.5 s with no paint: the curtain jumps and camera easing loses that time.
-  const ensureRockGuides = () => rockGuides
-    || (rockGuides = BL.rockGuides.create({ island, sealed: sealedCaves }));
+  // A WebGL2 boot builds the cue after its first paint, in idle time a few milliseconds at a time (`createSteps`, driven
+  // from `update`), so its wall build (about 0.9 s on an M1 Pro) never holds the loading curtain; a sliced step runs to
+  // the build's next checkpoint (11 to 17 ms at most on an M1 Pro), where the old single block after first paint stalled
+  // the curtain. Until it is done a view behind
+  // rock shows no wall outlines. Any other arrival builds it in `enter`, its wall build having run behind the fade, and
+  // so does Canvas 2D, whose few frames a second would stretch the slices out over a minute.
+  // A read that cannot wait (`headquarters.rockGuides`: an inspector, the suite) finishes the build at once.
+  // The deferred wall build's CPU as a share of the boot that ran without it (`bootDeferred`), so the boot tier judges the
+  // build it replaced: measured 2026-11-19 on an M-series Mac, 0.26 to 0.32 of the sliced boot, cold and warm.
+  const ROCK_GUIDES_SLICE_MS = 4, ROCK_GUIDES_IDLE = { timeout: 100 }, ROCK_GUIDES_BOOT_SHARE = 0.3;
+  const rockGuidesSlice = { until: 0, budget: ROCK_GUIDES_SLICE_MS, work: 0 };
+  let rockGuidesSteps = null, rockGuidesHandle = 0, rockGuidesIdle = false, rockGuidesIdled = false;
+  const stepRockGuides = () => {
+    const step = rockGuidesSteps.next();
+    if (!step.done) return false;
+    rockGuidesSteps = null;
+    rockGuides = step.value;
+    mark("rock-guides");
+    return true;
+  };
+  const cancelRockGuidesWork = () => {
+    if (rockGuidesHandle) { if (rockGuidesIdle) cancelIdleCallback(rockGuidesHandle); else clearTimeout(rockGuidesHandle); }
+    rockGuidesHandle = 0;
+  };
+  const dropRockGuidesWork = () => {
+    cancelRockGuidesWork();
+    if (rockGuidesSteps) rockGuidesSteps.return();
+    rockGuidesSteps = null;
+  };
+  // Each idle period takes slices while it lasts. A frame with no idle period before it takes one slice in `update`
+  // (`advanceRockGuides`), so a busy view still finishes in a few hundred frames.
+  const rockGuidesWork = (deadline) => {
+    rockGuidesHandle = 0;
+    if (!rockGuidesSteps) return;
+    rockGuidesIdled = true;
+    for (;;) {
+      const left = deadline ? deadline.timeRemaining() - 1 : 0;
+      rockGuidesSlice.budget = left >= 1 ? Math.min(ROCK_GUIDES_SLICE_MS, left) : ROCK_GUIDES_SLICE_MS;
+      if (stepRockGuides()) return;
+      if (!deadline || deadline.timeRemaining() <= 2) break;
+    }
+    scheduleRockGuides();
+  };
+  const scheduleRockGuides = () => {
+    if (rockGuidesHandle || !rockGuidesSteps) return;
+    rockGuidesIdle = typeof requestIdleCallback === "function";
+    rockGuidesHandle = rockGuidesIdle ? requestIdleCallback(rockGuidesWork, ROCK_GUIDES_IDLE) : setTimeout(rockGuidesWork, 16);
+  };
+  const advanceRockGuides = () => {
+    if (!rockGuidesIdled) {
+      rockGuidesSlice.budget = ROCK_GUIDES_SLICE_MS;
+      if (stepRockGuides()) return;
+    }
+    rockGuidesIdled = false;
+    scheduleRockGuides();
+  };
+  const ensureRockGuides = () => {
+    if (rockGuides) return rockGuides;
+    if (!rockGuidesSteps) return (rockGuides = BL.rockGuides.create({ island, sealed: sealedCaves }));
+    cancelRockGuidesWork();
+    rockGuidesSlice.until = rockGuidesSlice.budget = Infinity;
+    while (!stepRockGuides());
+    return rockGuides;
+  };
   const trackMirrorObject = (node, radius, vertexCapacity) => {
     entropyLab?.phase?.body?.track(node, radius, vertexCapacity);
     for (const veil of caveVeils) veil.phase?.body.track(node, radius, vertexCapacity);
@@ -10704,15 +10765,17 @@
       yield* pause(slice);
       const guides = sightGuides.update(actor, null, objects, view, aspect, 0.25, true);
       const observer = guides.observer;
-      guides.structure = rockGuides.select(p.x, p.y - actor.baseY, p.z, view.position.x, view.position.y, view.position.z);
-      guides.structures = rockGuides.updateSurfaces(observer[19], observer[20], observer[21], view, 0.25, actor, objectGuides.perceptionClear, objects.occlusionVersion, objects.perceptionVersion);
+      if (rockGuides) {
+        guides.structure = rockGuides.select(p.x, p.y - actor.baseY, p.z, view.position.x, view.position.y, view.position.z);
+        guides.structures = rockGuides.updateSurfaces(observer[19], observer[20], observer[21], view, 0.25, actor, objectGuides.perceptionClear, objects.occlusionVersion, objects.perceptionVersion);
+      }
       cameraCover.draw(view, actor.root, false, true, cameraRockAt, cameraRockMaterialAt, guides, 0.25);
       yield* pause(slice);
     } finally {
       preparingGuideActor = null;
       const guides = sightGuides.update(null, null, null, camera, aspect, 0, false);
       guides.structure = guides.structures = null;
-      rockGuides.resetSurface();
+      if (rockGuides) rockGuides.resetSurface();
       cameraCover.draw(camera, null, false, false, cameraRockAt, cameraRockMaterialAt, guides, 0);
       collectViewObjects();
       const context = overlayCanvas.getContext("2d");
@@ -10842,8 +10905,8 @@
       // Keep a separate cap pass so split objects stay legible in fruit.
       // It must not change the visibility rules in the clear part of the view.
       const fruitGuides = bananaGuides.update(bananaEnabled ? player : null, null, objects, camera, aspect, dt, bananaEnabled, true, SIGHT_RECOMPUTE_HZ);
-      if (objectsEnabled || bananaEnabled) {
-        const structure = ensureRockGuides().select(p.x, p.y - (gorilla ? 0 : player.baseY), p.z, camera.position.x, camera.position.y, camera.position.z), observer = guides.observer;
+      if ((objectsEnabled || bananaEnabled) && rockGuides) {
+        const structure = rockGuides.select(p.x, p.y - (gorilla ? 0 : player.baseY), p.z, camera.position.x, camera.position.y, camera.position.z), observer = guides.observer;
         // Keep wall derivation off a frame that just rebuilt object contours.
         const surfaces = rockGuides.updateSurfaces(observer[19], observer[20], observer[21], camera, dt, player, objectGuides.perceptionClear, objects.occlusionVersion, objects.perceptionVersion, SIGHT_RECOMPUTE_HZ, guides.updates !== contourUpdates);
         guides.structures = objectsEnabled ? surfaces : null; guides.structure = objectsEnabled ? structure : null;
@@ -11010,6 +11073,7 @@
     pilot.suspend();
     input.suspend();
     crew.pause();
+    cancelRockGuidesWork();
     weather.dispose();
     footsteps.dispose();
     petReactions.dispose();
@@ -11148,7 +11212,8 @@
     const slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 };
     if (!terrain.hasIsland(options)) yield* terrain.islandSteps(options, slice);
     yield* poolModels.prepareSteps();
-    yield* BL.rockGuides.prepareSteps(terrain.island(options), slice);
+    // A WebGL2 boot leaves the walls for after its first paint (see ensureRockGuides).
+    if (ctx.from || ctx.renderer.kind !== "webgl2") yield* BL.rockGuides.prepareSteps(terrain.island(options), slice);
     // The Mempool island's walked meshes' collision trees, and ₿IFRÖST's islet, each a task of its own.
     for (const geometry of [poolModels.islet(), poolModels.rampFloor(), poolModels.membrane(), poolModels.crossing(), poolModels.bridge()]) {
       yield;
@@ -11626,7 +11691,12 @@
     cameraCover = BL.cameraCover.create(ctx.overlay);
     headquarters.cameraCover = cameraCover.state;
     yield* pause(slice);
-    ensureRockGuides();
+    if (!ctx.from && renderer.kind === "webgl2" && !BL.rockGuides.built(island)) {
+      Object.assign(rockGuidesSlice, { until: 0, budget: ROCK_GUIDES_SLICE_MS, work: 0 });
+      rockGuidesSteps = BL.rockGuides.createSteps({ island, sealed: sealedCaves }, rockGuidesSlice);
+      // The first frame, the one that lifts the curtain, takes no slice: the build starts in the idle time after it.
+      rockGuidesIdled = true;
+    } else ensureRockGuides();
     yield* pause(slice);
     // Reading the cue builds it, so any view or inspector needing one gets it without waiting on the timer.
     Object.defineProperty(headquarters, "rockGuides", { configurable: true, get: ensureRockGuides });
@@ -12512,6 +12582,7 @@
     cameraCover.dispose();
     bananaCover.dispose();
     solids.dispose(); totemSolids.dispose();
+    dropRockGuidesWork();
     if (rockGuides) rockGuides.dispose();
     delete headquarters.rockGuides;
     sightGuides.dispose();
@@ -12660,6 +12731,8 @@
     get retainedRoot() { return heldHub ? root : null; },
     // Readying the hall takes a slice of frames that are otherwise the island's; the tier does not judge them.
     get warming() { return factoryWalk.warming || !!arcadeMouth?.entrance.warming; },
+    // The wall build a WebGL2 boot leaves for after its first paint, as a share of the boot CPU measured without it.
+    get bootDeferred() { return rockGuidesSteps ? ROCK_GUIDES_BOOT_SHARE : 0; },
     // The Lightning Factory's builders stay warm while the island runs, since its shield walks straight in.
     keeps: ["factory", "arcade"],
     root: null, camera: null, input: null, debug: null,

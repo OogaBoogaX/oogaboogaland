@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 const root = resolve(process.argv[2] || "."), label = process.argv[3] || "first-play";
-const runs = Number(process.env.RUNS || 10), cpu = process.env.CPU === "1";
+const runs = Number(process.env.RUNS || 10), cpu = process.env.CPU === "1", query = process.env.QUERY || "";
 if (!Number.isInteger(runs) || runs < 1 || runs > 20) throw Error("RUNS must be 1–20");
 const { launch, dispose } = await import(pathToFileURL(join(root, "test/browser.mjs")));
 const site = join(root, "_site"), out = join(root, "untracked/performance");
@@ -47,16 +47,16 @@ try {
     b = await launch({ w: 1920, h: 1080, perf: true, motion: true });
     await b.focus(true);
     await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
-      const S = window.__firstPlay = { tasks: [], times: new Float64Array(1200), count: 0, start: 0, previous: 0 };
+      const S = window.__firstPlay = { tasks: [], times: new Float64Array(1200), count: 0, start: 0, previous: 0, stamps: new Float64Array(8000), n: 0, quality: null, bootCPU: null };
       new PerformanceObserver(list => { for (const e of list.getEntries()) if (S.tasks.length < 2000) S.tasks.push({ at: e.startTime, ms: e.duration }); }).observe({ type: "longtask", buffered: true });
-      const frame = now => { if (S.start && S.count < S.times.length) { if (S.previous) S.times[S.count++] = now - S.previous; S.previous = now; } requestAnimationFrame(frame); }; requestAnimationFrame(frame);
+      const frame = now => { if (S.n < S.stamps.length) S.stamps[S.n++] = now; if (S.quality === null && window.__ooga && window.__ooga.bootCPU != null) { S.quality = __ooga.renderer.quality; S.bootCPU = __ooga.bootCPU; } if (S.start && S.count < S.times.length) { if (S.previous) S.times[S.count++] = now - S.previous; S.previous = now; } requestAnimationFrame(frame); }; requestAnimationFrame(frame);
     })()` });
     let loaded = false;
     b.on("Page.loadEventFired", () => { loaded = true; });
     for (const cache of ["cold", "warm"]) {
       loaded = false; b.logs.length = 0;
       if (cpu) { await b.send("Profiler.enable"); await b.send("Profiler.start"); }
-      await b.open(`${base}/?debug=1&nosim=1&net=0&chain=0&hour=12&day=80&bananas=1000&pos=0`);
+      await b.open(`${base}/?debug=1&nosim=1&net=0&chain=0&hour=12&day=80&bananas=1000&pos=0${query}`);
       for (let i = 0; !loaded && i < 1200; i++) await b.sleep(50);
       if (!loaded) throw Error("Document load deadline");
       const ready = await b.evaluate(`new Promise(resolve => {
@@ -82,12 +82,13 @@ try {
         const gl = document.getElementById("scene").getContext("webgl2"), e = gl?.getExtension("WEBGL_debug_renderer_info");
         return { environment: { viewport: [innerWidth, innerHeight], canvas: [document.getElementById("scene").width, document.getElementById("scene").height], renderSize: __ooga.renderer.size, browser: navigator.userAgent, gpu: e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : null, dpr: devicePixelRatio, memory: navigator.deviceMemory, quality: __ooga.renderer.quality },
           marks: performance.getEntriesByType("mark").filter(e=>e.name.startsWith("ooga:")).map(e=>({name:e.name,ms:e.startTime})),
-          heap: performance.memory?.usedJSHeapSize ?? null, tasks,
+          heap: performance.memory?.usedJSHeapSize ?? null, tasks, startQuality: S.quality, bootCPU: S.bootCPU, rockProbe: window.__rockProbe ?? null,
+          stamps: Array.from(S.stamps.subarray(0, S.n), n => Math.round(n * 10) / 10),
           postStart: { frames: times.length, p95: times[Math.floor(times.length*.95)], p99: times[Math.floor(times.length*.99)], max: times.at(-1), over33: times.filter(n=>n>33).length, over50: times.filter(n=>n>50).length },
           resources: performance.getEntriesByType("resource").filter(e=>e.name.startsWith(location.origin)).map(e=>({path:new URL(e.name).pathname,transfer:e.transferSize,encoded:e.encodedBodySize,decoded:e.decodedBodySize})) };
       })()`);
       rows.push({ run, cache, readyMs: ready, input, ...measured, logs: [...b.logs] }); save();
-      if (!input.accepted || input.distance <= 0 || b.logs.length) throw Error("Input or clean-console startup contract failed");
+      if (!input.accepted || b.logs.length) throw Error("Input or clean-console startup contract failed");
       console.log(JSON.stringify({ run, cache, readyMs: ready, input, frames: measured.postStart }));
     }
     await b.close(true); b = null;

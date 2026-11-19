@@ -663,6 +663,7 @@
   // delays. Recalibrated 2026-09-24 against the hub as it now is: an M4 Max builds it in about 2.35 s, so the old 2200 started every machine at medium. The same ratio to
   // that fast build is kept, and the frame-interval auto-tier still steps a slow device down while it plays.
   const BOOT_MEDIUM = 3600, BOOT_LOW = 5400;
+  let bootCPU = null;
   const tierFromBoot = (ms) => {
     if (renderer.kind !== "webgl2") return;
     const wanted = ms > BOOT_LOW ? "low" : ms > BOOT_MEDIUM || MEMORY_LIMITED ? "medium" : null;
@@ -1112,8 +1113,11 @@
     }
     mark("core-ready");
     mark("ready");
-    // A restored island counts as the build it replaced, so the cache never starts a device a tier higher.
-    tierFromBoot(window.BL.buildTasks.cpu - constructionCPU - uploadCPU + (window.BL.terrainCache?.stats.credit || 0));
+    // A restored island counts as the build it replaced, and so does a build the scene left for after its first paint
+    // (`bootDeferred`), so neither starts a device a tier higher.
+    bootCPU = window.BL.buildTasks.cpu - constructionCPU - uploadCPU + (window.BL.terrainCache?.stats.credit || 0);
+    bootCPU *= 1 + (active?.bootDeferred || 0);
+    tierFromBoot(bootCPU);
     raf = window.requestAnimationFrame(frame);
     if (terrainController && window.BL.terrainCache?.stats.lastSource === "miss") fillTerrain();
   };
@@ -1136,6 +1140,7 @@
       cabinet: cabinetView,
       renderer,
       startLevel: START_BANANAS,
+      get bootCPU() { return bootCPU; },
       hubPolicy: ctx.hubPolicy,
       testBananas: TEST_BANANAS,
       project: renderer.project,

@@ -36765,10 +36765,11 @@ record("character visibility source bakes: ownership wrappers share exact immuta
         && hits[0].y > cave.root.position.y - cave.baseY + cave.bodyHeight, JSON.stringify({ before, health: cave.health, hits }));
     } finally { crew.dispose(); }
   }
-  // The walls come from the sliced build a released hub's return runs behind the fade, at its finest slicing, so every
-  // sight check below reads that build.
-  for (const walls = BL.rockGuides.prepareSteps(island, { until: 0, budget: 0, work: 0 }); !walls.next().done;);
-  const rockGuides = BL.rockGuides.create({ island, sealed: [] });
+  // The cue comes from the sliced build the hub's boot runs after its first paint (its walls the same sliced build a
+  // released hub's return runs behind the fade), at its finest slicing, so every sight check below reads that build.
+  let rockGuides;
+  for (const steps = BL.rockGuides.createSteps({ island, sealed: [] }, { until: 0, budget: 0, work: 0 }); !(rockGuides = steps.next()).done;);
+  rockGuides = rockGuides.value;
   globalThis.__ooga = { island, headquarters: { rockGuides } };
 
   const backends = ["webgl2"];
