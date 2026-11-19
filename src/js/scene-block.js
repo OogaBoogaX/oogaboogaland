@@ -164,7 +164,7 @@
   const acts = (name, id, a, b, c) => onDeck() ? false : liveRound() ? round.act(name, id, a, b, c) : SIM[name](sim, id, a, b, c);
   let jumpWas = false, panelOpen = false;
   const el = {};
-  const blockScene = {
+  const blockScene = BL.deferred.scene("block", {
     id: "block", voiceZone: BL.blockWire.ZONE, renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() { return phase === "play" || fx.inMotion; },
     // A live session keeps stepping behind the controls panels: a host that stopped would freeze the round and lose its
@@ -174,7 +174,7 @@
       panelOpen = on;
       if (on && panelLive()) { trigger = false; arrows.left = arrows.right = 0; move.crouch = 0; jumpWas = false; }
     }
-  };
+  });
 
   const panelLive = () => panelOpen && blockScene.runsBehindPanels;
   const place = (node) => { addChild(root, node); placed.push(node); return node; };
