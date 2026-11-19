@@ -1,6 +1,6 @@
 // The Worker in front of Ooga Booga Land: the built page from static assets, GitHub sign-in under
 // /auth/*, the account API under /api/*, the totems' merge summaries under /api/totems/* and Repo Island's at /api/repo-totems, voice
-// signalling under /api/voice/*, Tess's answers at /api/tess, GitHub pictures at /api/avatar/<id> (avatar.js), who stands where for the World Map at /api/world (world.js), /room, the island's live socket, /game/*, the sockets
+// signalling under /api/voice/*, Tess's answers at /api/tess, GitHub pictures at /api/avatar/<id> (avatar.js), who stands where for the World Map at /api/world and, pushed, /api/world/live (world.js, world-watch.js), /room, the island's live socket, /game/*, the sockets
 // of the games the Worker hosts itself (game-host.js), /donations/*, passed on to bananapayserver over the
 // DONATIONS binding, /inspect with its feed /api/inspect/ws, the Durable Object inspector (inspect.js), and the lecture
 // recordings under /media/lectures/* from R2 (lecture-audio.js). Only those paths run this code (`run_worker_first` in wrangler.<env>.jsonc); every other path is
@@ -19,7 +19,7 @@ import { pruneCloudHopperReplays } from "./cloud-hopper-replay-store.js";
 import { allowed, fromSite, getSessionFromRequest, readBody, text } from "./http.js";
 import { handlePoker } from "./poker.js";
 import { handleTess, pruneTess } from "./tess.js";
-import { handleWorld } from "./world.js";
+import { handleWorld, handleWorldLive } from "./world.js";
 import { handleTotems } from "./totems.js";
 import { handleRepoTotems } from "./repo-totems.js";
 import { gameName } from "./games.js";
@@ -30,6 +30,7 @@ import { inspectEdge } from "./inspect-report.js";
 export { Room } from "./room.js";
 export { GameHost } from "./game-host.js";
 export { Inspector } from "./inspector.js";
+export { WorldWatch } from "./world-watch.js";
 // Ooga Chat's private door (docs/ooga-chat-backend.md): reachable only through a service binding that names it.
 export { ChatBridge } from "./chat-bridge.js";
 // Ooga Chat's audience (#665): both outdoor zones' listeners and speakers, apart from the Room's 32 players.
@@ -119,6 +120,7 @@ export default {
     if (url.pathname === "/api/connection-reports") return handleConnectionReports(request, env);
     if (url.pathname.startsWith("/api/avatar/")) return handleAvatar(request, env, url, ctx);
     if (url.pathname === "/api/world") return handleWorld(request, env, ctx);
+    if (url.pathname === "/api/world/live") return handleWorldLive(request, env);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);
     if (url.pathname === "/room") return handleRoom(request, env, ctx);
     if (url.pathname.startsWith("/game/")) return handleGame(request, env, url, ctx);

@@ -53,12 +53,13 @@
   // wave tint across that surface for the frame, an accepted Canvas quality trade-off. Light is keyed as the 8-bit values the
   // paint uses (`shade`), so a sun creeping across the sky repaints only when the pixels would change. Eight reusable
   // slots share a 2,097,152-pixel budget, so the largest board (1200x540) fits beside the smaller ones; an evicted
-  // slot of the same size keeps its backing store. Oversized surfaces keep a single grow-only scratch image.
+  // slot of the same size keeps its backing store. Oversized surfaces (a Timechain room's 4096x1024 dome) keep a single
+  // grow-only scratch image, shaded once a frame for the surface its first face asks for, then reused by its other faces.
   const createSurfaceShadeCache = (paint) => {
     const MAX_PIXELS = 2048 * 1024;
     const entries = Array.from({ length: 8 }, () => ({ canvas: null, context: null, geometry: null, source: null, pixels: 0, used: 0, frame: -1,
       version: 0, w: 0, h: 0, sourceW: 0, sourceH: 0, br: 0, bg: 0, bb: 0, r: 0, g: 0, b: 0, ar: 0, ag: 0, ab: 0 }));
-    const fallback = { canvas: null, context: null };
+    const fallback = { canvas: null, context: null, geometry: null, source: null, frame: -1, version: 0, w: 0, h: 0, sourceW: 0, sourceH: 0, br: 0, bg: 0, bb: 0 };
     const shade = { r: 0, g: 0, b: 0, ar: 0, ag: 0, ab: 0 };
     let pixels = 0, clock = 0, frame = 0;
     const clear = entry => {
@@ -68,6 +69,10 @@
     };
     const channel = value => value > 0 ? Math.round(value * 255) : 0;
     const added = value => value > 0 ? Math.min(255, Math.round(value)) : 0;
+    // What an entry was shaded from, light aside: the surface, its content version and every dimension it is drawn at.
+    const holds = (entry, geometry, surface, source, w, h, br, bg, bb) => entry.geometry === geometry && entry.source === source
+      && entry.version === surface.version && entry.w === w && entry.h === h && entry.sourceW === source.width && entry.sourceH === source.height
+      && entry.br === br && entry.bg === bg && entry.bb === bb;
     const get = (geometry, rec, coverage) => {
       const surface = geometry.imageSurface, source = surface.canvas, w = surface.width || source.width, h = surface.height || source.height;
       const background = surface.background, br = background ? background[0] : -1, bg = background ? background[1] : -1, bb = background ? background[2] : -1;
@@ -75,14 +80,13 @@
       shade.ar = added(rec.canvasAddR); shade.ag = added(rec.canvasAddG); shade.ab = added(rec.canvasAddB);
       for (let i = 0; i < entries.length; i++) {
         const entry = entries[i];
-        if (entry.geometry === geometry && entry.source === source && entry.version === surface.version && entry.w === w && entry.h === h
-          && entry.sourceW === source.width && entry.sourceH === source.height
-          && entry.br === br && entry.bg === bg && entry.bb === bb
+        if (holds(entry, geometry, surface, source, w, h, br, bg, bb)
           && (entry.frame === frame || entry.r === shade.r && entry.g === shade.g && entry.b === shade.b
             && entry.ar === shade.ar && entry.ag === shade.ag && entry.ab === shade.ab)) {
           entry.used = ++clock; entry.frame = frame; return entry.canvas;
         }
       }
+      if (fallback.frame === frame && holds(fallback, geometry, surface, source, w, h, br, bg, bb)) return fallback.canvas;
       let entry = fallback;
       if (w * h <= MAX_PIXELS) {
         // This surface's own slot first, else the least recently used: forgetting a key keeps its backing store.
@@ -111,21 +115,24 @@
         if (entry.canvas.height !== h) entry.canvas.height = h;
       }
       paint(entry.canvas, entry.context, surface, shade, coverage);
+      entry.geometry = geometry; entry.source = source; entry.version = surface.version; entry.w = w; entry.h = h;
+      entry.sourceW = source.width; entry.sourceH = source.height;
+      entry.br = br; entry.bg = bg; entry.bb = bb; entry.frame = frame;
       if (entry !== fallback) {
-        entry.geometry = geometry; entry.source = source; entry.version = surface.version; entry.w = w; entry.h = h;
-        entry.sourceW = source.width; entry.sourceH = source.height;
-        entry.br = br; entry.bg = bg; entry.bb = bb;
         entry.r = shade.r; entry.g = shade.g; entry.b = shade.b;
         entry.ar = shade.ar; entry.ag = shade.ag; entry.ab = shade.ab;
-        entry.pixels = w * h; pixels += entry.pixels; entry.used = ++clock; entry.frame = frame;
+        entry.pixels = w * h; pixels += entry.pixels; entry.used = ++clock;
       }
       return entry.canvas;
     };
     return { get,
       // Called once a frame before any surface draws.
       frame: () => { frame++; },
-      release: live => { for (const entry of entries) if (entry.geometry && !live.has(entry.geometry)) clear(entry); },
-      dispose: () => { for (const entry of entries) clear(entry); if (fallback.canvas) fallback.canvas.width = fallback.canvas.height = 0; },
+      release: live => {
+        for (const entry of entries) if (entry.geometry && !live.has(entry.geometry)) clear(entry);
+        if (fallback.geometry && !live.has(fallback.geometry)) fallback.geometry = fallback.source = null;
+      },
+      dispose: () => { for (const entry of entries) clear(entry); if (fallback.canvas) fallback.canvas.width = fallback.canvas.height = 0; fallback.geometry = fallback.source = null; },
       get pixels() { return pixels; }, get size() { let n = 0; for (const entry of entries) if (entry.geometry) n++; return n; } };
   };
   const createRenderer = (canvas, { width: fixedW = 0, height: fixedH = 0, transparent = false, environmentCapture = false } = {}) => {
@@ -2284,6 +2291,7 @@
       project,
       ray,
       setQuality: () => { },
+      setScale: () => { },
       releaseGeometry: () => { },
       prepareScene: () => { },
       prepareGeometry: () => true,

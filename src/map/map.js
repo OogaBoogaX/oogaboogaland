@@ -3,7 +3,8 @@
 // through: a bridge, a door, a window, a keypad. Branches fold and unfold, and a place with an address opens the game
 // there.
 //
-// The live layer comes from /api/world (worker/src/world.js), asked every `refreshMs` while the page shows:
+// The live layer comes from /api/world (worker/src/world.js), pushed over /api/world/live as it changes, or asked every
+// `refreshMs` while that socket is not open, and only while the page shows:
 // - for everyone: how many stand at each place;
 // - for a signed-in viewer: who they are;
 // - for an Inspector account: the room's sockets and every Durable Object's.
@@ -332,7 +333,7 @@
   }).observe(view);
 
   // The live layer.
-  let live = null, timer = 0, wait = 10000, stopped = false, failed = false, nowhere = 0;
+  let live = null, timer = 0, wait = 2000, stopped = false, failed = false, nowhere = 0;
   const say = () => {
     if (stopped) { status.textContent = "The map alone: who is where shows on the live site."; return; }
     if (!live) { status.textContent = failed ? "Couldn't read who is where. Trying again." : "Reading who is where…"; return; }
@@ -341,7 +342,8 @@
       : live.tier === "inspector" ? " Inspector view: sockets and Durable Objects." : "";
     const between = nowhere ? ` ${nowhere} between places.` : "";
     const cpu = live.cpu ? ` CPU is estimated from each place's messages over the last ${Math.round(live.cpu.seconds)} s.` : "";
-    status.textContent = `${plural(live.players, "player")} online, as of ${when}.${between}${failed ? " (Couldn't refresh.)" : ""}${cpu}${tail}`;
+    const how = pushing() ? " Live." : failed ? " (Couldn't refresh.)" : "";
+    status.textContent = `${plural(live.players, "player")} online, as of ${when}.${how}${between}${cpu}${tail}`;
   };
   const age = (at) => {
     const s = Math.max(0, Math.round((Date.now() - at) / 1000));
@@ -411,7 +413,14 @@
       if (live && live.tier === "inspector") {
         if (n.depth === 0 && live.room) {
           const r = live.room;
-          p.objects.append(el("li", null, `${r.cls} · ${r.name} · ${r.players} of ${r.maxPlayers} players · ${plural(r.sockets, "socket")}${r.commons ? ` (${r.commons} Ooga Chat)` : ""}`));
+          // What the room's sockets are: its connected players, Ooga Chat's members, and connections it has let go of
+          // whose close the page never finished (a reload, a second tab, a reconnect), which the runtime still holds.
+          // A player held over a lost socket, waiting a few seconds for its page to come back, has none.
+          const parts = [plural(r.players - (r.held || 0), "player")];
+          if (r.held) parts.push(`${r.held} away`);
+          if (r.commons) parts.push(`${r.commons} Ooga Chat`);
+          if (r.closing) parts.push(`${r.closing} closing`);
+          p.objects.append(el("li", null, `${r.cls} · ${r.name} · ${r.players} of ${r.maxPlayers} players · ${plural(r.sockets, "socket")}${r.sockets ? `: ${parts.join(", ")}` : ""}`));
         } else if (here && live.room) p.objects.append(el("li", null, `${live.room.cls} · ${live.room.name} · ${plural(here, "socket")} here`));
         for (const rule of n.objects) {
           if (rule.prefix) for (const o of live.objects.filter((x) => x.cls === rule.cls && x.name.startsWith(rule.prefix))) p.objects.append(el("li", null, objectLine(o)));
@@ -431,10 +440,12 @@
   };
   // Only a page with no Worker behind it (a 404 or 405, or an answer that is not JSON) stops for good. Anything else
   // that fails, the limiter's 429 among them, is waited out (its Retry-After when it gives one) and asked again.
+  // While the push below is open nothing is asked: the poll is how the page starts, and its way back when that drops.
   let asked = 0;
+  const pushing = () => !!sock && sock.readyState === WebSocket.OPEN;
   const poll = async () => {
     timer = 0;
-    if (document.hidden || stopped) return;
+    if (document.hidden || stopped || pushing()) return;
     asked = Date.now();
     try {
       const res = await fetch("/api/world", { credentials: "same-origin", cache: "no-store", headers: { accept: "application/json" } });
@@ -443,9 +454,15 @@
         const after = Number(res.headers.get("retry-after"));
         throw Object.assign(new Error(`world: ${res.status}`), { after: Number.isFinite(after) && after > 0 ? after * 1000 : 0 });
       }
-      live = await res.json();
+      const next = await res.json();
+      if (pushing()) return;
+      // Viewers in a data center share one read of the room, so an answer can be the one already drawn.
+      const same = !failed && live && next.at === live.at && next.tier === live.tier;
+      live = next;
       failed = false;
-      wait = Number.isFinite(live.refreshMs) && live.refreshMs >= 2000 ? live.refreshMs : 10000;
+      wait = Number.isFinite(live.refreshMs) && live.refreshMs >= 1000 ? live.refreshMs : 2000;
+      connect();
+      if (same) { schedule(); return; }
     } catch (error) {
       failed = true;
       wait = Math.min(Math.max(error.after || wait * 2, 10000), 60000);
@@ -453,11 +470,64 @@
     paint();
     schedule();
   };
-  const schedule = (delay = wait) => { if (!timer && !stopped && !document.hidden) timer = setTimeout(poll, delay); };
+  const schedule = (delay = wait) => { if (!timer && !stopped && !document.hidden && !pushing()) timer = setTimeout(poll, delay); };
+
+  // The push: once the Worker has answered, one socket to /api/world/live (WorldWatch, worker/src/world-watch.js), which
+  // sends the same answer whenever someone joins, leaves or moves. A Worker without it (an older one) or a socket that
+  // drops leaves the poll to carry on, and the socket is tried again ever less often, at most once a minute. A ping
+  // every PING_MS that goes unanswered closes a socket a network change left open but dead.
+  const PING_MS = 30000;
+  let sock = null, sockTimer = 0, sockWait = 2000, pinger = 0, ponged = true;
+  const connect = () => {
+    if (sock || sockTimer || stopped || document.hidden || typeof WebSocket !== "function") return;
+    let ws;
+    try { ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/world/live`); } catch { return; }
+    sock = ws;
+    ws.addEventListener("open", () => {
+      clearTimeout(timer);
+      timer = 0;
+      ponged = true;
+      pinger = setInterval(() => {
+        if (!ponged) { ws.close(); return; }
+        ponged = false;
+        try { ws.send("ping"); } catch { /* Its close follows. */ }
+      }, PING_MS);
+    });
+    ws.addEventListener("message", (event) => {
+      if (event.data === "pong") { ponged = true; return; }
+      let next;
+      try { next = JSON.parse(event.data); } catch { return; }
+      if (!next || typeof next !== "object" || !next.zones) return;
+      // Only a socket that delivers counts as working: one WorldWatch closes at once (the room unreachable) keeps
+      // backing off.
+      sockWait = 2000;
+      live = next;
+      failed = false;
+      paint();
+    });
+    ws.addEventListener("close", () => {
+      clearInterval(pinger);
+      pinger = 0;
+      if (sock !== ws) return;
+      sock = null;
+      if (stopped || document.hidden) return;
+      schedule(0);
+      sockTimer = setTimeout(() => { sockTimer = 0; connect(); }, sockWait);
+      sockWait = Math.min(sockWait * 2, 60000);
+    });
+  };
+  const disconnect = () => {
+    clearTimeout(sockTimer);
+    sockTimer = 0;
+    const ws = sock;
+    sock = null;
+    if (ws) ws.close();
+  };
+
   // Back on the page it asks at once only when its wait has run out since it last asked, so flipping between tabs
-  // never asks more often than the page would have anyway.
+  // never asks more often than the page would have anyway. A hidden page holds no socket.
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) { clearTimeout(timer); timer = 0; } else if (!stopped && !timer) schedule(Math.max(0, asked + wait - Date.now()));
+    if (document.hidden) { clearTimeout(timer); timer = 0; disconnect(); } else if (!stopped && !timer) schedule(Math.max(0, asked + wait - Date.now()));
   });
 
   // The drawing takes the list's place; the list stays in the page for a reader without scripts.

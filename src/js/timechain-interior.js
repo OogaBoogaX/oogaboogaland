@@ -310,6 +310,18 @@
     // their tops; the doorway and the vestibule open to the guided walk alone.
     let guided = false;
     const solids = built.solids, tops = solids.filter((o) => o.top !== undefined);
+    // A solid hung in the air with a top to stand on (the Block Party's mirror ball) is also a ceiling to a body under
+    // it, so one rising from below stops at its underside rather than passing up through it to its top.
+    const hung = tops.filter((o) => o.below !== undefined);
+    const overhead = (x, z, feet, r) => {
+      let c = roof(x, z, 0.3);
+      for (let i = 0; i < hung.length; i++) {
+        const o = hung[i];
+        if (feet >= o.below || Math.hypot(x - o.x, z - o.z) >= o.r + r) continue;
+        if (o.below < c) c = o.below;
+      }
+      return c;
+    };
     const walkable = (ax, az, bx, bz, y, height, actor) => {
       const r = actor && actor.bodyRadius || 0.35, steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.2));
       for (let i = 1; i <= steps; i++) if (!ROOMS.clearAt(L, ax + (bx - ax) * i / steps, az + (bz - az) * i / steps, r, guided, y, solids)) return false;
@@ -730,7 +742,7 @@
     };
     if (playerName) {
       const sharedCtx = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt, walkable, useNear, jetpackAllowed: () => !!kind.jetpack,
-        ceilingAt: (x, z) => roof(x, z, 0.3), shoulderObstacle, shoulderObstacleActive, shoulderPropClear };
+        ceilingAt: (x, z, feet, actor) => overhead(x, z, feet, actor ? actor.bodyRadius : 0.35), shoulderObstacle, shoulderObstacleActive, shoulderPropClear };
       people = sharedCtx.crew = BL.crew.create(sharedCtx);
       pilot.bind(sharedCtx);
       avatar = people.cavemen.get(playerName);

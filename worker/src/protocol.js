@@ -15,6 +15,8 @@ import { commonsRoom } from "./room-commons.js";
 export { commonsRoom };
 // The Durable Object inspector's reporter (inspect-report.js), here so the room and game host take it with the rest.
 export { inspectReporter, INSPECT_FEATURE } from "./inspect-report.js";
+// The World Map's reporter (world-report.js), likewise.
+export { worldReporter } from "./world-report.js";
 import { BACK_WHY } from "./inspect-report.js";
 // The voice cleanup queue's rules (sfu.js), here so the room takes them with the rest.
 export { sessionGone, cleanupPass } from "./sfu.js";

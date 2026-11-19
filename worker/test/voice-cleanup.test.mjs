@@ -17,6 +17,7 @@ const roomClass = () => {
     CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }], Date, Map, Set, Response, Promise, setTimeout, clearTimeout };
   runInNewContext(source, context);
   context.Room.prototype.inspect = protocol.inspectReporter(null, {}, "Room", () => "", () => null);
+  context.Room.prototype.world = protocol.worldReporter(null, {}, () => null);
   return context.Room;
 };
 const room = (sfu) => {

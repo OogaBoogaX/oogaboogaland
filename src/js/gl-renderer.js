@@ -1897,7 +1897,8 @@ void main() {
       const info = gl.getExtension("WEBGL_debug_renderer_info");
       return info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null;
     });
-    let width = 0, height = 0, dpr = 1, pw = 0, ph = 0;
+    // `scale` is a scene's own share of the tier's pixel density (`setScale`), never under the 0.75 floor.
+    let width = 0, height = 0, dpr = 1, pw = 0, ph = 0, scale = 1;
     const LOST_FRAMES = 900;
     let lost = false, lostFrames = 0;
     const size = { width: 0, height: 0 };
@@ -3475,7 +3476,7 @@ void main() {
       width = canvas.clientWidth;
       height = canvas.clientHeight;
       const budget = Math.sqrt(MAX_PIXELS / Math.max(1, width * height));
-      dpr = Math.min(budget, Math.max(0.75, Math.min(window.devicePixelRatio || 1, settings.dpr)));
+      dpr = Math.min(budget, Math.max(0.75, Math.min(window.devicePixelRatio || 1, settings.dpr) * scale));
       size.width = width;
       size.height = height;
       pw = Math.max(1, Math.floor(width * dpr));
@@ -4897,6 +4898,13 @@ void main() {
       buildShadow();
       resize();
     };
+    // A scene may draw fewer pixels than its tier (Block Frenzy's Low detail): 1 is the tier's own density. The scene
+    // that sets it puts it back to 1 when it leaves.
+    const setScale = (s) => {
+      if (s === scale) return;
+      scale = s;
+      resize();
+    };
     const dispose = () => {
       if(dsbGPU){dsbGPU.dispose();dsbGPU=null;}
       canvas.removeEventListener("webglcontextlost", onLost);
@@ -4966,6 +4974,7 @@ void main() {
       project,
       ray,
       setQuality,
+      setScale,
       releaseGeometry,
       prepareScene,
       // Owners of bounded, alternating meshes may prepare every variant before their first visible swap.

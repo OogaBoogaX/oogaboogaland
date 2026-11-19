@@ -114,7 +114,7 @@ test("busy rows go stale after five quiet minutes, the rest leave after a day, a
 });
 
 // The real room, as doorway.test.mjs runs it, with the inspector on.
-const roomHost = ({ sfu = null, inspector = true } = {}) => {
+const roomHost = ({ sfu = null, inspector = true, env = {} } = {}) => {
   let now = 100000;
   const accepted = [];
   const socket = () => ({
@@ -154,7 +154,7 @@ const roomHost = ({ sfu = null, inspector = true } = {}) => {
       put: async (key, value) => { stored.set(key, value); }, getAlarm: async () => null, setAlarm: async () => {},
     },
   };
-  const room = new context.Room(ctx, inspector ? { INSPECTOR, INSPECTOR_IDS: "1" } : {});
+  const room = new context.Room(ctx, { ...(inspector ? { INSPECTOR, INSPECTOR_IDS: "1" } : {}), ...env });
   const join = async (id, login) => {
     const before = accepted.length;
     await room.fetch({ url: "https://island.invalid/room", headers: new Headers({ upgrade: "websocket", "x-player-id": String(id), "x-player-login": login, "x-player-contributor": "0" }) });
@@ -229,8 +229,9 @@ test("what the room relays to an Ooga Chat member's socket is counted too", asyn
 });
 
 test("nothing in the room's code writes to a socket but Room.send, so no send goes uncounted", () => {
-  // Other objects' sockets (the Audience, a game host, the Inspector) and the inspector's own browser page are not the room's.
-  const others = new Set(["audience.js", "audience-media.js", "game-host.js", "inspector.js", "inspect-page.js"]);
+  // Other objects' sockets (the Audience, a game host, the Inspector, the World Map's WorldWatch) and the inspector's own
+  // browser page are not the room's.
+  const others = new Set(["audience.js", "audience-media.js", "game-host.js", "inspector.js", "inspect-page.js", "world-watch.js"]);
   const dir = new URL("../src/", import.meta.url), raw = [];
   for (const name of readdirSync(dir)) {
     if (!name.endsWith(".js") || others.has(name)) continue;
@@ -340,6 +341,38 @@ test("the Inspector keeps rows and the log across a restart, and tells objects w
   assert.equal(ws.closed.code, 4000, "taken off the allowlist, the page is closed");
 });
 
+test("the room tells the World Map's WorldWatch who joined, and stops once nobody watches", async () => {
+  const reports = [];
+  let watching = false;
+  const WORLD = { getByName: () => ({ report: async (view) => { reports.push(view); return { watching }; } }) };
+  const { room, join } = roomHost({ inspector: false, env: { WORLD } });
+  await join(1, "a");
+  await flush();
+  assert.equal(reports.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(reports[0].zones)), { [protocol.OUTSIDE]: [{ display: "a", login: "a" }] });
+  await join(2, "b");
+  await flush();
+  assert.equal(reports.length, 1, "nobody watching: the second join is not reported");
+  watching = true;
+  assert.equal(room.worldWatch().players, 2, "a viewer connecting is handed the room as it stands");
+});
+
+test("the World Map tells a connection the room has let go of, still held while its close is unfinished, from a player's", async () => {
+  const { room, join, accepted } = roomHost({ inspector: false });
+  const first = await join(1, "a");
+  const second = await join(2, "b");
+  await join(1, "a");
+  assert.equal(first.closed.reason, "replaced", "the account's newer tab replaced it");
+  first.closed = null;
+  const view = room.worldView();
+  assert.equal(accepted.length, 3);
+  assert.deepEqual([view.sockets, view.players, view.commons, view.closing], [3, 2, 0, 1], "three held, two players, one closing");
+  second.closed = { code: 1006 };
+  room.webSocketClose(second, 1006, "", false);
+  const away = room.worldView();
+  assert.deepEqual([away.sockets, away.players, away.held, away.closing], [2, 2, 1, 1], "a player held over a lost socket is still a player, with no socket");
+});
+
 test("the World Map reads who stands where from the room's memory alone, and the Inspector's objects without their rows", async () => {
   const { room, join } = roomHost({ inspector: false });
   const a = await join(1, "a");
@@ -351,7 +384,7 @@ test("the World Map reads who stands where from the room's memory alone, and the
   room.ctx.storage = new Proxy({}, { get: () => { throw new Error("the World Map read storage"); } });
   const view = JSON.parse(JSON.stringify(room.worldView()));
   room.ctx.storage = storage;
-  assert.deepEqual({ ...view, zones: undefined, load: undefined }, { name: "island", sockets: 2, players: 2, maxPlayers: protocol.MAX_PLAYERS, commons: 0, zones: undefined, load: undefined });
+  assert.deepEqual({ ...view, zones: undefined, load: undefined }, { name: "island", sockets: 2, players: 2, held: 0, maxPlayers: protocol.MAX_PLAYERS, commons: 0, closing: 0, zones: undefined, load: undefined });
   assert.ok(view.load.zones.factory.in >= 1, "a message counted in the zone its sender stood in");
   assert.ok(Object.values(view.load.zones).some((z) => z.out > 0), "the welcomes and broadcasts counted where they went");
   assert.ok(view.load.seconds > 0);

@@ -4570,11 +4570,16 @@ const canvasSurfaceCacheChecks = async () => {
   const before = paints, size = cache.size, pixels = cache.pixels;
   cache.frame(); cache.get(huge, rec); cache.frame(); cache.get(huge, rec);
   if (paints !== before + 2 || cache.size !== size || cache.pixels !== pixels) failures++;
+  // Its faces, each lit a little differently, share the one image their first face shaded that frame.
+  const domeLit = { ...rec }, domeBefore = paints;
+  cache.frame();
+  for (let face = 0; face < 12; face++) { domeLit.canvasR = 0.5 + face * 0.02; cache.get(huge, domeLit); }
+  if (paints !== domeBefore + 1) failures++;
   cache.release(new Set());
   if (cache.size || cache.pixels) failures++;
   cache.get(a, rec); cache.dispose();
   if (cache.size || cache.pixels || canvases.some(c => c.width || c.height) || canvases.length > 9) failures++;
-  record("Canvas surface reuse: unchanged faces reuse exact shaded images, every content/lighting/dimension input invalidates, and eviction, scene release and disposal bound owned canvases", failures === 0, JSON.stringify({ failures, paints, canvases: canvases.length }));
+  record("Canvas surface reuse: unchanged faces reuse exact shaded images, every content/lighting/dimension input invalidates, an oversized surface shades once a frame, and eviction, scene release and disposal bound owned canvases", failures === 0, JSON.stringify({ failures, paints, canvases: canvases.length }));
   // The curved jumbotron: a 1200x540 board drawn as ten faces a frame, each lit a little differently, under a sun
   // that moves every frame. It shades at most once a frame, and a slot keeps its backing store across repaints.
   const board = create(canvas => { canvas.serial = ++paints; }), slide = geometry();
@@ -13953,6 +13958,46 @@ const blockMirage = { name: "block clank mirage", why: "regression: phantom carr
   record("block mirage: phantom carriers hold the block on both modelled fists without a gun, and the effect clears outside the zone and on another map",
     proof.overlay && proof.phantoms.length === 3 && proof.phantoms.every(p => p.hands === 2 && p.gap < .03 && !p.gun) && proof.cleared && proof.switched, JSON.stringify(proof));
 } };
+const blockDetail = { name: "block detail", why: "rule: Low detail may only take away decoration; what an Ooga stands on, bumps into or hides behind is the same on Full and Low", run: async b => {
+  if (await b.evaluate(`!document.querySelector('[data-intro="block"]').hidden`)) await b.key(" ");
+  const rows = await b.evaluate(`(() => {
+    const D = __ooga.block, S = BL.scenes.block, R = __ooga.renderer, update = S.update, rows = [];
+    const canvas = document.getElementById("scene");
+    const pick = (sel) => document.querySelector('#block-board ' + sel).click();
+    // Collision and the camera's sight: the sim's solids sampled across the island at four heights, and its canopies.
+    const solids = () => { const A = BL.blockSim.ARENA; let s = ""; for (const y of [0.5, 1.5, 3, 6]) for (let x = -A.W; x <= A.W; x += 0.5) for (let z = -A.L; z <= A.L; z += 0.5) s += BL.blockSim.solidAt(x, y, z) ? 1 : 0; return s + "|" + (A.decor || []).filter((d) => d.kind === "canopy").length; };
+    // Every drawn node of the map (the scene's node holding its ground and buildings, which Detail rebuilds), by geometry
+    // and where it stands; sightHidden ones are decoration the view and sight ignore.
+    const mapRoot = () => { const ground = BL.blockModels.arena(BL.blockSim.MAPS.indexOf(D.sim.map)); return S.root.children.find((c) => c.children.some((x) => x.geometry === ground)); };
+    const drawn = () => { BL.scene.updateWorld(S.root); const all = new Map(); BL.scene.traverseVisible(mapRoot(), (n) => { if (!n.geometry) return; const k = n.geometry.faces.length + "@" + n.world[12].toFixed(2) + "," + n.world[13].toFixed(2) + "," + n.world[14].toFixed(2); all.set(k, (all.get(k) || 0) + 1); if (!n.sightHidden) all.set("solid " + k, (all.get("solid " + k) || 0) + 1); }); return all; };
+    S.update = () => {};
+    try {
+      D.showBoard();
+      for (const map of ["town", "jungle", "haunted", "clank"]) {
+        // Both pictures from a fresh build, so nothing the scene has already posed (a bobbing pickup) differs.
+        pick('[data-map="' + map + '"]'); pick('[data-detail="low"]'); pick('[data-detail="full"]');
+        const full = { solids: solids(), drawn: drawn(), w: canvas.width };
+        pick('[data-detail="low"]');
+        const low = { solids: solids(), drawn: drawn(), w: canvas.width };
+        const keys = new Set([...full.drawn.keys(), ...low.drawn.keys()]);
+        let sightChanged = 0, lowOnly = 0, fullOnlyDecor = 0;
+        for (const k of keys) {
+          const f = full.drawn.get(k) || 0, l = low.drawn.get(k) || 0;
+          if (k.startsWith("solid ")) { if (f !== l) sightChanged++; }
+          else if (l > f) lowOnly++;
+          else if (f > l) fullOnlyDecor++;
+        }
+        rows.push({ map, sameSolids: full.solids === low.solids, sightChanged, lowOnly, fullOnlyDecor, scale: R.kind === "webgl2" ? +(low.w / full.w).toFixed(3) : null });
+      }
+      pick('[data-detail="full"]');
+      rows.push({ back: canvas.width });
+      return rows;
+    } finally { S.update = update; D.showBoard(); }
+  })()`);
+  const maps = rows.slice(0, 4);
+  record("block detail: on every map Low draws a subset of Full that keeps every sight-blocking node, the sim's solids and canopies are the same, and Low draws three quarters of the pixels each way",
+    maps.length === 4 && maps.every(r => r.sameSolids && r.sightChanged === 0 && r.lowOnly === 0 && (r.scale === null || Math.abs(r.scale - 0.75) < 0.01)) && maps.some(r => r.fullOnlyDecor > 0), JSON.stringify(rows));
+} };
 const blockPoses = { name: "block modelled poses", why: "regression: old straight-arm weapon offsets missed the modelled fists and the trophy block floated above slim Oogas", run: async b => {
   const rows = await b.evaluate(`(() => {
     const B = __ooga, D = B.block, S = BL.scenes.block, rows = [], update = S.update;
@@ -22033,8 +22078,8 @@ const partyRadioChecks = async () => {
   // music stopping while it tuned in again and the lights losing the beat for the visit) after one late frame: the
   // whole time since the frame before counted as heard silent. A stream that comes back plays on, read as before, and
   // one that stays silent frame after frame is still given up.
-  const elements = [], level = { now: 0.2 }, node = () => ({ gain: { value: 0, setTargetAtTime() {} }, frequency: {}, connect() {}, disconnect() {} });
-  const audio = { currentTime: 0, sampleRate: SR, state: "running", destination: {}, createGain: node, createBiquadFilter: node, createMediaElementSource: node, close: async () => {},
+  const elements = [], level = { now: 0.2 }, node = () => ({ gain: { value: 0, setTargetAtTime() {} }, frequency: {}, delayTime: {}, connect() {}, disconnect() {} });
+  const audio = { currentTime: 0, sampleRate: SR, state: "running", destination: {}, createGain: node, createBiquadFilter: node, createDelay: node, createMediaElementSource: node, close: async () => {},
     createAnalyser: () => ({ ...node(), getFloatTimeDomainData: (a) => a.fill(level.now), getByteFrequencyData() {} }) };
   const page = { window: { BL: { sound: { muted: false, subscribe: () => () => {}, channel: () => ({ gain: 1, level: 1, node: (context, to) => to || context.destination, subscribe: () => () => {}, show() {}, release() {} }) } } }, location: { search: "" }, navigator: {}, URLSearchParams, setTimeout, clearTimeout, Date,
     document: { addEventListener() {}, removeEventListener() {} }, AudioContext: function () { return audio; },
@@ -22052,6 +22097,23 @@ const partyRadioChecks = async () => {
   } finally { radio.dispose(); }
   record("party radio: one late frame that finds the stream quiet neither restarts the music nor gives up its beat, and a stream silent frame after frame still falls back to the plain element",
     !late.plain && late.starts === 1 && late.mode === "live" && silent.plain && silent.starts === 2, JSON.stringify({ late, silent }));
+  // Regression: the lookahead's history was counted in frames (900), so at over 112 frames a second it held less than the
+  // eight seconds the speakers trail by: the room never found what is heard now, sat calm and never saw a drop. It is
+  // kept by time, so the music is read eight seconds in at any frame rate, and not before.
+  const rates = [60, 120, 144, 240].map((fps) => {
+    const r = page.window.BL.timechainPartyRadio.create(), E = {};
+    try {
+      elements.at(-1).onplaying();
+      let t = 0;
+      const run = (until) => { level.now = 0.2; for (; t < until; t += 1 / fps) { audio.currentTime += 1 / fps; elements.at(-1).currentTime += 1 / fps; r.sample(reading); } };
+      run(7.5);
+      const early = r.warming;
+      run(10);
+      return { fps, early, warming: r.warming, reads: r.energy(E), ahead: r.ahead(-1, E) };
+    } finally { r.dispose(); }
+  });
+  record("party radio: the music is read eight seconds behind the speakers at 60, 120, 144 and 240 frames a second alike, and not before",
+    rates.every((q) => q.early && !q.warming && q.reads && q.ahead), JSON.stringify(rates));
 };
 
 // Rule: a room id is validated at every boundary, and the three sizes are one design whose doorway, arrival, button and
@@ -25850,7 +25912,7 @@ scene("race", { label:"optional rig link fallback",url:hubPage(src, "scene=hub")
 scene("race", { query: "rain=0&draw=0", steps: [raceStart, raceOwn, raceBench, { name: "race tracks", why: "regression: the 12-slot grid spawned a free banana on Banana Bay", run: async (b) => { await b.evaluate(`window.__ooga.race.toGarage()`); await raceTracks[1](b); } }, raceRigs, raceRigContext, racePause, play("race", "a whole cup under the autopilot: one drawn field of fifteen runs every race and finishes in order, the cup medal and every track's best are saved", cupRun), raceMirror, raceAgain, trip("race")] });
 scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop"), dropOwn] });
 
-scene("block", { steps: [blockStart, blockWalk, blockQuiz, play("block", "a round on autopilot reaches three captures, shows its results and saves the round", blockRun), blockPoses, blockMirage, blockRoofs, blockThrowScore, blockTally, blockZipline, trip("block")] });
+scene("block", { steps: [blockStart, blockWalk, blockQuiz, play("block", "a round on autopilot reaches three captures, shows its results and saves the round", blockRun), blockPoses, blockMirage, blockDetail, blockRoofs, blockThrowScore, blockTally, blockZipline, trip("block")] });
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit"), orbitOwn] });
 scene("mine", { steps: [mineResume, trip("mine"), mineControls, mineOwn] });
 // ---- The Lightning Jet Hangar ----
@@ -32373,7 +32435,7 @@ const qualityFramebufferChecks = async () => {
     settings: { dpr: 1.5, msaa: 2, bloom: true, shafts: true }, maxSamples: 2, res: {}, size: {},
     createTexture: allocate, createRenderbuffer: allocate, DRAW_BOTH: [] };
   const r = runInNewContext(`(() => {
-    let width, height, dpr, pw, ph;
+    let width, height, dpr, pw, ph, scale = 1;
     ${extract("destroyFbo", "    const buildFbo =")}
     ${extract("buildFbo", "    const destroyShadow =")}
     ${extract("resize", "    const init =")}

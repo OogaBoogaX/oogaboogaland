@@ -41,7 +41,7 @@ import {
   PM_FEATURE, PM_HZ, PM_BURST, PM_INVITE_HZ, PM_INVITE_BURST, PM_CONTROL_HZ, PM_CONTROL_BURST, PM_INVITES, PM_BLOCKS, PM_ACCOUNT_KEEP,
   LINK_FEATURE, LINK_HZ, LINK_BURST, LINK_WANTS, LINK_ACCOUNTS, voiceLinked, restoreLinks, storedLinks, linkView, inVoice,
   chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
-  BLEND, BLEND_HZ, seenTogether, inspectReporter, INSPECT_FEATURE, audienceRoom, commonsRoom, sessionGone, cleanupPass,
+  BLEND, BLEND_HZ, seenTogether, inspectReporter, INSPECT_FEATURE, worldReporter, audienceRoom, commonsRoom, sessionGone, cleanupPass,
 } from "./protocol.js";
 import { sha256Hex } from "./crypto.js";
 import { getPlayer } from "./db.js";
@@ -66,14 +66,16 @@ const cleanupJob = (job) => !!job && typeof job === "object" && typeof job.sessi
   && (job.at == null || Number.isFinite(job.at)) && (job.revision === undefined || Number.isFinite(job.revision))
   && (job.inspectUntil === undefined || Number.isFinite(job.inspectUntil));
 
-// How long each of the World Map's two load windows runs (`countLoad`), and the name its counts give Ooga Chat's
-// community members, who report no zone.
-const LOAD_MS = 5000, LOAD_CHAT = "ooga-chat";
+// How long each of the World Map's two load windows runs (`countLoad`), short enough that the map's CPU follows a
+// change within a refresh or two, and the name its counts give Ooga Chat's community members, who report no zone.
+const LOAD_MS = 2000, LOAD_CHAT = "ooga-chat";
 
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.inspect = inspectReporter(ctx, env, "Room", () => ctx.id.name, (detail) => this.inspectState(detail));
+    // The World Map's live layer (world-report.js): who stands where, told to WorldWatch as it changes.
+    this.world = worldReporter(ctx, env, () => this.worldView());
     this.flushDue = 0;
     this.players = new Map();
     // Each player socket to its record, so a message finds its sender without reading the socket's attachment. Rebuilt
@@ -678,6 +680,7 @@ export class Room extends DurableObject {
     if (own) for (const o of this.players.values()) if (o.body && bodyName(o.body).toLowerCase() === own) this.release(o, "owner-here");
     this.players.set(p.id, p);
     this.sockets.set(server, p);
+    this.world.changed();
     if (this.inspect.on) this.inspect.event("join", p, { replaced: !!older });
     this.welcome(p, false);
     this.broadcast({ t: "join", p: this.view(p) }, server);
@@ -730,6 +733,7 @@ export class Room extends DurableObject {
     step("tess", () => tessQueue.presence(this, p, true));
     step("audience", () => audienceRoom.hold(this, p));
     step("host", () => this.electHost());
+    step("world", () => this.world.changed());
   }
 
   // Its page is back for the record: a hold goes on until `resume`; a socket still open (half-open, or the page's own
@@ -765,6 +769,7 @@ export class Room extends DurableObject {
     this.sendStudio(p);
     this.electHost();
     this.updateVoice();
+    this.world.changed();
   }
 
   // What arriving in its zone sends (the `zone` handler's), sent again to a resumed page: its own close forgot it all,
@@ -925,6 +930,7 @@ export class Room extends DurableObject {
       duel.check(this, p);
       tessQueue.presence(this, p);
       this.inspect.event("zone", p, { from, to: p.zone });
+      this.world.changed();
       this.roomZoneChanged(p, from);
       this.partyZoneChanged(p, from);
       hockey.arrive(this, p);
@@ -1171,6 +1177,7 @@ export class Room extends DurableObject {
     step("pm", () => this.privateLeave(p));
     this.players.delete(p.id);
     this.sockets.delete(p.ws);
+    step("world", () => this.world.changed());
     step("audience", () => audienceRoom.leave(this, p));
     step("tess", () => tessQueue.presence(this, p, true, reason === "revoked"));
     // A dropped socket can come straight back in; the last one out frees the room.
@@ -1235,6 +1242,7 @@ export class Room extends DurableObject {
       this.inspect.peak("late", Date.now() - this.flushDue);
       this.snapshot();
       this.inspect.tick();
+      this.world.tick();
     }, 1000 / TICK_HZ);
   }
 
@@ -2305,6 +2313,7 @@ export class Room extends DurableObject {
     if (next !== null) { await this.ctx.storage.setAlarm(next); this.alarmRegisteredAt = next; }
     this.alarmFinished = Date.now();
     this.inspect.tick();
+    this.world.tick();
   }
 
   // When the room last heard from a player: a message, or a ping the runtime answered without waking it.
@@ -2347,12 +2356,21 @@ export class Room extends DurableObject {
     this.inspect.watch(until);
   }
 
+  // WorldWatch asking as a map viewer connects (world-report.js `watch`): the view now, and reports from now on.
+  worldWatch() {
+    return this.world.watch();
+  }
+
   // The World Map's live layer (/api/world, world.js): who stands in which zone, by the names the players tab shows,
   // the room's sockets, and each zone's messages in and sends out a second over the span `load.seconds` says (the
   // current load window and the one before it). From memory alone: no storage, D1 or positions.
   worldView() {
     const zones = {}, now = Date.now();
-    for (const p of this.players.values()) (zones[p.zone] || (zones[p.zone] = [])).push({ display: p.display || p.login, login: p.login });
+    let held = 0;
+    for (const p of this.players.values()) {
+      (zones[p.zone] || (zones[p.zone] = [])).push({ display: p.display || p.login, login: p.login });
+      if (p.held) held++;
+    }
     const L = this.turnLoad(now);
     const ms = Math.max(1, now - L.at + L.wasMs), rate = (n) => Math.round(n * 100000 / ms) / 100, rates = {};
     for (const [zone, counts] of [...L.was, ...L.now]) {
@@ -2361,7 +2379,12 @@ export class Room extends DurableObject {
       sum.out += counts.out;
     }
     for (const sum of Object.values(rates)) { sum.in = rate(sum.in); sum.out = rate(sum.out); }
-    return { name: this.ctx.id.name || "", sockets: this.ctx.getWebSockets().length, players: this.players.size, maxPlayers: MAX_PLAYERS,
-      commons: commonsRoom.size(this), zones, load: { seconds: Math.round(ms) / 1000, zones: rates } };
+    // Every socket the runtime still holds is counted, and `closing` is what is neither a connected player nor a
+    // member: a connection the room has let go of (replaced by the account's newer one, kicked, refused, or reclaimed
+    // by its page coming back) whose close the page has not finished, usually because the page itself is gone. A
+    // player `held` over a lost socket (`hold`) is still a player, standing where they were, with no socket at all.
+    const sockets = this.ctx.getWebSockets().length, commons = commonsRoom.size(this);
+    return { name: this.ctx.id.name || "", sockets, players: this.players.size, held, maxPlayers: MAX_PLAYERS, commons,
+      closing: Math.max(0, sockets - (this.players.size - held) - commons), zones, load: { seconds: Math.round(ms) / 1000, zones: rates } };
   }
 }

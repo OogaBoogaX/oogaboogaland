@@ -8,9 +8,12 @@
 // spectrum and the floor's rings. A surface changes look only now and then, one surface at a time, and fades into it
 // slowly (the floor ring by ring from the middle out); all of them share one pair of colours (`PALETTES`) that changes
 // as rarely. The lasers on the walls stay dark until a hard part: a drop into one after a quiet part, or a long hard
-// stretch, gives a short show in one or two colours, its looks changing every phrase. Where the music can't be read
-// (a stream heard but not analysed, or the radio off) the room plays its own arrangement on the room's clock, so
-// everyone sees it alike. A new block on the chain drops the bass: a ring of light falls down the dome, a wave runs out
+// stretch, gives a short show in one or two colours, its looks changing every phrase. Everything that pulses (the
+// lasers' beat-locked looks, the floor's rings and sparks, the woofers, the bulbs) does so only while a strong kick
+// drives the music (the beat the radio finds and how hard it hits); a loud part without one gets the flowing looks,
+// the lasers a slow mesh of level beams crossing over everyone's heads from all round the room. Where the music can't
+// be read (a stream heard but not analysed, or the radio off) the room plays its own arrangement on the room's clock,
+// so everyone sees it alike. A new block on the chain drops the bass: a ring of light falls down the dome, a wave runs out
 // across the floor, the lasers strobe white and the sign over the booth says so. The DJ booth stands up on a stage
 // across the front with steps up each end; line arrays hang off the walls all the way round between the lasers and
 // thump, the mirror ball turns under the crown, and the latest block hangs on the dome.
@@ -26,8 +29,11 @@
   const BANDS = ["#5b3fd0", "#3a7bd5", "#2fbf71", "#e3c33a", "#f7931a", "#e0533d"], FLASH = "#ffd08a", PURPLE = "#9a5cff";
   const FLASH_RGB = rgbOf(FLASH), BAND_RGB = BANDS.map(rgbOf);
   // The pairs of colours the room is lit in, one pair at a time.
-  const PALETTES = [["#5b3fd0", "#3a7bd5"], ["#3a7bd5", "#2fbf71"], ["#7b3fe0", "#e0533d"], ["#f7931a", "#e0533d"],
-    ["#2b9fd5", "#9a5cff"], ["#5b3fd0", "#f7931a"], ["#2fbf71", "#3ac8d5"], ["#e0533d", "#9a5cff"]].map((p) => p.map(rgbOf));
+  const PALETTE_HEX = [["#5b3fd0", "#3a7bd5"], ["#3a7bd5", "#2fbf71"], ["#7b3fe0", "#e0533d"], ["#f7931a", "#e0533d"],
+    ["#2b9fd5", "#9a5cff"], ["#5b3fd0", "#f7931a"], ["#2fbf71", "#3ac8d5"], ["#e0533d", "#9a5cff"]];
+  const PALETTES = PALETTE_HEX.map((p) => p.map(rgbOf));
+  // A sine read from a table, for the dome's looks that need one or two a pixel.
+  const SIN = new Float32Array(1024).map((_, i) => Math.sin(i / 1024 * Math.PI * 2)), fsin = (x) => SIN[((x * 162.97466) | 0) & 1023];
   const C = {
     booth: "#1a1420", boothTop: "#2a2030", bezel: "#0a0810", metal: "#2a2a2e", vinyl: "#0b0b0b", cab: "#111114", grille: "#1b1b20",
     label: "#ffb04d", ink: "#0b0714", stage: "#16111d", stageTop: "#261d33", rig: "#3a3b42", plate: "#1c1c20", housing: "#16161b", trim: "#0c0c0f",
@@ -59,6 +65,12 @@
   // beats; LONG seconds of hard music since the last show starts one of SHOW_PEAK (a visit's first no sooner than FIRST
   // seconds in); a drop within GAP / 2 of the last show starts none. A show ends early with the hard part.
   const LASER = { DROP_AFTER: 24, LONG: 75, GAP: 25, FIRST: 40, SHOW_DROP: 48, SHOW_PEAK: 24 };
+  // Drops seen coming: the radio's readings run LOOK seconds ahead of its speakers (the arrangement is known outright),
+  // read every SCAN seconds at STEP-second points, each the mean of three frames AROUND seconds apart. A drop is where a
+  // second under BELOW gives way to OVER seconds over ABOVE, at least JUMP harder, seen on two scans in a row; it lands
+  // on the beat nearest, the room building toward it over its last BUILD seconds and holding its breath HUSH beats
+  // before it. One that stops showing while more than LOSE seconds off is let go.
+  const AHEAD = { LOOK: 8, STEP: 0.25, AROUND: 0.08, SCAN: 0.25, BELOW: 0.65, OVER: 0.75, ABOVE: 0.75, JUMP: 0.25, BUILD: 8, HUSH: 0.5, LOSE: 1 };
   // The sign's height in a drop, and where what is put away waits.
   const SIGN_Y = 5.4, AWAY = -3;
   // The DJ booth, up on the stage: its top (over the stage's) an Ooga can jump up onto, BOOTH_W across. The stage
@@ -66,6 +78,9 @@
   // the room's middle back to the wall, with STEPS steps up each end, each TREAD deep and STEP_W long, from DOWN
   // metres behind its front edge.
   const BOOTH_TOP = 1.03, BOOTH_W = 7;
+  // The DJ's platform behind the booth, DJ_UP over the stage (an Ooga steps up onto it, under the walkers' STEP_UP),
+  // so the decks stand at an Ooga's waist rather than its chest; DJ_IN degrees short of the booth's ends each side.
+  const DJ_UP = 0.4, DJ_IN = 1.5;
   const STAGE = { H: 0.8, W: 7, FRONT: 6, STEPS: 2, TREAD: 0.45, STEP_W: 2.4, DOWN: 0.4 };
   // The dome: its looks repainted DOME_FPS times a second on a canvas DOME_W by DOME_H drawn up smooth; its LED dots a
   // cell a fortieth of a radian round, about one in seven lit, in DOT_GROUPS nodes, sorted DOT_BIAS metres nearer for
@@ -76,7 +91,13 @@
   const RGB = ["#2bff5a", "#ff2b3a", "#3b5bff", "#2bf2ff", "#ff2bea", "#ffe62b", "#f4f2ff"];
   const GREEN = 0, RED = 1, BLUE = 2, CYAN = 3, MAGENTA = 4, YELLOW = 5, WHITE = 6;
   const SHOW_COLORS = [[GREEN, GREEN], [CYAN, MAGENTA], [RED, RED], [BLUE, CYAN], [GREEN, CYAN], [MAGENTA, BLUE]];
-  const NB = 10, PHRASE = 16, BEAM_W = 0.007, BEAM_LEN = 8, LOOKS = 5;
+  const NB = 10, PHRASE = 16, BEAM_W = 0.007, BEAM_LEN = 8;
+  // The lasers' looks a show turns through: on the beat while a strong kick drives the music, and flowing (the level
+  // sheet, the liquid sky and the mesh) while nothing kicks, turning half as often.
+  const PULSE_LOOKS = [0, 1, 2, 4, 5, 7, 8], FLOW_LOOKS = [3, 6, 9];
+  // A strong kick: the beat the radio finds, as hard as it hits now (`hit`, 0 to 1), counts from ON and stops counting
+  // under OFF; a change holds HOLD bars before another.
+  const KICK = { ON: 0.55, OFF: 0.4, HOLD: 8 };
   // The projectors on the walls: a pair at each of BEARINGS (degrees from the doors, mirrored, nearest the booth first),
   // Y up, on a bracket OUT from the wall, tipped TILT down, built SCALE times a projector's BODY (its aperture at
   // APERTURE in its own frame). A show lights one pair at a time, two while the music is at its hardest, the pairs
@@ -94,10 +115,16 @@
   // The LED wall round the room: a canvas W by H wrapped just inside the wall below the dome (INSET), from Y0 to Y1, all
   // the way round but DOOR either side of the doors; its spectrum's segments SEG pixels, its blocks BLOCKS a side.
   const WALL = { W: 2048, H: 96, INSET: 0.995, Y0: 0.14, Y1: 3.62, DOOR: 2.8, SEG: 4, BLOCKS: 24 };
-  // The surfaces' looks, and which suit each section (calm, middle, hard).
-  const DOME = { WASH: 0, NIGHT: 1, SWEEP: 2, RINGS: 3, SPIRAL: 4, NAMES: ["wash", "night", "sweep", "rings", "spiral"], FOR: [[0, 1, 2], [0, 2, 3], [3, 4, 2]] };
-  const FLOOR = { GLOW: 0, RIPPLES: 1, SWEEP: 2, SPARKS: 3, RINGS: 4, NAMES: ["glow", "ripples", "sweep", "sparks", "rings"], FOR: [[0, 1], [1, 2, 3], [4, 3, 2]] };
-  const WALLS = { WAVE: 0, FLOW: 1, BLOCKS: 2, SPECTRUM: 3, NAMES: ["wave", "flow", "blocks", "spectrum"], FOR: [[0, 1], [1, 2, 3], [3, 2]] };
+  // The surfaces' looks, and which suit each section (calm, middle, hard), and the flowing ones a middle or hard section
+  // gets while nothing kicks (the fourth list).
+  const DOME = { WASH: 0, NIGHT: 1, SWEEP: 2, RINGS: 3, SPIRAL: 4, PLASMA: 5, KALEIDO: 6, BURST: 7,
+    NAMES: ["wash", "night", "sweep", "rings", "spiral", "plasma", "kaleido", "burst"], FOR: [[0, 1, 2, 5], [0, 2, 3, 5, 6], [3, 4, 6, 7], [0, 5, 6, 2]] };
+  const FLOOR = { GLOW: 0, RIPPLES: 1, SWEEP: 2, SPARKS: 3, RINGS: 4, NAMES: ["glow", "ripples", "sweep", "sparks", "rings"], FOR: [[0, 1], [1, 2, 3], [4, 3, 2], [0, 1, 2]] };
+  const WALLS = { WAVE: 0, FLOW: 1, BLOCKS: 2, SPECTRUM: 3, WATERFALL: 4, HASHES: 5,
+    NAMES: ["wave", "flow", "blocks", "spectrum", "waterfall", "hashes"], FOR: [[0, 1, 4], [1, 2, 3, 4, 5], [3, 2, 5], [1, 4, 0]] };
+  // The wall's hash rain: COLS columns of the latest block's hash falling a CELL-pixel row at a time, its trail fading
+  // at FADE a second.
+  const RAIN = { COLS: 128, CELL: 10, FADE: 3.5 };
   const polar = (r, b) => ({ x: r * Math.sin(b * DEG), z: r * Math.cos(b * DEG) });
   const boothZ = (L) => -(L.r0 - 2.7);
   const stageZ = (L) => -(L.r0 - STAGE.FRONT);
@@ -122,7 +149,7 @@
   const rgbStyle = (c, k = 1) => `rgb(${Math.round(Math.min(1, c[0] * k) * 255)},${Math.round(Math.min(1, c[1] * k) * 255)},${Math.round(Math.min(1, c[2] * k) * 255)})`;
   // What every surface reads of the music each frame, written in place: the time, the beat, its step and its kick, how
   // hard the music is (`I`), the two colours (`a`, `b`), and the looks' own moving phases.
-  const moment = () => ({ t: 0, beat: 0, step: 0, kick: 0, I: 0, a: [0, 0, 0], b: [0, 0, 0], spin: 0, rings: 0, sweep: 0, ripple: 0, flow: 0 });
+  const moment = () => ({ t: 0, beat: 0, step: 0, kick: 0, I: 0, a: [0, 0, 0], b: [0, 0, 0], spin: 0, rings: 0, sweep: 0, ripple: 0, flow: 0, hash: "" });
 
   // ---------- the floor ----------
   // The panels, each with its ring and its bearing and distance from the floor's middle: every one whose corners keep
@@ -246,7 +273,9 @@
     };
     // The looks: soft washes of the two colours drifting round, brightest toward the horizon; a deep night for the dots
     // to twinkle in; two searchlights opposite each other turning slowly round; rings stepping down from the crown on
-    // the beat; spirals turning across the rings.
+    // the beat; spirals turning across the rings; a slow plasma of the two colours folding through each other; a
+    // kaleidoscope of rings bent six ways round the crown, flowing down on the beat; and a starburst of rays turning
+    // from the crown with a ring of light running down it every other beat.
     const render = (look, buf, M) => {
       const a = M.a, b = M.b, I = M.I;
       if (look === DOME.WASH) {
@@ -270,6 +299,44 @@
         }
         for (let v = 0; v < h; v++) { mix(a, b, up[v], c); const g = (0.25 + 0.55 * (1 - up[v] * 0.7)) * (0.45 + 0.55 * I); rr[v] = c[0] * g; rg[v] = c[1] * g; rb[v] = c[2] * g; }
         fill(buf, true);
+        return;
+      }
+      if (look === DOME.PLASMA) {
+        for (let u = 0; u < w; u++) { cs[u] = fsin(az[u] * 3 + M.t * 0.23); sn[u] = az[u] * 2; }
+        for (let v = 0; v < h; v++) { se[v] = fsin(el[v] * 7 - M.t * 0.31); ce[v] = el[v] * 5 + M.t * 0.17; rr[v] = (0.1 + 0.28 * (1 - up[v])) * (0.6 + 0.4 * I); }
+        for (let v = 0, o = 0; v < h; v++) {
+          const s1 = se[v], c1 = ce[v], g = rr[v], R = br[v], G = bg[v], B = bb[v];
+          for (let u = 0; u < w; u++, o += 3) {
+            const f = 0.5 + 0.5 * fsin((cs[u] + s1 + fsin(sn[u] + c1)) * 1.4 + M.spin * 0.6), k = g * (0.3 + 0.7 * f * f);
+            buf[o] = R + (a[0] + (b[0] - a[0]) * f) * k; buf[o + 1] = G + (a[1] + (b[1] - a[1]) * f) * k; buf[o + 2] = B + (a[2] + (b[2] - a[2]) * f) * k;
+          }
+        }
+        return;
+      }
+      if (look === DOME.KALEIDO) {
+        for (let u = 0; u < w; u++) { cs[u] = 1.4 * fsin(az[u] * 6 + M.spin * 0.7); sn[u] = fsin(az[u] * 12 - M.spin * 1.1); }
+        for (let v = 0; v < h; v++) { ce[v] = el[v] * 18 + M.rings * 1.2; rr[v] = (0.2 + 0.45 * I + 0.25 * M.kick * I) * (1 - up[v] * 0.35); }
+        for (let v = 0, o = 0; v < h; v++) {
+          const c1 = ce[v], g = rr[v], R = br[v], G = bg[v], B = bb[v];
+          for (let u = 0; u < w; u++, o += 3) {
+            const q = 0.5 + 0.5 * fsin(c1 + cs[u]), q2 = q * q, k = q2 * q2 * g * (0.7 + 0.3 * sn[u]), f = 0.5 + 0.5 * sn[u];
+            buf[o] = R + (a[0] + (b[0] - a[0]) * f) * k; buf[o + 1] = G + (a[1] + (b[1] - a[1]) * f) * k; buf[o + 2] = B + (a[2] + (b[2] - a[2]) * f) * k;
+          }
+        }
+        return;
+      }
+      if (look === DOME.BURST) {
+        for (let u = 0; u < w; u++) { const p = 0.5 + 0.5 * Math.cos(az[u] * 16 + M.spin), p2 = p * p, p4 = p2 * p2; colK[u] = p4 * p4; }
+        const front = 1 - ((M.beat * 0.5) % 1);
+        for (let v = 0; v < h; v++) {
+          mix(a, b, up[v], c); rr[v] = c[0]; rg[v] = c[1]; rb[v] = c[2];
+          const d = (up[v] - front) * 7;
+          se[v] = (0.22 + 0.45 * I) * (0.3 + 0.7 * up[v]); ce[v] = 0.55 * I * Math.exp(-d * d);
+        }
+        for (let v = 0, o = 0; v < h; v++) {
+          const ray = se[v], ring = ce[v], R = br[v], G = bg[v], B = bb[v], CR = rr[v], CG = rg[v], CB = rb[v];
+          for (let u = 0; u < w; u++, o += 3) { const k = colK[u] * ray + ring; buf[o] = R + CR * k; buf[o + 1] = G + CG * k; buf[o + 2] = B + CB * k; }
+        }
         return;
       }
       if (look === DOME.RINGS) {
@@ -322,7 +389,7 @@
       for (let cx = 0; cx < cols; cx++) {
         if (rand() < 0.86) continue;
         const az = (cx + 0.5) / cols * TAU - Math.PI, color = rand() < 0.15 ? BANDS[Math.floor(rand() * 6)] : "#ffd999", g = Math.floor(rand() * DOT_GROUPS);
-        if (el < ROOMS.edgeEl(L, az) + 1.5 * DEG || Math.abs(az) < 17 * DEG && el > 2.5 * DEG && el < 10.5 * DEG) continue;
+        if (el < ROOMS.edgeEl(L, az) + 1.5 * DEG || Math.abs(az) < 17 * DEG && el > -0.2 * DEG && el < 11.6 * DEG) continue;
         const p = at(az, el), e = at(az + E, el), nn = at(az, el + E);
         const ex = e[0] - p[0], ey = e[1] - p[1], ez = e[2] - p[2], el1 = Math.hypot(ex, ey, ez), nx = nn[0] - p[0], ny = nn[1] - p[1], nz = nn[2] - p[2], nl = Math.hypot(nx, ny, nz);
         const ux = ex / el1 * DOT / 2, uy = ey / el1 * DOT / 2, uz = ez / el1 * DOT / 2, vx = nx / nl * DOT / 2, vy = ny / nl * DOT / 2, vz = nz / nl * DOT / 2;
@@ -353,17 +420,25 @@
         out.push(g);
       }
     });
+    // Each projector's place going round the room, for the chase; and the mirror ball, which a look aims them all at.
+    out.slice().sort((p, q) => (p.bearing + 360) % 360 - (q.bearing + 360) % 360).forEach((g, i) => { g.round = i; });
+    out.ball = ballY(L);
     return out;
   };
   // Where every beam points this moment, into `out` (`dir`, three numbers a beam; `on`; `color`), in the look `look`
   // and the show's colours `ca` and `cb`: mirrored fans dipping on the kick; tunnels spinning onto the floor; a pair of
-  // beams scanning each fan; a level sheet over the crowd's heads; upright fans swaying side to side; and (-1) a block's
-  // drop, wide white fans spinning and strobing. Only the projectors whose pair's bit is set in `pairs` shine. `F` is
-  // scratch.
-  const aim = (rigs, beat, kick, look, ca, cb, pairs, out, F) => {
+  // beams scanning each fan; a level sheet over the crowd's heads; upright fans swaying side to side; every projector's
+  // cone grazing the mirror ball, so the beams meet there from all round; a liquid sky, level fans over the heads with
+  // a ripple running through them; a fan flashing from one projector after another round the room; crossfire, tight
+  // fans sweeping the floor against their partners; a block's drop (-1), wide white fans spinning and strobing; and
+  // while nothing kicks, a mesh of level fans from every projector drifting slowly over the heads so they cross into a
+  // net. The beat moves the pulsing looks, the time `t` the flowing ones. Only the projectors whose pair's bit is set in
+  // `pairs` shine in a pulsing look but the ball's and the chase's, every one in a flowing one (every other in the
+  // sheet). `F` is scratch.
+  const aim = (rigs, beat, t, kick, look, ca, cb, pairs, out, F) => {
     for (let p = 0; p < rigs.length; p++) {
       const g = rigs[p], s = g.side, base = p * NB, D = g.D;
-      let tx = g.ax + g.ix * D * 0.6, ty = 2.4, tz = g.az + g.iz * D * 0.6, cone = 0, spread = 0, roll = 0, spin = 0, color = p % 2 ? cb : ca, lit = -1, on = (pairs >> g.pair & 1) === 1;
+      let tx = g.ax + g.ix * D * 0.6, ty = 2.4, tz = g.az + g.iz * D * 0.6, cone = 0, spread = 0, roll = 0, spin = 0, color = p % 2 ? cb : ca, lit = -1, on = (pairs >> g.pair & 1) === 1, ripple = 0;
       if (look === 0) {
         tx = g.ax + g.ix * D * 0.55; tz = g.az + g.iz * D * 0.55; ty = 2.2 + 0.8 * Math.sin(beat * Math.PI / 4) - 0.4 * kick;
         spread = 0.55; roll = s * 0.5 * Math.sin(beat * Math.PI / 8);
@@ -373,9 +448,29 @@
       } else if (look === 2) {
         spread = 0.8; lit = Math.floor(((beat + p * 0.15) % 1) * NB);
       } else if (look === 3) {
-        on = on && p % 2 === 0;
-        tx = g.ax + g.ix * D * 1.6; tz = g.az + g.iz * D * 1.6; ty = 2.3 + 0.15 * Math.sin(beat * Math.PI / 4 + p * 0.7);
+        on = p % 2 === 0;
+        tx = g.ax + g.ix * D * 1.6; tz = g.az + g.iz * D * 1.6; ty = 2.6 + 0.15 * Math.sin(t * 0.5 + p * 0.7);
         spread = 1.0;
+      } else if (look === 9) {
+        on = true;
+        const sway = 5 * Math.sin(t * 0.21 + p * 0.8);
+        tx = g.ax + g.ix * D * 1.4 - g.iz * sway; tz = g.az + g.iz * D * 1.4 + g.ix * sway; ty = 2.7 + 0.25 * Math.sin(t * 0.37 + p);
+        spread = 0.9; roll = 0.15 * Math.sin(t * 0.29 + p * 1.7); ripple = 0.02;
+      } else if (look === 5) {
+        on = true;
+        tx = 0; ty = rigs.ball; tz = FZ;
+        cone = 0.02 + 0.012 * kick; spin = (p % 2 ? 1 : -1) * beat * Math.PI / 4;
+      } else if (look === 6) {
+        on = true;
+        tx = g.ax + g.ix * D * 1.5; tz = g.az + g.iz * D * 1.5; ty = 2.8;
+        spread = 1.1; ripple = 0.035;
+      } else if (look === 7) {
+        on = Math.floor(beat * 2) % rigs.length === g.round;
+        spread = 0.9; roll = s * 0.3;
+      } else if (look === 8) {
+        const sweep = 6 * s * Math.sin(beat * Math.PI / 4);
+        tx = g.ax + g.ix * D * 0.65 - g.iz * sweep; tz = g.az + g.iz * D * 0.65 + g.ix * sweep; ty = 0;
+        spread = 0.25;
       } else if (look === 4) {
         const sway = 4 * Math.sin(beat * Math.PI / 4 + p);
         tx = g.ax + g.ix * D * 0.6 - g.iz * sway; tz = g.az + g.iz * D * 0.6 + g.ix * sway; ty = 3;
@@ -394,7 +489,7 @@
           x = cc * dx + cx * ux + sx * vx; y = cc * dy + sx * vy; z = cc * dz + cx * uz + sx * vz;
         } else {
           const a = (j / (NB - 1) - 0.5) * spread, c = Math.cos(a), sn = Math.sin(a);
-          x = c * dx + sn * F[0]; y = c * dy + sn * F[1]; z = c * dz + sn * F[2];
+          x = c * dx + sn * F[0]; y = c * dy + sn * F[1] + ripple * Math.sin(j * 0.9 + t * 1.3 + p * 1.3); z = c * dz + sn * F[2];
         }
         const i = base + j, l = Math.hypot(x, y, z);
         out.dir[i * 3] = x / l; out.dir[i * 3 + 1] = y / l; out.dir[i * 3 + 2] = z / l;
@@ -448,17 +543,19 @@
 
   // ---------- the speakers ----------
   // A speaker's cone round its node's +y, which the node turns out of the box's face: the cone, its dust cap and a lit
-  // ring round it that glows on the kick.
-  const cone = (rr) => (k) => {
+  // ring round it in `ring` that glows on the kick. A box's lit strip along its foot, in `color`, on a node of its own.
+  const cone = (rr, ring) => (k) => {
     k.cyl(rr, rr * 0.6, 0.05, "#08080a", 0, -0.025, 0, { seg: 20 });
     k.ball(rr * 0.3, "#34343a", 0, 0, 0, { seg: 10 });
-    k.torus(rr * 0.72, 0.008, PURPLE, 0, 0.002, 0, { seg: 20, sides: 4, emissive: 1 });
+    k.torus(rr * 0.72, 0.008, ring, 0, 0.002, 0, { seg: 20, sides: 4, emissive: 1 });
   };
+  const speakerStrip = (color) => (k) => k.box(BOX.w - 0.08, 0.012, 0.012, color, 0, 0, 0, { emissive: 0.7, glow: true });
   // A line array hung off the wall, in a frame at the foot of the wall under it with +z into the room: a braced
   // bracket out from the wall, the bumper on chains under it, and `n` boxes hung below in a curve, each from the bottom
-  // back edge of the one above and tipped a little further down, two woofers either side of a horn on each, on nodes of
-  // their own (`name`, the box and the side). Returns the woofer's geometry, for the next to share.
-  const lineArray = (K, n, name, woofer, tip) => {
+  // back edge of the one above and tipped a little further down, two woofers either side of a horn on each and a lit
+  // strip along its foot, on nodes of their own (`name`, the box and the side), sharing `shared`'s woofer and strip,
+  // builders until the first is built and then their geometry.
+  const lineArray = (K, n, name, shared, tip) => {
     const top = HANG_Y, out = HANG_OUT;
     K.box(0.6, 0.5, 0.03, C.plate, 0, top + 0.45, 0.015);
     for (const sx of [-0.22, 0.22]) {
@@ -477,14 +574,13 @@
       g.box(BOX.w - 0.06, BOX.h - 0.05, 0.01, C.grille, 0, 0.005, front + 0.005);
       g.box(0.26, 0.2, 0.02, C.horn, 0, 0.01, front + 0.012);
       g.box(0.02, 0.17, 0.012, "#2a2a30", 0, 0.01, front + 0.024);
-      g.box(BOX.w - 0.08, 0.012, 0.012, PURPLE, 0, -BOX.h / 2 + 0.02, front + 0.012, { emissive: 0.7, glow: true });
+      shared.strip = g.node(`speakerStrip${name}_${k}`, shared.strip, 0, -BOX.h / 2 + 0.02, front + 0.012, { rx: tilt, glow: true }).geometry;
       for (const sx of [-1, 1]) g.box(0.012, BOX.h * 0.8, 0.012, "#2a2a30", sx * (BOX.w / 2 + 0.006), 0, -0.05);
       for (const sx of [-1, 1]) {
-        woofer = g.node(`${name}_${k}_${sx < 0 ? 0 : 1}`, woofer, sx * 0.34, 0.01, front + 0.012, { rx: Math.PI / 2 + tilt, target: k === 1 && sx < 0 ? tip : null }).geometry;
+        shared.woofer = g.node(`${name}_${k}_${sx < 0 ? 0 : 1}`, shared.woofer, sx * 0.34, 0.01, front + 0.012, { rx: Math.PI / 2 + tilt, target: k === 1 && sx < 0 ? tip : null }).geometry;
       }
       y -= BOX.h * c; z -= BOX.h * s;
     }
-    return woofer;
   };
 
   // ---------- the booth's screen ----------
@@ -613,8 +709,20 @@
     // The flow: the two colours in turn across a strip the wall's width, darker at its top and foot.
     const flow = CH.canvas(W, H), f = flow.getContext("2d");
     const level = new Float32Array(BARS), peak = new Float32Array(BARS), half = W / 2, pitch = half / BARS, bw = Math.max(2, pitch - 3), top = H - 4;
-    let barStyle = "#fff", waveStyle = "#fff", glowStyle = "#fff", shape = null;
+    let barStyle = "#fff", waveStyle = "#fff", glowStyle = "#fff", shape = null, step = 0;
+    // The waterfall: the spectrum's history, newest at the booth and flowing out round both sides, a column a frame.
+    const hist = CH.canvas(half, H), hc = hist.getContext("2d"), col = hc.createImageData(1, H), cpx = col.data, ca = [0, 0, 0], cb = [0, 0, 0];
+    hc.fillStyle = "#06030b"; hc.fillRect(0, 0, half, H);
+    // The rain: the hash's characters in the two colours (a column's head white over them), its trail a canvas of its own.
+    const HEX = "0123456789abcdef", { COLS, CELL } = RAIN, glyphs = CH.canvas(16 * CELL, 3 * CELL), gc = glyphs.getContext("2d");
+    const rain = CH.canvas(W, H), rc = rain.getContext("2d"), rowY = new Float32Array(COLS), rowV = new Float32Array(COLS), last = new Int16Array(COLS).fill(-1);
+    for (let i = 0; i < COLS; i++) { rowY[i] = -Math.random() * 12; rowV[i] = 6 + Math.random() * 10; }
     const colors = (a, bb) => {
+      ca[0] = a[0]; ca[1] = a[1]; ca[2] = a[2]; cb[0] = bb[0]; cb[1] = bb[1]; cb[2] = bb[2];
+      gc.clearRect(0, 0, 16 * CELL, 3 * CELL);
+      [rgbStyle(a, 1.3), rgbStyle(bb, 1.3), "#f4f2ff"].forEach((ink, r) => {
+        for (let i = 0; i < 16; i++) RM.paintKit.pix(gc, HEX[i], i * CELL + CELL / 2, r * CELL + CELL / 2, CELL * 0.75, ink);
+      });
       const grad = ctx.createLinearGradient(0, H, 0, 0);
       grad.addColorStop(0, rgbStyle(a)); grad.addColorStop(1, rgbStyle(bb, 1.25));
       barStyle = grad; waveStyle = rgbStyle(bb, 1.3); glowStyle = rgbStyle(a, 0.9);
@@ -636,7 +744,41 @@
     };
     const draw = (look, alpha, M) => {
       if (alpha <= 0.002) return;
-      if (look === WALLS.WAVE) {
+      if (look === WALLS.WATERFALL) {
+        hc.drawImage(hist, 1, 0);
+        for (let y = 0; y < H; y++) {
+          const v = level[Math.min(BARS - 1, Math.floor((H - 1 - y) * BARS / H))], g = 0.08 + 1.1 * v * v, o = y * 4;
+          cpx[o] = Math.min(255, (ca[0] + (cb[0] - ca[0]) * v) * g * 255); cpx[o + 1] = Math.min(255, (ca[1] + (cb[1] - ca[1]) * v) * g * 255);
+          cpx[o + 2] = Math.min(255, (ca[2] + (cb[2] - ca[2]) * v) * g * 255); cpx[o + 3] = 255;
+        }
+        hc.putImageData(col, 0, 0);
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(hist, half, 0);
+        ctx.save(); ctx.translate(half, 0); ctx.scale(-1, 1); ctx.drawImage(hist, 0, 0); ctx.restore();
+        ctx.drawImage(gaps, 0, 0);
+      } else if (look === WALLS.HASHES) {
+        // The trail fades; each column's head writes a character as it reaches a new row, faster the louder the bass.
+        rc.globalCompositeOperation = "destination-out"; rc.fillStyle = "#000"; rc.globalAlpha = Math.min(1, step * RAIN.FADE);
+        rc.fillRect(0, 0, W, H);
+        rc.globalCompositeOperation = "source-over"; rc.globalAlpha = 1;
+        const pitch = W / COLS, rows = Math.ceil(H / CELL), boost = 0.5 + M.I + 1.5 * level[2];
+        for (let i = 0; i < COLS; i++) {
+          rowY[i] += rowV[i] * boost * step;
+          const r = Math.floor(rowY[i]);
+          if (r > rows + 4) { rowY[i] = -Math.random() * 10; rowV[i] = 6 + Math.random() * 10; last[i] = -1; continue; }
+          if (r === last[i] || r < 0) continue;
+          if (last[i] >= 0 && last[i] < rows) {
+            const k = HEX.indexOf(M.hash[(i * 7 + last[i]) % 64] || "0"), g = i % 3 === 0 ? 1 : 0;
+            rc.drawImage(glyphs, k * CELL, g * CELL, CELL, CELL, i * pitch, last[i] * CELL, CELL, CELL);
+          }
+          last[i] = r;
+          if (r < rows) {
+            const k = HEX.indexOf(M.hash[(i * 7 + r) % 64] || "0");
+            rc.drawImage(glyphs, k * CELL, 2 * CELL, CELL, CELL, i * pitch, r * CELL, CELL, CELL);
+          }
+        }
+        ctx.globalAlpha = alpha; ctx.drawImage(rain, 0, 0);
+      } else if (look === WALLS.WAVE) {
         ctx.globalCompositeOperation = "lighter";
         drawWave(alpha * 0.25, 7, glowStyle); drawWave(alpha * (0.55 + 0.35 * M.I), 2, waveStyle);
         ctx.globalCompositeOperation = "source-over";
@@ -684,7 +826,7 @@
         level[i] = bands[i] > level[i] ? bands[i] : Math.max(bands[i], level[i] - dt * 2);
         peak[i] = level[i] > peak[i] ? level[i] : Math.max(0, peak[i] - dt * 0.4);
       }
-      shape = wave;
+      shape = wave; step = dt;
       ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
       ctx.drawImage(back, 0, 0);
       if (from !== to && fade < 1) draw(from, 1 - fade, M);
@@ -732,6 +874,23 @@
     const blocks = reader.value("recent"), b = blocks && blocks[0];
     return b ? `${b.height}|${b.pool}|${CH.format.ago(now - b.time * 1000)}` : reader.status("recent");
   };
+  // What the radio plays, as its station's feed names it: the station's name and the song (empty when the feed names
+  // none, and then the picture under the block is put away). The room's `animate` keeps it current.
+  const playing = { station: "", song: "" };
+  const songKey = () => playing.song ? `${playing.station}|${playing.song}` : "";
+  // Under the latest block: the station in the island's letters and the song in plain type, fitted to the width.
+  const paintSong = (ctx, w, h) => {
+    const P = RM.paintKit;
+    ctx.fillStyle = C.ink; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = PURPLE; ctx.lineWidth = h * 0.06; P.roundRect(ctx, h * 0.06, h * 0.06, w - h * 0.12, h - h * 0.12, h * 0.16);
+    ctx.stroke();
+    if (!playing.song) return;
+    const title = `NOW PLAYING · ${playing.station}`;
+    P.pix(ctx, title, w / 2, h * 0.3, Math.min(h * 0.19, w * 0.8 / P.pixWidth(title, 1)), "#c9a6ff");
+    ctx.fillStyle = "#f4ecff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    P.fit(ctx, playing.song, w * 0.86, 700, h * 0.32);
+    ctx.fillText(playing.song, w / 2, h * 0.67);
+  };
   // A sign in the island's letters, framed, on the room's ink.
   const sign = (text, ink, frame) => (ctx, w, h) => {
     const P = RM.paintKit;
@@ -754,27 +913,325 @@
     k.cyl(0.07, 0.09, 0.12, "#4a4a52", 0, r + 0.04, 0);
   };
 
+  // ---------- the DJ's gear ----------
+  // One club rig across the booth's top, built in a frame whose +z runs toward the DJ behind it (their right +x): a
+  // four-channel mixer between two big media players, butted together on one plinth lit along its front. Each player
+  // has its touch screen standing up at the back, its hot cue pads, a big jog wheel with a screen in its middle, the
+  // play button in its lit ring and its tempo fader; the mixer its channels' knobs, meters, colour knobs,
+  // cue buttons and faders, the crossfader, its FX screen and beat lamps, and an antenna. Beside it a laptop showing
+  // the radio's station and song, and headphones. What moves is its own node: the jog wheels and their screens turn,
+  // the meters, beat lamps and the players' play rings light with the music.
+  const GEAR = { black: "#111115", panel: "#1b1b21", edge: "#2c2c34", silver: "#b4b4bc", rubber: "#08080a", knob: "#24242a",
+    cap: "#c8c8d0", tick: "#ececf4", screen: "#06080f", button: "#2e2e36" };
+  const RIG = { H: 0.11, D: 0.56, PW: 0.46, MW: 0.54, GAP: 0.006, BASE: 0.03 };
+  const METER = { SEGS: 10, GREEN: 7, AMBER: 2 };
+  const PADS = ["#ff3d6e", "#ff9b2e", "#ffe14d", "#4dff88", "#3dd9ff", "#4d7aff", "#b44dff", "#ff4de1"];
+  // Geometries shared by every copy (a meter's segments, the players' rings), made once.
+  const gearParts = new Map();
+  const gearPart = (key, build) => {
+    if (!gearParts.has(key)) { const g = RM.solo(build); g.castShadow = false; gearParts.set(key, g); }
+    return gearParts.get(key);
+  };
+  const knob = (G, x, y, z, r, color) => {
+    G.cyl(r, r * 1.08, r * 1.4, color, x, y + r * 0.7, z, { seg: 12 });
+    G.box(r * 0.18, 0.002, r * 0.75, GEAR.tick, x, y + r * 1.42, z - r * 0.4);
+  };
+  // A slot with its cap, along z (or along x with `across`); `at` is where the cap stands, -1 to 1.
+  const fader = (G, x, y, z, len, across, at) => {
+    G.box(across ? len : 0.006, 0.002, across ? 0.006 : len, GEAR.rubber, x, y + 0.001, z);
+    const cx = across ? x + at * len / 2 : x, cz = across ? z : z + at * len / 2;
+    G.box(across ? 0.014 : 0.03, 0.016, across ? 0.026 : 0.014, GEAR.cap, cx, y + 0.008, cz);
+    G.box(across ? 0.003 : 0.022, 0.002, across ? 0.02 : 0.003, GEAR.tick, cx, y + 0.0165, cz);
+  };
+  // A tube from a to b, a cylinder `r` round: the kit turns a part about z, then x (its y axis then runs along
+  // (-sin rz, cos rx cos rz, sin rx cos rz)).
+  const rod = (G, a, b, r, color) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], l = Math.hypot(dx, dy, dz);
+    G.cyl(r, r, l, color, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2, { seg: 6, rz: Math.asin(-dx / l), rx: Math.atan2(dz, dy) });
+  };
+  // A media player's screen, as the image shows one: its tabs, the track, the waveform with its playhead, the time,
+  // tempo and BPM, and the track's overview.
+  const playerScreen = (i) => (ctx, w, h) => {
+    const rand = RM.paintKit.rng(31 + i), P = RM.paintKit;
+    ctx.fillStyle = GEAR.screen; ctx.fillRect(0, 0, w, h);
+    ["SOURCE", "BROWSE", "TAG LIST", "PLAYLIST", "SEARCH", "MENU"].forEach((t, k) => {
+      const x = w * (0.03 + k * 0.16);
+      ctx.fillStyle = k === 1 ? "#24406e" : "#1e2230"; ctx.fillRect(x, h * 0.03, w * 0.14, h * 0.07);
+      P.pix(ctx, t, x + w * 0.07, h * 0.067, Math.min(h * 0.035, w * 0.12 / P.pixWidth(t, 1)), "#c9d8ff");
+    });
+    P.pix(ctx, i ? "BLOCK 2 · OOGA DUB" : "BLOCK 1 · HALVING", w * 0.04, h * 0.16, h * 0.05, "#e8eeff", "left");
+    for (let x = 0; x < w; x++) {
+      const a = (0.2 + 0.8 * rand()) * (0.45 + 0.55 * Math.abs(Math.sin(x * 0.03 + i))), mid = h * 0.4;
+      ctx.fillStyle = a > 0.78 ? "#e6f6ff" : a > 0.4 ? "#3fa2ff" : "#1d5fbf";
+      ctx.fillRect(x, mid - a * h * 0.17, 1, a * h * 0.34);
+    }
+    ctx.fillStyle = "#ff8a3d"; ctx.fillRect(w * 0.5 - 1, h * 0.2, 2, h * 0.4);
+    ctx.fillStyle = "#1e2230"; ctx.fillRect(w * 0.03, h * 0.63, w * 0.94, h * 0.14);
+    P.pix(ctx, i ? "02" : "01", w * 0.07, h * 0.7, h * 0.08, "#ffffff");
+    P.pix(ctx, i ? "02:35.503" : "04:12.091", w * 0.33, h * 0.7, h * 0.075, "#ffffff");
+    P.pix(ctx, "-0.05%", w * 0.62, h * 0.7, h * 0.05, "#c9d8ff");
+    ctx.strokeStyle = "#c9d8ff"; ctx.lineWidth = 2; ctx.strokeRect(w * 0.76, h * 0.645, w * 0.19, h * 0.11);
+    P.pix(ctx, "124.0", w * 0.855, h * 0.7, h * 0.06, "#ffffff");
+    for (let x = 0; x < w * 0.94; x += 2) {
+      const a = 0.25 + 0.75 * rand();
+      ctx.fillStyle = x < w * (i ? 0.31 : 0.58) ? "#5d6c8a" : "#9ad0ff";
+      ctx.fillRect(w * 0.03 + x, h * 0.93 - a * h * 0.1, 1.5, a * h * 0.1);
+    }
+  };
+  // The mixer's FX screen: the effect, its tempo and its beat.
+  const fxScreen = (ctx, w, h) => {
+    const P = RM.paintKit;
+    ctx.fillStyle = GEAR.screen; ctx.fillRect(0, 0, w, h);
+    P.pix(ctx, "124 BPM", w * 0.95, h * 0.14, h * 0.11, "#c9d8ff", "right");
+    ctx.fillStyle = "#e8e8f0"; ctx.fillRect(w * 0.06, h * 0.28, w * 0.88, h * 0.22);
+    P.pix(ctx, "FLANGER", w / 2, h * 0.39, h * 0.15, "#06080f");
+    ctx.fillStyle = "#3a8cff"; ctx.fillRect(w * 0.06, h * 0.58, w * 0.42, h * 0.16); ctx.fillRect(w * 0.52, h * 0.58, w * 0.42, h * 0.16);
+    P.pix(ctx, "1/2", w * 0.27, h * 0.66, h * 0.1, "#ffffff"); P.pix(ctx, "BEAT", w * 0.73, h * 0.66, h * 0.1, "#ffffff");
+    P.pix(ctx, "OOGA DJ", w / 2, h * 0.88, h * 0.1, "#9a5cff");
+  };
+  // A round button in a lit ring, `r` round, the ring's colour lit by its node.
+  const ringButton = (key, r, color) => gearPart(key, (k) => {
+    k.torus(r, r * 0.16, color, 0, 0, 0, { emissive: 1, glow: true, seg: 20, sides: 5 });
+    k.cyl(r * 0.82, r * 0.82, 0.008, GEAR.button, 0, 0, 0, { seg: 18 });
+  });
+  const player = (G, x, i) => {
+    const W = RIG.PW, D = RIG.D, top = RIG.H, z0 = -D / 2;
+    G.box(W, top, D, GEAR.black, x, top / 2, 0);
+    G.box(W - 0.014, 0.003, D - 0.014, GEAR.panel, x, top + 0.0015, 0);
+    // The touch screen standing up at the back in its bezel, leaning away from the DJ.
+    const lean = -0.35, sh = 0.26, sw = 0.4, cy = top + 0.02 + sh / 2 * Math.cos(lean), cz = z0 + 0.06 + sh / 2 * Math.sin(lean);
+    G.box(sw + 0.024, sh + 0.024, 0.014, GEAR.black, x, cy, cz - 0.008, { rx: lean });
+    G.box(sw * 0.8, 0.03, 0.05, GEAR.black, x, top + 0.015, z0 + 0.04);
+    G.picture(sw, sh, 512, 333, playerScreen(i), x, cy, cz, { rx: lean, emissive: 0.85 });
+    // The hot cue pads under it, the loop buttons and the USB slots down its left.
+    for (let k = 0; k < 8; k++) {
+      const px = x - 0.16 + k * 0.042;
+      G.box(0.034, 0.008, 0.02, GEAR.button, px, top + 0.004, z0 + 0.135);
+      G.box(0.034, 0.003, 0.004, PADS[k], px, top + 0.009, z0 + 0.124, { emissive: 0.9, glow: true });
+    }
+    for (let k = 0; k < 3; k++) G.box(0.03, 0.006, 0.02, GEAR.button, x - W / 2 + 0.035, top + 0.003, z0 + 0.19 + k * 0.035);
+    for (const k of [0, 1]) G.torus(0.013, 0.003, "#ff9b2e", x - W / 2 + 0.08 + k * 0.035, top + 0.004, z0 + 0.19, { emissive: 0.8, glow: true, seg: 12, sides: 4 });
+    G.box(0.05, 0.006, 0.014, GEAR.rubber, x - W / 2 + 0.04, top + 0.003, z0 + 0.03);
+    // The jog wheel: a silver rim round its knurled platter, its screen in the middle.
+    const jx = x - 0.02, jz = 0.085;
+    G.cyl(0.178, 0.178, 0.01, GEAR.edge, jx, top + 0.005, jz, { seg: 40 });
+    G.torus(0.168, 0.008, GEAR.silver, jx, top + 0.014, jz, { seg: 40, sides: 6 });
+    G.node(`record${i}`, (k) => {
+      k.cyl(0.155, 0.157, 0.016, "#16161a", 0, 0, 0, { seg: 40 });
+      for (let d = 0; d < 48; d++) { const a = TAU * d / 48; k.box(0.004, 0.004, 0.014, "#3a3a44", 0.142 * Math.sin(a), 0.009, 0.142 * Math.cos(a), { ry: a }); }
+    }, jx, top + 0.016, jz, { target: { kind: "decks", tip: "Media player", radius: 0.3, data: { say: "Two decks and a mixer, and the bass drops on every block" } } });
+    G.node(`jog${i}`, (k) => {
+      k.cyl(0.062, 0.062, 0.004, "#0b1530", 0, 0, 0, { seg: 24 });
+      k.torus(0.06, 0.004, "#3a8cff", 0, 0.002, 0, { emissive: 1, glow: true, seg: 24, sides: 4 });
+      k.torus(0.04, 0.003, "#9a5cff", 0, 0.002, 0, { emissive: 1, glow: true, seg: 20, sides: 4 });
+      k.box(0.008, 0.003, 0.03, "#ffffff", 0, 0.003, 0.043, { emissive: 1, glow: true });
+    }, jx, top + 0.026, jz);
+    // The play button in its ring, bottom left.
+    G.node(`play${i}`, ringButton("play", 0.028, "#3dff7a"), x - W / 2 + 0.05, top + 0.006, D / 2 - 0.05, { glow: true });
+    // The tempo fader and its buttons down the right, the sync buttons and jog knob over it.
+    fader(G, x + W / 2 - 0.04, top, 0.135, 0.2, false, -0.1);
+    for (let k = 0; k < 3; k++) G.box(0.036, 0.008, 0.02, k === 1 ? "#ff9b2e" : GEAR.button, x + W / 2 - 0.04, top + 0.004, -0.02 + k * 0.026, { emissive: k === 1 ? 0.6 : 0 });
+    knob(G, x + W / 2 - 0.04, top, -0.1, 0.012, GEAR.knob);
+  };
+  const mixer = (G) => {
+    const W = RIG.MW, D = RIG.D, top = RIG.H, z0 = -D / 2;
+    G.box(W, top, D, GEAR.black, 0, top / 2, 0);
+    G.box(W - 0.014, 0.003, D - 0.014, GEAR.panel, 0, top + 0.0015, 0);
+    for (const sx of [-1, 1]) G.box(0.004, 0.003, D - 0.06, GEAR.edge, sx * 0.165, top + 0.0015, 0.0);
+    // The USB slots and the antenna at the back.
+    for (const sx of [-1, 1]) {
+      G.box(0.05, 0.008, 0.022, GEAR.rubber, sx * 0.21 + (sx < 0 ? 0.03 : -0.03) - 0.03, top + 0.004, z0 + 0.04);
+      G.box(0.05, 0.002, 0.003, "#3a8cff", sx * 0.21 + (sx < 0 ? 0.03 : -0.03) - 0.03, top + 0.005, z0 + 0.054, { emissive: 1, glow: true });
+    }
+    G.cyl(0.004, 0.006, 0.2, GEAR.black, -W / 2 + 0.04, top + 0.1, z0 + 0.02, { seg: 6 });
+    // The mic section down the left.
+    for (let k = 0; k < 4; k++) knob(G, -0.215, top, z0 + 0.12 + k * 0.06, 0.012, GEAR.knob);
+    for (let k = 0; k < 3; k++) G.box(0.026, 0.006, 0.016, GEAR.button, -0.215, top + 0.003, z0 + 0.38 + k * 0.03);
+    [-0.12, -0.04, 0.04, 0.12].forEach((x, c) => {
+      for (let k = 0; k < 4; k++) knob(G, x - 0.008, top, z0 + 0.09 + k * 0.045, 0.012, k ? GEAR.knob : GEAR.cap);
+      // The channel's meter beside its knobs, bottom toward the DJ: a dark strip with its segments over it.
+      G.box(0.009, 0.002, 0.15, GEAR.rubber, x + 0.026, top + 0.001, z0 + 0.155);
+      for (let i = 0; i < METER.SEGS; i++) {
+        const color = i < METER.GREEN ? "#3dffb0" : i < METER.GREEN + METER.AMBER ? "#ffb020" : "#ff3030";
+        G.node(`meter${c}_${i}`, gearPart(`seg${color}`, (k) => k.box(0.007, 0.003, 0.01, color, 0, 0, 0, { emissive: 1, glow: true })), x + 0.026, top + 0.003, z0 + 0.222 - i * 0.0145, { glow: true });
+      }
+      knob(G, x, top, z0 + 0.3, 0.02, GEAR.knob);
+      G.torus(0.026, 0.002, PADS[(c * 2 + 3) % 8], x, top + 0.002, z0 + 0.3, { emissive: 0.6, glow: true, seg: 16, sides: 3 });
+      G.box(0.03, 0.008, 0.018, GEAR.button, x, top + 0.004, z0 + 0.35);
+      G.box(0.03, 0.002, 0.004, "#ff9b2e", x, top + 0.009, z0 + 0.343, { emissive: 0.8, glow: true });
+      fader(G, x, top, z0 + 0.43, 0.1, false, 0.5 - c * 0.3);
+    });
+    fader(G, 0, top, D / 2 - 0.035, 0.16, true, 0);
+    // The master section down the right: its knob, the FX screen with the beat lamps under it, the FX knobs and the
+    // big lit FX button.
+    knob(G, 0.205, top, z0 + 0.06, 0.014, GEAR.cap);
+    G.picture(0.09, 0.07, 160, 124, fxScreen, 0.205, top + 0.004, z0 + 0.14, { rx: -Math.PI / 2, emissive: 0.85 });
+    for (let i = 0; i < 4; i++) G.node(`beat${i}`, gearPart("beatLamp", (k) => k.box(0.016, 0.003, 0.008, "#ffd34d", 0, 0, 0, { emissive: 1, glow: true })), 0.178 + i * 0.018, top + 0.002, z0 + 0.19, { glow: true });
+    for (let k = 0; k < 3; k++) knob(G, 0.205, top, z0 + 0.24 + k * 0.06, 0.013, GEAR.knob);
+    G.node("fxOn", ringButton("fxOn", 0.022, "#3a8cff"), 0.205, top + 0.006, D / 2 - 0.05, { glow: true });
+  };
+  // The laptop's screen, a DJ library: the stations down the side with the one playing lit, the station and what it
+  // plays (a dash while its feed names nothing) over two decks' waveforms, the tempo, and a track list. Repainted by the
+  // room as either changes.
+  const LAPTOP = { W: 768, H: 480 };
+  const paintLaptop = (ctx, station, song) => {
+    const P = RM.paintKit, w = LAPTOP.W, h = LAPTOP.H, rand = P.rng(57), side = w * 0.24, x0 = side + w * 0.02, cw = w - x0 - w * 0.02;
+    const stations = BL.timechainPartyRadio ? BL.timechainPartyRadio.STATIONS : [];
+    ctx.fillStyle = "#0a0d16"; ctx.fillRect(0, 0, w, h);
+    // The title bar: the app, the clock and the master level.
+    ctx.fillStyle = "#151a28"; ctx.fillRect(0, 0, w, h * 0.07);
+    P.pix(ctx, "OOGA RADIO", w * 0.02, h * 0.035, h * 0.035, "#9a5cff", "left");
+    P.pix(ctx, "ON AIR", w * 0.6, h * 0.035, h * 0.03, "#ff4d6e");
+    for (let k = 0; k < 16; k++) { ctx.fillStyle = k < 11 ? "#3dffb0" : k < 14 ? "#ffb020" : "#3a2020"; ctx.fillRect(w * 0.76 + k * w * 0.013, h * 0.022, w * 0.009, h * 0.026); }
+    // The side: the library and the stations.
+    ctx.fillStyle = "#10141f"; ctx.fillRect(0, h * 0.07, side, h * 0.93);
+    P.pix(ctx, "COLLECTION", w * 0.02, h * 0.11, h * 0.026, "#7f8bb0", "left");
+    P.pix(ctx, "STATIONS", w * 0.02, h * 0.17, h * 0.026, "#7f8bb0", "left");
+    stations.forEach((s, k) => {
+      const y = h * (0.21 + k * 0.055), on = s.name === station;
+      if (on) { ctx.fillStyle = "#2a1f4a"; ctx.fillRect(0, y - h * 0.022, side, h * 0.044); ctx.fillStyle = "#9a5cff"; ctx.fillRect(0, y - h * 0.022, w * 0.005, h * 0.044); }
+      P.pix(ctx, s.short, w * 0.025, y, h * 0.024, on ? "#ffffff" : "#aab4d4", "left");
+    });
+    P.pix(ctx, "HISTORY", w * 0.02, h * 0.55, h * 0.026, "#7f8bb0", "left");
+    P.pix(ctx, "PLAYLISTS", w * 0.02, h * 0.61, h * 0.026, "#7f8bb0", "left");
+    for (let k = 0; k < 4; k++) { ctx.fillStyle = "#2a3248"; ctx.fillRect(w * 0.035, h * (0.65 + k * 0.045), side * (0.4 + 0.4 * rand()), h * 0.014); }
+    // Now playing: the station and the song.
+    ctx.fillStyle = "#c9a6ff"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    P.fit(ctx, station || "Tuning in", cw, 700, h * 0.06);
+    ctx.fillText(station || "Tuning in", x0, h * 0.12);
+    ctx.fillStyle = "#f4ecff";
+    P.fit(ctx, song || "—", cw, 600, h * 0.05);
+    ctx.fillText(song || "—", x0, h * 0.19);
+    // The two decks: each a waveform with its playhead, its number and its tempo.
+    for (let d = 0; d < 2; d++) {
+      const y = h * (0.3 + d * 0.13), hi = d ? "#ffd0a0" : "#e6f6ff", mid = d ? "#ff8a3d" : "#3fa2ff";
+      ctx.fillStyle = "#121828"; ctx.fillRect(x0, y - h * 0.055, cw, h * 0.11);
+      for (let x = 0; x < cw - w * 0.08; x++) {
+        const a = (0.2 + 0.8 * rand()) * (0.45 + 0.55 * Math.abs(Math.sin(x * 0.035 + d * 2)));
+        ctx.fillStyle = a > 0.78 ? hi : mid;
+        ctx.fillRect(x0 + w * 0.07 + x, y - a * h * 0.045, 1, a * h * 0.09);
+      }
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(x0 + w * 0.07 + (cw - w * 0.08) / 2, y - h * 0.05, 2, h * 0.1);
+      P.pix(ctx, `${d + 1}`, x0 + w * 0.02, y - h * 0.02, h * 0.035, mid);
+      P.pix(ctx, "124.0", x0 + w * 0.035, y + h * 0.03, h * 0.022, "#c9d8ff");
+    }
+    // The track list: a header and rows of artists, titles, tempos and keys.
+    const ty = h * 0.5;
+    ctx.fillStyle = "#1a2134"; ctx.fillRect(x0, ty, cw, h * 0.05);
+    ["#", "TITLE", "ARTIST", "BPM", "KEY"].forEach((t, k) => P.pix(ctx, t, x0 + cw * [0.02, 0.1, 0.5, 0.8, 0.92][k], ty + h * 0.025, h * 0.022, "#7f8bb0", "left"));
+    for (let r = 0; r < 8; r++) {
+      const y = ty + h * (0.055 + r * 0.055);
+      ctx.fillStyle = r === 2 ? "#24406e" : r % 2 ? "#0e1320" : "#111726"; ctx.fillRect(x0, y, cw, h * 0.05);
+      P.pix(ctx, `${r + 1}`, x0 + cw * 0.02, y + h * 0.025, h * 0.02, "#7f8bb0", "left");
+      ctx.fillStyle = r === 2 ? "#c9d8ff" : "#4a5a7a";
+      ctx.fillRect(x0 + cw * 0.1, y + h * 0.018, cw * (0.18 + 0.18 * rand()), h * 0.014);
+      ctx.fillRect(x0 + cw * 0.5, y + h * 0.018, cw * (0.12 + 0.14 * rand()), h * 0.014);
+      P.pix(ctx, `${120 + Math.floor(rand() * 10)}`, x0 + cw * 0.8, y + h * 0.025, h * 0.02, "#aab4d4", "left");
+      P.pix(ctx, `${1 + Math.floor(rand() * 12)}A`, x0 + cw * 0.92, y + h * 0.025, h * 0.02, PADS[r], "left");
+    }
+  };
+  // A laptop on its stand, its back toward the dancers, black like the decks: its body with a backlit keyboard, a trackpad and speaker
+  // grilles, ports down its side, the lid on its hinge with a black bezel, a camera and the screen, a glowing logo on
+  // its back, and a cable across the desk into the player beside it.
+  const laptop = (G, x, z, plug) => {
+    const slate = "#17171c", stand = GEAR.edge, tilt = 0.32, lean = -0.57;
+    // The stand: two side plates on the desk rising toward the back, a top plate under the laptop and a front lip.
+    for (const sx of [-1, 1]) {
+      rod(G, [x + sx * 0.13, 0.004, z + 0.1], [x + sx * 0.13, 0.11, z - 0.11], 0.006, stand);
+      rod(G, [x + sx * 0.13, 0.004, z + 0.1], [x + sx * 0.13, 0.004, z - 0.12], 0.005, stand);
+      rod(G, [x + sx * 0.13, 0.004, z - 0.12], [x + sx * 0.13, 0.11, z - 0.11], 0.005, stand);
+    }
+    const D = G.group(x, 0.072, z, 0, tilt);
+    D.box(0.3, 0.004, 0.22, stand, 0, -0.012, 0);
+    D.box(0.3, 0.018, 0.008, stand, 0, -0.002, 0.112);
+    // The body: its slate shell, rubber feet, the keyboard well with its backlight and keys, the trackpad, grilles
+    // either side of the keys and ports down the left side.
+    D.box(0.34, 0.016, 0.24, slate, 0, 0, 0);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) D.box(0.02, 0.003, 0.012, GEAR.rubber, sx * 0.14, -0.009, sz * 0.1);
+    D.box(0.29, 0.002, 0.118, "#0b0b0e", 0, 0.008, -0.04);
+    D.box(0.286, 0.0015, 0.114, "#7a4dff", 0, 0.0088, -0.04, { emissive: 0.5, glow: true });
+    for (let row = 0; row < 5; row++) for (let k = 0; k < 13; k++) {
+      const kx = -0.13 + k * 0.0217 + (row % 2) * 0.005, kz = -0.088 + row * 0.022;
+      if (row === 4 && k > 3 && k < 9) continue;
+      D.box(0.018, 0.004, 0.018, "#0e0e12", kx, 0.0105, kz);
+    }
+    D.box(0.1, 0.004, 0.018, "#0e0e12", 0, 0.0105, 0.0);
+    D.box(0.11, 0.002, 0.07, "#24242c", 0, 0.0085, 0.072);
+    for (const sx of [-1, 1]) for (let k = 0; k < 6; k++) D.box(0.008, 0.002, 0.004, "#24242c", sx * 0.158, 0.0085, -0.09 + k * 0.018);
+    for (let k = 0; k < 3; k++) D.box(0.002, 0.006, 0.012, k ? "#121218" : "#3a8cff", -0.171, 0, -0.06 + k * 0.03, { emissive: k ? 0 : 0.8 });
+    // The lid on its hinge, leaning back; its picture's node turns by the deck's tilt and the lid's lean together.
+    D.cyl(0.008, 0.008, 0.28, slate, 0, 0.006, -0.12, { rz: Math.PI / 2, seg: 10 });
+    const Lg = D.group(0, 0.008, -0.12, 0, lean);
+    Lg.box(0.34, 0.232, 0.008, slate, 0, 0.116, -0.004);
+    Lg.box(0.334, 0.226, 0.002, "#08080c", 0, 0.116, 0.001);
+    Lg.ball(0.003, "#3a3a44", 0, 0.222, 0.0025, { seg: 6 });
+    Lg.cyl(0.03, 0.03, 0.002, "#ff9b2e", 0, 0.125, -0.009, { rx: Math.PI / 2, emissive: 1, glow: true, seg: 20 });
+    Lg.torus(0.038, 0.003, "#ffd34d", 0, 0.125, -0.0085, { rx: Math.PI / 2, emissive: 0.8, glow: true, seg: 20, sides: 3 });
+    const canvas = CH.canvas(LAPTOP.W, LAPTOP.H);
+    paintLaptop(canvas.getContext("2d"), "", "");
+    Lg.node("laptopScreen", RM.flatPicture(canvas, 0.31, 0.194, 0.85), 0, 0.12, 0.0025, { rx: tilt + lean, glow: true });
+    // The cable from its right side down across the desk and into the player.
+    const a = [x + 0.171, 0.072 + 0.02 * Math.sin(tilt), z - 0.02 * Math.cos(tilt)];
+    const pts = [a, [a[0] + 0.03, 0.02, a[2]], [a[0] + 0.06, 0.004, a[2] - 0.04], [plug[0] - 0.05, 0.004, plug[2]], plug];
+    for (let k = 1; k < pts.length; k++) rod(G, pts[k - 1], pts[k], 0.0035, "#18181e");
+  };
+  const headphones = (G, x, z) => {
+    for (const sx of [-1, 1]) {
+      G.cyl(0.05, 0.05, 0.04, GEAR.black, x + sx * 0.08, 0.05, z, { rz: Math.PI / 2, seg: 16 });
+      G.cyl(0.04, 0.04, 0.012, GEAR.rubber, x + sx * 0.055, 0.05, z, { rz: Math.PI / 2, seg: 14 });
+      G.torus(0.035, 0.003, "#9a5cff", x + sx * 0.101, 0.05, z, { rz: Math.PI / 2, emissive: 0.8, glow: true, seg: 14, sides: 3 });
+    }
+    G.torus(0.095, 0.01, GEAR.edge, x, 0.05, z, { rx: Math.PI / 2, seg: 24, sides: 5 });
+  };
+  const djGear = (G) => {
+    const span = RIG.MW / 2 + RIG.GAP + RIG.PW, B = RIG.BASE;
+    laptop(G, -span - 0.32, 0.02, [-span, B + 0.06, -0.12]);
+    headphones(G, span + 0.22, 0.12);
+    G.box(2 * span + 0.04, B, RIG.D + 0.04, GEAR.black, 0, B / 2, 0);
+    G.box(2 * span + 0.04, 0.008, 0.004, PURPLE, 0, B * 0.5, -RIG.D / 2 - 0.021, { emissive: 1, glow: true });
+    const R = G.group(0, B, 0);
+    mixer(R);
+    for (const side of [-1, 1]) player(R, side * (RIG.MW / 2 + RIG.GAP + RIG.PW / 2), side < 0 ? 0 : 1);
+  };
+
   // ---------- its door ----------
-  // A club's: black leather leaves buttoned in a diamond pattern with a neon strip down the seam and a glowing
-  // porthole, neon tubes round the frame, and a string of bulbs round it that chase the beat.
+  // A club's: black leather leaves buttoned in a diamond pattern with a soft strip down the seam and a porthole, neon
+  // tubes round the frame, EXIT over it and a string of bulbs round it that chase the beat, the neon, EXIT and the bulbs
+  // in the room's two colours (`lightsIn`, swapped as the colours change), and no strip across the bay.
   const door = {
-    casing: "#120d18", frame: "#2a1f36", header: "#0b0714", word: "#ff3ce0", strip: PURPLE, chain: false,
-    leaf: "#17121c", seam: "#050307", plate: "#0b0714", face: "#ff3ce0", mark: "#0b0714",
+    casing: "#120d18", frame: "#2a1f36", header: "#0b0714", word: PALETTE_HEX[0][1], strip: false, chain: false,
+    leaf: "#17121c", seam: "#050307", plate: "#0b0714", face: "#d8d0ff", mark: "#0b0714",
     leafFace(side, H) {
       for (let row = 0; row < 11; row++) for (let col = 0; col < 5; col++) {
         const x = -0.6 + col * 0.3 + (row & 1 ? 0.15 : 0), y = 0.35 + row * 0.27;
         if (x < 0.72 && Math.hypot(x, y - 2.35) > 0.28) H.diamond(x, y, 0.025, "#6e5a86", 0.15, 1);
       }
-      H.rect(H.inner + side * 0.02, 0.1, H.inner + side * 0.05, 3.1, PURPLE, 1, 2);
+      H.rect(H.inner + side * 0.02, 0.1, H.inner + side * 0.05, 3.1, "#4a3d66", 0.6, 2);
       H.disc(0, 2.35, 0.15, "#24123a", 0.5, 16, 1);
-      H.ring(0, 2.35, 0.18, 0.03, "#ff3ce0", 0.9, 16, 2);
+      H.ring(0, 2.35, 0.18, 0.03, "#9a8ab8", 0.5, 16, 2);
     }
   };
+  // The neon round the frame in `color`, in the room's frame: up both sides and across the top.
+  const neon = (k, d, color) => {
+    const x = d.W + d.F + 0.03, z = d.Z - 0.14;
+    for (const sx of [-1, 1]) k.box(0.03, d.D + d.F, 0.03, color, sx * x, (d.D + d.F) / 2, z, { emissive: 1, glow: true });
+    k.box(2 * x, 0.03, 0.03, color, 0, d.D + d.F, z, { emissive: 1, glow: true });
+  };
   const doorTrim = (K, L) => {
-    const d = RM.doorway(L), x = d.W + d.F + 0.03, z = d.Z - 0.14;
-    for (const sx of [-1, 1]) K.box(0.03, d.D + d.F, 0.03, "#ff3ce0", sx * x, (d.D + d.F) / 2, z, { emissive: 1, glow: true });
-    K.box(2 * x, 0.03, 0.03, "#ff3ce0", 0, d.D + d.F, z, { emissive: 1, glow: true });
-    RM.doorBulbs(K, L, "#ffd08a", 0.38);
+    K.node("doorNeon", (k) => neon(k, RM.doorway(L), PALETTE_HEX[0][1]), 0, 0, 0, { glow: true });
+    RM.doorBulbs(K, L, PALETTE_HEX[0][0], 0.38);
+  };
+  // The door's and the speakers' lights in a palette's colours, made once a room and palette: the neon, EXIT and the
+  // woofers' rings in its second colour, the bulbs and the speakers' strips in its first.
+  const lightLooks = new Map();
+  const lightsIn = (L, i) => {
+    const key = `${L.id}|${i}`;
+    if (!lightLooks.has(key)) {
+      const [ha, hb] = PALETTE_HEX[i], d = RM.doorway(L), tube = RM.solo((k) => neon(k, d, hb)), bulb = RM.helpers.ballGeo(0.045, ha, 8, 1), strip = RM.solo(speakerStrip(ha));
+      tube.castShadow = bulb.castShadow = strip.castShadow = false;
+      lightLooks.set(key, { tube, exit: RM.helpers.litWord("EXIT", 0.036, hb, 0.9), bulb, ring: RM.solo(cone(0.13, hb)), strip });
+    }
+    return lightLooks.get(key);
   };
 
   const plan = (K, L) => {
@@ -834,19 +1291,18 @@
     // The desk stands in the way of feet below its top, so an Ooga walks round it on the stage to the DJ's place
     // behind, or jumps up onto it and over.
     arcSolids(K, (rb0 + rb1) / 2, 180 - ah, 180 + ah, 0.42, U);
-    for (const side of [-1, 1]) {
-      const x = side * 0.65;
-      K.cyl(0.3, 0.3, 0.05, C.metal, x, H + 1.055, BZ, { seg: 24 });
-      K.box(0.03, 0.03, 0.3, "#c9c9d0", x + side * 0.26, H + 1.1, BZ + 0.04, { ry: side * 0.25 });
-      K.node(`record${side < 0 ? 0 : 1}`, (k) => {
-        k.cyl(0.25, 0.25, 0.012, C.vinyl, 0, 0, 0, { seg: 24 });
-        k.cyl(0.08, 0.08, 0.014, C.label, 0, 0.001, 0, { seg: 12 });
-        k.box(0.13, 0.016, 0.02, "#3a3a44", 0.15, 0.001, 0);
-      }, x, H + 1.087, BZ, { target: { kind: "decks", tip: "Decks", radius: 0.4, data: { say: "33 rpm, and the bass drops on every block" } } });
+    // The DJ's platform behind it, from the desk back to the wall, its top a solid's in slices along it; amber nosing
+    // along its open ends, where an Ooga steps up.
+    const pr0 = rb1 + 0.01, pr1 = rw - 0.05, pb = ah - DJ_IN, P = H + DJ_UP, da0 = (180 - pb) * DEG, da1 = (180 + pb) * DEG;
+    K.sector(0, pr0, pr1, da0, da1, H, P, C.stage);
+    K.sector(0, pr0 + 0.01, pr1, da0 + 0.001, da1 - 0.001, P, P + 0.012, C.stageTop);
+    for (const a of [da0, da1 - 0.004]) K.sector(0, pr0, pr1, a, a + 0.004, P + 0.004, P + 0.016, "#ffb04d", { emissive: 0.8, glow: true });
+    const rows = 3, slices = Math.ceil(2 * pb * DEG * (pr0 + pr1) / 2 / 0.5), depth = (pr1 - pr0) / rows;
+    for (let i = 0; i < rows; i++) for (let j = 0; j < slices; j++) {
+      const rm = pr0 + depth * (i + 0.5), b = 180 - pb + 2 * pb * (j + 0.5) / slices, c = polar(rm, b);
+      K.solid({ x: c.x, z: c.z, hx: pb * DEG * rm / slices - 0.02, hz: depth / 2 - 0.02, top: P, stay: true });
     }
-    K.box(0.42, 0.08, 0.32, C.metal, 0, H + 1.07, BZ);
-    K.box(0.36, 0.01, 0.26, PURPLE, 0, H + 1.115, BZ, { emissive: 0.6, glow: true });
-    for (let m = 0; m < 2; m++) K.node(`meter${m}`, (k) => k.box(0.03, 0.12, 0.03, m ? BANDS[4] : BANDS[2], 0, 0.06, 0, { emissive: 1, glow: true }), (m - 0.5) * 0.12, H + 1.12, BZ - 0.08, { glow: true });
+    djGear(K.group(0, U, BZ + 0.05, Math.PI));
 
     // The lasers on the walls: each projector on its bracket, and every projector's beams and their dots, built shrunk
     // to nothing (the room starts dark) and in every colour among them, so all of them stay with the room.
@@ -866,26 +1322,34 @@
     });
 
     // The line arrays hung off the walls either side of the booth and further round, their woofers on nodes that thump.
-    let woofer = cone(0.13);
+    const shared = { woofer: cone(0.13, PALETTE_HEX[0][1]), strip: speakerStrip(PALETTE_HEX[0][0]) };
     const tip = { kind: "speaker", tip: "Line array", radius: 0.6, data: { say: "Hung off the wall, and a drop on every block" } }, rh = ROOMS.radiusAt(L, HANG_Y);
     for (const [i, a] of ARRAYS.entries()) for (const s of [1, -1]) {
       const b = s * a.b * DEG;
-      woofer = lineArray(K.group(rh * Math.sin(b), 0, rh * Math.cos(b), b + Math.PI), a.n, `woofer${i}${s < 0 ? "l" : "r"}`, woofer, tip);
+      lineArray(K.group(rh * Math.sin(b), 0, rh * Math.cos(b), b + Math.PI), a.n, `woofer${i}${s < 0 ? "l" : "r"}`, shared, tip);
     }
 
     // The mirror ball under the crown on its line; the ring of light a drop sends down the dome and the sign over the
     // booth that a block's drop shows, both kept under the floor until then.
     const by = ballY(L);
     K.node("ball", (k) => mirrorBall(k, 1.1), 0, by, FZ, { target: { kind: "ball", tip: "Mirror ball", radius: 1.3, data: { say: "It turns faster when the music hits hard" } } });
+    // It is solid to an Ooga flying into it, and one that comes down on it stands on its crown: a wide circle up to its
+    // shoulder and a narrow one up to its top, both hung, so nobody under it meets them and a rise from below stops at
+    // its underside.
+    K.solid({ x: 0, z: FZ, r: 0.95, top: by + 0.55, below: by - 1.0 });
+    K.solid({ x: 0, z: FZ, r: 0.25, top: by + 1.1, below: by - 1.0 });
     K.box(0.03, L.crown - by - 1.25, 0.03, "#55555c", 0, (by + 1.15 + L.crown - 0.1) / 2, FZ);
     K.node("wave", (k) => k.torus(1, 0.025, FLASH, 0, 0, 0, { emissive: 1, glow: true, seg: 96, sides: 5 }), 0, AWAY, 0, { glow: true });
     K.picture(9, 1.1, 1636, 200, sign("BLOCK FOUND · DROP!", FLASH, FLASH), 0, AWAY, BZ + 1.6, { name: "drop", rx: 0.3 });
 
     // The latest block on the dome over the booth.
-    const pa0 = -15, pa1 = 15, pe0 = 3.5, pe1 = 9.5, pw = 1024;
+    const pa0 = -15, pa1 = 15, pe0 = 4.6, pe1 = 10.6, pw = 1024;
     const wM = (pa1 - pa0) * DEG * L.R * Math.cos((pe0 + pe1) / 2 * DEG), hM = L.R * (Math.sin(pe1 * DEG) - Math.sin(pe0 * DEG)), ph = Math.round(pw * hM / wM);
     K.live({ az0: pa0, az1: pa1, el0: pe0, el1: pe1, w: pw, h: ph, tip: "The latest block",
       key: (f, now) => blockKey(f.reader, now), paint: (ctx, f, now) => paintBlock(ctx, f.reader, now, pw, ph) });
+    // Under it, what the radio plays, shown only while its station's feed names a song.
+    const se0 = 0.4, se1 = 4.3, sw = 1024, swM = (pa1 - pa0) * DEG * L.R * Math.cos((se0 + se1) / 2 * DEG), sh = Math.round(sw * L.R * (Math.sin(se1 * DEG) - Math.sin(se0 * DEG)) / swM);
+    K.live({ az0: pa0, az1: pa1, el0: se0, el1: se1, w: sw, h: sh, tip: "Now playing", key: songKey, paint: (ctx) => paintSong(ctx, sw, sh) });
 
     // Point lights, in the order `animate` drives them: the two mood lights over the floor, the floor's own glow in the
     // middle and the ball's; four more over the floor round it; the screen's.
@@ -919,25 +1383,44 @@
     const dots = [];
     for (let g = 0; nodes[`dots${g}`]; g++) dots.push(nodes[`dots${g}`]);
     // Each woofer's rest and the way it pushes out, toward the room's middle.
-    const cones = [];
+    const cones = [], strips = [];
+    for (const name of Object.keys(nodes)) if (/^speakerStrip/.test(name)) strips.push(nodes[name]);
     for (const name of Object.keys(nodes)) if (/^woofer/.test(name)) {
       const n = nodes[name], p = n.position, d = Math.hypot(p.x, p.z);
       cones.push({ node: n, x: p.x, z: p.z, dx: -p.x / d, dz: -p.z / d });
     }
-    const records = [nodes.record0, nodes.record1], meters = [nodes.meter0, nodes.meter1], ball = nodes.ball, wave = nodes.wave, drop = nodes.drop, stageEdge = nodes.stageEdge;
+    const records = [nodes.record0, nodes.record1], jogs = [nodes.jog0, nodes.jog1], plays = [nodes.play0, nodes.play1];
+    const fxOn = nodes.fxOn, ball = nodes.ball, wave = nodes.wave, drop = nodes.drop, stageEdge = nodes.stageEdge, wallNode = nodes.wall;
+    // The mixer's meters, a channel's segments bottom up, and how many of each are lit; its beat lamps.
+    const meterSegs = [], meterLit = new Int8Array(4).fill(-1), beatLamps = [0, 1, 2, 3].map((i) => nodes[`beat${i}`]);
+    for (let c = 0; c < 4; c++) for (let i = 0; i < METER.SEGS; i++) meterSegs.push(nodes[`meter${c}_${i}`]);
+    // What the radio plays, under the latest block.
+    const songPicture = built.live.find((l) => l.spec.tip === "Now playing");
+    // The laptop's screen, repainted as the station or the song changes.
+    const laptopSurface = nodes.laptopScreen.geometry.imageSurface, laptopCtx = laptopSurface.canvas.getContext("2d");
+    let laptopStation = null, laptopSong = null;
+    // The door's neon, EXIT and bulbs, in the colours the room is in.
+    const doorNeon = nodes.doorNeon, exitSign = built.exitSign;
+    let doorColors = -1;
     const domeSurface = built.dome && built.dome.geometry.imageSurface, domeShow = domeSurface && shows.get(domeSurface.canvas);
     const screenSurface = nodes.screen.geometry.imageSurface, screen = screenOf(screenSurface.canvas);
     const wallSurface = nodes.wall.geometry.imageSurface, wall = wallOf(wallSurface.canvas), music = new Float32Array(MUSIC.BANDS), shape = new Float32Array(MUSIC.WAVE);
     const e0 = ROOMS.edgeEl(L, 0) / DEG;
     const floorRgb = built.lights[2].slice(4, 7), screenRgb = built.lights[8].slice(4, 7);
-    const radio = BL.timechainPartyRadio.create(), heard = { live: false, bpm: 0, phase: 0, level: 0, conf: 0 }, E = { loud: 0, bass: 0 }, bulbs = RM.bulbsOf(nodes);
+    const radio = BL.timechainPartyRadio.create(), heard = { live: false, bpm: 0, phase: 0, level: 0, conf: 0 }, E = { loud: 0, bass: 0 }, E2 = { loud: 0, bass: 0 }, bulbs = RM.bulbsOf(nodes);
     const setLight = (lights, i, r, g, b) => { const o = i * 8; lights[o + 4] = r; lights[o + 5] = g; lights[o + 6] = b; };
     // The room's clock for its own arrangement: the island room's where there is one, so everyone sees it alike.
-    const clock = () => (BL.net.state.room === "live" ? BL.net.serverNow() : Date.now()) / 1000;
+    const clock = () => (BL.net.state.room === "live" ? BL.net.serverNow() : Date.now()) / 1000 + shift;
+    let shift = 0, pinned = null;
 
     // The beat, the music's energy and the section.
     let beat = 0, rate = 1 / BEAT, lastStep = 0, hit = 1, I = 0.25, raw = 0.25, forced = null, analysed = false;
     let fastB = NaN, fastL = 0, refB = 0, refL = 0;
+    let kicking = false, kickBeat = 0, forcedKick = null, forcedLook = null, held = false;
+    // A drop seen coming: the beat it lands on (-1 for none), the one the last scan saw, when the next scan is due; the
+    // build toward it, the room holding its breath before it, and the build's rings across the floor.
+    const curve = new Float32Array(Math.round(AHEAD.LOOK / AHEAD.STEP) + 1);
+    let dropBeat = -1, seenBeat = -1, scanWait = 0, tension = 0, hushK = 0, converge = 0;
     let section = 0, sectionBeat = 0, lastCalm = -99, nextChange = CHANGE.EVERY * BAR, nextColors = CHANGE.PALETTE * BAR, turn = 0;
     // Each surface's look now and the one it fades from, how far, and the step its next change is due on.
     const surface = (seconds, fors, first) => ({ look: first, from: first, fade: 1, seconds, fors, due: Infinity });
@@ -962,7 +1445,7 @@
     const newColors = () => { colorFrom = colorTo; colorTo = pick(PALETTE_IDS, colorTo); colorFade = 0; };
     const startShow = (beats, dropped) => {
       showFrom = beat; showUntil = beat + beats; showCount++;
-      showLook = dropped ? 0 : Math.floor(Math.random() * LOOKS);
+      showLook = dropped ? 0 : Math.floor(Math.random() * 64);
       showPair = dropped ? 0 : Math.floor(Math.random() * PROJ.BEARINGS.length);
       showColors = SHOW_COLORS[Math.floor(Math.random() * SHOW_COLORS.length)];
     };
@@ -1000,6 +1483,41 @@
       BL.hud.toast(`${who ? `${who} changed the channel · ` : ""}Channel ${radio.channel + 1} of ${stations} · ${radio.station.name}`);
     });
 
+    // How hard a reading is against the loudest lately, as the intensity reads it.
+    const rawOf = (bass, loud) => ENERGY.BASS_SHARE * clamp01((bass - refB + ENERGY.BASS_SPAN) / ENERGY.BASS_WIDTH) + (1 - ENERGY.BASS_SHARE) * clamp01((loud - refL + ENERGY.LOUD_SPAN) / ENERGY.LOUD_WIDTH);
+    // How hard the music will be `d` seconds on (-1 where it can't be read).
+    const futureAt = (d) => {
+      if (!analysed) return arranged(clock() + d);
+      let b = 0, l = 0, n = 0;
+      for (let j = -1; j <= 1; j++) if (radio.ahead(d + j * AHEAD.AROUND, E2)) { b += E2.bass; l += E2.loud; n++; }
+      return n ? rawOf(b / n, l / n) : -1;
+    };
+    // The seconds to the first drop coming, or -1: the steepest step where a quiet second meets a hard stretch.
+    const scanAhead = () => {
+      const n = curve.length, back = Math.round(1 / AHEAD.STEP), on = Math.round(AHEAD.OVER / AHEAD.STEP);
+      for (let k = 0; k < n; k++) curve[k] = futureAt(k * AHEAD.STEP);
+      for (let k = back; k + on <= n; k++) {
+        let before = 0, after = 0, ok = true;
+        for (let j = k - back; j < k; j++) { if (curve[j] < 0) ok = false; before += curve[j]; }
+        for (let j = k; j < k + on; j++) { if (curve[j] < 0) ok = false; after += curve[j]; }
+        before /= back; after /= on;
+        if (!ok || before >= AHEAD.BELOW || after <= AHEAD.ABOVE || after - before < AHEAD.JUMP) continue;
+        let best = k, rise = -1;
+        for (let j = Math.max(1, k - 2); j <= Math.min(n - 1, k + 2); j++) if (curve[j] - curve[j - 1] > rise) { rise = curve[j] - curve[j - 1]; best = j; }
+        return (best - 0.5) * AHEAD.STEP;
+      }
+      return -1;
+    };
+    // The drop lands: the room goes hard on that beat, every surface and the colours change and the lasers come on.
+    const landDrop = (t, step) => {
+      musicT = 0;
+      if (showUntil < 0) startShow(LASER.SHOW_DROP, true);
+      section = 2; sectionBeat = beat; I = Math.max(I, 0.85);
+      for (let i = 0; i < 3; i++) surfaces[i].due = step + i * BAR;
+      newColors();
+      nextChange = step + CHANGE.EVERY * BAR; nextColors = step + CHANGE.PALETTE * BAR;
+    };
+
     return {
       update(dt, t) {
         // The beat: its own steady one, or eased onto the music's tempo and phase; it never runs backward.
@@ -1018,22 +1536,54 @@
           fastB += (E.bass - fastB) * k; fastL += (E.loud - fastL) * k;
           refB = Math.max(fastB, refB - dt * ENERGY.FALL); refL = Math.max(fastL, refL - dt * ENERGY.FALL);
           raw = ENERGY.BASS_SHARE * clamp01((fastB - refB + ENERGY.BASS_SPAN) / ENERGY.BASS_WIDTH) + (1 - ENERGY.BASS_SHARE) * clamp01((fastL - refL + ENERGY.LOUD_SPAN) / ENERGY.LOUD_WIDTH);
-        } else raw = arranged(clock());
+        } else raw = radio.warming ? 0.15 : arranged(clock());
         if (forced !== null) raw = forced;
         I += (raw - I) * Math.min(1, dt * (raw > I ? ENERGY.RISE : ENERGY.SINK));
-        hit += ((heard.live ? 0.35 + 0.65 * heard.level : 1) - hit) * Math.min(1, dt * TEMPO_RATE);
+        // A drop coming: looked for while the room is not already hard, landed on its beat; the build over its last
+        // seconds and the breath held just before it.
+        if ((scanWait -= dt) <= 0) {
+          scanWait = AHEAD.SCAN;
+          const s = forced === null && section !== 2 && !radio.warming ? scanAhead() : -1;
+          if (s >= 0) {
+            const at = Math.round(beat + s * rate);
+            if (seenBeat >= 0 && Math.abs(at - seenBeat) <= 2 && (dropBeat < 0 || Math.abs(at - dropBeat) > 1)) dropBeat = at;
+            seenBeat = at;
+          } else {
+            seenBeat = -1;
+            if (dropBeat >= 0 && (forced !== null || (dropBeat - beat) / rate > AHEAD.LOSE)) dropBeat = -1;
+          }
+        }
+        if (dropBeat >= 0 && beat >= dropBeat) {
+          dropBeat = seenBeat = -1;
+          if (section !== 2) landDrop(t, Math.floor(beat));
+        }
+        const toDrop = dropBeat >= 0 ? (dropBeat - beat) / rate : Infinity;
+        tension = toDrop < AHEAD.BUILD ? smooth(1 - toDrop / AHEAD.BUILD) : 0;
+        hushK += ((dropBeat >= 0 && dropBeat - beat < AHEAD.HUSH ? 1 : 0) - hushK) * Math.min(1, dt * 25);
+        const dim = 1 - 0.85 * hushK;
+        // How hard a kick drives the music now: the beat the radio finds, as hard as it hits (none when it finds none);
+        // or, where the music can't be read, the arrangement's, kicking through its hard part.
+        const groove = forcedKick !== null ? forcedKick : analysed ? (heard.live ? heard.level : 0) : I > 0.6 ? 1 : 0.3;
+        hit += (groove - hit) * Math.min(1, dt * TEMPO_RATE);
         const kick = Math.exp(-(beat - step) * 6) * hit * (0.35 + 0.65 * I);
         if (I < SECTION.CALM_DOWN) lastCalm = t;
         // A new block on the chain drops the bass.
         const blocks = feeds.reader.value("recent"), height = blocks && blocks[0] ? blocks[0].height : -1;
+        M.hash = blocks && blocks[0] ? blocks[0].id : "00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8d72728a054";
         if (height > 0 && lastHeight > 0 && height > lastHeight) blockDrop();
         if (height > 0) lastHeight = height;
         // On each bar: the section, and now and then a new look for one surface or new colours.
         if (newStep && step % BAR === 0) {
+          // Whether a strong kick drives it: a change of mind repicks every surface's look, a bar apart.
+          const kickWant = kicking ? hit > KICK.OFF : hit > KICK.ON;
+          if (kickWant !== kicking && beat - kickBeat >= KICK.HOLD * BAR) {
+            kicking = kickWant; kickBeat = beat;
+            for (let i = 0; i < 3; i++) surfaces[i].due = Math.min(surfaces[i].due, step + i * BAR);
+          }
           const want = section === 2 ? (I < SECTION.CALM_DOWN ? 0 : I < SECTION.HARD_DOWN ? 1 : 2)
             : section === 0 ? (I > SECTION.HARD_UP ? 2 : I > SECTION.CALM_UP ? 1 : 0)
               : (I > SECTION.HARD_UP ? 2 : I < SECTION.CALM_DOWN ? 0 : 1);
-          if (want !== section && (beat - sectionBeat >= SECTION.HOLD * BAR || want === 2)) {
+          if (want !== section && !(want === 2 && dropBeat >= 0) && (beat - sectionBeat >= SECTION.HOLD * BAR || want === 2)) {
             if (want === 2 && (section === 0 || t - lastCalm < LASER.DROP_AFTER)) musicDrop(t);
             if (want !== 2) endShow(t);
             section = want; sectionBeat = beat;
@@ -1044,7 +1594,8 @@
             surfaces[turn].due = step; turn = (turn + 1) % 3; nextChange = step + CHANGE.EVERY * BAR;
           }
           if (step >= nextColors) { newColors(); nextColors = step + CHANGE.PALETTE * BAR; }
-          for (const s of surfaces) if (step >= s.due) { s.due = Infinity; change(s, pick(s.fors[section], s.look)); }
+          const mood = section > 0 && !kicking ? 3 : section;
+          if (!held) for (const s of surfaces) if (step >= s.due) { s.due = Infinity; change(s, pick(s.fors[mood], s.look)); }
           // A long hard stretch without lasers gets a short show.
           if (section === 2 && showUntil < 0 && t - lastShowEnd > LASER.LONG) startShow(LASER.SHOW_PEAK, false);
         }
@@ -1055,20 +1606,36 @@
         // The moment every surface reads.
         const cf = smooth(colorFade);
         mix(PALETTES[colorFrom][0], PALETTES[colorTo][0], cf, M.a); mix(PALETTES[colorFrom][1], PALETTES[colorTo][1], cf, M.b);
-        M.t = t; M.beat = beat; M.step = step; M.kick = kick; M.I = I;
-        M.spin += dt * (0.25 + 0.9 * I); M.rings += move * Math.PI * (0.3 + 0.7 * I); M.sweep += move * TAU / 16 * (0.5 + 0.5 * I);
+        M.t = t; M.beat = beat; M.step = step; M.kick = kick * dim; M.I = I * dim;
+        const rush = 1 + 1.5 * tension;
+        M.spin += dt * (0.25 + 0.9 * I) * rush; M.rings += move * Math.PI * (0.3 + 0.7 * I) * rush; M.sweep += move * TAU / 16 * (0.5 + 0.5 * I) * rush;
         M.ripple += dt * (0.7 + 1.5 * I); M.flow += dt * (12 + 40 * I);
         // The drops: a block's lasts DROP_TIME, the music's MUSIC_DROP.
         if (blockT >= 0 && (blockT += dt / DROP_TIME) >= 1) blockT = -1;
         if (musicT >= 0 && (musicT += dt / MUSIC_DROP) >= 1) musicT = -1;
         const d = blockT >= 0 ? blockT : musicT, dropping = d >= 0, boom = blockT >= 0 ? 1 - blockT : 0;
         // The stage's lip glows with how hard the music is and on the kick.
-        stageEdge.glow = 0.3 + 0.35 * I + 0.35 * kick + boom;
-        // The door's bulbs chase round the frame a bulb a beat, every third lit.
+        stageEdge.glow = (0.3 + 0.35 * I + 0.35 * kick + 0.4 * tension) * dim + boom;
+        // The door's and the speakers' lights take the room's colours halfway through their fade; the neon, EXIT and the
+        // speakers' strips glow with the music, and the door's bulbs chase round the frame a bulb a beat, every third lit.
+        const doorWants = cf >= 0.5 ? colorTo : colorFrom;
+        if (doorWants !== doorColors) {
+          doorColors = doorWants;
+          const look = lightsIn(L, doorColors);
+          doorNeon.geometry = look.tube; exitSign.geometry = look.exit;
+          for (let i = 0; i < bulbs.length; i++) bulbs[i].geometry = look.bulb;
+          for (let i = 0; i < cones.length; i++) cones[i].node.geometry = look.ring;
+          for (let i = 0; i < strips.length; i++) strips[i].geometry = look.strip;
+        }
+        for (let i = 0; i < strips.length; i++) strips[i].glow = (0.35 + 0.35 * I + 0.3 * kick) * dim;
+        doorNeon.glow = 0.45 + 0.3 * I + 0.25 * kick;
+        exitSign.glow = 0.7 + 0.3 * I;
         for (let i = 0; i < bulbs.length; i++) bulbs[i].glow = (i + step) % 3 === 0 ? 0.3 + 0.5 * kick : 0.1;
         // The floor: its look wiped outward ring by ring over the last, a drop's wave over it all; re-hashed on every
         // beat while the music is hard and every bar while it is not, the hashes held through a drop.
-        const front = dropping ? (d - 0.3) / 0.6 * (RINGS + 1) : -9;
+        // In a build, rings run in from the walls toward the middle, quicker as the drop nears.
+        converge += move * (0.25 + 1.75 * tension);
+        const front = dropping ? (d - 0.3) / 0.6 * (RINGS + 1) : tension > 0.05 ? (1 - (converge % 1)) * (RINGS + 1) : -9;
         if (!dropping) nonce = I > 0.6 ? step : step >> 2;
         sparkDt += dt;
         if (floor && (floorWait -= dt) <= 0) {
@@ -1086,18 +1653,22 @@
             }
             if (Math.abs(r - front) < 1.3) { floorA[o] = flash[0] * 1.1; floorA[o + 1] = flash[1] * 1.1; floorA[o + 2] = flash[2] * 1.1; }
           }
-          if (floor.paint(floorA, nonce, 0.3 + 0.7 * I)) floorSurface.version++;
+          if (floor.paint(floorA, nonce, (0.3 + 0.7 * I) * dim)) floorSurface.version++;
         }
         // The lasers: during a show as bright as the music is hard, one pair at a time taking turns by the phrase and the
         // opposite pair with it at the hardest; a block's drop all of them.
-        const target = blockT >= 0 ? 1 : showUntil >= 0 ? clamp01((I - 0.45) / 0.35) : 0;
+        // In a build's last half every beam finds the mirror ball, brighter as the drop nears; they go dark before it.
+        const building = showUntil < 0 && blockT < 0 && tension > 0.5;
+        const target = blockT >= 0 ? 1 : showUntil >= 0 ? clamp01((I - 0.45) / 0.35) : building ? (tension - 0.5) * 1.2 : 0;
         laser += (target - laser) * Math.min(1, dt * (target > laser ? 3 : 1.5));
+        if (hushK > 0.5) laser = 0;
         const n = PROJ.BEARINGS.length, first = (showPair + Math.floor((beat - showFrom) / PHRASE)) % n;
         const pairs = blockT >= 0 ? (1 << n) - 1 : laser > 0.03 ? 1 << first | (laser > 0.75 ? 1 << (first + 2) % n : 0) : 0;
         if (pairs) {
-          const lk = blockT >= 0 ? -1 : (showLook + Math.floor((beat - showFrom) / PHRASE)) % LOOKS;
-          aim(rigs, beat, kick, lk, showColors[0], showColors[1], pairs, look, F);
-          const glow = (0.35 + 0.65 * laser) * (0.85 + 0.15 * kick);
+          const list = kicking ? PULSE_LOOKS : FLOW_LOOKS;
+          const lk = blockT >= 0 ? -1 : forcedLook !== null ? forcedLook : building ? 5 : list[(showLook + Math.floor((beat - showFrom) / (kicking ? PHRASE : 2 * PHRASE))) % list.length];
+          aim(rigs, beat, t, kick, lk, showColors[0], showColors[1], pairs, look, F);
+          const glow = (0.35 + 0.65 * laser) * (0.85 + 0.15 * kick) * (kicking || blockT >= 0 ? 1 : 0.7);
           for (let i = 0; i < count; i++) {
             const beam = beams[i], dot = hits[i], on = look.on[i] === 1;
             beam.visible = dot.visible = on;
@@ -1110,7 +1681,11 @@
             beam.glow = dot.glow = glow;
           }
         } else for (let i = 0; i < count; i++) beams[i].visible = hits[i].visible = false;
-        for (let p = 0; p < projectors.length; p++) projectors[p].glow = pairs >> rigs[p].pair & 1 ? 0.4 + 0.6 * laser : 0.25;
+        for (let p = 0; p < projectors.length; p++) {
+          let lit = false;
+          for (let j = 0; pairs && j < NB && !lit; j++) lit = look.on[p * NB + j] === 1;
+          projectors[p].glow = lit ? 0.4 + 0.6 * laser : 0.25;
+        }
         // The dome: its look faded over the last, warm in a block's drop; the dots twinkling softly, brighter in the
         // night's look, a group lit on the kick.
         if (domeShow && (domeWait -= dt) <= 0) {
@@ -1119,7 +1694,7 @@
           domeSurface.version++;
         }
         const night = dome.look === DOME.NIGHT ? dome.fade : dome.from === DOME.NIGHT ? 1 - dome.fade : 0;
-        for (let g = 0; g < dots.length; g++) dots[g].glow = 0.12 + 0.3 * night + (0.15 + 0.25 * night) * (0.5 + 0.5 * Math.sin(t * 1.3 + g * 1.7)) + (g === step % dots.length ? 0.5 * kick * I : 0) + boom;
+        for (let g = 0; g < dots.length; g++) dots[g].glow = (0.12 + 0.3 * night + (0.15 + 0.25 * night) * (0.5 + 0.5 * Math.sin(t * 1.3 + g * 1.7)) + (g === step % dots.length ? 0.5 * kick * I : 0)) * dim + boom;
         // The booth's screen and the LED wall, from the music read once for both (or made from the beat).
         screenDt += dt;
         if ((screenWait -= dt) <= 0) {
@@ -1128,9 +1703,22 @@
           const styled = Math.round(cf * 8) + colorTo * 16;
           if (styled !== colorStyled) { colorStyled = styled; wall.colors(M.a, M.b); }
           screen.paint(screenDt, kick, I, boom, music, shape);
+          // The mixer's meters, a channel a quarter of the spectrum, low to high.
+          const quarter = MUSIC.BANDS / 4;
+          for (let c = 0; c < 4; c++) {
+            let sum = 0;
+            for (let k = c * quarter; k < (c + 1) * quarter; k++) sum += music[k];
+            const lit = Math.round(clamp01(sum / quarter * 1.6 * dim) * METER.SEGS);
+            if (lit === meterLit[c]) continue;
+            meterLit[c] = lit;
+            for (let i = 0; i < METER.SEGS; i++) meterSegs[c * METER.SEGS + i].visible = i < lit;
+          }
           wall.paint(screenDt, strip.from, strip.look, smooth(strip.fade), M, boom, music, shape);
           screenSurface.version++; wallSurface.version++; screenDt = 0;
         }
+        // The LED wall strobes through a build's second half, on eighths then sixteenths, and dims before the drop.
+        const strobe = tension > 0.5 ? ((beat * (tension > 0.75 ? 4 : 2)) % 1 < 0.5 ? 1 + 0.6 * tension : 0.6) : 1;
+        wallNode.glow = strobe * dim;
         // The woofers push out on the kick, harder in a block's drop.
         const push = 0.02 * kick * (1 + boom);
         for (let i = 0; i < cones.length; i++) {
@@ -1139,30 +1727,50 @@
           n.scale.x = n.scale.z = 1 + push * 2.5;
           n.glow = 0.2 + 0.6 * kick;
         }
-        records[0].rotation.y -= dt * 3.49; records[1].rotation.y -= dt * 3.49;
-        meters[0].scale.y = 0.25 + 0.75 * kick; meters[1].scale.y = 0.25 + 0.75 * Math.exp(-((beat + 0.5) % 1) * 5) * hit;
-        ball.rotation.y += dt * (0.15 + 0.35 * I + boom * 2.2);
-        ball.glow = 0.55 + 0.35 * I + 0.3 * kick + boom;
+        // The DJ's rig: the jog wheels and their screens turn at 33 rpm, the play rings blink on the beat, the beat lamps
+        // count the bar and the FX button pulses on the kick.
+        for (let i = 0; i < 2; i++) {
+          records[i].rotation.y -= dt * 3.49; jogs[i].rotation.y -= dt * 3.49;
+          plays[i].glow = (beat % 1 < 0.5 ? 1 : 0.4) * dim;
+        }
+        for (let i = 0; i < 4; i++) beatLamps[i].glow = (i === step % 4 ? 0.5 + 0.5 * kick : 0.08) * dim;
+        fxOn.glow = (0.45 + 0.55 * kick) * dim;
+        // What the radio plays, under the latest block, put away while its station names no song.
+        const song = pinned !== null ? pinned : radio.song;
+        if (song !== playing.song) { playing.song = song; playing.station = radio.station.short; }
+        if (songPicture) songPicture.node.visible = !!song;
+        if (radio.station.name !== laptopStation || song !== laptopSong) {
+          laptopStation = radio.station.name; laptopSong = song;
+          paintLaptop(laptopCtx, laptopStation, laptopSong);
+          laptopSurface.version++;
+        }
+        ball.rotation.y += dt * (0.15 + 0.35 * I + boom * 2.2 + 0.8 * tension);
+        ball.glow = (0.55 + 0.35 * I + 0.3 * kick + 0.4 * tension) * dim + boom;
         // A drop's ring of light falls from the crown to the dome's edge in its first half; a block's sign blinks.
         const fall = d / 0.5;
         if (dropping && fall < 1) {
           const el = (90 - fall * (90 - e0)) * DEG, s = Math.max(0.3, (L.R * Math.cos(el) - 0.12) / 1.025);
           wave.position.y = L.c + L.R * Math.sin(el); wave.scale.x = wave.scale.y = wave.scale.z = s;
+        } else if (tension > 0.02 && hushK < 0.5) {
+          // In a build the ring rises from the dome's edge toward the crown.
+          const el = (e0 + tension * (84 - e0)) * DEG, s = Math.max(0.3, (L.R * Math.cos(el) - 0.12) / 1.025);
+          wave.position.y = L.c + L.R * Math.sin(el); wave.scale.x = wave.scale.y = wave.scale.z = s;
         } else wave.position.y = AWAY;
+        wave.glow = dropping ? 1 : 0.35 + 0.65 * tension;
         drop.position.y = blockT >= 0 && (blockT * 7) % 1 < 0.7 ? SIGN_Y : AWAY;
         // The lights in the room's two colours, as bright as the music is hard, flaring warm in a block's drop.
         const opts = BL.scenes.timechain.renderOpts, lights = opts && opts.lights;
         if (lights && opts.lightCount >= 9) {
-          const lift = (0.45 + 0.55 * I) * (1 + 0.6 * boom);
+          const lift = (0.45 + 0.55 * I) * (1 + 0.6 * boom) * dim;
           mix(M.a, FLASH_RGB, boom, rgb); setLight(lights, 0, rgb[0] * lift, rgb[1] * lift, rgb[2] * lift);
           mix(M.b, FLASH_RGB, boom, rgb); setLight(lights, 1, rgb[0] * lift, rgb[1] * lift, rgb[2] * lift);
-          const f = (0.35 + 0.35 * I + 0.3 * kick) * (1 + 0.6 * boom);
+          const f = (0.35 + 0.35 * I + 0.3 * kick) * (1 + 0.6 * boom) * dim;
           setLight(lights, 2, floorRgb[0] * f, floorRgb[1] * f, floorRgb[2] * f);
-          const bl = (0.6 + 0.3 * I) * (1 + 0.6 * boom);
+          const bl = (0.6 + 0.3 * I) * (1 + 0.6 * boom) * dim;
           setLight(lights, 3, M.b[0] * bl, M.b[1] * bl, M.b[2] * bl);
-          const fr = 0.25 + 0.3 * I + 0.25 * kick, ring = blockT >= 0 && Math.abs(FAR - front) < 1.3 ? FLASH_RGB : M.a;
+          const fr = (0.25 + 0.3 * I + 0.25 * kick) * dim, ring = blockT >= 0 && Math.abs(FAR - front) < 1.3 ? FLASH_RGB : M.a;
           for (let q = 4; q < 8; q++) setLight(lights, q, ring[0] * fr, ring[1] * fr, ring[2] * fr);
-          const sc = 0.55 + 0.4 * kick + boom;
+          const sc = (0.55 + 0.4 * kick) * dim + boom;
           setLight(lights, 8, screenRgb[0] * sc, screenRgb[1] * sc, screenRgb[2] * sc);
         }
       },
@@ -1173,23 +1781,28 @@
       tap(owner, hud) {
         if (owner.kind === "booth" || owner.kind === "decks" || owner.kind === "speaker") { hud.toast(radio.words()); return true; }
         if (owner.kind !== "live") return false;
+        if (owner.tip === "Now playing") { hud.toast(`${radio.station.name} · ${playing.song || "now playing"}`); return true; }
         hud.toast("The latest block, from mempool.space · the bass drops on every one");
         return true;
       },
       // Under debug (`__ooga.timechain.motion`): the radio's state and the room's reading of the music, with handles to
-      // hold its intensity (null lets go), drop the bass as a block or the music would, set a surface's look by name
-      // at once and set the colours.
+      // hold its intensity, how hard its kick is and the lasers' look (null lets go of each) and its surfaces' looks, drop
+      // the bass as a block or the music would, set a surface's look by name at once and set the colours; the drop seen
+      // coming and the build toward it, a place in the room's own arrangement to play from (`arrange`), and a song to
+      // show under the latest block (`song`, null lets go).
       get stats() {
-        return { ...radio.stats, intensity: +I.toFixed(3), analysed, section, laser: +laser.toFixed(3), showing: showUntil >= 0, shows: showCount,
+        return { ...radio.stats, intensity: +I.toFixed(3), analysed, section, kicking, hit: +hit.toFixed(3), laser: +laser.toFixed(3), showing: showUntil >= 0, shows: showCount,
+          dropIn: dropBeat >= 0 ? +((dropBeat - beat) / rate).toFixed(2) : -1, tension: +tension.toFixed(3), playing: playing.song,
+          arrange: (s) => { shift = 0; shift = s - ((clock() % ARRANGE_S) + ARRANGE_S) % ARRANGE_S; }, song: (text) => { pinned = text; },
           looks: { dome: DOME.NAMES[dome.look], floor: FLOOR.NAMES[ground.look], wall: WALLS.NAMES[strip.look] }, colors: colorTo,
-          force: (v) => { forced = v === null ? null : clamp01(v); }, blockDrop, musicDrop: () => musicDrop(1e9),
+          force: (v) => { forced = v === null ? null : clamp01(v); }, kick: (v) => { forcedKick = v === null ? null : clamp01(v); kickBeat = -1e9; }, laserLook: (i) => { forcedLook = i; }, blockDrop, musicDrop: () => { showUntil = -1; musicDrop(1e9); }, hold: (on) => { held = !!on; },
           look: (which, name) => {
             const s = { dome, floor: ground, wall: strip }[which], names = { dome: DOME.NAMES, floor: FLOOR.NAMES, wall: WALLS.NAMES }[which];
             change(s, names.indexOf(name)); s.fade = 1;
           },
           palette: (i) => { colorFrom = colorTo = i % PALETTES.length; colorFade = 1; } };
       },
-      dispose() { offParty(); radio.dispose(); }
+      dispose() { offParty(); radio.dispose(); playing.song = playing.station = ""; }
     };
   };
   // `jetpack`: the visitor's jetpack comes in with them and flies under the dome.

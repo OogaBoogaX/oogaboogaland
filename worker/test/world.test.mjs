@@ -4,9 +4,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { routeFixture } from "./routes.mjs";
 
-const { createWorldHandler, worker, LIVE_MS, EMPTY_MS, RETRY_S } = routeFixture();
+const { createWorldHandler, worker, REFRESH_MS, LIVE_MS, EMPTY_MS, RETRY_S } = routeFixture();
 
-const VIEW = { name: "island", sockets: 4, players: 3, maxPlayers: 32, commons: 1,
+const VIEW = { name: "island", sockets: 5, players: 3, held: 1, maxPlayers: 32, commons: 1, closing: 2,
   zones: { outside: [{ display: "Bea", login: "bea" }, { display: "al", login: "al" }], "dsb-maxis": [{ display: "Cy", login: "cy" }] },
   load: { seconds: 8, zones: { outside: { in: 12, out: 300 }, "dsb-maxis": { in: 6, out: 0 } } } };
 const OBJECTS = [{ cls: "Room", name: "island", status: "live", lastSeen: 1, sockets: 4, maxSockets: 32, rates: { in: 18, out: 300 } },
@@ -38,7 +38,7 @@ test("a viewer signed out is told how many stand where, never who or what serves
   const { env, calls } = setup();
   const { res, body } = await ask(0, env);
   assert.equal(res.headers.get("cache-control"), "no-store");
-  assert.deepEqual({ ...body, at: 0 }, { at: 0, refreshMs: LIVE_MS, tier: "public", players: 3, zones: { outside: 2, "dsb-maxis": 1 } });
+  assert.deepEqual({ ...body, at: 0 }, { at: 0, refreshMs: REFRESH_MS, tier: "public", players: 3, zones: { outside: 2, "dsb-maxis": 1 } });
   assert.equal(calls.objects, 0, "the Inspector is not asked");
 });
 
@@ -48,11 +48,11 @@ test("a signed-in player sees names as the players tab shows them, and an Inspec
   assert.deepEqual(player.body.names.outside.map((p) => p.display), ["al", "Bea"], "by name, case aside");
   assert.equal(player.body.room, undefined);
   assert.equal(player.body.objects, undefined);
-  assert.ok(!JSON.stringify(player.body).includes("socket"), "no sockets for a player");
+  assert.ok(!/socket|closing/.test(JSON.stringify(player.body)), "no sockets for a player");
 
   const inspector = await ask(7, setup().env);
   assert.equal(inspector.body.tier, "inspector");
-  assert.deepEqual(inspector.body.room, { cls: "Room", name: "island", sockets: 4, players: 3, maxPlayers: 32, commons: 1 });
+  assert.deepEqual(inspector.body.room, { cls: "Room", name: "island", sockets: 5, players: 3, held: 1, maxPlayers: 32, commons: 1, closing: 2 }, "five sockets: two players connected (one more away, with none), one Ooga Chat member, two closing");
   assert.deepEqual(inspector.body.objects.map(({ cpuMs, ...o }) => o), OBJECTS);
   assert.deepEqual(inspector.body.objects.map((o) => o.cpuMs), [330, 10], "each object's messages in at 1/600 s, sends out at 1/1000 s");
   assert.deepEqual(inspector.body.names["dsb-maxis"], [{ display: "Cy", login: "cy" }]);
@@ -108,4 +108,41 @@ test("the Worker answers /api/world", async () => {
   const res = await worker.fetch(get(), env, { waitUntil: () => {} });
   assert.equal(res.status, 200);
   assert.equal((await res.json()).tier, "public", "no session cookie, no names");
+});
+
+const { createWorldLiveHandler, answerFor } = routeFixture();
+const live = (headers = {}) => new Request("https://oogabooga.land/api/world/live", { headers: { upgrade: "websocket", origin: "https://oogabooga.land", ...headers } });
+const door = (env) => {
+  const seen = [];
+  return { seen, env: { ...env, SITE_ORIGIN: "https://oogabooga.land", WORLD: { getByName: (name) => ({ fetch: async (request) => { seen.push({ name, request }); return new Response("ok"); } }) } } };
+};
+
+test("the live socket's door names the viewer's tier from their session, and nothing a page sent", async () => {
+  for (const [id, tier] of [[0, "public"], [3, "player"], [7, "inspector"]]) {
+    const { env, seen } = door(setup().env);
+    await createWorldLiveHandler(as(id))(live({ "x-viewer-tier": "inspector", "x-viewer-id": "7" }), env);
+    assert.equal(seen[0].name, "world");
+    assert.equal(seen[0].request.headers.get("x-viewer-tier"), tier, `account ${id}`);
+    assert.equal(seen[0].request.headers.get("x-viewer-id"), String(id));
+  }
+});
+
+test("the live socket's door refuses a cross-site page, a plain request, past the limit and without the object", async () => {
+  const handle = createWorldLiveHandler(as(3));
+  const { env, seen } = door(setup().env);
+  assert.equal((await handle(live({ origin: "https://elsewhere.test" }), env)).status, 403, "a cross-site page would read a viewer's names");
+  assert.equal((await handle(live({ upgrade: "" }), env)).status, 426);
+  assert.equal((await handle(live(), door(setup({ success: false }).env).env)).status, 429);
+  assert.equal((await handle(live(), setup().env)).status, 404, "no WORLD binding: the page keeps asking /api/world");
+  assert.equal(seen.length, 0);
+});
+
+test("the poll and the push send one shape, tier by tier", () => {
+  for (const tier of ["public", "player", "inspector"]) {
+    const pushed = answerFor(VIEW, 5, tier, OBJECTS);
+    assert.equal(pushed.tier, tier);
+    assert.equal(!!pushed.names, tier !== "public");
+    assert.equal(!!pushed.room, tier === "inspector");
+  }
+  assert.deepEqual(answerFor(VIEW, 5, "player", OBJECTS).objects, undefined, "objects only for an Inspector account");
 });

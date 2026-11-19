@@ -12,21 +12,25 @@
 // the tempo by autocorrelation every EVERY seconds and the beat's phase from the onsets' Fourier component at that
 // tempo, and says whether to trust it (`live`). Both are pure, load in Node and allocate nothing as they run.
 //
-// `create` is the player: one <audio> through a gain to the speakers, through the low-pass to an analyser and, whole,
-// to a second analyser whose spectrum and wave the booth's screen shows (`spectrum`, `scope`), a context only after a
-// gesture, the page-wide mute on the gain (the lights still follow a muted room), a watchdog and
+// `create` is the player: one <audio> through a delay of LOOKAHEAD seconds and a gain to the speakers, and undelayed
+// through the low-pass to an analyser and, whole, to a second analyser, so the room reads the music LOOKAHEAD seconds
+// before it is heard: what is heard now (the beat, `energy`, and the spectrum and wave the booth's screen shows,
+// `spectrum`, `scope`) and what is coming (`ahead`). It reads the station's now-playing feed too (`song`). A context
+// only after a gesture, the page-wide mute on the gain (the lights still follow a muted room), a watchdog and
 // retries with backoff. Where a browser hands Web Audio silence for a live stream (Safari has), or the stream stops
 // answering cross-origin, it falls back to a plain element: heard, not analysed, the lights on their own steady beat.
 // Off under `nosim` (unless `timechain=1`) and `timechain=0`, with the room's other feeds.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
+  // A SomaFM channel's song list's newest, as "Artist - Title".
+  const soma = (j) => { const t = j.songs && j.songs[0]; return t ? (t.artist ? `${t.artist} - ${t.title}` : t.title) : ""; };
   const STATIONS = [
-    { name: "EDM Sessions", short: "EDM SESSIONS", url: "https://s2.radio.co/s30844a0f4/listen" },
-    { name: "SomaFM · The Trip", short: "THE TRIP", url: "https://ice1.somafm.com/thetrip-128-mp3" },
-    { name: "SomaFM · Beat Blender", short: "BEAT BLENDER", url: "https://ice1.somafm.com/beatblender-128-mp3" },
-    { name: "SomaFM · DEF CON Radio", short: "DEF CON RADIO", url: "https://ice1.somafm.com/defcon-128-mp3" },
-    { name: "SomaFM · Dub Step Beyond", short: "DUB STEP BEYOND", url: "https://ice1.somafm.com/dubstep-128-mp3" }
+    { name: "EDM Sessions", short: "EDM SESSIONS", url: "https://s2.radio.co/s30844a0f4/listen", meta: "https://public.radio.co/stations/s30844a0f4/status", song: (j) => j.current_track && j.current_track.title },
+    { name: "SomaFM · The Trip", short: "THE TRIP", url: "https://ice1.somafm.com/thetrip-128-mp3", meta: "https://somafm.com/songs/thetrip.json", song: soma },
+    { name: "SomaFM · Beat Blender", short: "BEAT BLENDER", url: "https://ice1.somafm.com/beatblender-128-mp3", meta: "https://somafm.com/songs/beatblender.json", song: soma },
+    { name: "SomaFM · DEF CON Radio", short: "DEF CON RADIO", url: "https://ice1.somafm.com/defcon-128-mp3", meta: "https://somafm.com/songs/defcon.json", song: soma },
+    { name: "SomaFM · Dub Step Beyond", short: "DUB STEP BEYOND", url: "https://ice1.somafm.com/dubstep-128-mp3", meta: "https://somafm.com/songs/dubstep.json", song: soma }
   ], STATION = STATIONS[0];
   // The tracker: RATE onsets a second, SPAN of them kept, RECENT of them for how hard the beat hits now; tempo between
   // MIN_BPM and MAX_BPM, leaning toward LEAN so a half or double tempo loses; estimated every EVERY seconds once WARM
@@ -43,6 +47,13 @@
   // The player: its volume, how long a stall may last, the first retry's wait (doubling to RETRY_MAX), and how long
   // Web Audio may hand silence for a stream that plays before the plain element takes over.
   const VOLUME = 0.32, STALL_MS = 12000, RETRY_MS = 5000, RETRY_MAX = 60000, SILENT_S = 4;
+  // The lookahead: the speakers play LOOKAHEAD seconds behind what the room reads, so the room sees a drop coming. The
+  // player keeps HISTORY frames of its readings, one each `sample` at least GAP_S seconds after the last, so the ring
+  // holds the same span of time on a 60 Hz display as on a 240 Hz one (the beat's, the loudness, the spectrum's BANDS
+  // and the wave's POINTS), and a reading more than STALE seconds from the time asked for counts as none (a hidden
+  // tab's gap). What's playing: each station's own feed, asked every META_MS while the radio plays, a song at most
+  // SONG_MAX characters.
+  const LOOKAHEAD = 8, GAP_S = 0.015, STALE = 0.5, HISTORY = Math.ceil((LOOKAHEAD + 2 * STALE) / GAP_S), BANDS = 96, POINTS = 512, META_MS = 20000, SONG_MAX = 90;
   const TAU = Math.PI * 2;
 
   // `rate` is how many onsets come a second (a block's whole samples make it a hair off RATE at some sample rates).
@@ -144,7 +155,13 @@
     const enabled = q.get("timechain") !== "0" && (!q.has("nosim") || q.get("timechain") === "1");
     let track = tracker();
     let context = null, filter = null, analyser = null, sink = null, gain = null, wave = null, beats = null, element = null, source = null;
-    let whole = null, bins = null, signal = null, edges = null;
+    let whole = null, bins = null, signal = null, edges = null, delay = null;
+    // The history: each frame's time on the audio's clock, its beat's strength and whether it was trusted, loudness,
+    // spectrum and wave; the frame heard now (`heard`, -1 for none yet).
+    let hAt = null, hLevel = null, hLive = null, hLoud = null, hBass = null, hBands = null, hWave = null, hHead = 0, hCount = 0, heard = -1;
+    const now = { live: false, bpm: 0, phase: 0, level: 0, conf: 0 }, spec = new Float32Array(BANDS);
+    // What's playing: the song the feed named, shown once the speakers reach it.
+    let song = "", songNext = "", songAt = 0, metaTimer = 0, metaAsk = null;
     let mode = enabled ? "waiting" : "off", plain = false, disposed = false, timer = 0, watchdog = 0, epoch = 0;
     let failures = 0, quiet = 0, lastTime = -1, starts = 0, channel = 0;
     const soundChannel = BL.sound.channel("party");
@@ -161,7 +178,23 @@
         element.pause(); element.removeAttribute("src"); element.load(); element = null;
       }
       quiet = 0; lastTime = -1; track.reset();
+      hCount = 0; heard = -1;
       if (context) beats = meter(context.sampleRate);
+      // The delay still holds the last stream's seconds: a fresh one, so a new channel starts clean.
+      if (delay && !disposed) { delay.disconnect(); delay = lineOf(context); }
+    };
+    const lineOf = (c) => { const d = c.createDelay(LOOKAHEAD + 1); d.delayTime.value = LOOKAHEAD; d.connect(gain); return d; };
+    // The station's now-playing feed, asked while the radio plays; a song arriving waits for the speakers to reach it.
+    const askSong = () => {
+      clearTimeout(metaTimer); metaTimer = 0;
+      if (disposed || mode !== "live" || typeof fetch !== "function") return;
+      const station = STATIONS[channel], ask = metaAsk = new AbortController();
+      fetch(station.meta, { signal: ask.signal, cache: "no-store" }).then((r) => r.ok ? r.json() : null).then((j) => {
+        if (ask !== metaAsk || !j) return;
+        const name = String(station.song(j) || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, SONG_MAX);
+        if (name && name !== songNext) { songNext = name; songAt = performance.now() + (plain ? 0 : LOOKAHEAD * 1000); }
+      }).catch(() => {});
+      metaTimer = setTimeout(askSong, META_MS);
     };
     const failed = () => {
       if (disposed) return;
@@ -185,7 +218,10 @@
         filter.connect(analyser); analyser.connect(sink); sink.connect(context.destination);
         whole = context.createAnalyser(); whole.fftSize = FFT; whole.minDecibels = DB_MIN; whole.maxDecibels = DB_MAX; whole.smoothingTimeConstant = 0.55;
         whole.connect(sink);
+        delay = lineOf(context);
         wave = new Float32Array(WAVE); bins = new Uint8Array(FFT / 2); signal = new Float32Array(FFT);
+        hAt = new Float64Array(HISTORY); hLevel = new Float32Array(HISTORY); hLive = new Uint8Array(HISTORY); hLoud = new Float32Array(HISTORY);
+        hBass = new Float32Array(HISTORY); hBands = new Float32Array(HISTORY * BANDS); hWave = new Float32Array(HISTORY * POINTS);
         track = tracker(context.sampleRate / meter(context.sampleRate).block);
       }
       if (context.state === "suspended") context.resume().catch(() => {});
@@ -194,11 +230,11 @@
       element = new Audio(); element.preload = "none";
       if (!plain) {
         element.crossOrigin = "anonymous";
-        source = context.createMediaElementSource(element); source.connect(gain); source.connect(filter); source.connect(whole);
+        source = context.createMediaElementSource(element); source.connect(delay); source.connect(filter); source.connect(whole);
       }
       mode = "connecting";
       applyVolume();
-      element.onplaying = () => { if (attempt !== epoch) return; clearTimeout(watchdog); watchdog = 0; mode = "live"; failures = 0; applyVolume(); };
+      element.onplaying = () => { if (attempt !== epoch) return; clearTimeout(watchdog); watchdog = 0; mode = "live"; failures = 0; applyVolume(); askSong(); };
       element.onerror = element.onended = () => { if (attempt === epoch) failed(); };
       element.onwaiting = element.onstalled = () => {
         if (attempt === epoch && !watchdog) watchdog = setTimeout(() => { if (attempt === epoch) failed(); }, STALL_MS);
@@ -218,40 +254,82 @@
     const offSound = BL.sound.subscribe(() => applyVolume());
     soundChannel.subscribe(() => applyVolume());
     start();
-    // Once a frame: the newest stretch of the stream into the tracker, and what the room should show now. Where Web
-    // Audio hands only silence for a stream that is playing, the plain element takes over.
+    // The newest frame read at or before `time` on the audio's clock, within STALE of it, or -1.
+    const frameAt = (time) => {
+      for (let k = 0; k < hCount; k++) {
+        const i = (hHead - 1 - k + HISTORY) % HISTORY;
+        if (hAt[i] <= time) return time - hAt[i] <= STALE ? i : -1;
+      }
+      return -1;
+    };
+    // What the room shows for what is heard now: the frame LOOKAHEAD seconds back, and the tempo and phase then.
+    const heardNow = (at, lag, out) => {
+      heard = frameAt(at - LOOKAHEAD);
+      track.read(at - lag - LOOKAHEAD, out);
+      out.live = heard >= 0 && hLive[heard] === 1; out.level = heard >= 0 ? hLevel[heard] : 0;
+      return out;
+    };
+    // Once a frame: the newest stretch of the stream into the tracker and into the history with its loudness, spectrum
+    // and wave, and what the room should show for what is heard now, LOOKAHEAD seconds behind (the tempo and phase at
+    // that time, and how hard the beat hit then). Where Web Audio hands only silence for a stream that is playing, the
+    // plain element takes over.
     const sample = (out) => {
+      heard = -1;
       if (mode !== "live" || plain || !analyser) { out.live = false; out.level = 0; return out; }
       analyser.getFloatTimeDomainData(wave);
-      const heard = beats.take(wave, Math.round(context.currentTime * context.sampleRate), track);
-      if (!heard && lastTime >= 0 && element.currentTime > lastTime) {
+      const sounding = beats.take(wave, Math.round(context.currentTime * context.sampleRate), track);
+      if (!sounding && lastTime >= 0 && element.currentTime > lastTime) {
         // A frame vouches only for the stretch the analyser holds: a late frame (a stalled page, a view change's
         // hitch) that finds the stream catching its breath is one quiet moment, not all the time since the last.
         quiet += Math.min(element.currentTime - lastTime, WAVE / context.sampleRate);
         if (quiet > SILENT_S) { plain = true; mode = "idle"; start(); out.live = false; return out; }
-      } else if (heard) quiet = 0;
+      } else if (sounding) quiet = 0;
       lastTime = element.currentTime;
-      return track.read(context.currentTime - (context.outputLatency || context.baseLatency || 0), out);
-    };
-    // How loud the music is now, in dB of its RMS: `out.loud` the whole signal over the analyser's last FFT samples,
-    // `out.bass` the low-passed kick band over its newest LOUD_N samples (as `sample` read them this frame, so call
-    // it after). False when there is nothing to read (the room then runs its own arrangement).
-    const energy = (out) => {
-      if (mode !== "live" || plain || !whole || !analyser) return false;
-      let s = 0;
-      for (let i = WAVE - LOUD_N; i < WAVE; i++) s += wave[i] * wave[i];
-      out.bass = 10 * Math.log10(s / LOUD_N + 1e-12);
+      const lag = context.outputLatency || context.baseLatency || 0, at = context.currentTime, i = hHead;
+      if (hCount && at - hAt[(hHead - 1 + HISTORY) % HISTORY] < GAP_S) return heardNow(at, lag, out);
+      track.read(at - lag, now);
+      hAt[i] = at; hLevel[i] = now.level; hLive[i] = now.live ? 1 : 0;
+      let e = 0;
+      for (let k = WAVE - LOUD_N; k < WAVE; k++) e += wave[k] * wave[k];
+      hBass[i] = 10 * Math.log10(e / LOUD_N + 1e-12);
       whole.getFloatTimeDomainData(signal);
-      s = 0;
-      for (let i = 0; i < FFT; i++) s += signal[i] * signal[i];
-      out.loud = 10 * Math.log10(s / FFT + 1e-12);
+      e = 0;
+      for (let k = 0; k < FFT; k++) e += signal[k] * signal[k];
+      hLoud[i] = 10 * Math.log10(e / FFT + 1e-12);
+      readSpectrum(spec);
+      hBands.set(spec, i * BANDS);
+      const span = FFT / 2;
+      let from = 0;
+      for (let k = 1; k < FFT - span; k++) if (signal[k - 1] < 0 && signal[k] >= 0) { from = k; break; }
+      for (let k = 0, o = i * POINTS; k < POINTS; k++) hWave[o + k] = signal[from + Math.floor(k * span / POINTS)];
+      hHead = (hHead + 1) % HISTORY; hCount = Math.min(HISTORY, hCount + 1);
+      return heardNow(at, lag, out);
+    };
+    // How loud the music heard now is, in dB of its RMS: `out.loud` the whole signal over the analyser's FFT samples,
+    // `out.bass` the low-passed kick band over its newest LOUD_N samples (as `sample` read them, so call it after).
+    // False when there is nothing to read (the room then runs its own arrangement). `ahead(d, out)` is the same `d`
+    // seconds after what is heard now (up to LOOKAHEAD; a little before it too).
+    const energy = (out) => {
+      if (heard < 0) return false;
+      out.loud = hLoud[heard]; out.bass = hBass[heard];
       return true;
     };
-    // The screen's spectrum: `out`'s bands, low to high on a log scale, each the loudest bin in it (0 to 1, raised to
-    // SPREAD). False when
-    // there is nothing to read (the screen then makes its own from the beat). The bands' bins are worked out once.
+    const ahead = (d, out) => {
+      if (heard < 0) return false;
+      const i = frameAt(hAt[heard] + d);
+      if (i < 0) return false;
+      out.loud = hLoud[i]; out.bass = hBass[i];
+      return true;
+    };
+    // The screen's spectrum of what is heard now: BANDS bands into `out`, low to high on a log scale, each the loudest
+    // bin in it (0 to 1, raised to SPREAD). False when there is nothing to read (the screen then makes its own from the
+    // beat). The bands' bins are worked out once.
     const spectrum = (out) => {
-      if (mode !== "live" || plain || !whole) return false;
+      if (heard < 0) return false;
+      for (let k = 0, o = heard * BANDS; k < BANDS; k++) out[k] = hBands[o + k];
+      return true;
+    };
+    const readSpectrum = (out) => {
       whole.getByteFrequencyData(bins);
       const n = out.length;
       if (!edges || edges.length !== n + 1) {
@@ -264,17 +342,12 @@
         for (let b = edges[i]; b < edges[i + 1]; b++) if (bins[b] > most) most = bins[b];
         out[i] = (most / 255) ** SPREAD;
       }
-      return true;
     };
-    // The screen's wave: `out` samples of the newest half of the analyser's window from a rising zero crossing, so it
-    // stands still on a steady note.
+    // The screen's wave of what is heard now: POINTS samples of the newest half of the analyser's window from a rising
+    // zero crossing, so it stands still on a steady note.
     const scope = (out) => {
-      if (mode !== "live" || plain || !whole) return false;
-      whole.getFloatTimeDomainData(signal);
-      const span = FFT / 2;
-      let from = 0;
-      for (let i = 1; i < FFT - span; i++) if (signal[i - 1] < 0 && signal[i] >= 0) { from = i; break; }
-      for (let i = 0; i < out.length; i++) out[i] = signal[from + Math.floor(i * span / out.length)];
+      if (heard < 0) return false;
+      for (let k = 0, o = heard * POINTS; k < POINTS; k++) out[k] = hWave[o + k];
       return true;
     };
     // Another channel: the stream let go and the new one asked for at once (after the first gesture, as ever), the
@@ -284,6 +357,7 @@
       const wanted = ((index % STATIONS.length) + STATIONS.length) % STATIONS.length;
       if (wanted === channel && mode !== "offline") return;
       channel = wanted;
+      song = songNext = ""; if (metaAsk) metaAsk.abort(); metaAsk = null; clearTimeout(metaTimer); metaTimer = 0;
       clearTimeout(timer); timer = 0;
       dropElement();
       plain = false; failures = 0;
@@ -304,25 +378,32 @@
       return reading.live ? `Live · ${name} · ${Math.round(reading.bpm)} BPM · the lights follow the beat${muted}` : `Live · ${name} · finding the beat${muted}`;
     };
     return {
-      sample, energy, spectrum, scope, words, tune,
+      sample, energy, ahead, spectrum, scope, words, tune,
       next: () => tune(channel + 1),
+      // How far ahead of the speakers the readings run (0 where they are not delayed), whether the speakers have yet to
+      // reach the first reading, and the song playing now, as the station's feed named it ("" for none yet).
+      get lookahead() { return mode === "live" && !plain ? LOOKAHEAD : 0; },
+      get warming() { return mode === "live" && !plain && heard < 0; },
+      get song() { if (songNext !== song && performance.now() >= songAt) song = songNext; return song; },
       get channel() { return channel; }, get station() { return STATIONS[channel]; },
       get stats() { return { mode, plain, starts, failures, channel, contexts: context ? 1 : 0, elements: element ? 1 : 0, ...track.read(context ? context.currentTime : 0, reading) }; },
       dispose() {
         if (disposed) return;
         disposed = true;
-        clearTimeout(timer); timer = 0;
+        clearTimeout(timer); timer = 0; clearTimeout(metaTimer); metaTimer = 0;
+        if (metaAsk) metaAsk.abort();
         document.removeEventListener("pointerdown", gesture);
         document.removeEventListener("keydown", gesture);
         offSound(); soundChannel.release();
         dropElement();
-        for (const node of [filter, analyser, whole, sink, gain]) if (node) node.disconnect();
+        for (const node of [filter, analyser, whole, sink, gain, delay]) if (node) node.disconnect();
         if (context) context.close().catch(() => {});
-        context = filter = analyser = whole = sink = gain = wave = beats = bins = signal = null;
+        context = filter = analyser = whole = sink = gain = delay = wave = beats = bins = signal = null;
+        hAt = hLevel = hLive = hLoud = hBass = hBands = hWave = null; hCount = 0; heard = -1;
         mode = "disposed";
       }
     };
   };
 
-  BL.timechainPartyRadio = { STATION, STATIONS, RATE, CONF, tracker, meter, create };
+  BL.timechainPartyRadio = { STATION, STATIONS, RATE, CONF, LOOKAHEAD, BANDS, POINTS, tracker, meter, create };
 })();
