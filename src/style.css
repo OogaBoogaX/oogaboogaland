@@ -8269,9 +8269,9 @@ body[data-active-scene] :is(.world-clock, .world-block) {
 .sound-mixer-row + .sound-mixer-row { border-top: 1px solid rgba(243, 239, 228, 0.07); }
 .sound-mixer-row label { font-size: 12px; line-height: 1.2; white-space: nowrap; color: rgba(243, 239, 228, 0.88); }
 .sound-mixer-row output { font-family: var(--mono); font-size: 11px; text-align: right; color: var(--accent-text); white-space: nowrap; }
-.sound-mixer-everything, .sound-mixer-players { grid-template-columns: minmax(0, 1fr) 38px; gap: 0 10px; min-height: 44px; padding: 6px 0 2px; }
-:is(.sound-mixer-everything, .sound-mixer-players) input[type="range"] { grid-row: 2; grid-column: 1 / -1; }
-.sound-mixer-everything label, .sound-mixer-players label { font-size: 13px; font-weight: 700; color: var(--paper); }
+.sound-mixer-everything, .sound-mixer-music, .sound-mixer-players { grid-template-columns: minmax(0, 1fr) 38px; gap: 0 10px; min-height: 44px; padding: 6px 0 2px; }
+:is(.sound-mixer-everything, .sound-mixer-music, .sound-mixer-players) input[type="range"] { grid-row: 2; grid-column: 1 / -1; }
+:is(.sound-mixer-everything, .sound-mixer-music, .sound-mixer-players) label { font-size: 13px; font-weight: 700; color: var(--paper); }
 #sound-mixer-all { border-bottom: 2px solid var(--stone-dk); }
 .sound-mixer-row[hidden] { display: none; }
 .sound-mixer-here { margin: 10px 0 2px; font-size: 9px; font-weight: 700; line-height: 1; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; color: rgba(243, 239, 228, 0.5); }

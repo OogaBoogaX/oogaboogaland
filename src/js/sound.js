@@ -8,18 +8,21 @@
   const listeners = new Set(), watchers = new Set(), outputs = new WeakMap(), gates = new Map(), uses = new WeakMap();
   // Every sound a visitor can turn up or down by itself (the speaker button's panel, sound-panel.js), in the
   // panel's order. A module holds its channel while it lives, so the panel lists only what this place can sound.
+  // `music` is every place's and game's music at once (a radio, a game's score, a room's tune): its row stands with the
+  // level of everything, so it is never on the place's list.
   const NAMES = [
     ["footsteps", "Footsteps"], ["rain", "Rain"], ["wind", "Wind"], ["thunder", "Thunder"], ["surf", "Waves"],
     ["pets", "Pets"], ["horn", "Heimdall's horn"], ["pile", "Banana pile"], ["bifrost", "₿IFRÖST chamber"],
     ["factory", "Lightning Factory"], ["hangar", "Jet Hangar"], ["arcade", "Arcade"],
-    ["hunt-music", "Ghost hunt music"], ["hunt", "Ghost hunt"], ["hopper-music", "Cloud Hopper music"], ["hopper", "Cloud Hopper"],
+    ["music", "Music"], ["hunt", "Ghost hunt"], ["hopper", "Cloud Hopper"],
     ["block", "Block Frenzy"], ["drop", "Ooga Drop"], ["mine", "Ooga Mine"], ["race", "Ooga Rally"], ["orbit", "Ooga Orbit"],
-    ["poker", "Poker table"], ["room", "Room hum"], ["temple", "Temple bells"], ["party", "Block Party radio"],
-    ["lecture", "Lecture"], ["dsb-music", "DSB Land music"], ["dsb", "DSB Land"], ["dsb-radio", "Noderunners Radio"],
+    ["poker", "Poker table"], ["room", "Room hum"], ["temple", "Temple bells"],
+    ["lecture", "Lecture"], ["dsb", "DSB Land"],
     ["workshop", "Workshop hum"], ["wallets", "Wallet alarms"]
   ];
   const channelsById = new Map();
   for (const [id, label] of NAMES) channelsById.set(id, { id, label, level: 1, refs: 0, nodes: new Map(), listeners: new Set() });
+  const musicRecord = channelsById.get("music");
   let muted = false, master = 1;
   const level01 = (value) => typeof value === "number" && value >= 0 && value <= 1;
   // The saved levels, checked a field at a time: anything that is not a level from 0 to 1 for a known sound is full.
@@ -136,7 +139,7 @@
   // The sounds this place holds now, in the panel's order.
   const channels = () => {
     const list = [];
-    for (const record of channelsById.values()) if (record.refs > 0) list.push({ id: record.id, label: record.label, level: record.level });
+    for (const record of channelsById.values()) if (record.refs > 0 && record !== musicRecord) list.push({ id: record.id, label: record.label, level: record.level });
     return list;
   };
   const watch = (watcher) => { watchers.add(watcher); return () => watchers.delete(watcher); };
@@ -149,5 +152,6 @@
     }
   });
   BL.sound = { setMuted, toggle: () => setMuted(!muted), subscribe, output, channel, channels, setLevel, setMaster, resetLevels, watch,
-    get muted() { return muted; }, get master() { return master; } };
+    setMusic: (value) => setLevel("music", value),
+    get muted() { return muted; }, get master() { return master; }, get music() { return musicRecord.level; } };
 })();

@@ -13,7 +13,7 @@
   const create = () => {
     let ctx = null, master = null, musicGain = null, jetGain = null, jetFilter = null, jetHiss = null, music = null;
     let armed = false, disposed = false, resuming = false, jetOn = false, muted = BL.sound.muted, nextJump = 0;
-    const soundChannel = BL.sound.channel("hopper"), musicChannel = BL.sound.channel("hopper-music");
+    const soundChannel = BL.sound.channel("hopper"), musicChannel = BL.sound.channel("music");
     // On the sound panel's list only while the game is up.
     const listSounds = (on) => { soundChannel.show(on); musicChannel.show(on); };
     listSounds(false);

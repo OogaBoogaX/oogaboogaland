@@ -1,6 +1,6 @@
-// The speaker button opens and closes this panel: a level for every game sound (all but voices), one for every other
-// player's voice while signed in (voice.js's `setPlayersLevel`), and one for each sound this place holds (sound.js's
-// channels), so its rows change with the place. The levels are kept in this browser; M still mutes the game sounds.
+// The speaker button opens and closes this panel: a level for every game sound (all but voices), one for all music
+// anywhere (sound.js's `setMusic`), one for every other player's voice while signed in (voice.js's `setPlayersLevel`),
+// and one for each sound this place holds (sound.js's channels), so its rows change with the place. The levels are kept in this browser; M still mutes the game sounds.
 // `create({ button })` wires the button and the `#sound-mixer` markup once a page; `open`, `close`, `dispose`.
 (() => {
   "use strict";
@@ -29,10 +29,12 @@
       row.value.textContent = percent ? `${percent}%` : "Off";
     };
     const everything = makeRow("everything", "All sounds except voices", sound.setMaster);
+    const music = makeRow("music", "Music", sound.setMusic);
     const players = makeRow("players", "All online players' voices", voice.setPlayersLevel);
     everything.el.classList.add("sound-mixer-everything");
+    music.el.classList.add("sound-mixer-music");
     players.el.classList.add("sound-mixer-players");
-    $("sound-mixer-all").append(everything.el, players.el);
+    $("sound-mixer-all").append(everything.el, music.el, players.el);
     const render = () => {
       if (panel.hidden) return;
       const active = sound.channels();
@@ -45,6 +47,7 @@
         empty.hidden = active.length > 0;
       }
       paint(everything, sound.master);
+      paint(music, sound.music);
       players.el.hidden = !(BL.net && BL.net.state.me);
       paint(players, voice.stats.playersLevel);
       for (const channel of active) paint(rows.get(channel.id), channel.level);

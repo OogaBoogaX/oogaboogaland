@@ -163,7 +163,7 @@
     // plain element (which has no gain of its own) when it began to fade in; and when the visitor began to leave
     // (performance time, 0 none).
     let entry = null, arrivedEpoch = -1, arriveAt = 0, fadeInAt = 0, leaving = 0;
-    const soundChannel = BL.sound.channel("party");
+    const soundChannel = BL.sound.channel("music");
     if (!enabled) soundChannel.show(false);
     // The plain element's share of its volume now, as it fades in and as the visitor leaves.
     const plainK = () => {
@@ -174,7 +174,7 @@
     };
     const applyVolume = () => {
       if (gain) gain.gain.setTargetAtTime(plain || BL.sound.muted ? 0 : VOLUME, context.currentTime, 0.4);
-      if (element && plain) { element.muted = BL.sound.muted; element.volume = VOLUME * soundChannel.gain * plainK(); }
+      if (element && plain) { element.muted = BL.sound.muted || soundChannel.gain <= 0; element.volume = VOLUME * soundChannel.gain * plainK(); }
     };
     // A start's music first playing: when it will reach the speakers (LOOKAHEAD behind the stream through Web Audio, at
     // once on the plain element), noted only once a start, so a stall's recovery plays on at its level; it fades in

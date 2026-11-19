@@ -60,7 +60,7 @@
       musicOn = true;
     }
     muted = BL.sound.muted;
-    const soundChannel = BL.sound.channel("hunt"), musicChannel = BL.sound.channel("hunt-music");
+    const soundChannel = BL.sound.channel("hunt"), musicChannel = BL.sound.channel("music");
     let fx = null;
 
     const open = () => {

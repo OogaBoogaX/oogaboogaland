@@ -89,7 +89,7 @@
     let muted = BL.sound.muted, progress = 0, next = 0, queued = 0, musicVersion = 0, cue = -1, outdoors = false, stepAt = 0, stepSide = 0, steps = 0, ready = false, duration = 7, failure = "";
     let foot = null, footGain = null, ambience = null;
     let radioVolume = 0.075;
-    const soundChannel = BL.sound.channel("dsb"), musicChannel = BL.sound.channel("dsb-music"), radioChannel = BL.sound.channel("dsb-radio");
+    const soundChannel = BL.sound.channel("dsb"), musicChannel = BL.sound.channel("music");
     let fx = null;
     let musicEnabled = true, ambientEnabled = true, radio = null, radioTimer = 0, radioWatchdog = 0, radioEpoch = 0, radioStatus = "Radio starts outdoors";
     const radioWanted = () => outdoors && musicEnabled && !muted && !disposed;
@@ -101,7 +101,7 @@
       if (!radioWanted()) return;
       stopRadio(); const epoch = radioEpoch;
       if (!radio) { radio = new Audio(); radio.preload = "none"; }
-      radio.volume = radioVolume * radioChannel.gain; radio.muted = false; radioStatus = "Connecting to Noderunners Radio";
+      radio.volume = radioVolume * musicChannel.gain; radio.muted = musicChannel.gain <= 0; radioStatus = "Connecting to Noderunners Radio";
       const failed = () => {
         if (epoch !== radioEpoch || !radioWanted()) return;
         stopRadio(); radioStatus = "Radio offline - retrying; ambient sounds available";
@@ -222,11 +222,11 @@
       const p = camera.position, distance = source ? Math.hypot(p.x - source.x, p.y - source.y, p.z - source.z) : Infinity;
       const volume = 0.04 + 0.16 / (1 + (distance / 12) ** 2);
       radioVolume += (volume - radioVolume) * (1 - Math.exp(-Math.max(0, dt) * 4));
-      if (radio) radio.volume = radioVolume * radioChannel.gain;
+      if (radio) { radio.volume = radioVolume * musicChannel.gain; radio.muted = musicChannel.gain <= 0; }
       if (ambience) ambience.update(camera, boat, outdoors && ambientEnabled, muted); }, get ambience() { return ambience ? ambience.stats : null; }, arrive: () => { outdoors = true; if (context) { if (!ambience) ambience = createAmbience(context, fx); mix(); } syncRadio(); }, toggleMusic: () => { gesture(); musicEnabled = !musicEnabled; if (context) mix(); syncRadio(); }, toggleAmbient: () => { gesture(); ambientEnabled = !ambientEnabled; }, playRadio: () => { gesture(); musicEnabled = true; syncRadio(); }, get musicEnabled() { return musicEnabled; }, get ambientEnabled() { return ambientEnabled; }, get radioStatus() { return radioStatus; }, get cue() { return cue; }, get musicDuration() { return music ? music.buffer.duration : 0; }, get levels() { return { music: musicGain ? musicGain.gain.value : 0, speech: speechGain ? speechGain.gain.value : 0, footsteps: footGain ? footGain.gain.value : 0, steps }; }, get ready() { return ready; }, get duration() { return duration; }, get durations() { return clips.map((clip) => clip ? clip.duration : 0); }, get failure() { return failure; }, get pending() { return !muted && (!!voice || next < queued && !!context); }, get muted() { return muted; }, fade: (seconds) => { if (master) master.gain.setTargetAtTime(0, context.currentTime, seconds / 3); }, toggle: () => {
       gesture(); return BL.sound.toggle();
     }, dispose: () => {
-      offSound(); soundChannel.release(); musicChannel.release(); radioChannel.release();
+      offSound(); soundChannel.release(); musicChannel.release();
       disposed = true;
       for (const entry of heldRecordings) {
         entry.users--;

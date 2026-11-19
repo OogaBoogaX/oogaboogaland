@@ -58,7 +58,7 @@
   // Keep HTML audio, and accept the same synchronous gate that drives the exterior bus.
   const create=(context,master)=>{
     const radio=new Audio();radio.preload="none";radio.volume=0;radio.muted=true;
-    const soundChannel=window.BL.sound.channel("dsb-radio");
+    const soundChannel=window.BL.sound.channel("music");
     let fallback=null,disposed=false,enabled=false,distance=Infinity,target=0,level=0;
     let mode="idle",status="Press Play radio to enable sound",timer=0,watchdog=0,epoch=0,starts=0;
     const quiet=()=>{radio.muted=true;radio.volume=0;if(fallback)fallback.update(0,distance,false);};
@@ -98,7 +98,7 @@
         if(disposed)return;distance=nextDistance;setEnabled(on);
         target=enabled ? .45*attenuation(distance) : 0;
         level+=(target-level)*(1-Math.exp(-Math.max(0,dt)*4));
-        radio.volume=mode==="live"?level*.3*soundChannel.gain:0;radio.muted=!enabled||mode!=="live"||level<.00001;
+        radio.volume=mode==="live"?level*.3*soundChannel.gain:0;radio.muted=!enabled||mode!=="live"||level<.00001||soundChannel.gain<=0;
         if(fallback)fallback.update(dt,distance,enabled&&mode==="fallback");
       },
       get status(){return status;},

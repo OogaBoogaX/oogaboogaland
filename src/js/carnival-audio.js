@@ -245,6 +245,10 @@
     let bed = null, bedOn = false, beatAt = 0, beatStep = 0, cricketAt = 0, cricketI = 0, crackAt = 0, roarAt = 0, birdAt = 0, callI = 0, chantAt = 0, gruntI = 0, tapI = 0;
     muted = BL.sound.muted;
     const soundChannel = BL.sound.channel("arcade");
+    // A retro cabinet's tune shares the chip with its cues, so the page's Music level scales its notes as they are
+    // queued (`musicLevel`), and a change to it queues the notes ahead again at the new level.
+    const musicChannel = withChip ? BL.sound.channel("music") : null;
+    let musicLevel = musicChannel ? musicChannel.level : 1;
     const voices = [], noises = [], drums = [], throats = [], running = [];
     let voiceNext = 0, noiseNext = 0, drumNext = 0, throatNext = 0;
     // The chip's four channels (two pulses, the triangle, the noise: { f, gain, osc, wave, vib, lp, until }, `until`
@@ -824,7 +828,7 @@
       ch.gain.linearRampToValueAtTime(0, end);
     };
     // How loud the tune's note at `t` plays under the duck.
-    const ducked = (t) => t < M.duck ? DUCK : t < M.duck + DUCK_BACK ? DUCK + (1 - DUCK) * (t - M.duck) / DUCK_BACK : 1;
+    const ducked = (t) => musicLevel * (t < M.duck ? DUCK : t < M.duck + DUCK_BACK ? DUCK + (1 - DUCK) * (t - M.duck) / DUCK_BACK : 1);
     // Every step due within the lookahead, on each of its channels no cue holds; a tune that fell behind (a
     // pause, a mute, a delayed timer) carries on from now. Allocation-free.
     const play = () => {
@@ -997,11 +1001,16 @@
       return muted;
     };
     const offSound = BL.sound.subscribe(setMuted);
+    if (musicChannel) musicChannel.subscribe(() => {
+      if (musicLevel === musicChannel.level) return;
+      musicLevel = musicChannel.level;
+      if (ready && M.tune && !M.paused) reduck(ctx.currentTime);
+    });
     return {
       cue, chip, music, pause, activate, setMuted, room, tick,
       get muted() { return muted; },
       dispose() {
-        offSound(); soundChannel.release();
+        offSound(); soundChannel.release(); if (musicChannel) musicChannel.release();
         stopBackground();
         document.removeEventListener("visibilitychange", onVisibility);
         M.tune = null;
