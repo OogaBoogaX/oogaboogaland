@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' https://stream.noderunnersradio.com https://s2.radio.co https://ice1.somafm.com; connect-src 'self' https: wss:; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' https://stream.noderunnersradio.com https://s2.radio.co; connect-src 'self' https: wss:; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -699,6 +699,16 @@
           </span>
         </span>
       </button>
+      <div class="dance-hud" id="dance-hud" role="group" aria-label="Dance level" data-level="1" hidden>
+        <button type="button" class="dance-step" data-action="dance-down" aria-label="Dance calmer" title="Dance calmer (-)">&minus;</button>
+        <span class="dance-read" aria-live="polite">
+          <svg class="dance-icon" viewBox="0 0 9 11" shape-rendering="crispEdges" aria-hidden="true">
+            <path fill="#ffcf5a" d="M3 0h2v2H3zM2 2h4v1H2zM6 1h1v1H6zM7 0h1v1H7zM1 3h1v1H1zM0 4h1v1H0zM3 3h3v3H3zM3 6h1v2H3zM5 6h1v1H5zM6 7h1v2H6zM2 8h1v2H2zM7 9h1v1H7zM1 10h2v1H1z"/>
+          </svg>
+          <span class="dance-num" id="dance-level">1</span>
+        </span>
+        <button type="button" class="dance-step" data-action="dance-up" aria-label="Dance harder" title="Dance harder (=)">+</button>
+      </div>
       <button type="button" class="gorilla-hud" id="gorilla-smash-hud" data-action="gorilla-smash"
         aria-label="Ground smash; hold for double damage" title="Ground smash · hold for double damage (1)" hidden>
         <span class="weapon-toggle">
@@ -2662,6 +2672,7 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
   <script src="js/timechain-room-conference.js" data-defer="timechain"></script>
   <script src="js/timechain-room-temple.js" data-defer="timechain"></script>
   <script src="js/timechain-party-radio.js" data-defer="timechain"></script>
+  <script src="js/timechain-party-dance.js" data-defer="timechain"></script>
   <script src="js/timechain-room-party.js" data-defer="timechain"></script>
   <script src="js/timechain-room-workout.js" data-defer="timechain"></script>
   <script src="js/timechain-room-mining.js" data-defer="timechain"></script>

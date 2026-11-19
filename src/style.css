@@ -4210,6 +4210,86 @@ body[data-leave-hud] .presets [data-action="leave"] {
   transform: translateX(-13px);
 }
 
+/* The Block Party's dancing level in the banner (timechain-party-dance.js): a slab as tall as the equipment buttons, a
+   step down and a step up either side of the dancer and the level, which warms from paper to banana gold as it rises. */
+.dance-hud {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  flex: none;
+  height: 52px;
+  background: var(--slab-dark);
+  border: 2px solid #221f1c;
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), inset 0 -2px 0 rgba(0, 0, 0, 0.35), 0 2px 0 rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  pointer-events: auto;
+  --dance-glow: 0;
+}
+
+.dance-hud[hidden] { display: none; }
+
+.dance-step {
+  width: 34px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--paper);
+  font: inherit;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.dance-step:hover:not(:disabled),
+.dance-step.virtual-hover:not(:disabled),
+.dance-step:focus-visible {
+  background: #2a2622;
+  outline: none;
+}
+
+.dance-step:active:not(:disabled) { transform: translateY(1px); }
+.dance-step:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.dance-step:disabled { color: #5d564e; cursor: default; }
+
+.dance-read {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 34px;
+  border-left: 1px solid #221f1c;
+  border-right: 1px solid #221f1c;
+}
+
+.dance-icon {
+  width: 16px;
+  height: 20px;
+  filter: drop-shadow(0 0 calc(var(--dance-glow) * 5px) rgba(255, 207, 90, 0.8));
+}
+
+.dance-num {
+  color: color-mix(in srgb, var(--paper), #ffcf5a calc(var(--dance-glow) * 100%));
+  font-size: 16px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 calc(var(--dance-glow) * 6px) rgba(255, 207, 90, 0.7);
+}
+
+.dance-hud[data-level="0"] .dance-icon { opacity: 0.45; }
+.dance-hud[data-level="0"] { --dance-glow: 0; }
+.dance-hud[data-level="1"] { --dance-glow: 0.1; }
+.dance-hud[data-level="2"] { --dance-glow: 0.2; }
+.dance-hud[data-level="3"] { --dance-glow: 0.3; }
+.dance-hud[data-level="4"] { --dance-glow: 0.42; }
+.dance-hud[data-level="5"] { --dance-glow: 0.54; }
+.dance-hud[data-level="6"] { --dance-glow: 0.66; }
+.dance-hud[data-level="7"] { --dance-glow: 0.78; }
+.dance-hud[data-level="8"] { --dance-glow: 0.9; }
+.dance-hud[data-level="9"] { --dance-glow: 1; }
+
 .weapon-hud {
   flex: none;
   gap: 6px;

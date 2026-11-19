@@ -501,9 +501,12 @@
   // The vestibule past the doorway, dim, ending in a hanging curtain of dark strips; the same depth in every room.
   const vestibule = perRoom((id) => {
     const L = ROOMS.layout(id), geo = blank(), Z = L.doorZ, W = DOOR.halfW, D = DOOR.height, end = Z + DOOR.vestibule;
-    quad(geo, [-W, 0, Z], [W, 0, Z], [W, 0, end], [-W, 0, end], C.vestibule, 0, UP);
-    quad(geo, [-W, D, Z], [W, D, Z], [W, D, end], [-W, D, end], C.vestibule, 0, DOWN);
-    for (const side of [-1, 1]) quad(geo, [side * W, 0, Z], [side * W, 0, end], [side * W, D, end], [side * W, D, Z], C.vestibule, 0, [-side, 0, 0]);
+    // Its floor a little under the room's, whose disc reaches past the doors over it (two faces 2 mm apart flicker).
+    quad(geo, [-W, -0.004, Z], [W, -0.004, Z], [W, -0.004, end], [-W, -0.004, end], C.vestibule, 0, UP);
+    // Its walls and ceiling start just past the doorway's frame, which reaches a little into it in the same planes.
+    const Zw = Z + 0.025;
+    quad(geo, [-W, D, Zw], [W, D, Zw], [W, D, end], [-W, D, end], C.vestibule, 0, DOWN);
+    for (const side of [-1, 1]) quad(geo, [side * W, 0, Zw], [side * W, 0, end], [side * W, D, end], [side * W, D, Zw], C.vestibule, 0, [-side, 0, 0]);
     const strips = 10;
     for (let i = 0; i < strips; i++) {
       const x0 = -W + 2 * W * i / strips, x1 = x0 + 2 * W / strips;
@@ -607,7 +610,7 @@
   const button = perRoom((id) => {
     const st = doorStyle(id), geo = merge(box({ w: 0.38, h: 0.38, d: 0.06, color: st.plate }), box({ w: 0.28, h: 0.28, d: 0.02, color: st.face, emissive: 0.85, offset: { z: -0.035 } }));
     const base = geo.verts.length / 3;
-    geo.verts.push(0.06, 0.08, -0.047, 0.06, -0.08, -0.047, -0.08, 0, -0.047);
+    geo.verts.push(0.06, 0.08, -0.049, 0.06, -0.08, -0.049, -0.08, 0, -0.049);
     geo.faces.push({ i: [base, base + 1, base + 2], color: hexToRgb(st.mark), emissive: 0 });
     return geo;
   });

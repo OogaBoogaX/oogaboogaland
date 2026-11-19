@@ -1,12 +1,7 @@
-// The Block Party's radio: a live dance station playing in the room, and the beat its lights follow, found in the music
-// as it plays. Its channels (`STATIONS`) are commercial-free and their streams answer with Access-Control-Allow-Origin,
-// so the page may route them through Web Audio and read them (a station without that header can be heard but not
-// analysed, and its redirect must send it too): EDM Sessions through radio.co (stream.edmsessions.com's redirect sends
-// no such header, so this is the address it redirects to), and four of SomaFM's listener-supported channels, whose
-// streams and their redirects send it. The room starts on the first; the DJ changes channel from behind the booth
-// (`tune`, `next`), and in a shared room everyone there is tuned to the channel the DJ chose (net.js `sendParty`). A
-// station playing goes on until the next one streams (`ask`), which then fades in under it as its sound reaches the
-// speakers (`swap`); one that never answers puts the dial back.
+// The Block Party's radio: EDM Sessions, a live dance station, playing in the room, and the beat its lights follow,
+// found in the music as it plays. Its stream (`STATION`) is reached through radio.co, the address
+// stream.edmsessions.com redirects to (whose redirect sends no Access-Control-Allow-Origin), and answers with that
+// header, so the page may route it through Web Audio and read it. The room plays this one station alone.
 //
 // The beat is found on the audio's own clock, never the frame rate's: each frame reads the newest stretch of the
 // stream through a low-pass (the kick), and `meter` cuts it into blocks of a RATE-th of a second by absolute sample
@@ -27,15 +22,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  // A SomaFM channel's song list's newest, as "Artist - Title".
-  const soma = (j) => { const t = j.songs && j.songs[0]; return t ? (t.artist ? `${t.artist} - ${t.title}` : t.title) : ""; };
-  const STATIONS = [
-    { name: "EDM Sessions", short: "EDM SESSIONS", url: "https://s2.radio.co/s30844a0f4/listen", meta: "https://public.radio.co/stations/s30844a0f4/status", song: (j) => j.current_track && j.current_track.title },
-    { name: "SomaFM · The Trip", short: "THE TRIP", url: "https://ice1.somafm.com/thetrip-128-mp3", meta: "https://somafm.com/songs/thetrip.json", song: soma },
-    { name: "SomaFM · Beat Blender", short: "BEAT BLENDER", url: "https://ice1.somafm.com/beatblender-128-mp3", meta: "https://somafm.com/songs/beatblender.json", song: soma },
-    { name: "SomaFM · DEF CON Radio", short: "DEF CON RADIO", url: "https://ice1.somafm.com/defcon-128-mp3", meta: "https://somafm.com/songs/defcon.json", song: soma },
-    { name: "SomaFM · Dub Step Beyond", short: "DUB STEP BEYOND", url: "https://ice1.somafm.com/dubstep-128-mp3", meta: "https://somafm.com/songs/dubstep.json", song: soma }
-  ], STATION = STATIONS[0];
+  const STATION = { name: "EDM Sessions", short: "EDM SESSIONS", url: "https://s2.radio.co/s30844a0f4/listen", meta: "https://public.radio.co/stations/s30844a0f4/status", song: (j) => j.current_track && j.current_track.title };
   // The tracker: RATE onsets a second, SPAN of them kept, RECENT of them for how hard the beat hits now; tempo between
   // MIN_BPM and MAX_BPM, leaning toward LEAN so a half or double tempo loses; estimated every EVERY seconds once WARM
   // seconds are in; trusted once the onsets' normalized autocorrelation at the beat reaches CONF and until it falls
@@ -55,13 +42,11 @@
   // player keeps HISTORY frames of its readings, one each `sample` at least GAP_S seconds after the last, so the ring
   // holds the same span of time on a 60 Hz display as on a 240 Hz one (the beat's, the loudness, the spectrum's BANDS
   // and the wave's POINTS), and a reading more than STALE seconds from the time asked for counts as none (a hidden
-  // tab's gap). What's playing: each station's own feed, asked every META_MS while the radio plays, a song at most
-  // SONG_MAX characters.
-  // A change of channel fades over FADE seconds (a time constant), and the old stream is let go FADE_MS after that.
-  // Arriving, the music fades in over FADE_IN seconds from when it first reaches the speakers; walking out, it fades
+  // tab's gap). What's playing: the station's own feed, asked every META_MS while the radio plays, a song at most
+  // SONG_MAX characters. Arriving, the music fades in over FADE_IN seconds from when it first reaches the speakers; walking out, it fades
   // out over FADE_OUT, back in over FADE_BACK if the visitor stays after all, and gone any other way, it fades over
   // TAIL before the context closes.
-  const FADE = 0.25, FADE_MS = 1500, FADE_IN = 4, FADE_OUT = 2.5, FADE_BACK = 1, TAIL = 0.8;
+  const FADE_IN = 4, FADE_OUT = 2.5, FADE_BACK = 1, TAIL = 0.8;
   const LOOKAHEAD = 8, GAP_S = 0.015, STALE = 0.5, HISTORY = Math.ceil((LOOKAHEAD + 2 * STALE) / GAP_S), BANDS = 96, POINTS = 512, META_MS = 20000, SONG_MAX = 90;
   const TAU = Math.PI * 2;
 
@@ -172,18 +157,12 @@
     // What's playing: the song the feed named, shown once the speakers reach it.
     let song = "", songNext = "", songAt = 0, metaTimer = 0, metaAsk = null;
     let mode = enabled ? "waiting" : "off", plain = false, disposed = false, timer = 0, watchdog = 0, epoch = 0;
-    let failures = 0, quiet = 0, lastTime = -1, starts = 0, channel = 0, fader = null, line = null;
+    let failures = 0, quiet = 0, lastTime = -1, starts = 0, fader = null, line = null;
     // The fade in and out: the gain after the volume; the start whose music has reached (or is on its way to) the
     // speakers and when it does (`arriveAt`, on the audio's clock, or in performance time on the plain element); on the
     // plain element (which has no gain of its own) when it began to fade in; and when the visitor began to leave
     // (performance time, 0 none).
     let entry = null, arrivedEpoch = -1, arriveAt = 0, fadeInAt = 0, leaving = 0;
-    // `channel` is the one dialled, `on` the one streaming; the speakers reach `on` at `onAt` (performance time), until
-    // then playing `was`. Silence from Web Audio once (`hushed`) keeps later channels on the plain element.
-    let on = 0, was = 0, onAt = 0, hushed = false, refused = -1;
-    // The next channel while it loads, and the last one going out under it.
-    let next = null, nextSource = null, nextLine = null, nextFader = null, nextPlain = false, nextDog = 0, nextEpoch = 0;
-    const going = [];
     const soundChannel = BL.sound.channel("party");
     if (!enabled) soundChannel.show(false);
     // The plain element's share of its volume now, as it fades in and as the visitor leaves.
@@ -228,20 +207,11 @@
         el.pause(); el.removeAttribute("src"); el.load();
       }
     };
-    const dropNext = () => {
-      nextEpoch++; clearTimeout(nextDog); nextDog = 0;
-      release(next, nextSource, nextLine, nextFader); next = nextSource = nextLine = nextFader = null;
-    };
-    const dropGoing = () => {
-      for (const g of going) { clearTimeout(g.timer); release(g.el, g.src, g.line, g.fader); }
-      going.length = 0;
-    };
     const dropElement = () => {
       epoch++; clearTimeout(watchdog); watchdog = 0;
-      dropNext(); dropGoing();
       release(element, source, line, fader); element = source = line = fader = null;
       quiet = 0; lastTime = -1; track.reset();
-      hCount = 0; heard = -1; onAt = 0;
+      hCount = 0; heard = -1;
       if (context) beats = meter(context.sampleRate);
     };
     // A stream's own way to the speakers: LOOKAHEAD seconds of delay, then its fader (at `level`).
@@ -263,18 +233,16 @@
     const askSong = () => {
       clearTimeout(metaTimer); metaTimer = 0;
       if (disposed || mode !== "live" || typeof fetch !== "function") return;
-      const station = STATIONS[on], ask = metaAsk = new AbortController();
-      fetch(station.meta, { signal: ask.signal, cache: "no-store" }).then((r) => r.ok ? r.json() : null).then((j) => {
+      const ask = metaAsk = new AbortController();
+      fetch(STATION.meta, { signal: ask.signal, cache: "no-store" }).then((r) => r.ok ? r.json() : null).then((j) => {
         if (ask !== metaAsk || !j) return;
-        const name = String(station.song(j) || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, SONG_MAX);
+        const name = String(STATION.song(j) || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, SONG_MAX);
         if (name && name !== songNext) { songNext = name; songAt = performance.now() + (plain ? 0 : LOOKAHEAD * 1000); }
       }).catch(() => {});
       metaTimer = setTimeout(askSong, META_MS);
     };
     const failed = () => {
       if (disposed) return;
-      // The station streaming died while another loaded: nothing left to keep playing, so straight to the one dialled.
-      if (next) { dropElement(); plain = hushed; failures = 0; mode = "idle"; start(); return; }
       dropElement(); failures++;
       // Twice refused through Web Audio, try the plain element: the music without the beat beats no music.
       if (!plain && failures >= 2) { plain = true; mode = "idle"; start(); return; }
@@ -303,7 +271,7 @@
       }
       if (context.state === "suspended") context.resume().catch(() => {});
       dropElement();
-      const attempt = epoch; starts++; on = was = channel;
+      const attempt = epoch; starts++;
       element = new Audio(); element.preload = "none";
       if (!plain) {
         element.crossOrigin = "anonymous";
@@ -313,7 +281,7 @@
       applyVolume();
       watch(attempt);
       watchdog = setTimeout(() => { if (attempt === epoch) failed(); }, STALL_MS);
-      element.src = `${STATIONS[channel].url}?_=${Date.now()}`;
+      element.src = `${STATION.url}?_=${Date.now()}`;
       element.play().catch((error) => {
         if (attempt !== epoch || disposed) return;
         if (error.name === "NotAllowedError") { dropElement(); mode = "waiting"; } else failed();
@@ -356,7 +324,7 @@
         // A frame vouches only for the stretch the analyser holds: a late frame (a stalled page, a view change's
         // hitch) that finds the stream catching its breath is one quiet moment, not all the time since the last.
         quiet += Math.min(element.currentTime - lastTime, WAVE / context.sampleRate);
-        if (quiet > SILENT_S) { plain = hushed = true; mode = "idle"; start(); out.live = false; return out; }
+        if (quiet > SILENT_S) { plain = true; mode = "idle"; start(); out.live = false; return out; }
       } else if (sounding) quiet = 0;
       lastTime = element.currentTime;
       const lag = context.outputLatency || context.baseLatency || 0, at = context.currentTime, i = hHead;
@@ -443,111 +411,21 @@
       for (let k = 0, o = heard * POINTS; k < POINTS; k++) out[k] = hWave[o + k];
       return true;
     };
-    // The dialled channel streaming beside the old one: the old one stops feeding the readings now and goes on to the
-    // speakers until the new one's sound reaches them (LOOKAHEAD seconds on through Web Audio, at once on the plain
-    // element), then fades out under it and is let go. A change made before the last one's sound reached the speakers
-    // lets that unheard station go at once and keeps the one still heard going until this one arrives. The beat, the
-    // history and the readings carry on unbroken, so the room shows each station as it is heard.
-    const swap = () => {
-      clearTimeout(nextDog); nextDog = 0;
-      const t = context.currentTime, wait = nextPlain ? 0 : LOOKAHEAD, unheard = onAt > 0 && performance.now() < onAt;
-      epoch++; clearTimeout(watchdog); watchdog = 0;
-      // A stream going out: faded from when the new one arrives, and let go once it has.
-      const retire = (g) => {
-        clearTimeout(g.timer);
-        if (g.fader) { const p = g.fader.gain; p.cancelScheduledValues(t); p.setValueAtTime(p.value, t); p.setTargetAtTime(0, t + wait, FADE); }
-        g.timer = setTimeout(() => { const k = going.indexOf(g); if (k >= 0) going.splice(k, 1); release(g.el, g.src, g.line, g.fader); },
-          wait * 1000 + (g.fader ? FADE_MS : 0));
-      };
-      if (unheard) for (const g of going) retire(g);
-      if (element) {
-        element.onplaying = element.onerror = element.onended = element.onwaiting = element.onstalled = null;
-        if (unheard) release(element, source, line, fader);
-        else {
-          const g = { el: element, src: source, line, fader, timer: 0 };
-          if (source) { source.disconnect(filter); source.disconnect(whole); }
-          going.push(g); retire(g);
-        }
-      }
-      const wasPlain = plain;
-      element = next; source = nextSource; line = nextLine; fader = nextFader; plain = nextPlain;
-      next = nextSource = nextLine = nextFader = null; nextEpoch++;
-      // The room hears the new channel through the crossfade at the level it was at: it counts as arrived, so its first
-      // buffering hiccup never fades it in again, and a plain element taking over plays at once. A Web Audio stream
-      // taking over from the plain element finds the entry gain never raised, so it fades in as it reaches the speakers.
-      arrivedEpoch = epoch; arriveAt = plain ? performance.now() : t;
-      if (plain && !fadeInAt) fadeInAt = performance.now() - FADE_IN * 1000;
-      if (wasPlain && !plain) { arriveAt = t + wait; if (!leaving) fadeIn(); }
-      if (source) { source.connect(filter); source.connect(whole); fader.gain.setTargetAtTime(1, t + wait, FADE); }
-      // What the speakers play until the new channel reaches them is what they play now (a change made inside the
-      // last one's lookahead keeps naming the station still heard).
-      was = onAt && performance.now() < onAt ? was : on;
-      on = channel; onAt = performance.now() + wait * 1000; failures = 0; quiet = 0; lastTime = -1; starts++;
-      songNext = ""; songAt = onAt; if (metaAsk) metaAsk.abort(); metaAsk = null;
-      mode = "live"; watch(epoch); applyVolume(); askSong();
-    };
-    // Load the dialled channel beside the one playing, silent until it streams. Refused through Web Audio it is tried
-    // on the plain element; refused that way too, the dial goes back to the station still playing.
-    const ask = (asPlain) => {
-      dropNext();
-      const attempt = nextEpoch;
-      nextPlain = asPlain;
-      next = new Audio(); next.preload = "none";
-      if (!asPlain) {
-        next.crossOrigin = "anonymous";
-        nextSource = context.createMediaElementSource(next); [nextLine, nextFader] = lineOf(nextSource, 0);
-      } else next.muted = true;
-      const refuse = () => {
-        if (attempt !== nextEpoch || disposed) return;
-        if (!asPlain) { ask(true); return; }
-        dropNext(); refused = channel; channel = on;
-      };
-      next.onplaying = () => { if (attempt === nextEpoch) swap(); };
-      next.onerror = next.onended = refuse;
-      nextDog = setTimeout(refuse, STALL_MS);
-      next.src = `${STATIONS[channel].url}?_=${Date.now()}`;
-      next.play().catch(refuse);
-    };
-    // Another channel. With a station live it plays on while the new one loads (`ask`); with nothing streaming the new
-    // one is asked for at once (after the first gesture, as ever). Either way the plain element is given up, so a
-    // channel that answers cross-origin is read again, unless Web Audio has already handed this page silence.
-    const tune = (index) => {
-      if (disposed || !enabled) return;
-      const wanted = ((index % STATIONS.length) + STATIONS.length) % STATIONS.length;
-      if (wanted === channel && mode !== "offline") return;
-      channel = wanted; refused = -1;
-      if (mode === "live") {
-        if (channel === on) dropNext(); else ask(hushed);
-        return;
-      }
-      song = songNext = ""; if (metaAsk) metaAsk.abort(); metaAsk = null; clearTimeout(metaTimer); metaTimer = 0;
-      clearTimeout(timer); timer = 0;
-      dropElement();
-      plain = hushed; failures = 0;
-      if (mode !== "waiting") mode = "idle";
-      start();
-    };
-    // The station the speakers play now.
-    const playing = () => STATIONS[onAt && performance.now() < onAt ? was : on];
     const reading = { live: false, bpm: 0, phase: 0, level: 0, conf: 0 };
     // A line for a tap on the booth, the decks or the speakers.
     const words = () => {
       const muted = BL.sound.muted ? " · sound muted (M, or the speaker button's Sound on/off)" : "";
-      const name = STATIONS[channel].name;
+      const name = STATION.name;
       if (mode === "off") return "The radio is off on this page";
-      if (next) return `Tuning in to ${name}… · ${STATIONS[on].name} plays until it's ready`;
-      if (refused >= 0 && mode === "live") return `${STATIONS[refused].name} isn't answering · still on ${playing().name}`;
       if (mode === "waiting") return `${name} · tap or press a key to tune in`;
       if (mode === "connecting" || mode === "idle") return `Tuning in to ${name}…`;
       if (mode === "offline") return `${name} isn't answering · trying again shortly`;
-      const heardName = playing().name;
-      if (plain) return `Live · ${heardName}${muted}`;
+      if (plain) return `Live · ${name}${muted}`;
       track.read(context.currentTime, reading);
-      return reading.live ? `Live · ${heardName} · ${Math.round(reading.bpm)} BPM · the lights follow the beat${muted}` : `Live · ${heardName} · finding the beat${muted}`;
+      return reading.live ? `Live · ${name} · ${Math.round(reading.bpm)} BPM · the lights follow the beat${muted}` : `Live · ${name} · finding the beat${muted}`;
     };
     return {
-      sample, energy, ahead, spectrum, scope, waveform, words, tune,
-      next: () => tune(channel + 1),
+      sample, energy, ahead, spectrum, scope, waveform, words,
       // The visitor walking out: the music fades out over FADE_OUT, so disposal finds it silent; `fadeBack` if they stay.
       fadeOut() {
         if (disposed || leaving) return;
@@ -569,10 +447,7 @@
       get lookahead() { return mode === "live" && !plain ? LOOKAHEAD : 0; },
       get warming() { return mode === "live" && !plain && heard < 0; },
       get song() { if (songNext !== song && performance.now() >= songAt) song = songNext; return song; },
-      // The channel dialled and its station; `playing`, the station the speakers play now (the old one until a new
-      // channel's sound reaches them).
-      get channel() { return channel; }, get station() { return STATIONS[channel]; }, get playing() { return playing(); },
-      get stats() { return { mode, plain, starts, failures, channel, on, switching: !!next, contexts: context ? 1 : 0, elements: (element ? 1 : 0) + (next ? 1 : 0) + going.length, ...track.read(context ? context.currentTime : 0, reading) }; },
+      get stats() { return { mode, plain, starts, failures, contexts: context ? 1 : 0, elements: element ? 1 : 0, ...track.read(context ? context.currentTime : 0, reading) }; },
       dispose() {
         if (disposed) return;
         disposed = true;
@@ -586,7 +461,7 @@
         const ctx = context, ch = soundChannel, tail = !plain && !!entry && !!ctx && ctx.state === "running" && entry.gain.value > 0.01;
         if (tail) {
           rampEntry(0, TAIL);
-          epoch++; clearTimeout(watchdog); watchdog = 0; dropNext(); dropGoing();
+          epoch++; clearTimeout(watchdog); watchdog = 0;
           release(element, null, null, null); element = source = line = fader = null;
           setTimeout(() => { ctx.close().catch(() => {}); ch.release(); }, TAIL * 1000 + 100);
         } else {
@@ -602,5 +477,5 @@
     };
   };
 
-  BL.timechainPartyRadio = { STATION, STATIONS, RATE, CONF, LOOKAHEAD, BANDS, POINTS, tracker, meter, create };
+  BL.timechainPartyRadio = { STATION, RATE, CONF, LOOKAHEAD, BANDS, POINTS, tracker, meter, create };
 })();

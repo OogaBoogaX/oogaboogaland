@@ -58,7 +58,7 @@
         ["Satoshi's Temple", "A meditation temple under a dusk sky: a lantern path, a pagoda, a koi pond and a replica of Valentina Picozzi's Satoshi statue in the main hall."],
         ["Proof of Work-out", "Exercise bikes facing a mountain sunrise: pedal to find a fake block and climb the gym's leaderboard."],
         ["Movie Theater", "Recliners on a steep rake facing a dome that is all picture, the biggest room in the Sphere."],
-        ["Block Party", "Live dance radio in a club of light: an LED floor and wall that move to the music, lasers on a truss, and a DJ booth to change the channel behind. The bass drops on every block."],
+        ["Block Party", "Live dance radio in a club of light: an LED floor and wall that move to the music, lasers on the walls, and EDM Sessions live from the DJ booth. The latest block lights the scoreboard as it lands."],
         ["Planetarium", "Tonight's sky over London on the whole dome, from reclining seats round the star projector."]
       ].map(([name, what], i) => ({ path: `sphere-${i}`, scene: "timechain", place: String(i), title: `Timechain Sphere · ${name}`, description: `${name}, room ${i} of the Timechain Sphere. ${what}` }))
     ]

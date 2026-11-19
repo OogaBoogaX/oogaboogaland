@@ -6320,6 +6320,7 @@
         ? flyable(fromX, fromZ, toX, toZ, y, height, cave) && groundAt(toX, toZ, y, y, cave) <= y
         : walkable(fromX, fromZ, toX, toZ, y, height, cave);
     };
+    const SLIDE = { x: 0, z: 0 };
     const movePlayer = (cave, flying, dx, dz) => {
       const p = cave.root.position, steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / PLAYER_STEP));
       dx /= steps;
@@ -6331,6 +6332,11 @@
         if (canStep(cave, flying, p.x, p.z, p.x + sx, p.z + sz)) {
           p.x += sx;
           p.z += sz;
+        } else if (ctx.slideStep && ctx.slideStep(cave, flying, p.x, p.z, p.x + sx, p.z + sz, SLIDE)
+          && canStep(cave, flying, p.x, p.z, SLIDE.x, SLIDE.z)) {
+          // A scene that knows its walls' faces turns a step into one along the face it ran into.
+          p.x = SLIDE.x;
+          p.z = SLIDE.z;
         } else {
           if (sx && canStep(cave, flying, p.x, p.z, p.x + sx, p.z)) p.x += sx;
           if (sz && canStep(cave, flying, p.x, p.z, p.x, p.z + sz)) p.z += sz;

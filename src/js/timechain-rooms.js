@@ -34,7 +34,7 @@
     { kind: "temple", name: "Satoshi's Temple", tag: "A meditation temple; the bell rings every block", R: 15 },
     { kind: "workout", name: "Proof of Work-out", tag: "Pedal to find a fake block", R: 12 },
     { kind: "theater", name: "Movie Theater", tag: "The whole dome is the picture", R: 20 },
-    { kind: "party", name: "Block Party", tag: "The bass drops on every block", R: 20 },
+    { kind: "party", name: "Block Party", tag: "Dance under a dome of light", R: 20 },
     { kind: "planetarium", name: "Planetarium", tag: "Tonight's sky over London", R: 8 },
     null,
     null
@@ -189,25 +189,33 @@
     const r = radius;
     // Reaching back a body's width, so it overlaps the room's own edge below whatever the walker's size.
     if (door && Math.abs(x) < DOOR.halfW - r && z >= L.doorZ - 0.6 - r && z <= L.doorZ + DOOR.vestibule - r) return true;
-    // Where the sphere widens over the floor a body in the air keeps to where it can stand, so no jump comes down held
-    // by the wall: the floor, or a solid's top under its feet (the Block Party's balcony).
+    if (Math.hypot(x, z) > wallLimit(L, x, z, feet, solids) - r || z > L.doorZ - 0.12 - r) return false;
+    if (solids) for (const o of solids) {
+      if (!blocks(o, feet)) continue;
+      if (o.r !== undefined ? Math.hypot(x - o.x, z - o.z) < o.r + r : inBox(o, x, z, r)) return false;
+    }
+    return true;
+  };
+  // How far out from the middle a body's middle line may stand at (x, z) with its feet at `feet`, before its radius.
+  // Where the sphere widens over the floor a body in the air keeps to where it can stand, so no jump comes down held
+  // by the wall: the floor, or a solid's top under its feet (the Block Party's balcony).
+  const wallLimit = (L, x, z, feet, solids) => {
     let ground = floorAt(L, x, z);
     if (solids) for (const o of solids) {
       if (o.top === undefined || o.top > feet + 1e-3 || o.top <= ground) continue;
       if (o.r !== undefined ? Math.hypot(x - o.x, z - o.z) < o.r : inBox(o, x, z, 0)) ground = o.top;
     }
-    if (Math.hypot(x, z) > Math.min(wallAt(L, feet), wallAt(L, ground)) - r || z > L.doorZ - 0.12 - r) return false;
-    if (solids) for (const o of solids) {
-      if (o.top !== undefined && feet >= o.top - STEP_UP) continue;
-      if (o.below !== undefined && feet + 1.8 <= o.below) continue;
-      if (o.r !== undefined ? Math.hypot(x - o.x, z - o.z) < o.r + r : inBox(o, x, z, r)) return false;
-    }
-    return true;
+    return Math.min(wallAt(L, feet), wallAt(L, ground));
   };
-  // Whether (x, z) is within `r` of a box solid, in its own turned frame.
+  // Whether a solid stands in the way of a body with its feet at `feet`: one with a `top` only below it, less a step,
+  // and one with a `below` only for a head that reaches it.
+  const blocks = (o, feet) => !(o.top !== undefined && feet >= o.top - STEP_UP) && !(o.below !== undefined && feet + 1.8 <= o.below);
+  // Whether (x, z) is within `r` of a box solid, in its own turned frame: rounded at its corners, as a body meets one,
+  // so a walker going along a row of boxes (a balustrade round a curve) passes each joint rather than catching on it.
   const inBox = (o, x, z, r) => {
     const c = o.ry ? Math.cos(o.ry) : 1, s = o.ry ? Math.sin(o.ry) : 0, dx = x - o.x, dz = z - o.z;
-    return Math.abs(dx * c - dz * s) < o.hx + r && Math.abs(dx * s + dz * c) < o.hz + r;
+    const u = Math.abs(dx * c - dz * s) - o.hx, v = Math.abs(dx * s + dz * c) - o.hz;
+    return u < r && v < r && (u <= 0 || v <= 0 || u * u + v * v < r * r);
   };
   // The height of the ceiling over (x, z): the sphere's inner face as its flat facets lie, a little inside the curve.
   const ceilingAt = (L, x, z) => {
@@ -224,5 +232,5 @@
     const D = Math.max(0.3, Math.min(width / (2 * h), (eye - floor) / v, (ceiling - eye) / v, reach));
     return { D, w: 2 * D * h, h: 2 * D * v };
   };
-  BL.timechainRooms = { COUNT, ROOMS, LOCKABLE, OPEN, EXTERIOR_ZONE, DOOR, BODY, STEP_UP, DEG, TAU, parse, get, layout, radiusAt, onSphere, edgeY, edgeEl, floorAt, aisleStep, wallAt, clearAt, inBox, ceilingAt, fill };
+  BL.timechainRooms = { COUNT, ROOMS, LOCKABLE, OPEN, EXTERIOR_ZONE, DOOR, BODY, STEP_UP, DEG, TAU, parse, get, layout, radiusAt, onSphere, edgeY, edgeEl, floorAt, aisleStep, wallAt, wallLimit, blocks, clearAt, inBox, ceilingAt, fill };
 })();

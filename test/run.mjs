@@ -22103,12 +22103,12 @@ const partyRadioChecks = async () => {
     elements.at(-1).onplaying();
     const e = entryOf(t0);
     fade.inAt = !!e && e.gain.log.some(([k, v, t]) => k === "set" && v === 0 && Math.abs(t - (t0 + 8)) < 1e-9);
-    // Regression: a channel change gave the new stream a start of its own never marked as heard, so its first
-    // buffering hiccup silenced the room for the lookahead and faded it in again, and walking back from the doors
-    // after a change left the room silent.
+    // A stream's next playing (a buffering hiccup) never fades it in again, and walking back from the doors brings the
+    // music back.
     const before = e.gain.log.length;
-    a.tune(1); elements.at(-1).onplaying(); elements.at(-1).onplaying();
-    fade.swapped = a.stats.on === 1 && e.gain.log.length === before;
+    elements.at(-1).onplaying();
+    fade.again = e.gain.log.length === before;
+    audio.currentTime += 9;
     a.fadeOut(); a.fadeBack();
     fade.back = e.gain.log.at(-1);
     a.fadeOut();
@@ -22127,30 +22127,8 @@ const partyRadioChecks = async () => {
   record("party radio: the music fades in as it reaches the speakers, out on the walk to the doors, and over a moment when left any other way, never cold",
     fade.inAt && fade.out && fade.out[0] === "ramp" && fade.out[1] === 0 && Math.abs(fade.out[2] - (audio.currentTime + 2.5)) < 1e-9 && fade.closedAtOnce === 1
       && fade.tail && fade.tail[0] === "ramp" && fade.tail[1] === 0 && Math.abs(fade.tail[2] - (audio.currentTime + 0.8)) < 1e-9 && fade.closedLater === 0, JSON.stringify(fade));
-  record("party radio: a channel change never fades the music in again on the new stream's next playing, and walking back from the doors after one brings the music back",
-    fade.swapped && fade.back && fade.back[0] === "ramp" && fade.back[1] === 1 && Math.abs(fade.back[2] - (audio.currentTime + 1)) < 1e-9, JSON.stringify(fade));
-  // Regression: a stream refused twice through Web Audio falls back to the plain element, which never raises the entry
-  // gain; the next channel, asked through Web Audio, was counted as already heard on its swap, so the room stayed
-  // silent for the rest of the visit. It fades in as it reaches the speakers.
-  const queued = [], realTimeout = page.setTimeout;
-  const handover = {};
-  made.length = 0;
-  audio.createGain = () => { const n = makeGain(); made.push(n); return n; };
-  page.setTimeout = (fn) => { queued.push(fn); return 0; };
-  try {
-    const c = page.window.BL.timechainPartyRadio.create();
-    elements.at(-1).onerror(); queued.pop()();
-    elements.at(-1).onerror();
-    handover.plain = c.stats.plain;
-    elements.at(-1).onplaying();
-    const t2 = audio.currentTime;
-    c.tune(1); elements.at(-1).onplaying();
-    handover.web = !c.stats.plain && c.stats.on === 1;
-    handover.fades = made.some((n) => n.gain.log.some(([k, v, t]) => k === "ramp" && v === 1 && Math.abs(t - (t2 + 12)) < 1e-9));
-    c.dispose();
-  } finally { page.setTimeout = realTimeout; audio.createGain = makeGain; }
-  record("party radio: a channel change from the plain element to Web Audio fades the music in as it reaches the speakers rather than leaving the room silent",
-    handover.plain && handover.web && handover.fades, JSON.stringify(handover));
+  record("party radio: the stream's next playing never fades the music in again, and walking back from the doors brings the music back",
+    fade.again && fade.back && fade.back[0] === "ramp" && fade.back[1] === 1 && Math.abs(fade.back[2] - (audio.currentTime + 1)) < 1e-9, JSON.stringify(fade));
 };
 
 // Rule: a room id is validated at every boundary, and the three sizes are one design whose doorway, arrival, button and
@@ -27369,7 +27347,7 @@ scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "
   record("dsb compatibility: built CSP preserves exactly the weather, DSB and Block Party network permissions", await b.evaluate(`(() => {
     const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
     const sources = name => policy.split(";").map(s => s.trim().split(/\\s+/)).find(s => s[0] === name).slice(1).sort().join("|");
-    return sources("connect-src") === ["'self'", "https:", "wss:"].sort().join("|") && sources("worker-src") === "'self'" && sources("media-src") === ["'self'", "https://stream.noderunnersradio.com", "https://s2.radio.co", "https://ice1.somafm.com"].sort().join("|") && !policy.includes("unsafe-");
+    return sources("connect-src") === ["'self'", "https:", "wss:"].sort().join("|") && sources("worker-src") === "'self'" && sources("media-src") === ["'self'", "https://stream.noderunnersradio.com", "https://s2.radio.co"].sort().join("|") && !policy.includes("unsafe-");
   })()`));
   record("dsb registry: c10 is B.C.A.'s hub office and DSB is internally addressable without a cave", await b.evaluate(`(BL.caves.slots.find(s => s.id === "c10").status === "open" && BL.caves.slots.find(s => s.id === "c10").scene === null && BL.caves.slots.find(s => s.id === "c10").place === "bca") && !BL.caves.slots.some(s => s.scene === "dsb") && !!BL.scenes.dsb`));
   record("dsb compatibility: hub keeps the Agent module without spawning a standalone gorilla", await b.evaluate(`__ooga.scene === "hub" && !__ooga.agent && !!BL.agent && !!BL.characters.get("rules-without-rulers") && Object.hasOwn(__ooga, "agent") && Object.hasOwn(__ooga, "dsb") && !__ooga.dsb`));
@@ -32616,7 +32594,9 @@ const raceRigChecks = async () => {
     // other geometry.
     // The Lightning Jet Hangar's crane adds a second cone light for its safety spot: `uSpotLight` holds two and the
     // shader loops over them (to 4678b5f4); the second is zero in every other scene.
-    "4678b5f4813a79fe30f90883c3221caff2d31a914d4b9a4602fb459a5e065bb1",
+    // The Block Party's glass floors add uGlassGrazing, a geometry's scale on how much reflective glass pales toward a
+    // glancing view (to 94dab4cf); it is 1 for every other geometry, so DSB Land's water is as it was.
+    "94dab4cf8dafb0f84ca86f7ccb0af7f7e0e92724e9fe06616829c802dbac0f90",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));

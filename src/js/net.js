@@ -102,7 +102,7 @@
 // `{ op: "placed" }` after each body, zone or crossing frame sent (counted in `state.placed`), which the room's own check
 // of an `enter` reads, so the bridge can ask again for an epoch refused before the room had them.
 // Without the feature both stay silent and the bridge keeps the page out of every public audience.
-// Exports sendParty, subscribeParty (the Block Party's shared channel), sendDuel, subscribeDuel, voiceLink, toggleVoiceLink, linkEveryone, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeAudience, subscribeClouds, sendAudience, subscribePrivate, subscribeChalk, subscribeWallets, sendOutdoor, subscribeOutdoor, OUTDOOR_FEATURE, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
+// Exports sendDuel, subscribeDuel, voiceLink, toggleVoiceLink, linkEveryone, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeAudience, subscribeClouds, sendAudience, subscribePrivate, subscribeChalk, subscribeWallets, sendOutdoor, subscribeOutdoor, OUTDOOR_FEATURE, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
 // sendProps, sendPropInput, subscribeProps (the loose props' host frames and followers' inputs, prop-sync.js),
 // setMuted, setHealth, sendNpc, sendChat, sendPrivate, npcFrame, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
 // ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
@@ -177,7 +177,6 @@
   const subscribers = new Set();
   const highscoreSubscribers = new Set();
   const doorSubscribers = new Set();
-  const partySubscribers = new Set();
   const rosterSubscribers = new Set();
   const moveSubscribers = new Set();
   const studioSubscribers = new Set();
@@ -246,7 +245,7 @@
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
 // stopped it ("replaced", "full").
   const offline = new URLSearchParams(location.search);
-  const state = { roomLocks: false, partyRadio: false, lockedRooms: new Uint8Array(10), roomPin: "", roomPinRoom: -1, backend: false, games: [], me: null, donations: false, tess: false, voiceTurn: false, tessShared: false, tessGuide: null, highscores: false, highscoreSnapshots: false, logoutEpoch: 0, started: false,
+  const state = { roomLocks: false, dance: false, lockedRooms: new Uint8Array(10), roomPin: "", roomPinRoom: -1, backend: false, games: [], me: null, donations: false, tess: false, voiceTurn: false, tessShared: false, tessGuide: null, highscores: false, highscoreSnapshots: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, hostEpoch: 0, props: false, npcVersion: 0, doorway: false, pokerVoice: null,
     self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0, reactions: false, customHand: false, hand: false, handTone: 0, handEmoji: "",
@@ -325,9 +324,13 @@
   let npcFrame = null, inHub = false, hubSent = null, visibleSent = null;
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
   const gSent = new Float64Array(6);
-  let gKnown = false, poseHasG = false, jetSent = 0, weaponSent = 0, visualKnown = false;
+  let gKnown = false, poseHasG = false, jetSent = 0, weaponSent = 0, visualKnown = false, danceSent = -1;
   // A pose's visual state (crew.js `visualState`), each number between its low and high; an older page sends the
   // first 17 alone, without the body's own pose (`VISUAL_BODY` on).
+  // A player's dance number (the Block Party's, timechain-party-dance.js: 0 standing still, 1 to 9 a move each), where
+  // the room's welcome lists DANCE_FEATURE: 0 to DANCE_MAX, or -1 for none said.
+  const DANCE_FEATURE = "dance-v1", DANCE_MAX = 9;
+  const danceOf = (d) => Number.isInteger(d) && d >= 0 && d <= DANCE_MAX ? d : -1;
   const VISUAL_LOWS = [-157, -157, -314, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -50, -100, 0, -157, 0];
   const VISUAL_LIMITS = [157, 157, 314, 8191, 240, 1200, 560, 440, 320, 1240, 100, 750, 1300, 280, 2000, 31, 31, 2628, 50, 100, 1, 157, 100];
   const VISUAL_SIZE = VISUAL_LIMITS.length, VISUAL_BODY = 17;
@@ -481,6 +484,7 @@
     if (Array.isArray(p.g) && p.g.length === 6) readGorillaPose(rec, p.g);
     rec.jet = Number.isInteger(p.j) && p.j > 0 && p.j <= 7 ? p.j : 0;
     rec.weapon = Number.isInteger(p.w) && p.w > 0 && p.w <= 255 ? p.w : 0;
+    rec.dance = danceOf(p.d);
     readVisual(rec, p.v, p.va);
     readRest(rec, p.r);
     rec.zone = typeof p.zone === "string" ? p.zone : "outside";
@@ -604,6 +608,7 @@
         rec.jet = rec.weapon = 0;
         rec.visual = null;
         rec.rest = undefined;
+        rec.dance = -1;
       }
       const gs = msg.gs;
       if (Array.isArray(gs)) for (let i = 0; i + 6 < gs.length; i += 7) {
@@ -619,6 +624,12 @@
       if (Array.isArray(ws)) for (let i = 0; i + 1 < ws.length; i += 2) {
         const rec = remotes.get(ws[i]), w = ws[i + 1];
         if (rec && Number.isInteger(w) && w > 0 && w <= 255) rec.weapon = w;
+      }
+      // `ds` lists the dance number of everyone whose page sends one (the Block Party's); -1 for the rest.
+      const ds = msg.ds;
+      if (Array.isArray(ds)) for (let i = 0; i + 1 < ds.length; i += 2) {
+        const rec = remotes.get(ds[i]);
+        if (rec) rec.dance = danceOf(ds[i + 1]);
       }
       const vs = msg.vs;
       if (Array.isArray(vs)) for (const row of vs) {
@@ -661,7 +672,7 @@
       for (const fn of duelSubscribers) fn({ op: "lost" });
       state.doorway = Array.isArray(msg.features) && msg.features.includes("door");
       state.roomLocks = Array.isArray(msg.features) && msg.features.includes("room-lock-v1");
-      state.partyRadio = Array.isArray(msg.features) && msg.features.includes("party-radio-v1");
+      state.dance = Array.isArray(msg.features) && msg.features.includes(DANCE_FEATURE);
       setLockedRooms(msg.locks);
       state.chatUnicode = Array.isArray(msg.features) && msg.features.includes(BL.chatPolicy.FEATURE);
       state.privateChat = Array.isArray(msg.features) && msg.features.includes("pm-v1");
@@ -691,6 +702,7 @@
         if (visualKnown) { visualSent[3] &= 7; for (let i = 4; i < 15; i++) visualSent[i] = 0; for (let i = VISUAL_BODY; i < VISUAL_SIZE; i++) visualSent[i] = 0; }
         const extra = state.bodyKind === "gorilla" && poseHasG ? `,"g":[${gSent[0]},${gSent[1].toFixed(3)},${gSent[2].toFixed(3)},${gSent[3].toFixed(3)},${gSent[4].toFixed(3)},${gSent[5].toFixed(3)}]`
           : (jetSent ? `,"j":${jetSent}` : "") + (weaponSent ? `,"w":${weaponSent}` : "") + (visualKnown ? `,"v":[${visualSent.join(",")}]` : "")
+            + (state.dance && danceSent >= 0 ? `,"d":${danceSent}` : "")
             + (restKnown ? restActive ? `,"r":[${restSent.join(",")}]` : ',"r":0' : "");
         send(`{"t":"pose","x":${px.toFixed(3)},"y":${py.toFixed(3)},"z":${pz.toFixed(3)},"yaw":${pyaw.toFixed(3)}${extra}}`);
       }
@@ -733,6 +745,7 @@
         rec.jet = rec.weapon = 0;
         rec.visual = null;
         rec.rest = undefined;
+        rec.dance = -1;
         rec.hp = 100;
         rec.ko = false;
       }
@@ -849,11 +862,6 @@
         doorHeard({ t: "door", op: "room-pin", room: msg.room });
       }
       else if (msg.op === "lock-result" && (msg.action === "lock" || msg.action === "unlock" || msg.action === "try") && sphereRoom(msg.room)) doorHeard({ t: "door", op: "lock-result", action: msg.action, room: msg.room, ok: msg.ok === true, reason: typeof msg.reason === "string" ? msg.reason.slice(0, 32) : "" });
-    } else if (msg.t === "party") {
-      // The Block Party's channel: -1 when nobody in the room has chosen one; `by` who chose it (0, the room's word).
-      if (Number.isInteger(msg.channel) && msg.channel >= -1 && msg.channel < 16 && Number.isSafeInteger(msg.by) && msg.by >= 0) {
-        for (const fn of partySubscribers) fn(msg.channel, msg.by);
-      }
     } else if (msg.t === "transit") {
       const transit = transitOf(msg);
       if (transit && transit.actor !== state.selfId) doorHeard(transit);
@@ -931,7 +939,7 @@
     // Any request for the doorway went with the socket.
     if (state.doorway) doorHeard({ t: "door", op: "lost" });
     state.roomLocks = false;
-    state.partyRadio = false;
+    state.dance = false;
     forgetRoomPin();
     if (setLockedRooms(null)) doorHeard({ t: "door", op: "locks" });
     // So did the chalkboard: the board is kept to show until the room sends it again, but nobody here holds it.
@@ -1266,7 +1274,7 @@
     state.bodyName = bodyName(name);
     poseAt = 0; px = NaN;
     gKnown = poseHasG = false;
-    jetSent = weaponSent = 0; visualKnown = false; restKnown = restActive = false;
+    jetSent = weaponSent = 0; visualKnown = false; restKnown = restActive = false; danceSent = -1;
     sendBody();
     // The room starts another actor at full health.
     hpSent = 100; koSent = false; hpAt = 0;
@@ -1377,10 +1385,11 @@
   };
 
   // Throttled to POSE_MS and skipped while nothing moved; a changed gorilla pose, jetpack or weapon also earns a report.
-  const sendPose = (x, y, z, yaw, g = null, jet = 0, weapon = 0, visual = null, rest = 0) => {
+  // `dance` is the driven Ooga's dance number (0 to DANCE_MAX, the Block Party's), sent where the room takes it.
+  const sendPose = (x, y, z, yaw, g = null, jet = 0, weapon = 0, visual = null, rest = 0, dance = 0) => {
     if (cabinetAnchor) {
       const at = cabinetAnchor;
-      x = at.x; y = at.y; z = at.z; yaw = at.yaw; g = null; jet = weapon = 0; visual = null; rest = 0;
+      x = at.x; y = at.y; z = at.z; yaw = at.yaw; g = null; jet = weapon = 0; visual = null; rest = 0; dance = 0;
     }
     const now = performance.now();
     if (state.bodyKind === "gorilla" && g && g.length === 6) {
@@ -1402,7 +1411,8 @@
     if (state.bodyKind === "gorilla" || !Number.isInteger(weapon) || weapon < 0 || weapon > 255) weapon = 0;
     if (state.bodyKind === "gorilla" || !validVisual(visual)) visual = null;
     if (state.bodyKind === "gorilla" || !validRest(rest)) rest = 0;
-    let changed = !!g && !gKnown || jet !== jetSent || weapon !== weaponSent || !!visual !== visualKnown
+    dance = state.dance && state.bodyKind !== "gorilla" ? danceOf(dance) : -1;
+    let changed = !!g && !gKnown || jet !== jetSent || weapon !== weaponSent || !!visual !== visualKnown || dance !== danceSent
       || state.bodyKind !== "gorilla" && (!restKnown || !!rest !== restActive);
     if (rest && !changed) for (let i = 0; i < 6; i++) if (rest[i] !== restSent[i]) { changed = true; break; }
     if (visual && !changed) for (let i = 0; i < visual.length; i++) if (visual[i] !== visualSent[i]) { changed = true; break; }
@@ -1422,8 +1432,9 @@
       gKnown = true;
       extra = `,"g":[${g[0]},${g[1].toFixed(3)},${g[2].toFixed(3)},${g[3].toFixed(3)},${g[4].toFixed(3)},${g[5].toFixed(3)}]`;
     }
-    jetSent = jet; weaponSent = weapon;
+    jetSent = jet; weaponSent = weapon; danceSent = dance;
     if (jet) extra += `,"j":${jet}`;
+    if (dance >= 0) extra += `,"d":${dance}`;
     if (weapon) extra += `,"w":${weapon}`;
     visualKnown = !!visual;
     if (visual) { visualSent.set(visual); extra += `,"v":[${visualSent.join(",")}]`; }
@@ -1480,13 +1491,6 @@
   const lockRoom = (room, pin) => roomPin("lock", room, pin);
   const unlockRoom = (room) => state.roomLocks && lockableRoom(room) && doorSend(JSON.stringify({ t: "door", op: "unlock", room }));
   const tryRoomPin = (room, pin) => roomPin("try", room, pin);
-  // The Block Party's radio (room.js `partyMessage`): this page's DJ changes the channel for everyone in the room.
-  const sendParty = (channel) => {
-    if (state.room !== "live" || !state.partyRadio || state.zone !== "sphere-6" || !Number.isInteger(channel) || channel < 0 || channel >= 16 || !ws || ws.readyState !== WebSocket.OPEN) return false;
-    ws.send(JSON.stringify({ t: "party", channel }));
-    return true;
-  };
-  const subscribeParty = (fn) => { partySubscribers.add(fn); return () => partySubscribers.delete(fn); };
   const passDoor = (door, dir) => typeof door === "string" && DOOR_NAME.test(door) && (dir === "in" || dir === "out")
     && doorSend(JSON.stringify({ t: "door", op: "pass", door, dir }));
 
@@ -1691,10 +1695,9 @@
     shotSubscribers.clear(); swingSubscribers.clear(); reactSubscribers.clear(); audienceSubscribers.clear(); cloudSubscribers.clear();
     presenceSubscribers.clear();
     doorSubscribers.clear();
-    partySubscribers.clear();
     close("off");
     diagnostic = null;
   };
 
-  BL.net = { sendParty, subscribeParty, sendProps, sendPropInput, subscribeProps, sendDuel, subscribeDuel, sendTess, connectionDiagnostics, subscribeConnection, lockRoom, unlockRoom, tryRoomPin, voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeBf, subscribeBfFrame, sendBf, sendBfInput, sendBfFrame, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeAudience, subscribeClouds, sendAudience, subscribePrivate, subscribeChalk, subscribeWallets, sendOutdoor, subscribeOutdoor, OUTDOOR_FEATURE, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, probe, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendReaction, subscribeReactions, setHand, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { sendProps, sendPropInput, subscribeProps, sendDuel, subscribeDuel, sendTess, connectionDiagnostics, subscribeConnection, lockRoom, unlockRoom, tryRoomPin, voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeBf, subscribeBfFrame, sendBf, sendBfInput, sendBfFrame, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeAudience, subscribeClouds, sendAudience, subscribePrivate, subscribeChalk, subscribeWallets, sendOutdoor, subscribeOutdoor, OUTDOOR_FEATURE, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, probe, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendReaction, subscribeReactions, setHand, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

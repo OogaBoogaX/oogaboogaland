@@ -171,30 +171,6 @@ test("anyone inside may unlock, wrong tries run out, and a lock survives hiberna
   assert.equal(woken.players.get(1).roomLock, null);
 });
 
-test("the Block Party's channel is everyone's in the room: arrivals hear it, it survives hibernation, and the last one out takes it", async () => {
-  const h = host(), r = h.room(), dj = await h.join(r, 1, "a"), friend = await h.join(r, 2, "b"), outside = await h.join(r, 3, "c");
-  await h.enter(r, dj, "a", "sphere-6");
-  assert.deepEqual(messages(dj, "party").at(-1), { t: "party", channel: -1, by: 0 }, "an arrival hears that nobody has chosen one yet");
-  await h.enter(r, friend, "b", "sphere-6");
-  await h.enter(r, outside, "c", "sphere");
-  await h.send(r, dj, { t: "party", channel: 3 });
-  assert.deepEqual(messages(friend, "party").at(-1), { t: "party", channel: 3, by: 1 });
-  assert.equal(messages(dj, "party").at(-1).channel, 3, "the DJ's own page hears it too");
-  assert.equal(messages(outside, "party").length, 0, "nobody outside the room hears it");
-  await h.send(r, dj, { t: "party", channel: 4 });
-  assert.equal(messages(friend, "party").at(-1).channel, 3, "a second change within the gap is not passed on");
-  assert.deepEqual(messages(dj, "party").at(-1), { t: "party", channel: 3, by: 0 }, "and its sender is tuned back to the room's channel");
-  await h.send(r, outside, { t: "party", channel: 1 });
-  assert.equal(r.party.channel, 3, "only someone in the room changes it");
-  h.runtime.listed = h.accepted.filter((ws) => !ws.closed);
-  const woken = h.room();
-  assert.equal(woken.party.channel, 3, "the channel comes back from the occupants' attachments");
-  await h.send(woken, outside, { t: "zone", name: "sphere-6" });
-  assert.equal(messages(outside, "party").at(-1).channel, 3, "a later arrival is tuned to it");
-  for (const ws of [dj, friend, outside]) await h.send(woken, ws, { t: "zone", name: "sphere" });
-  assert.equal(woken.party, null, "the last one out takes it with them");
-});
-
 test("wrong PIN tries are the player's: a reconnect or a hibernation does not start them again", async () => {
   const h = host(), r = h.room(), inside = await h.join(r, 1, "a");
   let outside = await h.join(r, 2, "b");
