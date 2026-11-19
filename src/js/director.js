@@ -66,7 +66,7 @@
     soundButton.title = voice.enabled || voice.joining || voice.returning ? label : `${label} · M mutes game sounds`;
     soundButton.dataset.muted = String(sound.muted);
   };
-  BL.destinationMap = BL.destinationMap.create({ current: () => active, ready: () => !!active && !transition, offerCoach: params.get("coach") === "1" });
+  BL.destinationMap = BL.destinationMap.create({ current: () => active, ready: () => !!active && !transition });
   let helpHeld = false;
   // Both panels pause the scene. A pad keeps working inside them: its Menus context reaches no scene while they show.
   const controlsHelp = BL.controlsHelp.create({ current: () => active, ready: () => !!active && !transition,

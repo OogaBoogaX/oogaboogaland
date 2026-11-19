@@ -12200,6 +12200,27 @@ body.cloud-hopper-active #destination-hud { display: none; }
 body[data-active-scene] #controls-help-button { display: flex; align-items: center; justify-content: center; }
 .controls-help-button { position: absolute; top: var(--hub-banner-button-top, calc(10px + var(--safe-top))); right: calc(var(--hub-banner-button-right, calc(var(--hub-banner-gutter) + var(--safe-right))) + var(--hub-banner-button, 36px) + var(--hub-banner-button-gap, 8px)); width: var(--hub-banner-button, 36px); height: var(--hub-banner-button, 36px); }
 .controls-help-button svg { width: calc(var(--hub-banner-button, 36px) * 2 / 3); height: calc(var(--hub-banner-button, 36px) * 2 / 3); }
+/* A first visit to the island: a ring grows off the controls button three times, then stops (destination-map.js). */
+.controls-help-button[data-hint="pulse"] { color: var(--accent-text); }
+.controls-help-button[data-hint="pulse"]::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 9px 7px 10px 8px;
+  border: 2px solid var(--accent-text);
+  box-shadow: 0 0 0 0 rgba(216, 137, 43, 0.65);
+  animation: controls-hint-pulse 1.4s ease-out 0.6s 3 both;
+  pointer-events: none;
+}
+@keyframes controls-hint-pulse {
+  0% { opacity: 1; box-shadow: 0 0 0 0 rgba(216, 137, 43, 0.65); }
+  70% { opacity: 1; box-shadow: 0 0 0 12px rgba(216, 137, 43, 0); }
+  100% { opacity: 0; box-shadow: 0 0 0 12px rgba(216, 137, 43, 0); }
+}
+/* Reduced motion: no ring, a steady amber outline for the same few seconds. */
+@media (prefers-reduced-motion: reduce) {
+  .controls-help-button[data-hint="pulse"]::after { animation: none; opacity: 1; box-shadow: 0 0 0 3px rgba(216, 137, 43, 0.55); }
+}
 .controls-help { width: min(480px, calc(100vw - 24px)); padding: 16px; max-height: calc(100dvh - 32px - var(--safe-top) - var(--safe-bottom)); overflow-y: auto; overscroll-behavior: contain; }
 /* Its words and its keys sit on stone slabs, as the sound panel's rows do, never on the planks. */
 .controls-help-about { margin: 0 0 10px; padding: 9px 12px; }
@@ -12549,8 +12570,7 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
 /* Empty, the status keeps its place in the page for screen readers and takes none on screen. */
 #destination-map-status:empty { margin: 0; padding: 0; border: 0; background: none; box-shadow: none; }
 .destination-map button:focus-visible { outline: 3px solid var(--accent-text); outline-offset: 2px; }
-.explore-coach button:focus-visible { outline: 3px solid #b3f3ff; outline-offset: 3px; }
-#destination-map-close, #controls-learn { min-width: 44px; min-height: 44px; }
+#destination-map-close { min-width: 44px; min-height: 44px; }
 .destination-map-receipt { position: fixed; z-index: 46; top: calc(68px + var(--safe-top)); left: 50%; transform: translateX(-50%); width: max-content; max-width: min(470px, calc(100vw - 32px)); padding: 13px 18px; border: 1px solid #e9d189; border-radius: 12px; background: #192a29ed; color: #fff1ce; box-shadow: 0 5px 24px #0008; font-size: 13px; line-height: 1.5; pointer-events: none; animation: map-arrival .32s ease-out; }
 .destination-map-receipt[hidden] { display: none; }
 .destination-map-receipt[data-kind="warp"] { border-color: #a7efd8; box-shadow: 0 0 0 6px #8ad7c61a, 0 5px 24px #0008; }
@@ -12584,12 +12604,6 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
 }
 @media (max-height: 540px) and (max-width: 520px) { .destination-map-layout { grid-template-columns: 1fr; } }
 @media (max-width: 380px) { #destination-map-list { grid-template-columns: 1fr; } }
-/* A coaching hint must not cover the controls of a floating Oogatron window (layers 20+). */
-.explore-coach { position: fixed; z-index: 19; top: calc(64px + var(--safe-top)); left: 50%; transform: translateX(-50%); width: min(340px, calc(100vw - 32px)); padding: 12px; border: 2px solid var(--accent-text); border-radius: 12px; background: #30271f; color: var(--paper); box-shadow: 0 4px 16px #0008; }
-.explore-coach[hidden] { display: none; }
-.explore-coach p { margin: 0 0 10px; line-height: 1.5; font-size: 13px; }
-.explore-coach div { display: flex; flex-wrap: wrap; gap: 8px; }
-.explore-coach button { min-height: 44px; white-space: normal; flex: 1; }
 
 /* Block Frenzy's menu: dark backing behind every line of text on the wood, so it reads. */
 #block-board .garage-head,
@@ -12947,7 +12961,7 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
 body[data-active-scene] #cave-directory-button { min-height: 44px; }
 
 /* Duels (duel.js): the target, a challenge heard and the duel's bars, at the top left under the banner (the top centre
-   is the movement coaching card's and the walking directions'). */
+   is the walking directions'). */
 .duel-target, .duel-invite, .duel-hud {
   position: fixed;
   left: calc(16px + var(--safe-left));
@@ -13059,9 +13073,3 @@ body[data-active-scene] #cave-directory-button { min-height: 44px; }
 .duel-flash[hidden], .duel-count[hidden], .duel-result[hidden] { display: none; }
 .players-duel { grid-column: 1 / -1; justify-self: start; margin-top: 6px; }
 .players-duel[hidden] { display: none; }
-/* On a narrow screen the movement coaching card spans the top: the duel's cards stand below it while it shows. */
-@media (max-width: 760px) {
-  body:has(#explore-coach:not([hidden])) .duel-target,
-  body:has(#explore-coach:not([hidden])) .duel-hud { top: calc(172px + var(--safe-top)); }
-  body:has(#explore-coach:not([hidden])) .duel-invite { top: calc(224px + var(--safe-top)); }
-}

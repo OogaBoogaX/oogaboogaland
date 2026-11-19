@@ -387,50 +387,58 @@ const destinationMapPadEscapeProof = () => {
   map.dispose();
   return { passedDialog, passedCard, opened, closed, keyboardPassed, floatingOpens, refusedPassed, unavailablePassed };
 };
-const destinationMapCoachingHintProof = () => {
-  const els = new Map(), state = { otherDialog: null };
-  const el = id => {
-    if (!els.has(id)) els.set(id, { id, hidden: id === "explore-coach", disabled: false, open: false, textContent: "", dataset: {}, attrs: {}, children: [],
-      addEventListener() {}, removeEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, click() {}, append(...nodes) { this.children.push(...nodes); },
-      replaceChildren(...nodes) { this.children = nodes; }, querySelectorAll(tag) { return this.children.flatMap(n => [...(n.tagName === tag.toUpperCase() ? [n] : []), ...n.querySelectorAll(tag)]); }, showModal() { this.open = true; }, close() { this.open = false; } });
-    return els.get(id);
+// Rule: a first visit to the island pulses the controls button once (issue 755), no text; opening Controls or a press
+// anywhere but the button records it for good, a pulse left to run out is not recorded, and a visitor with the key never sees it.
+const destinationMapControlsHintProof = () => {
+  const visit = stored => {
+    const els = new Map(), presses = new Set(), timers = [], store = { value: stored };
+    const el = id => {
+      if (!els.has(id)) els.set(id, { id, hidden: id === "destination-map-receipt", disabled: false, open: false, textContent: "", dataset: {}, attrs: {}, children: [],
+        addEventListener() {}, removeEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, click() {}, contains(node) { return node === this; }, append(...nodes) { this.children.push(...nodes); },
+        replaceChildren(...nodes) { this.children = nodes; }, querySelectorAll() { return []; }, showModal() { this.open = true; }, close() { this.open = false; } });
+      return els.get(id);
+    };
+    const document = { getElementById: el, pointerLockElement: null,
+      querySelector: sel => sel === "dialog:modal, dialog[open]:not(.board-floating)" && el("controls-help").open ? el("controls-help") : null,
+      addEventListener: (type, fn) => type === "pointerdown" && presses.add(fn), removeEventListener: (type, fn) => presses.delete(fn) };
+    const window = { BL: { controls: { resetAll() {} }, gamepad: { requireNeutral() {} }, padFocus: { open: () => false } },
+      addEventListener() {}, removeEventListener() {}, setTimeout: fn => timers.push(fn), clearTimeout() {} };
+    const context = { window, document, localStorage: { getItem: () => store.value, setItem: (k, v) => { if (k === "ooga-explore-coach-v1") store.value = v; } } };
+    runInNewContext(readFileSync(join(root, "src/js/destination-map.js"), "utf8"), context);
+    const scene = { id: "hub", coachingReady: true }, map = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
+    map.connect({ available: () => true, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true, position: () => null });
+    const button = el("controls-help-button");
+    const press = target => { for (const fn of [...presses]) fn({ target }); };
+    return { map, scene, button, press, presses, timers, store, controls: el("controls-help") };
   };
-  const querySelector = sel => {
-    const open = [el("destination-map"), state.otherDialog].find(d => d && d.open) || null;
-    if (!open) return null;
-    if (sel === "dialog[open]") return open;
-    if (sel === "dialog:modal, dialog[open]:not(.board-floating)") return open.floating ? null : open;
-    return null;
-  };
-  const document = { getElementById: el, querySelector, pointerLockElement: null, createElement: tag => Object.assign(el("row" + els.size), { tagName: tag.toUpperCase() }) };
-  const window = { BL: { controls: { resetAll() {} }, gamepad: { requireNeutral() {}, state: { connected: false } }, padFocus: { open: () => false } },
-    matchMedia: () => ({ matches: false }), addEventListener() {}, removeEventListener() {} };
-  const context = { window, document, localStorage: { getItem: () => null, setItem() {} } };
-  runInNewContext(readFileSync(join(root, "src/js/destination-map.js"), "utf8"), context);
-  const scene = { id: "hub" }, provider = { available: () => true, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true, controlled: () => false, position: () => null };
-  const coach = el("explore-coach");
-  // Until its redesign the card and its replay button show only where the page asks for them.
-  const plain = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
-  plain.connect(provider); plain.update();
-  const offByDefault = coach.hidden && el("controls-learn").hidden;
-  plain.dispose();
-  const map = window.BL.destinationMap.create({ current: () => scene, ready: () => true, offerCoach: true });
-  map.connect(provider);
-  map.update();
-  const offered = !coach.hidden && !el("controls-learn").hidden;
-  // A floating Oogatron board is a non-modal dialog: it must not hide the coaching hint.
-  state.otherDialog = Object.assign(el("board"), { open: true, floating: true });
-  map.update();
-  const floatingShows = !coach.hidden;
-  // A modal or other non-floating dialog still hides the hint.
-  state.otherDialog = Object.assign(el("controls-help"), { open: true, floating: false });
-  map.update();
-  const modalHides = coach.hidden;
-  state.otherDialog = null;
-  map.update();
-  const restored = !coach.hidden;
-  map.dispose();
-  return { offByDefault, offered, floatingShows, modalHides, restored };
+  // Tess's offer holds it back; once she is working it pulses, once a page, with one bounded timeout and one listener.
+  const first = visit(null);
+  first.scene.coachingReady = false; first.map.update();
+  const heldForTess = !first.button.dataset.hint;
+  first.scene.coachingReady = true; first.map.update(); first.map.update();
+  const pulsed = first.button.dataset.hint === "pulse" && first.timers.length === 1 && first.presses.size === 1;
+  // A press on the button itself is Controls opening, not a dismissal.
+  first.press(first.button);
+  const buttonPressKeeps = first.button.dataset.hint === "pulse" && first.store.value === null;
+  first.timers[0](); first.map.update();
+  const ranOut = !first.button.dataset.hint && first.store.value === null && first.presses.size === 0 && first.timers.length === 1;
+  first.map.dispose();
+  // Opening Controls records it.
+  const opened = visit(null);
+  opened.map.update(); opened.controls.open = true; opened.map.update();
+  const controlsStores = !opened.button.dataset.hint && opened.store.value === "1" && opened.presses.size === 0;
+  opened.map.dispose();
+  // A press anywhere else records it and lets go of its listener.
+  const outside = visit(null);
+  outside.map.update(); outside.press({ id: "scene" });
+  const pressStores = !outside.button.dataset.hint && outside.store.value === "1" && outside.presses.size === 0;
+  outside.map.dispose();
+  // A visitor who has it never sees it.
+  const returning = visit("1");
+  returning.map.update();
+  const neverAgain = !returning.button.dataset.hint && returning.timers.length === 0 && returning.presses.size === 0;
+  returning.map.dispose();
+  return { heldForTess, pulsed, buttonPressKeeps, ranOut, controlsStores, pressStores, neverAgain };
 };
 // Rule: exercise the actual bounded rage state machine with a small physical
 // adapter. Collision and the rendered carry are covered by the hub regressions.
@@ -15270,39 +15278,6 @@ const hubDestinationNames = { name: "destination accessible names", why: "regres
     }
   })()`);
   record("destination gamepad: Menu opens Map, Down moves focus into the destinations, B closes, a held stick waits for neutral, and B or Menu over the Controls panel closes it without opening Map", Object.values(gamepad).every(Boolean), JSON.stringify(gamepad));
-  const keyboardReplay = [];
-  for (const [key, code] of [["Enter", "Enter"], [" ", "Space"]]) {
-    await b.evaluate(`document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").focus()`);
-    const keyCode = key === "Enter" ? 13 : 32;
-    await b.send("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: keyCode, text: key === "Enter" ? "\r" : " " });
-    await b.send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: keyCode });
-    keyboardReplay.push(await b.evaluate(`(() => {
-      const replayed = !document.getElementById("controls-help").open && BL.destinationMap.coaching;
-      document.getElementById("explore-coach-skip").click(); return replayed;
-    })()`));
-  }
-  record("destination coaching: Enter and Space activate the Controls replay button", keyboardReplay.every(Boolean), JSON.stringify(keyboardReplay));
-  const coaching = await b.evaluate(`(() => {
-    const start = document.getElementById("explore-coach-start"), skip = document.getElementById("explore-coach-skip");
-    document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").click();
-    const offered = BL.destinationMap.coaching;
-    skip.click(); const dismissed = !BL.destinationMap.coaching && document.getElementById("explore-coach").hidden;
-    // The guide's movement step is about the visitor's own Ooga, so one is driven first, as a visitor would have taken one.
-    const a = __ooga.cavemen.get("portlandhodl"); if (!(__ooga.pilot.player === a || __ooga.pilot.player?.npc === a)) __ooga.pilot.possess(a);
-    __ooga.pilot.navigate({ position: { x: -5, y: __ooga.island.surfaceAt(-5, 5), z: 5 }, yaw: 0, pitch: 0.4, dist: 10 }); __ooga.advance(.5,1/60);
-    document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").click();
-    start.click(); document.getElementById("scene").focus();
-    __ooga.advance(.1,1/60);
-    window.dispatchEvent(new KeyboardEvent("keydown", {key:"w",code:"KeyW"})); __ooga.advance(1,1/60);
-    window.dispatchEvent(new KeyboardEvent("keyup", {key:"w",code:"KeyW"})); __ooga.advance(.1,1/60);
-    const moved = start.textContent === "Open Map";
-    start.click(); document.querySelector('[data-destination="arcade"]')?.click(); document.getElementById("destination-map-go").click();
-    const completed = start.textContent === "Done" && localStorage.getItem("ooga-explore-coach-v1") === "1";
-    __ooga.advance(.1,1/60);
-    const receiptClear = !document.getElementById("destination-map-receipt").hidden && document.getElementById("explore-coach").hidden;
-    start.click(); return {offered,dismissed,moved,completed,receiptClear};
-  })()`);
-  record("destination coaching: Controls replays a dismissible guide, actual movement advances it and a successful Arcade view completes it", Object.values(coaching).every(Boolean), JSON.stringify(coaching));
   // Real touch activation, including the scrolling needed to reach a narrow phone's controls.
   const viewport = await b.evaluate(`({width:innerWidth,height:innerHeight,deviceScaleFactor:devicePixelRatio,mobile:false})`), phoneRows=[], pinFailures=[];
   const tapMapControl = async selector => {
@@ -15505,12 +15480,11 @@ const hubSharedGuide = { name: "hub shared guide", why: "rule: visitors opt into
       N.sendTess=m=>{calls.push(JSON.parse(JSON.stringify(m)));return true;};
       Object.assign(N.state,{me:{id:901,login:"queue-fixture"},room:"live",connectionToken:"queue-fixture",tessShared:true,tessGuide:null,zone:"outside"});
       receive("none");
-      // Shared Tess idles in queue even when her panel is hidden; coaching must still be usable.
-      document.getElementById("controls-learn").click();step();BL.destinationMap.update();
-      const sharedCoaching=BL.destinationMap.coaching&&!document.getElementById("explore-coach").hidden;
-      document.getElementById("explore-coach-skip").click();
-      G.tap();step();BL.destinationMap.update();
-      const queueHidesCoaching=!BL.scenes.hub.coachingReady&&document.getElementById("explore-coach").hidden;
+      // Shared Tess idles in queue even when her panel is hidden; the controls hint may still show, and her open panel holds it back.
+      step();
+      const sharedCoaching=BL.scenes.hub.coachingReady;
+      G.tap();step();
+      const queueHidesCoaching=!BL.scenes.hub.coachingReady;
       const panel=document.querySelector(".greeter-menu"),go=panel.querySelector(".greeter-row button:first-child"),skip=panel.querySelector(".greeter-row button:last-child");
       const optIn=!panel.hidden&&go.textContent==="Join queue"&&!calls.some(m=>m.op==="join");
       const fits=()=>{const r=panel.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1&&r.top>=0&&r.bottom<=innerHeight+1;};
@@ -26397,8 +26371,8 @@ scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="
 scene("hub", { label: "gorilla population restoration", query: "status=clankin", exclusive: true, opts: { motion: true }, steps: [hubGorillaPopulation] });
 scene("hub", { label: "weapons", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1&gorillarage=1", steps: [hubCombatGate, ...[hubAk, hubMelee, hubJetpack].map(gameCombat)] });
 // Her greeting comes once a page, to a fresh landing nothing has moved, so the guide has its own page.
-scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1&coach=1", steps: [hubGuide, hubAsk, hubTourInput, hubSharedGuide] });
-scene("hub", { label: "shared guide phone", opts: { w: 390, h: 844, mobile: true }, query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1&coach=1", steps: [hubSharedGuide] });
+scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk, hubTourInput, hubSharedGuide] });
+scene("hub", { label: "shared guide phone", opts: { w: 390, h: 844, mobile: true }, query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubSharedGuide] });
 // Native pointer-lock assertions need sole focus; another browser lane can
 // steal capture and spend this long scenario's deadline waiting for it back.
 scene("hub", { label: "camera modes", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubCameraModes] });
@@ -26973,7 +26947,7 @@ scene("hub", { label: "join alerts", query: "pos=0", steps: [hubJoinAlerts] });
 scene("hub", { label: "private chat", query: "pos=0", steps: [hubPrivateChat] });
 scene("hub", { label: "player preferences", query: "pos=0", steps: [hubPlayerPreferences] });
 scene("hub", { label: "player preferences", query: "pos=0", opts: PHONE_SIZE, steps: [hubPlayerPreferences] });
-scene("hub", { label: "clock and block height", query: "pos=0&time=0900&coach=1", steps: [hubBlockHeight, hubDestinationNames] });
+scene("hub", { label: "clock and block height", query: "pos=0&time=0900", steps: [hubBlockHeight, hubDestinationNames] });
 // Rally is out of order for visitors; the tour still boots it on Canvas 2D through its retained maintenance opt-in
 // (`wip=race` alone would land the page in Rally, so it names the island).
 scene("hub", { label: "canvas2d", query: "canvas2d=1&scene=hub&wip=race", steps: [hubMatrix, canvasTour] });
@@ -35474,8 +35448,8 @@ const unitChecks = async () => {
   record("gorilla sleep landing: the real hub predicate protects local and remote players while allowing vertically clear beds", Object.values(sleepLandingPlayers).every(Boolean), JSON.stringify(sleepLandingPlayers));
   const mapPadEscape = destinationMapPadEscapeProof();
   record("destination map pad regression: a pad's B or Menu over another dialog or card is that layer's Escape and never opens Map; on foot it opens Map and inside Map it closes it; a floating board does not block Map and a refused Map never swallows Menu's Escape", Object.values(mapPadEscape).every(Boolean), JSON.stringify(mapPadEscape));
-  const mapCoachingHint = destinationMapCoachingHintProof();
-  record("destination map coaching hint: neither the hint nor its Controls replay button shows without the opt-in; with it a floating board does not hide the island coaching hint, while a non-floating dialog still does", Object.values(mapCoachingHint).every(Boolean), JSON.stringify(mapCoachingHint));
+  const controlsHint = destinationMapControlsHintProof();
+  record("controls hint: a first visit to the island pulses the controls button once, opening Controls or a press elsewhere records it for good, a pulse left to run out does not, and a visitor who has it never sees it", Object.values(controlsHint).every(Boolean), JSON.stringify(controlsHint));
   const sleepBeamPool = sleepBeamPoolProof();
   record("gorilla sleep beam: fixed pool, slot isolation, live reduced motion and scene cleanup", Object.values(sleepBeamPool).every(Boolean), JSON.stringify(sleepBeamPool));
   const sleepStalls = gorillaSleepStallProof();

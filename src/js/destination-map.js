@@ -18,14 +18,13 @@
     repos: ["Learn", "Explore open-source Bitcoin projects · cross the stone bridge past the Oogatron."],
     timechain: ["Learn", "Live Bitcoin charts · choose a room at the keypad."]
   };
-  // The movement and Map coaching card is off until its redesign (issue 755); `offerCoach` (the page's `coach=1`) shows it.
-  const create = ({ current, ready, offerCoach = false }) => {
+  // A first visit to the island pulses the controls button (issue 755): an amber ring three times, no text.
+  const HINT_MS = 600 + 3 * 1400;
+  const create = ({ current, ready }) => {
     const $ = id => document.getElementById(id);
     const dialog = $("destination-map"), list = $("destination-map-list"), status = $("destination-map-status");
     const button = $("destination-hud"), closeButton = $("destination-map-close"), title = $("destination-map-title");
-    const coach = $("explore-coach"), coachText = $("explore-coach-text"), start = $("explore-coach-start"), skip = $("explore-coach-skip");
-    const learn = $("controls-learn"), controls = $("controls-help-button");
-    const coarse = window.matchMedia("(pointer: coarse)");
+    const controls = $("controls-help-button"), controlsDialog = $("controls-help");
     const mode = $("destination-map-mode"), go = $("destination-map-go"), selection = $("destination-map-selection"), detail = $("destination-map-detail");
     const guide = $("destination-map-guide"), returnButton = $("destination-return"), waypoint = $("destination-waypoint"), waypointText = $("destination-waypoint-text"), waypointArrow = $("destination-waypoint-arrow"), waypointStop = $("destination-waypoint-stop");
     const mapTab = $("destination-show-map"), listTab = $("destination-show-list"), layers = $("destination-map-layers");
@@ -60,9 +59,17 @@
     let mapData = null, selectedName = "", selectedTravels = false, acting = false, receiptTimer = 0;
     const hideReceipt = () => { if (receiptTimer) window.clearTimeout(receiptTimer); receiptTimer = 0; receipt.hidden = true; effect.hidden = true; receipt.textContent = ""; };
     const KEY = "ooga-explore-coach-v1", down = new Set(), swallowed = new Set();
-    let provider = null, owner = null, rows = [], seen = false, coaching = -1, anchor = null, x = 0, z = 0;
-    try { seen = localStorage.getItem(KEY) === "1"; } catch { /* Optional coaching also works without storage. */ }
+    let provider = null, owner = null, rows = [], seen = false, hinted = false, hinting = false, hintTimer = 0;
+    try { seen = localStorage.getItem(KEY) === "1"; } catch { /* The hint also works without storage. */ }
     const remember = () => { seen = true; try { localStorage.setItem(KEY, "1"); } catch { /* No persistence. */ } };
+    // The pulse ends by itself after its three rings, unstored, so it shows again next visit. Opening Controls or a
+    // press anywhere but the button (a press on it opens Controls) ends it for good.
+    const endHint = () => {
+      if (!hinting) return;
+      hinting = false; window.clearTimeout(hintTimer); hintTimer = 0; delete controls.dataset.hint;
+      document.removeEventListener("pointerdown", onHintPress, true);
+    };
+    const onHintPress = e => { if (!controls.contains(e.target)) { remember(); endHint(); } };
     const canOpen = () => !!provider && ready() && current()?.navigationReady !== false && provider.available();
     // A successful choice hands the keys back to the world, so Space acts there; closing returns to Map.
     const finish = (chosen = false) => {
@@ -81,11 +88,6 @@
     const close = (chosen = false) => { if (dialog.open) dialog.close(); finish(chosen); };
     const closeFromButton = () => close();
     const onClose = () => { if (!dialog.open) finish(); };
-    const complete = () => {
-      if (coaching !== 2) return;
-      remember(); coaching = 3; coachText.textContent = "You're ready to explore. Controls and Map are always here.";
-      start.textContent = "Done"; skip.hidden = true;
-    };
     const select = name => {
       if (acting || !provider || !provider.names().includes(name)) return;
       selectedName = name; selectedTravels = provider.travels();
@@ -124,10 +126,10 @@
         phase.textContent = "NOT MOVED";
         return;
       }
-      complete(); close(true);
+      close(true);
       hideReceipt(); receipt.dataset.kind = travels ? "warp" : "view";
       receipt.textContent = outside ? "Return outside to CHORA started." : travels ? `Warp complete · ${label}. Heading and equipment kept.` : `View selected · ${label}. Your Ooga stays in place. Move or Escape to return.`;
-      receipt.hidden = false; effect.hidden = !travels; coach.hidden = true;
+      receipt.hidden = false; effect.hidden = !travels;
       receiptTimer = window.setTimeout(hideReceipt, 5500);
     };
     const open = () => {
@@ -218,34 +220,16 @@
       const r = dialog.getBoundingClientRect();
       if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) close();
     };
-    const dismissCoach = () => { remember(); coaching = -1; coach.hidden = true; anchor = null; skip.hidden = false; skip.textContent = "Not now"; };
-    const begin = () => {
-      if (!canOpen() || current()?.id !== "hub") return;
-      current().beginCoaching?.();
-      coaching = 0; seen = false; anchor = null;
-      coachText.textContent = "Move your character to explore, then use Map to choose a place.";
-      start.textContent = "Start moving"; coach.hidden = false; skip.hidden = false; skip.textContent = "Skip guide";
-    };
-    const coachStart = () => {
-      if (coaching < 0) { begin(); return; }
-      if (coaching === 0) { coaching = 1; anchor = null; start.textContent = "Controls"; }
-      else if (coaching === 1) controls.click();
-      else if (coaching === 2) open();
-      else dismissCoach();
-    };
-    const replay = () => { $("controls-help-close").click(); begin(); };
     mapTab.addEventListener("click", showMap); listTab.addEventListener("click", showList); layers.addEventListener("click", changeLayer);
     guide.addEventListener("click", startGuidance); returnButton.addEventListener("click", returnToActor); waypointStop.addEventListener("click", stopGuidance);
     go.addEventListener("click", choose);
     closeButton.addEventListener("click", closeFromButton); dialog.addEventListener("cancel", onCancel);
     dialog.addEventListener("close", onClose); dialog.addEventListener("click", onBackdrop);
     window.addEventListener("keydown", onDown, true); window.addEventListener("keyup", onUp, true); window.addEventListener("blur", onBlur);
-    start.addEventListener("click", coachStart); skip.addEventListener("click", dismissCoach); learn.addEventListener("click", replay);
     return {
       open, close,
-      get coaching() { return coaching >= 0; },
-      connect(next) { close(); hideReceipt(); stopGuidance(); provider = next; anchor = null; },
-      disconnect(previous) { if (provider === previous) { close(); hideReceipt(); stopGuidance(); returnButton.hidden = true; provider = null; coach.hidden = true; anchor = null; } },
+      connect(next) { close(); hideReceipt(); stopGuidance(); provider = next; },
+      disconnect(previous) { if (provider === previous) { close(); hideReceipt(); stopGuidance(); returnButton.hidden = true; provider = null; } },
       update() {
         returnButton.hidden = dialog.open || !current()?.navigationLooking?.();
         if (waypointName) {
@@ -267,41 +251,21 @@
           }
         }
         if (dialog.open && (!ready() || current() !== owner)) close();
-        const hub = current()?.id === "hub";
-        const learnShown = offerCoach && hub;
-        if (learn.hidden === learnShown) learn.hidden = !learnShown;
-        const learnDisabled = !canOpen();
-        if (learn.disabled !== learnDisabled) { learn.disabled = learnDisabled; learn.title = learnDisabled ? "Finish the current interaction before learning the controls" : "Replay the movement and Map guide"; }
-        if ((seen || !offerCoach) && coaching < 0) { if (!coach.hidden) coach.hidden = true; return; }
-        const available = receipt.hidden && hub && canOpen() && current().coachingReady !== false && !document.querySelector("dialog:modal, dialog[open]:not(.board-floating)");
-        const show = available && (!seen || coaching >= 0);
-        if (coach.hidden === show) coach.hidden = !show;
-        if (!show) return;
-        if (coaching < 0 && start.textContent !== "Learn the controls") { coachText.textContent = "New to the island? Learn to move and find your way."; start.textContent = "Learn the controls"; }
-        else if (coaching === 0 && provider.controlled()) { coaching = 1; anchor = null; start.textContent = "Controls"; }
-        if (coaching === 1) {
-          const point = provider.position();
-          if (!point) return;
-          if (point !== anchor) { anchor = point; x = point.x; z = point.z; }
-          const touch = coarse.matches;
-          const words = BL.gamepad.state.connected ? "Use the left stick to move and the right stick to look. Menu opens Map." : touch ? "Use the left stick to move and the right stick to look." : "Use W A S D or the arrows to move. Drag to look around.";
-          if (coachText.textContent !== words) coachText.textContent = words;
-          if ((point.x - x) ** 2 + (point.z - z) ** 2 >= 1) {
-            coaching = 2; coachText.textContent = provider.travels()
-              ? "Choose a destination on the Map. At its entrance, use the action shown on screen."
-              : "Choose a view on the Map. Move or press Escape to return to your Ooga."; start.textContent = "Open Map";
-          }
-        }
+        if (hinting) { if (controlsDialog.open) { remember(); endHint(); } return; }
+        if (seen || hinted || current()?.id !== "hub") return;
+        if (!receipt.hidden || !canOpen() || current().coachingReady === false || document.querySelector("dialog:modal, dialog[open]:not(.board-floating)")) return;
+        hinted = hinting = true; controls.dataset.hint = "pulse";
+        hintTimer = window.setTimeout(endHint, HINT_MS);
+        document.addEventListener("pointerdown", onHintPress, true);
       },
       dispose() {
-        close(); hideReceipt(); stopGuidance(); returnButton.hidden = true; atlas?.dispose();
+        close(); hideReceipt(); stopGuidance(); endHint(); returnButton.hidden = true; atlas?.dispose();
         mapTab.removeEventListener("click", showMap); listTab.removeEventListener("click", showList); layers.removeEventListener("click", changeLayer);
-        guide.removeEventListener("click", startGuidance); returnButton.removeEventListener("click", returnToActor); waypointStop.removeEventListener("click", stopGuidance); provider = anchor = null; coach.hidden = true;
+        guide.removeEventListener("click", startGuidance); returnButton.removeEventListener("click", returnToActor); waypointStop.removeEventListener("click", stopGuidance); provider = null;
         go.removeEventListener("click", choose);
         closeButton.removeEventListener("click", closeFromButton); dialog.removeEventListener("cancel", onCancel);
         dialog.removeEventListener("close", onClose); dialog.removeEventListener("click", onBackdrop);
         window.removeEventListener("keydown", onDown, true); window.removeEventListener("keyup", onUp, true); window.removeEventListener("blur", onBlur);
-        start.removeEventListener("click", coachStart); skip.removeEventListener("click", dismissCoach); learn.removeEventListener("click", replay);
       }
     };
   };
