@@ -4,7 +4,9 @@
 // analysed, and its redirect must send it too): EDM Sessions through radio.co (stream.edmsessions.com's redirect sends
 // no such header, so this is the address it redirects to), and four of SomaFM's listener-supported channels, whose
 // streams and their redirects send it. The room starts on the first; the DJ changes channel from behind the booth
-// (`tune`, `next`), and in a shared room everyone there is tuned to the channel the DJ chose (net.js `sendParty`).
+// (`tune`, `next`), and in a shared room everyone there is tuned to the channel the DJ chose (net.js `sendParty`). A
+// station playing goes on until the next one streams (`ask`), which then fades in under it as its sound reaches the
+// speakers (`swap`); one that never answers puts the dial back.
 //
 // The beat is found on the audio's own clock, never the frame rate's: each frame reads the newest stretch of the
 // stream through a low-pass (the kick), and `meter` cuts it into blocks of a RATE-th of a second by absolute sample
@@ -53,6 +55,8 @@
   // and the wave's POINTS), and a reading more than STALE seconds from the time asked for counts as none (a hidden
   // tab's gap). What's playing: each station's own feed, asked every META_MS while the radio plays, a song at most
   // SONG_MAX characters.
+  // A change of channel fades over FADE seconds (a time constant), and the old stream is let go FADE_MS after that.
+  const FADE = 0.25, FADE_MS = 1500;
   const LOOKAHEAD = 8, GAP_S = 0.015, STALE = 0.5, HISTORY = Math.ceil((LOOKAHEAD + 2 * STALE) / GAP_S), BANDS = 96, POINTS = 512, META_MS = 20000, SONG_MAX = 90;
   const TAU = Math.PI * 2;
 
@@ -155,7 +159,7 @@
     const enabled = q.get("timechain") !== "0" && (!q.has("nosim") || q.get("timechain") === "1");
     let track = tracker();
     let context = null, filter = null, analyser = null, sink = null, gain = null, wave = null, beats = null, element = null, source = null;
-    let whole = null, bins = null, signal = null, edges = null, delay = null;
+    let whole = null, bins = null, signal = null, edges = null;
     // The history: each frame's time on the audio's clock, its beat's strength and whether it was trusted, loudness,
     // spectrum and wave; the frame heard now (`heard`, -1 for none yet).
     let hAt = null, hLevel = null, hLive = null, hLoud = null, hBass = null, hBands = null, hWave = null, hHead = 0, hCount = 0, heard = -1;
@@ -163,32 +167,65 @@
     // What's playing: the song the feed named, shown once the speakers reach it.
     let song = "", songNext = "", songAt = 0, metaTimer = 0, metaAsk = null;
     let mode = enabled ? "waiting" : "off", plain = false, disposed = false, timer = 0, watchdog = 0, epoch = 0;
-    let failures = 0, quiet = 0, lastTime = -1, starts = 0, channel = 0;
+    let failures = 0, quiet = 0, lastTime = -1, starts = 0, channel = 0, fader = null, line = null;
+    // `channel` is the one dialled, `on` the one streaming; the speakers reach `on` at `onAt` (performance time), until
+    // then playing `was`. Silence from Web Audio once (`hushed`) keeps later channels on the plain element.
+    let on = 0, was = 0, onAt = 0, hushed = false, refused = -1;
+    // The next channel while it loads, and the last one going out under it.
+    let next = null, nextSource = null, nextLine = null, nextFader = null, nextPlain = false, nextDog = 0, nextEpoch = 0;
+    const going = [];
     const soundChannel = BL.sound.channel("party");
     if (!enabled) soundChannel.show(false);
     const applyVolume = () => {
       if (gain) gain.gain.setTargetAtTime(plain || BL.sound.muted ? 0 : VOLUME, context.currentTime, 0.4);
       if (element && plain) { element.muted = BL.sound.muted; element.volume = VOLUME * soundChannel.gain; }
     };
+    // An element, its source and its own delay line and fader let go.
+    const release = (el, src, ln, fad) => {
+      if (src) src.disconnect();
+      if (ln) ln.disconnect();
+      if (fad) fad.disconnect();
+      if (el) {
+        el.onplaying = el.onerror = el.onended = el.onwaiting = el.onstalled = null;
+        el.pause(); el.removeAttribute("src"); el.load();
+      }
+    };
+    const dropNext = () => {
+      nextEpoch++; clearTimeout(nextDog); nextDog = 0;
+      release(next, nextSource, nextLine, nextFader); next = nextSource = nextLine = nextFader = null;
+    };
+    const dropGoing = () => {
+      for (const g of going) { clearTimeout(g.timer); release(g.el, g.src, g.line, g.fader); }
+      going.length = 0;
+    };
     const dropElement = () => {
       epoch++; clearTimeout(watchdog); watchdog = 0;
-      if (source) { source.disconnect(); source = null; }
-      if (element) {
-        element.onplaying = element.onerror = element.onended = element.onwaiting = element.onstalled = null;
-        element.pause(); element.removeAttribute("src"); element.load(); element = null;
-      }
+      dropNext(); dropGoing();
+      release(element, source, line, fader); element = source = line = fader = null;
       quiet = 0; lastTime = -1; track.reset();
-      hCount = 0; heard = -1;
+      hCount = 0; heard = -1; onAt = 0;
       if (context) beats = meter(context.sampleRate);
-      // The delay still holds the last stream's seconds: a fresh one, so a new channel starts clean.
-      if (delay && !disposed) { delay.disconnect(); delay = lineOf(context); }
     };
-    const lineOf = (c) => { const d = c.createDelay(LOOKAHEAD + 1); d.delayTime.value = LOOKAHEAD; d.connect(gain); return d; };
+    // A stream's own way to the speakers: LOOKAHEAD seconds of delay, then its fader (at `level`).
+    const lineOf = (src, level) => {
+      const d = context.createDelay(LOOKAHEAD + 1), f = context.createGain();
+      d.delayTime.value = LOOKAHEAD; f.gain.value = level;
+      src.connect(d); d.connect(f); f.connect(gain);
+      return [d, f];
+    };
+    // The streaming element's failures and stalls, from `attempt` on.
+    const watch = (attempt) => {
+      element.onplaying = () => { if (attempt !== epoch) return; clearTimeout(watchdog); watchdog = 0; mode = "live"; failures = 0; applyVolume(); askSong(); };
+      element.onerror = element.onended = () => { if (attempt === epoch) failed(); };
+      element.onwaiting = element.onstalled = () => {
+        if (attempt === epoch && !watchdog) watchdog = setTimeout(() => { if (attempt === epoch) failed(); }, STALL_MS);
+      };
+    };
     // The station's now-playing feed, asked while the radio plays; a song arriving waits for the speakers to reach it.
     const askSong = () => {
       clearTimeout(metaTimer); metaTimer = 0;
       if (disposed || mode !== "live" || typeof fetch !== "function") return;
-      const station = STATIONS[channel], ask = metaAsk = new AbortController();
+      const station = STATIONS[on], ask = metaAsk = new AbortController();
       fetch(station.meta, { signal: ask.signal, cache: "no-store" }).then((r) => r.ok ? r.json() : null).then((j) => {
         if (ask !== metaAsk || !j) return;
         const name = String(station.song(j) || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, SONG_MAX);
@@ -198,6 +235,8 @@
     };
     const failed = () => {
       if (disposed) return;
+      // The station streaming died while another loaded: nothing left to keep playing, so straight to the one dialled.
+      if (next) { dropElement(); plain = hushed; failures = 0; mode = "idle"; start(); return; }
       dropElement(); failures++;
       // Twice refused through Web Audio, try the plain element: the music without the beat beats no music.
       if (!plain && failures >= 2) { plain = true; mode = "idle"; start(); return; }
@@ -218,7 +257,6 @@
         filter.connect(analyser); analyser.connect(sink); sink.connect(context.destination);
         whole = context.createAnalyser(); whole.fftSize = FFT; whole.minDecibels = DB_MIN; whole.maxDecibels = DB_MAX; whole.smoothingTimeConstant = 0.55;
         whole.connect(sink);
-        delay = lineOf(context);
         wave = new Float32Array(WAVE); bins = new Uint8Array(FFT / 2); signal = new Float32Array(FFT);
         hAt = new Float64Array(HISTORY); hLevel = new Float32Array(HISTORY); hLive = new Uint8Array(HISTORY); hLoud = new Float32Array(HISTORY);
         hBass = new Float32Array(HISTORY); hBands = new Float32Array(HISTORY * BANDS); hWave = new Float32Array(HISTORY * POINTS);
@@ -226,19 +264,15 @@
       }
       if (context.state === "suspended") context.resume().catch(() => {});
       dropElement();
-      const attempt = epoch; starts++;
+      const attempt = epoch; starts++; on = was = channel;
       element = new Audio(); element.preload = "none";
       if (!plain) {
         element.crossOrigin = "anonymous";
-        source = context.createMediaElementSource(element); source.connect(delay); source.connect(filter); source.connect(whole);
+        source = context.createMediaElementSource(element); [line, fader] = lineOf(source, 1); source.connect(filter); source.connect(whole);
       }
       mode = "connecting";
       applyVolume();
-      element.onplaying = () => { if (attempt !== epoch) return; clearTimeout(watchdog); watchdog = 0; mode = "live"; failures = 0; applyVolume(); askSong(); };
-      element.onerror = element.onended = () => { if (attempt === epoch) failed(); };
-      element.onwaiting = element.onstalled = () => {
-        if (attempt === epoch && !watchdog) watchdog = setTimeout(() => { if (attempt === epoch) failed(); }, STALL_MS);
-      };
+      watch(attempt);
       watchdog = setTimeout(() => { if (attempt === epoch) failed(); }, STALL_MS);
       element.src = `${STATIONS[channel].url}?_=${Date.now()}`;
       element.play().catch((error) => {
@@ -282,7 +316,7 @@
         // A frame vouches only for the stretch the analyser holds: a late frame (a stalled page, a view change's
         // hitch) that finds the stream catching its breath is one quiet moment, not all the time since the last.
         quiet += Math.min(element.currentTime - lastTime, WAVE / context.sampleRate);
-        if (quiet > SILENT_S) { plain = true; mode = "idle"; start(); out.live = false; return out; }
+        if (quiet > SILENT_S) { plain = hushed = true; mode = "idle"; start(); out.live = false; return out; }
       } else if (sounding) quiet = 0;
       lastTime = element.currentTime;
       const lag = context.outputLatency || context.baseLatency || 0, at = context.currentTime, i = hHead;
@@ -343,6 +377,25 @@
         out[i] = (most / 255) ** SPREAD;
       }
     };
+    // The decks' waveform: a column for each of `lo`, `mid` and `hi` (each as long), from `d0` to `d1` seconds after
+    // what is heard now (the readings run LOOKAHEAD ahead, so what is coming shows), the mean of the spectrum's low
+    // quarter, its middle and its top two fifths in each (0 where nothing was read). False when nothing is heard.
+    const waveform = (d0, d1, lo, mid, hi) => {
+      if (heard < 0) return false;
+      const n = lo.length, t0 = hAt[heard] + d0, span = d1 - d0, oldest = (hHead - hCount + HISTORY) % HISTORY;
+      const q = BANDS >> 2, f = Math.round(BANDS * 0.6);
+      let j = 0;
+      for (let c = 0; c < n; c++) {
+        const tc = t0 + span * (c + 0.5) / n;
+        while (j + 1 < hCount && hAt[(oldest + j + 1) % HISTORY] <= tc) j++;
+        const i = (oldest + j) % HISTORY;
+        if (hAt[i] > tc || tc - hAt[i] > STALE) { lo[c] = mid[c] = hi[c] = 0; continue; }
+        let a = 0, m = 0, h = 0;
+        for (let k = 0, o = i * BANDS; k < BANDS; k++) { const v = hBands[o + k]; if (k < q) a += v; else if (k < f) m += v; else h += v; }
+        lo[c] = a / q; mid[c] = m / (f - q); hi[c] = h / (BANDS - f);
+      }
+      return true;
+    };
     // The screen's wave of what is heard now: POINTS samples of the newest half of the analyser's window from a rising
     // zero crossing, so it stands still on a steady note.
     const scope = (out) => {
@@ -350,43 +403,113 @@
       for (let k = 0, o = heard * POINTS; k < POINTS; k++) out[k] = hWave[o + k];
       return true;
     };
-    // Another channel: the stream let go and the new one asked for at once (after the first gesture, as ever), the
-    // beat found afresh and the plain element given up, so a channel that answers cross-origin is read again.
+    // The dialled channel streaming beside the old one: the old one stops feeding the readings now and goes on to the
+    // speakers until the new one's sound reaches them (LOOKAHEAD seconds on through Web Audio, at once on the plain
+    // element), then fades out under it and is let go. A change made before the last one's sound reached the speakers
+    // lets that unheard station go at once and keeps the one still heard going until this one arrives. The beat, the
+    // history and the readings carry on unbroken, so the room shows each station as it is heard.
+    const swap = () => {
+      clearTimeout(nextDog); nextDog = 0;
+      const t = context.currentTime, wait = nextPlain ? 0 : LOOKAHEAD, unheard = onAt > 0 && performance.now() < onAt;
+      epoch++; clearTimeout(watchdog); watchdog = 0;
+      // A stream going out: faded from when the new one arrives, and let go once it has.
+      const retire = (g) => {
+        clearTimeout(g.timer);
+        if (g.fader) { const p = g.fader.gain; p.cancelScheduledValues(t); p.setValueAtTime(p.value, t); p.setTargetAtTime(0, t + wait, FADE); }
+        g.timer = setTimeout(() => { const k = going.indexOf(g); if (k >= 0) going.splice(k, 1); release(g.el, g.src, g.line, g.fader); },
+          wait * 1000 + (g.fader ? FADE_MS : 0));
+      };
+      if (unheard) for (const g of going) retire(g);
+      if (element) {
+        element.onplaying = element.onerror = element.onended = element.onwaiting = element.onstalled = null;
+        if (unheard) release(element, source, line, fader);
+        else {
+          const g = { el: element, src: source, line, fader, timer: 0 };
+          if (source) { source.disconnect(filter); source.disconnect(whole); }
+          going.push(g); retire(g);
+        }
+      }
+      element = next; source = nextSource; line = nextLine; fader = nextFader; plain = nextPlain;
+      next = nextSource = nextLine = nextFader = null; nextEpoch++;
+      if (source) { source.connect(filter); source.connect(whole); fader.gain.setTargetAtTime(1, t + wait, FADE); }
+      // What the speakers play until the new channel reaches them is what they play now (a change made inside the
+      // last one's lookahead keeps naming the station still heard).
+      was = onAt && performance.now() < onAt ? was : on;
+      on = channel; onAt = performance.now() + wait * 1000; failures = 0; quiet = 0; lastTime = -1; starts++;
+      songNext = ""; songAt = onAt; if (metaAsk) metaAsk.abort(); metaAsk = null;
+      mode = "live"; watch(epoch); applyVolume(); askSong();
+    };
+    // Load the dialled channel beside the one playing, silent until it streams. Refused through Web Audio it is tried
+    // on the plain element; refused that way too, the dial goes back to the station still playing.
+    const ask = (asPlain) => {
+      dropNext();
+      const attempt = nextEpoch;
+      nextPlain = asPlain;
+      next = new Audio(); next.preload = "none";
+      if (!asPlain) {
+        next.crossOrigin = "anonymous";
+        nextSource = context.createMediaElementSource(next); [nextLine, nextFader] = lineOf(nextSource, 0);
+      } else next.muted = true;
+      const refuse = () => {
+        if (attempt !== nextEpoch || disposed) return;
+        if (!asPlain) { ask(true); return; }
+        dropNext(); refused = channel; channel = on;
+      };
+      next.onplaying = () => { if (attempt === nextEpoch) swap(); };
+      next.onerror = next.onended = refuse;
+      nextDog = setTimeout(refuse, STALL_MS);
+      next.src = `${STATIONS[channel].url}?_=${Date.now()}`;
+      next.play().catch(refuse);
+    };
+    // Another channel. With a station live it plays on while the new one loads (`ask`); with nothing streaming the new
+    // one is asked for at once (after the first gesture, as ever). Either way the plain element is given up, so a
+    // channel that answers cross-origin is read again, unless Web Audio has already handed this page silence.
     const tune = (index) => {
       if (disposed || !enabled) return;
       const wanted = ((index % STATIONS.length) + STATIONS.length) % STATIONS.length;
       if (wanted === channel && mode !== "offline") return;
-      channel = wanted;
+      channel = wanted; refused = -1;
+      if (mode === "live") {
+        if (channel === on) dropNext(); else ask(hushed);
+        return;
+      }
       song = songNext = ""; if (metaAsk) metaAsk.abort(); metaAsk = null; clearTimeout(metaTimer); metaTimer = 0;
       clearTimeout(timer); timer = 0;
       dropElement();
-      plain = false; failures = 0;
+      plain = hushed; failures = 0;
       if (mode !== "waiting") mode = "idle";
       start();
     };
+    // The station the speakers play now.
+    const playing = () => STATIONS[onAt && performance.now() < onAt ? was : on];
     const reading = { live: false, bpm: 0, phase: 0, level: 0, conf: 0 };
     // A line for a tap on the booth, the decks or the speakers.
     const words = () => {
       const muted = BL.sound.muted ? " · sound muted (M, or the speaker button's Sound on/off)" : "";
       const name = STATIONS[channel].name;
       if (mode === "off") return "The radio is off on this page";
+      if (next) return `Tuning in to ${name}… · ${STATIONS[on].name} plays until it's ready`;
+      if (refused >= 0 && mode === "live") return `${STATIONS[refused].name} isn't answering · still on ${playing().name}`;
       if (mode === "waiting") return `${name} · tap or press a key to tune in`;
       if (mode === "connecting" || mode === "idle") return `Tuning in to ${name}…`;
       if (mode === "offline") return `${name} isn't answering · trying again shortly`;
-      if (plain) return `Live · ${name}${muted}`;
+      const heardName = playing().name;
+      if (plain) return `Live · ${heardName}${muted}`;
       track.read(context.currentTime, reading);
-      return reading.live ? `Live · ${name} · ${Math.round(reading.bpm)} BPM · the lights follow the beat${muted}` : `Live · ${name} · finding the beat${muted}`;
+      return reading.live ? `Live · ${heardName} · ${Math.round(reading.bpm)} BPM · the lights follow the beat${muted}` : `Live · ${heardName} · finding the beat${muted}`;
     };
     return {
-      sample, energy, ahead, spectrum, scope, words, tune,
+      sample, energy, ahead, spectrum, scope, waveform, words, tune,
       next: () => tune(channel + 1),
       // How far ahead of the speakers the readings run (0 where they are not delayed), whether the speakers have yet to
       // reach the first reading, and the song playing now, as the station's feed named it ("" for none yet).
       get lookahead() { return mode === "live" && !plain ? LOOKAHEAD : 0; },
       get warming() { return mode === "live" && !plain && heard < 0; },
       get song() { if (songNext !== song && performance.now() >= songAt) song = songNext; return song; },
-      get channel() { return channel; }, get station() { return STATIONS[channel]; },
-      get stats() { return { mode, plain, starts, failures, channel, contexts: context ? 1 : 0, elements: element ? 1 : 0, ...track.read(context ? context.currentTime : 0, reading) }; },
+      // The channel dialled and its station; `playing`, the station the speakers play now (the old one until a new
+      // channel's sound reaches them).
+      get channel() { return channel; }, get station() { return STATIONS[channel]; }, get playing() { return playing(); },
+      get stats() { return { mode, plain, starts, failures, channel, on, switching: !!next, contexts: context ? 1 : 0, elements: (element ? 1 : 0) + (next ? 1 : 0) + going.length, ...track.read(context ? context.currentTime : 0, reading) }; },
       dispose() {
         if (disposed) return;
         disposed = true;
@@ -396,9 +519,9 @@
         document.removeEventListener("keydown", gesture);
         offSound(); soundChannel.release();
         dropElement();
-        for (const node of [filter, analyser, whole, sink, gain, delay]) if (node) node.disconnect();
+        for (const node of [filter, analyser, whole, sink, gain]) if (node) node.disconnect();
         if (context) context.close().catch(() => {});
-        context = filter = analyser = whole = sink = gain = delay = wave = beats = bins = signal = null;
+        context = filter = analyser = whole = sink = gain = wave = beats = bins = signal = null;
         hAt = hLevel = hLive = hLoud = hBass = hBands = hWave = null; hCount = 0; heard = -1;
         mode = "disposed";
       }

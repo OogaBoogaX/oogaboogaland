@@ -94,7 +94,9 @@
   const NB = 10, PHRASE = 16, BEAM_W = 0.007, BEAM_LEN = 8;
   // The lasers' looks a show turns through: on the beat while a strong kick drives the music, and flowing (the level
   // sheet, the liquid sky and the mesh) while nothing kicks, turning half as often.
-  const PULSE_LOOKS = [0, 1, 2, 4, 5, 7, 8], FLOW_LOOKS = [3, 6, 9];
+  const PULSE_LOOKS = [0, 1, 2, 4, 5, 7, 8, 10, 12, 13], FLOW_LOOKS = [3, 6, 9, 11];
+  // A rainbow fan's colours, in order round the wheel.
+  const RAINBOW = [RED, YELLOW, GREEN, CYAN, BLUE, MAGENTA];
   // A strong kick: the beat the radio finds, as hard as it hits now (`hit`, 0 to 1), counts from ON and stops counting
   // under OFF; a change holds HOLD bars before another.
   const KICK = { ON: 0.55, OFF: 0.4, HOLD: 8 };
@@ -120,8 +122,11 @@
   const DOME = { WASH: 0, NIGHT: 1, SWEEP: 2, RINGS: 3, SPIRAL: 4, PLASMA: 5, KALEIDO: 6, BURST: 7,
     NAMES: ["wash", "night", "sweep", "rings", "spiral", "plasma", "kaleido", "burst"], FOR: [[0, 1, 2, 5], [0, 2, 3, 5, 6], [3, 4, 6, 7], [0, 5, 6, 2]] };
   const FLOOR = { GLOW: 0, RIPPLES: 1, SWEEP: 2, SPARKS: 3, RINGS: 4, NAMES: ["glow", "ripples", "sweep", "sparks", "rings"], FOR: [[0, 1], [1, 2, 3], [4, 3, 2], [0, 1, 2]] };
-  const WALLS = { WAVE: 0, FLOW: 1, BLOCKS: 2, SPECTRUM: 3, WATERFALL: 4, HASHES: 5,
-    NAMES: ["wave", "flow", "blocks", "spectrum", "waterfall", "hashes"], FOR: [[0, 1, 4], [1, 2, 3, 4, 5], [3, 2, 5], [1, 4, 0]] };
+  const WALLS = { WAVE: 0, FLOW: 1, BLOCKS: 2, SPECTRUM: 3, WATERFALL: 4, HASHES: 5, SKYLINE: 6, WARP: 7,
+    NAMES: ["wave", "flow", "blocks", "spectrum", "waterfall", "hashes", "skyline", "warp"],
+    FOR: [[0, 1, 4, 6], [1, 2, 3, 4, 5, 6], [3, 2, 5, 7], [1, 4, 0, 6]] };
+  // The wall's skyline: TOWERS a side. Its warp: STARS streaks and CHEVRONS a side.
+  const CITY = { TOWERS: 48 }, WARP = { STARS: 150, CHEVRONS: 4 };
   // The wall's hash rain: COLS columns of the latest block's hash falling a CELL-pixel row at a time, its trail fading
   // at FADE a second.
   const RAIN = { COLS: 128, CELL: 10, FADE: 3.5 };
@@ -432,14 +437,35 @@
   // a ripple running through them; a fan flashing from one projector after another round the room; crossfire, tight
   // fans sweeping the floor against their partners; a block's drop (-1), wide white fans spinning and strobing; and
   // while nothing kicks, a mesh of level fans from every projector drifting slowly over the heads so they cross into a
-  // net. The beat moves the pulsing looks, the time `t` the flowing ones. Only the projectors whose pair's bit is set in
+  // net; scissors, each fan's two halves crossing and parting on the beat (10); a prism, a wide level sheet in every
+  // colour of the rainbow rolling slowly, its colours drifting along it (11); lighthouses, every projector's tight
+  // cone landing on a ring round the floor and the ring turning a quarter a bar, so the spots chase round the room (12);
+  // and a burst, every cone on the mirror ball opening wide on the kick, its beams in the show's two colours in turn
+  // (13). The beat moves the pulsing looks, the time `t` the flowing ones. Only the projectors whose pair's bit is set in
   // `pairs` shine in a pulsing look but the ball's and the chase's, every one in a flowing one (every other in the
   // sheet). `F` is scratch.
   const aim = (rigs, beat, t, kick, look, ca, cb, pairs, out, F) => {
     for (let p = 0; p < rigs.length; p++) {
       const g = rigs[p], s = g.side, base = p * NB, D = g.D;
       let tx = g.ax + g.ix * D * 0.6, ty = 2.4, tz = g.az + g.iz * D * 0.6, cone = 0, spread = 0, roll = 0, spin = 0, color = p % 2 ? cb : ca, lit = -1, on = (pairs >> g.pair & 1) === 1, ripple = 0;
-      if (look === 0) {
+      let scissor = 0, rainbow = -1, alternate = false;
+      if (look === 10) {
+        tx = g.ax + g.ix * D * 0.6; tz = g.az + g.iz * D * 0.6; ty = 2.0 - 0.3 * kick;
+        spread = 0.5; scissor = 0.42 * Math.sin(beat * Math.PI / 2); roll = s * 0.2;
+      } else if (look === 11) {
+        on = true;
+        tx = g.ax + g.ix * D * 1.35; tz = g.az + g.iz * D * 1.35; ty = 2.6 + 0.25 * Math.sin(t * 0.41 + p * 0.9);
+        spread = 1.25; roll = 0.22 * Math.sin(t * 0.23 + p * 1.3); ripple = 0.012; rainbow = Math.floor(t * 1.5 + p);
+      } else if (look === 12) {
+        on = true;
+        const a = beat * Math.PI / 8 + g.round * TAU / rigs.length;
+        tx = 6.5 * Math.cos(a); tz = FZ + 6.5 * Math.sin(a); ty = 0;
+        cone = 0.028 + 0.01 * kick; spin = (p % 2 ? 1 : -1) * beat * Math.PI / 2;
+      } else if (look === 13) {
+        on = true;
+        tx = 0; ty = rigs.ball; tz = FZ;
+        cone = 0.035 + 0.2 * kick; spin = (p % 2 ? 1 : -1) * beat * Math.PI / 3; alternate = true;
+      } else if (look === 0) {
         tx = g.ax + g.ix * D * 0.55; tz = g.az + g.iz * D * 0.55; ty = 2.2 + 0.8 * Math.sin(beat * Math.PI / 4) - 0.4 * kick;
         spread = 0.55; roll = s * 0.5 * Math.sin(beat * Math.PI / 8);
       } else if (look === 1) {
@@ -488,13 +514,13 @@
           const a = j / NB * TAU + spin, cx = Math.cos(a) * Math.sin(cone), sx = Math.sin(a) * Math.sin(cone), cc = Math.cos(cone);
           x = cc * dx + cx * ux + sx * vx; y = cc * dy + sx * vy; z = cc * dz + cx * uz + sx * vz;
         } else {
-          const a = (j / (NB - 1) - 0.5) * spread, c = Math.cos(a), sn = Math.sin(a);
+          const half = NB >> 1, a = scissor ? ((j % half) / (half - 1) - 0.5) * spread + (j < half ? scissor : -scissor) : (j / (NB - 1) - 0.5) * spread, c = Math.cos(a), sn = Math.sin(a);
           x = c * dx + sn * F[0]; y = c * dy + sn * F[1] + ripple * Math.sin(j * 0.9 + t * 1.3 + p * 1.3); z = c * dz + sn * F[2];
         }
         const i = base + j, l = Math.hypot(x, y, z);
         out.dir[i * 3] = x / l; out.dir[i * 3 + 1] = y / l; out.dir[i * 3 + 2] = z / l;
         out.on[i] = on && (lit < 0 || j === lit || j === NB - 1 - lit) ? 1 : 0;
-        out.color[i] = color;
+        out.color[i] = rainbow >= 0 ? RAINBOW[(rainbow + j) % RAINBOW.length] : alternate ? (j % 2 ? cb : ca) : color;
       }
     }
     return out;
@@ -717,6 +743,25 @@
     const HEX = "0123456789abcdef", { COLS, CELL } = RAIN, glyphs = CH.canvas(16 * CELL, 3 * CELL), gc = glyphs.getContext("2d");
     const rain = CH.canvas(W, H), rc = rain.getContext("2d"), rowY = new Float32Array(COLS), rowV = new Float32Array(COLS), last = new Int16Array(COLS).fill(-1);
     for (let i = 0; i < COLS; i++) { rowY[i] = -Math.random() * 12; rowV[i] = 6 + Math.random() * 10; }
+    // The wave's echo: the last frames' waves fading on a canvas of their own.
+    const echo = CH.canvas(W, H), ec = echo.getContext("2d");
+    // The skyline: each tower's width and height as a share of its slot, its windows a canvas of lit and unlit panes
+    // (two of them, swapped on the beat), and the sky behind with its stars and the moon over the booth.
+    const towerW = new Float32Array(CITY.TOWERS), towerH = new Float32Array(CITY.TOWERS), towerX = new Uint16Array(CITY.TOWERS);
+    for (let i = 0; i < CITY.TOWERS; i++) { towerW[i] = 0.55 + 0.4 * Math.random(); towerH[i] = 0.45 + 0.55 * Math.random(); towerX[i] = Math.floor(Math.random() * (W - 64)); }
+    const panes = [CH.canvas(W, H), CH.canvas(W, H)], sky = CH.canvas(W, H), sk = sky.getContext("2d");
+    for (const [n, pane] of panes.entries()) {
+      const pg = pane.getContext("2d");
+      for (let y = 3; y < H; y += 5) for (let x = 2; x < W; x += 4) {
+        const r = Math.random();
+        if (r < (n ? 0.38 : 0.45)) { pg.fillStyle = r < 0.05 ? "#9fe7ff" : r < 0.3 ? "#ffd27a" : "#ffb04d"; pg.fillRect(x, y, 2, 3); }
+      }
+    }
+    let bodyStyle = "#111";
+    // The warp: each streak's distance out from the booth, its height and its speed.
+    const starX = new Float32Array(WARP.STARS), starY = new Float32Array(WARP.STARS), starZ = new Float32Array(WARP.STARS);
+    for (let i = 0; i < WARP.STARS; i++) { starX[i] = Math.random() * half; starY[i] = 4 + Math.random() * (H - 8); starZ[i] = 0.2 + Math.random(); }
+    let streakStyles = ["#fff", "#fff", "#f4f2ff"];
     const colors = (a, bb) => {
       ca[0] = a[0]; ca[1] = a[1]; ca[2] = a[2]; cb[0] = bb[0]; cb[1] = bb[1]; cb[2] = bb[2];
       gc.clearRect(0, 0, 16 * CELL, 3 * CELL);
@@ -732,15 +777,23 @@
       const fade = f.createLinearGradient(0, 0, 0, H);
       fade.addColorStop(0, "rgba(6,3,11,0.85)"); fade.addColorStop(0.5, "rgba(6,3,11,0)"); fade.addColorStop(1, "rgba(6,3,11,0.6)");
       f.fillStyle = fade; f.fillRect(0, 0, W, H);
+      bodyStyle = rgbStyle(a, 0.16); streakStyles = [rgbStyle(a, 1.35), rgbStyle(bb, 1.35), "#f4f2ff"];
+      // The skyline's sky: dark at the top into the room's colour at the horizon, stars, and the moon over the booth.
+      const dusk = sk.createLinearGradient(0, 0, 0, H);
+      dusk.addColorStop(0, "#05030a"); dusk.addColorStop(1, rgbStyle(bb, 0.35));
+      sk.fillStyle = dusk; sk.fillRect(0, 0, W, H);
+      for (let i = 0; i < 260; i++) { sk.fillStyle = i % 9 ? "rgba(244,242,255,0.55)" : "#ffffff"; sk.fillRect(Math.random() * W, Math.random() * H * 0.7, i % 9 ? 1 : 2, i % 9 ? 1 : 2); }
+      sk.fillStyle = "#f6f0d8"; sk.beginPath(); sk.arc(half, 22, 13, 0, TAU); sk.fill();
+      sk.fillStyle = "rgba(246,240,216,0.12)"; sk.beginPath(); sk.arc(half, 22, 24, 0, TAU); sk.fill();
     };
-    const drawWave = (alpha, width, style) => {
-      ctx.globalAlpha = alpha; ctx.strokeStyle = style; ctx.lineWidth = width;
-      ctx.beginPath();
+    const drawWave = (alpha, width, style, to = ctx) => {
+      to.globalAlpha = alpha; to.strokeStyle = style; to.lineWidth = width;
+      to.beginPath();
       for (let i = 0; i < WAVE; i++) {
         const x = i / (WAVE - 1) * W, y = H / 2 - Math.max(-1, Math.min(1, shape[i])) * H * 0.4;
-        if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        if (i) to.lineTo(x, y); else to.moveTo(x, y);
       }
-      ctx.stroke();
+      to.stroke();
     };
     const draw = (look, alpha, M) => {
       if (alpha <= 0.002) return;
@@ -779,8 +832,58 @@
         }
         ctx.globalAlpha = alpha; ctx.drawImage(rain, 0, 0);
       } else if (look === WALLS.WAVE) {
+        // Its echo: the last waves fading behind it, longer while the music is soft.
+        ec.globalCompositeOperation = "destination-out"; ec.fillStyle = "#000"; ec.globalAlpha = Math.min(1, step * (3 + 5 * M.I));
+        ec.fillRect(0, 0, W, H);
+        ec.globalCompositeOperation = "source-over";
+        drawWave(0.8, 1.5, glowStyle, ec);
         ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = alpha * 0.55; ctx.drawImage(echo, 0, 0);
         drawWave(alpha * 0.25, 7, glowStyle); drawWave(alpha * (0.55 + 0.35 * M.I), 2, waveStyle);
+        ctx.globalCompositeOperation = "source-over";
+      } else if (look === WALLS.SKYLINE) {
+        // A city each way from the booth under its sky: a tower a band of the spectrum, as tall as that band is loud, its
+        // windows lit (another set on every other beat), a lamp on every fourth roof blinking on the beat.
+        ctx.globalAlpha = alpha; ctx.drawImage(sky, 0, 0);
+        const n = CITY.TOWERS, slot = half / n, pane = panes[Math.floor(M.beat) & 1], blink = M.beat - Math.floor(M.beat) < 0.3;
+        for (let i = 0; i < n; i++) {
+          const v = level[Math.floor(i * BARS / n)], tw = Math.max(3, Math.round(slot * towerW[i])), th = Math.max(6, Math.round((0.16 + 0.84 * v) * (H - 12) * towerH[i]));
+          const x = Math.round(half + i * slot + (slot - tw) / 2), mx = W - x - tw, yy = H - th;
+          ctx.fillStyle = bodyStyle; ctx.fillRect(x, yy, tw, th); ctx.fillRect(mx, yy, tw, th);
+          ctx.drawImage(pane, towerX[i], yy, tw, th, x, yy, tw, th);
+          ctx.drawImage(pane, towerX[(i + 7) % n], yy, tw, th, mx, yy, tw, th);
+          if (i % 4 === 1 && th > 20) {
+            ctx.fillStyle = blink ? "#ff3a3a" : "#5a1a1a";
+            ctx.fillRect(x + (tw >> 1) - 1, yy - 4, 2, 4); ctx.fillRect(mx + (tw >> 1) - 1, yy - 4, 2, 4);
+          }
+        }
+      } else if (look === WALLS.WARP) {
+        // Hyperspace out from the booth: streaks rushing out both ways, faster and longer the harder the music and on the
+        // kick, and chevrons flying out on every beat.
+        const speed = (70 + 520 * M.I) * (1 + 1.6 * M.kick);
+        ctx.globalCompositeOperation = "lighter";
+        for (let g = 0; g < 3; g++) {
+          ctx.fillStyle = streakStyles[g];
+          for (let i = g; i < WARP.STARS; i += 3) {
+            starX[i] += speed * step * starZ[i] * (0.25 + starX[i] / half);
+            if (starX[i] > half) { starX[i] = Math.random() * 40; starY[i] = 4 + Math.random() * (H - 8); starZ[i] = 0.2 + Math.random(); }
+            const len = 2 + speed * 0.04 * starZ[i] * (0.3 + starX[i] / half), out = starX[i] / half;
+            ctx.globalAlpha = alpha * Math.min(1, 0.15 + out * 1.4);
+            const th = starZ[i] > 0.9 ? 2 : 1;
+            ctx.fillRect(half + starX[i], starY[i], len, th); ctx.fillRect(half - starX[i] - len, starY[i], len, th);
+          }
+        }
+        ctx.fillStyle = streakStyles[1];
+        for (let c = 0; c < WARP.CHEVRONS; c++) {
+          const p = (M.beat - Math.floor(M.beat) + c) / WARP.CHEVRONS, x = half + 30 + p * (half - 60), s = 10 + 22 * p;
+          ctx.globalAlpha = alpha * (1 - p) * (0.5 + 0.5 * M.I);
+          for (let dir = 1; dir >= -1; dir -= 2) {
+            const cx = dir > 0 ? x : W - x;
+            const bx = cx - dir * s * 0.5, tx = cx + dir * s * 0.5, th = dir * s * 0.45;
+            ctx.beginPath(); ctx.moveTo(bx, H / 2 - s); ctx.lineTo(bx + th, H / 2 - s); ctx.lineTo(tx + th, H / 2); ctx.lineTo(bx + th, H / 2 + s);
+            ctx.lineTo(bx, H / 2 + s); ctx.lineTo(tx, H / 2); ctx.closePath(); ctx.fill();
+          }
+        }
         ctx.globalCompositeOperation = "source-over";
       } else if (look === WALLS.FLOW) {
         const x = -(((M.flow % W) + W) % W);
@@ -1002,7 +1105,7 @@
     const lean = -0.35, sh = 0.26, sw = 0.4, cy = top + 0.02 + sh / 2 * Math.cos(lean), cz = z0 + 0.06 + sh / 2 * Math.sin(lean);
     G.box(sw + 0.024, sh + 0.024, 0.014, GEAR.black, x, cy, cz - 0.008, { rx: lean });
     G.box(sw * 0.8, 0.03, 0.05, GEAR.black, x, top + 0.015, z0 + 0.04);
-    G.picture(sw, sh, 512, 333, playerScreen(i), x, cy, cz, { rx: lean, emissive: 0.85 });
+    G.picture(sw, sh, DECK.W, DECK.H, playerScreen(i), x, cy, cz, { name: `deckScreen${i}`, rx: lean, emissive: 0.85 });
     // The hot cue pads under it, the loop buttons and the USB slots down its left.
     for (let k = 0; k < 8; k++) {
       const px = x - 0.16 + k * 0.042;
@@ -1025,7 +1128,7 @@
       k.torus(0.06, 0.004, "#3a8cff", 0, 0.002, 0, { emissive: 1, glow: true, seg: 24, sides: 4 });
       k.torus(0.04, 0.003, "#9a5cff", 0, 0.002, 0, { emissive: 1, glow: true, seg: 20, sides: 4 });
       k.box(0.008, 0.003, 0.03, "#ffffff", 0, 0.003, 0.043, { emissive: 1, glow: true });
-    }, jx, top + 0.026, jz);
+    }, jx, top + 0.026, jz, { glow: true });
     // The play button in its ring, bottom left.
     G.node(`play${i}`, ringButton("play", 0.028, "#3dff7a"), x - W / 2 + 0.05, top + 0.006, D / 2 - 0.05, { glow: true });
     // The tempo fader and its buttons down the right, the sync buttons and jog knob over it.
@@ -1065,7 +1168,7 @@
     // The master section down the right: its knob, the FX screen with the beat lamps under it, the FX knobs and the
     // big lit FX button.
     knob(G, 0.205, top, z0 + 0.06, 0.014, GEAR.cap);
-    G.picture(0.09, 0.07, 160, 124, fxScreen, 0.205, top + 0.004, z0 + 0.14, { rx: -Math.PI / 2, emissive: 0.85 });
+    G.picture(0.09, 0.07, FXS.W, FXS.H, fxScreen, 0.205, top + 0.004, z0 + 0.14, { name: "fxScreen", rx: -Math.PI / 2, emissive: 0.85 });
     for (let i = 0; i < 4; i++) G.node(`beat${i}`, gearPart("beatLamp", (k) => k.box(0.016, 0.003, 0.008, "#ffd34d", 0, 0, 0, { emissive: 1, glow: true })), 0.178 + i * 0.018, top + 0.002, z0 + 0.19, { glow: true });
     for (let k = 0; k < 3; k++) knob(G, 0.205, top, z0 + 0.24 + k * 0.06, 0.013, GEAR.knob);
     G.node("fxOn", ringButton("fxOn", 0.022, "#3a8cff"), 0.205, top + 0.006, D / 2 - 0.05, { glow: true });
@@ -1182,6 +1285,222 @@
       G.torus(0.035, 0.003, "#9a5cff", x + sx * 0.101, 0.05, z, { rz: Math.PI / 2, emissive: 0.8, glow: true, seg: 14, sides: 3 });
     }
     G.torus(0.095, 0.01, GEAR.edge, x, 0.05, z, { rx: Math.PI / 2, seg: 24, sides: 5 });
+  };
+  // ---------- the gear's screens, playing ----------
+  // While the eye is within NEAR metres of the booth the players' screens, the mixer's FX screen and the laptop are
+  // repainted from the music: FPS ticks a second, a player each tick in turn, the laptop and the FX screen every third.
+  // A player's waveform runs SPAN seconds across its screen, what is heard now under the playhead in the middle and what
+  // the radio has already read (its lookahead) coming in from the right, as a CDJ shows a track; TRACK is how long the
+  // overview pretends a track is.
+  const DECK = { W: 512, H: 333, COLS: 256, SPAN: [3, 6], FPS: 60, NEAR: 10, TRACK: 372 };
+  const FXS = { W: 160, H: 124 };
+  const FX_NAMES = ["FLANGER", "ECHO", "REVERB", "FILTER", "PHASER", "ROLL", "SPIRAL", "PITCH"], FX_BEATS = ["1/2", "3/4", "1", "1/4", "2", "1/8", "1/2", "1"];
+  // A waveform where the radio can't be read, from the room's own beat: a kick on every beat, a middle rising and
+  // falling through the bar, a hiss of top with the hats on the off-beats, each roughened by a hash of where in the
+  // beat it falls, so it stands still against the grid as it scrolls.
+  const grain = (q) => { const v = fsin(q * 12.9898) * 437.5453; return v - Math.floor(v); };
+  const synthWave = (lo, mid, hi, beat, rate, span, I) => {
+    const n = lo.length;
+    for (let c = 0; c < n; c++) {
+      const bt = beat + (-span / 2 + span * (c + 0.5) / n) * rate, f = bt - Math.floor(bt), k = Math.exp(-f * 7), q = Math.floor(bt * 24);
+      lo[c] = (0.06 + 0.5 * k * (0.75 + 0.25 * grain(q))) * (0.5 + 0.5 * I);
+      mid[c] = (0.08 + 0.1 * grain(q + 7.3) + 0.05 * fsin(bt * 0.5)) * (0.6 + 0.4 * I);
+      hi[c] = 0.02 + 0.04 * grain(q + 3.1) + (Math.abs(f - 0.5) < 0.05 ? 0.1 : 0);
+    }
+  };
+  // A waveform's columns stacked as a club player's three bands are: the whole in `colors[0]`, the middle and top in
+  // `colors[1]` and the top alone in `colors[2]`, `g` the gain; into the box from `x` across `w`, round `mid`, `A` high.
+  const stacked = (ctx, lo, md, hi, g, x, w, mid, A, colors) => {
+    const n = lo.length, cw = w / n;
+    for (let layer = 0; layer < 3; layer++) {
+      ctx.fillStyle = colors[layer];
+      const k = layer === 0 ? 1 : layer === 1 ? 0.85 : 0.6;
+      for (let c = 0; c < n; c++) {
+        const v = layer === 0 ? lo[c] + md[c] + hi[c] : layer === 1 ? md[c] + hi[c] : hi[c] * 1.6, a = Math.min(1, v * g) * A * k;
+        if (a > 0.5) ctx.fillRect(x + c * cw, mid - a, cw, 2 * a);
+      }
+    }
+  };
+  // The loudest a waveform's columns stack, for its gain.
+  const loudest = (lo, md, hi) => {
+    let top = 0;
+    for (let c = 0; c < lo.length; c++) { const v = lo[c] + md[c] + hi[c]; if (v > top) top = v; }
+    return top;
+  };
+  const DECK_INKS = [["#2160d8", "#ffa23d", "#f4f8ff"], ["#b8402c", "#ffb27a", "#fff1e0"]];
+  // A player's screen as it plays, made once per canvas: deck 1 in a club player's three bands, deck 2 in RGB (low red,
+  // middle green, top blue, added) over twice the time with its four-beat loop boxed; the bars marked red on the beat
+  // grid and a memory cue every phrase; the phase meter counting the bar; the time, the tempo and the BPM; the overview
+  // lit as far as it has played; deck 1's edge red with ON AIR, on the kick. `paint(S, lo, mid, hi)`.
+  const deckScreens = new WeakMap();
+  const deckOf = (canvas, i) => {
+    let deck = deckScreens.get(canvas);
+    if (deck) return deck;
+    const P = RM.paintKit, w = DECK.W, h = DECK.H, n = DECK.COLS, ctx = canvas.getContext("2d"), rand = P.rng(71 + i);
+    const y0 = h * 0.22, y1 = h * 0.56, mid = (y0 + y1) / 2, A = (y1 - y0) / 2 - 2, oy = h * 0.84, oh = h * 0.12, ox = w * 0.03, ow = w * 0.94;
+    // What never moves: the tabs, the waveform's box, the info row and the overview, dim and, on a canvas of its own,
+    // bright as it is once played.
+    const back = CH.canvas(w, h), b = back.getContext("2d"), played = CH.canvas(w, h), pc = played.getContext("2d");
+    b.fillStyle = GEAR.screen; b.fillRect(0, 0, w, h);
+    ["SOURCE", "BROWSE", "TAG LIST", "PLAYLIST", "SEARCH", "MENU"].forEach((t, k) => {
+      const x = w * (0.03 + k * 0.16);
+      b.fillStyle = k === 1 ? "#24406e" : "#1e2230"; b.fillRect(x, h * 0.03, w * 0.14, h * 0.07);
+      P.pix(b, t, x + w * 0.07, h * 0.067, Math.min(h * 0.035, w * 0.12 / P.pixWidth(t, 1)), "#c9d8ff");
+    });
+    b.fillStyle = "#0a0e1a"; b.fillRect(0, y0 - 10, w, y1 - y0 + 20);
+    b.fillStyle = "#161b2a"; b.fillRect(0, mid, w, 1);
+    b.fillStyle = "#1e2230"; b.fillRect(w * 0.03, h * 0.655, w * 0.94, h * 0.13);
+    P.pix(b, i ? "02" : "01", w * 0.07, h * 0.72, h * 0.08, i ? "#ffb27a" : "#7fb6ff");
+    P.pix(b, i ? "+0.00%" : "-0.05%", w * 0.62, h * 0.7, h * 0.042, "#c9d8ff");
+    P.pix(b, i ? "KEY 8A" : "KEY 5A", w * 0.62, h * 0.75, h * 0.036, PADS[i ? 4 : 2]);
+    b.strokeStyle = "#c9d8ff"; b.lineWidth = 2; b.strokeRect(w * 0.76, h * 0.665, w * 0.19, h * 0.11);
+    P.pix(b, "BPM", w * 0.855, h * 0.755, h * 0.028, "#7f8bb0");
+    P.pix(b, i ? "LOOP 4" : "ON AIR", w * 0.06, h * 0.615, h * 0.03, i ? "#3cdc8c" : "#ff4d5e", "left");
+    for (let x = 0; x < ow; x += 2) {
+      const a = 0.25 + 0.75 * rand(), bx = ox + x, by = oy + oh - a * oh;
+      b.fillStyle = "#3a4560"; b.fillRect(bx, by, 1.5, a * oh);
+      pc.fillStyle = a > 0.8 ? DECK_INKS[i][2] : DECK_INKS[i][i ? 1 : 0]; pc.fillRect(bx, by, 1.5, a * oh);
+    }
+    for (let k = 1; k < 8; k++) { b.fillStyle = "#566080"; b.fillRect(ox + ow * k / 8, oy - 3, 1, 3); }
+    const title = CH.canvas(w, Math.ceil(h * 0.075)), tc = title.getContext("2d");
+    let titled = null, clock = "", tenths = -1, bpmText = "", bpmShown = -1, peak = 0.3;
+    const paint = (S, lo, md, hi) => {
+      const label = i ? S.next : S.title;
+      if (label !== titled) {
+        titled = label; tc.clearRect(0, 0, title.width, title.height);
+        P.pix(tc, label, 0, title.height / 2, Math.min(h * 0.05, w * 0.92 / Math.max(1, P.pixWidth(label, 1))), "#e8eeff", "left");
+      }
+      ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+      ctx.drawImage(back, 0, 0);
+      ctx.drawImage(title, w * 0.04, h * 0.125);
+      peak = Math.max(loudest(lo, md, hi), peak * 0.985, 0.06);
+      const g = 1.1 / peak, span = DECK.SPAN[i], px = w / span / S.rate, at = (bt) => w / 2 + (bt - S.beat) * px;
+      if (i === 0) stacked(ctx, lo, md, hi, g, 0, w, mid, A, DECK_INKS[0]);
+      else {
+        ctx.globalCompositeOperation = "lighter";
+        const cw = w / n;
+        for (let layer = 0; layer < 3; layer++) {
+          const src = layer === 0 ? lo : layer === 1 ? md : hi, k = layer === 0 ? 1.2 : layer === 1 ? 2.2 : 3;
+          ctx.fillStyle = layer === 0 ? "#d02a34" : layer === 1 ? "#2aa344" : "#2a58d8";
+          for (let c = 0; c < n; c++) { const a = Math.min(1, src[c] * g * k) * A; if (a > 0.5) ctx.fillRect(c * cw, mid - a, cw, 2 * a); }
+        }
+        ctx.globalCompositeOperation = "source-over";
+        const b0 = Math.floor(S.beat / 4) * 4, lx = at(b0);
+        ctx.fillStyle = "rgba(60,220,140,0.14)"; ctx.fillRect(lx, y0 - 10, 4 * px, y1 - y0 + 20);
+        ctx.fillStyle = "#3cdc8c"; ctx.fillRect(lx, y0 - 10, 2, y1 - y0 + 20); ctx.fillRect(lx + 4 * px - 2, y0 - 10, 2, y1 - y0 + 20);
+      }
+      // What has played, a little dimmer than what is coming.
+      ctx.fillStyle = "rgba(6,8,15,0.4)"; ctx.fillRect(0, y0 - 10, w / 2, y1 - y0 + 20);
+      // The beat grid: a tick on every beat, a red one on every bar, an orange memory cue every phrase.
+      for (let bt = Math.ceil(S.beat - span * S.rate / 2); bt <= S.beat + span * S.rate / 2; bt++) {
+        const x = at(bt), q = ((bt % 4) + 4) % 4, bar = q === 0;
+        ctx.fillStyle = bar ? "#ff3b4a" : "rgba(235,240,255,0.6)";
+        ctx.fillRect(x - (bar ? 1 : 0.5), y0 - 10, bar ? 2 : 1, bar ? 9 : 5);
+        ctx.fillRect(x - (bar ? 1 : 0.5), y1 + 10 - (bar ? 9 : 5), bar ? 2 : 1, bar ? 9 : 5);
+        if (((bt % 16) + 16) % 16 === 0) { ctx.fillStyle = "#ff8a1e"; ctx.fillRect(x - 3, y0 - 10, 7, 4); }
+      }
+      // The playhead, its glow beating with the kick.
+      ctx.fillStyle = "#ffffff"; ctx.globalAlpha = 0.12 + 0.4 * S.kick; ctx.fillRect(w / 2 - 4, y0 - 10, 8, y1 - y0 + 20);
+      ctx.globalAlpha = 1; ctx.fillStyle = "#ff3b3b"; ctx.fillRect(w / 2 - 1, y0 - 12, 2, y1 - y0 + 24);
+      // The phase meter: the bar's four beats, the one now lit and filling.
+      const whole = Math.floor(S.beat), inBar = ((whole % 4) + 4) % 4, frac = S.beat - whole;
+      for (let k = 0; k < 4; k++) {
+        ctx.fillStyle = k === inBar ? "#5a3a10" : k < inBar ? "#3a2a18" : "#22283a";
+        ctx.fillRect(w * (0.3 + k * 0.105), h * 0.6, w * 0.095, h * 0.03);
+      }
+      ctx.fillStyle = "#ff9b2e"; ctx.fillRect(w * (0.3 + inBar * 0.105), h * 0.6, w * 0.095 * Math.min(1, frac * 1.3), h * 0.03);
+      // The time and the tempo, written again only as they change.
+      const e = S.t + i * 97.3, tn = Math.floor(e * 10);
+      if (tn !== tenths) {
+        tenths = tn;
+        const m = Math.floor(e / 60) % 100, sec = Math.floor(e) % 60;
+        clock = `${m < 10 ? "0" : ""}${m}:${sec < 10 ? "0" : ""}${sec}.${tn % 10}`;
+      }
+      P.pix(ctx, clock, w * 0.36, h * 0.72, h * 0.075, "#ffffff");
+      const bv = Math.round(S.bpm * 10);
+      if (bv !== bpmShown) { bpmShown = bv; bpmText = (bv / 10).toFixed(1); }
+      P.pix(ctx, bpmText, w * 0.855, h * 0.71, h * 0.052, S.live ? "#ffffff" : "#9aa6c6");
+      // The overview, lit as far as the track has played.
+      const pw = ow * ((((e / DECK.TRACK) % 1) + 1) % 1);
+      if (pw >= 1) ctx.drawImage(played, ox, oy, pw, oh, ox, oy, pw, oh);
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(ox + pw - 1, oy - 3, 2, oh + 5);
+      if (i === 0) {
+        ctx.strokeStyle = "#ff2b3a"; ctx.lineWidth = 4; ctx.globalAlpha = 0.25 + 0.6 * S.kick;
+        ctx.strokeRect(2, 2, w - 4, h - 4); ctx.globalAlpha = 1;
+      }
+    };
+    deck = { paint };
+    deckScreens.set(canvas, deck);
+    return deck;
+  };
+  // The mixer's FX screen as it plays: the BPM, the effect (a new one every phrase) and its beat, how hard it works (as
+  // hard as the music), and the bar's four beats. `paint(S)`.
+  const fxScreens = new WeakMap();
+  const fxOf = (canvas) => {
+    let fx = fxScreens.get(canvas);
+    if (fx) return fx;
+    const P = RM.paintKit, w = FXS.W, h = FXS.H, ctx = canvas.getContext("2d");
+    let bpmText = "", bpmShown = -1;
+    const paint = (S) => {
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = GEAR.screen; ctx.fillRect(0, 0, w, h);
+      const bv = Math.round(S.bpm);
+      if (bv !== bpmShown) { bpmShown = bv; bpmText = `${bv} BPM`; }
+      P.pix(ctx, bpmText, w * 0.95, h * 0.12, h * 0.1, "#c9d8ff", "right");
+      P.pix(ctx, "FX", w * 0.05, h * 0.12, h * 0.1, "#9a5cff", "left");
+      const f = ((Math.floor(S.beat / 16) % 8) + 8) % 8, whole = Math.floor(S.beat), inBar = ((whole % 4) + 4) % 4;
+      ctx.fillStyle = "#e8e8f0"; ctx.fillRect(w * 0.06, h * 0.24, w * 0.88, h * 0.2);
+      P.pix(ctx, FX_NAMES[f], w / 2, h * 0.34, h * 0.13, "#06080f");
+      ctx.fillStyle = "#3a8cff"; ctx.fillRect(w * 0.06, h * 0.5, w * 0.42, h * 0.14); ctx.fillRect(w * 0.52, h * 0.5, w * 0.42, h * 0.14);
+      P.pix(ctx, FX_BEATS[f], w * 0.27, h * 0.57, h * 0.09, "#ffffff"); P.pix(ctx, "BEAT", w * 0.73, h * 0.57, h * 0.09, "#ffffff");
+      ctx.fillStyle = "#1e2230"; ctx.fillRect(w * 0.06, h * 0.7, w * 0.88, h * 0.08);
+      ctx.fillStyle = "#9a5cff"; ctx.fillRect(w * 0.06, h * 0.7, w * 0.88 * Math.min(1, 0.15 + 0.85 * S.I), h * 0.08);
+      ctx.fillStyle = "#e0d0ff"; ctx.globalAlpha = S.kick; ctx.fillRect(w * 0.06, h * 0.7, w * 0.88 * Math.min(1, 0.15 + 0.85 * S.I), h * 0.08); ctx.globalAlpha = 1;
+      for (let k = 0; k < 4; k++) { ctx.fillStyle = k === inBar ? "#ffd34d" : "#2a3046"; ctx.fillRect(w * (0.06 + k * 0.225), h * 0.84, w * 0.2, h * 0.09); }
+    };
+    fx = { paint };
+    fxScreens.set(canvas, fx);
+    return fx;
+  };
+  // The laptop as it plays: its library painted again only as the station or the song changes, and over it each
+  // frame the two decks' waveforms scrolling past their playheads with their BPM, the master meter in the title bar
+  // and ON AIR blinking on the beat. `paint(S, waves)`, `waves` the players' (each its low, middle and top).
+  const laptops = new WeakMap();
+  const laptopOf = (canvas) => {
+    let lap = laptops.get(canvas);
+    if (lap) return lap;
+    const P = RM.paintKit, w = LAPTOP.W, h = LAPTOP.H, ctx = canvas.getContext("2d"), back = CH.canvas(w, h), bc = back.getContext("2d");
+    const side = w * 0.24, x0 = side + w * 0.02, cw = w - x0 - w * 0.02, lx = x0 + w * 0.07, lw = cw - w * 0.08;
+    const peak = [0.3, 0.3];
+    let station = null, song = null, bpmText = "", bpmShown = -1;
+    const paint = (S, waves) => {
+      if (S.station !== station || S.song !== song) { station = S.station; song = S.song; paintLaptop(bc, station, song); }
+      ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+      ctx.drawImage(back, 0, 0);
+      const bv = Math.round(S.bpm * 10);
+      if (bv !== bpmShown) { bpmShown = bv; bpmText = (bv / 10).toFixed(1); }
+      for (let d = 0; d < 2; d++) {
+        const y = h * (0.3 + d * 0.13), [lo, md, hi] = waves[d], mid2 = d ? "#ff8a3d" : "#3fa2ff";
+        ctx.fillStyle = "#121828"; ctx.fillRect(x0, y - h * 0.055, cw, h * 0.11);
+        peak[d] = Math.max(loudest(lo, md, hi), peak[d] * 0.985, 0.06);
+        stacked(ctx, lo, md, hi, 1.1 / peak[d], lx, lw, y, h * 0.045, d ? DECK_INKS[1] : DECK_INKS[0]);
+        ctx.fillStyle = "rgba(18,24,40,0.45)"; ctx.fillRect(lx, y - h * 0.05, lw / 2, h * 0.1);
+        const px = lw / DECK.SPAN[d] / S.rate;
+        for (let bt = Math.ceil(S.beat - DECK.SPAN[d] * S.rate / 2); bt <= S.beat + DECK.SPAN[d] * S.rate / 2; bt++) {
+          ctx.fillStyle = ((bt % 4) + 4) % 4 === 0 ? "#ff3b4a" : "rgba(235,240,255,0.5)";
+          ctx.fillRect(lx + lw / 2 + (bt - S.beat) * px, y - h * 0.05, 1, h * 0.012);
+        }
+        ctx.fillStyle = "#ffffff"; ctx.fillRect(lx + lw / 2 - 1, y - h * 0.05, 2, h * 0.1);
+        P.pix(ctx, d ? "2" : "1", x0 + w * 0.02, y - h * 0.02, h * 0.035, mid2);
+        P.pix(ctx, bpmText, x0 + w * 0.035, y + h * 0.03, h * 0.022, S.live ? "#ffffff" : "#c9d8ff");
+      }
+      const lit = Math.round(Math.min(1, 0.25 + 0.5 * S.I + 0.35 * S.kick) * 16);
+      for (let k = 0; k < 16; k++) { ctx.fillStyle = k >= lit ? "#202634" : k < 11 ? "#3dffb0" : k < 14 ? "#ffb020" : "#ff3a3a"; ctx.fillRect(w * 0.76 + k * w * 0.013, h * 0.022, w * 0.009, h * 0.026); }
+      if (S.beat - Math.floor(S.beat) > 0.5) { ctx.fillStyle = "#151a28"; ctx.fillRect(w * 0.55, h * 0.012, w * 0.1, h * 0.046); }
+    };
+    lap = { paint };
+    laptops.set(canvas, lap);
+    return lap;
   };
   const djGear = (G) => {
     const span = RIG.MW / 2 + RIG.GAP + RIG.PW, B = RIG.BASE;
@@ -1396,9 +1715,15 @@
     for (let c = 0; c < 4; c++) for (let i = 0; i < METER.SEGS; i++) meterSegs.push(nodes[`meter${c}_${i}`]);
     // What the radio plays, under the latest block.
     const songPicture = built.live.find((l) => l.spec.tip === "Now playing");
-    // The laptop's screen, repainted as the station or the song changes.
-    const laptopSurface = nodes.laptopScreen.geometry.imageSurface, laptopCtx = laptopSurface.canvas.getContext("2d");
-    let laptopStation = null, laptopSong = null;
+    // The gear's screens, repainted as the music plays while the eye is near the booth (DECK): what each reads, a
+    // player's waveform each, and the tick that takes them in turn.
+    const laptopSurface = nodes.laptopScreen.geometry.imageSurface, laptop = laptopOf(laptopSurface.canvas);
+    const deckSurfaces = [nodes.deckScreen0, nodes.deckScreen1].map((n) => n.geometry.imageSurface), deckPainters = deckSurfaces.map((s, i) => deckOf(s.canvas, i));
+    const fxSurface = nodes.fxScreen.geometry.imageSurface, fxPainter = fxOf(fxSurface.canvas);
+    const waves = [0, 1].map(() => [new Float32Array(DECK.COLS), new Float32Array(DECK.COLS), new Float32Array(DECK.COLS)]);
+    const S = { t: 0, beat: 0, rate: 1 / BEAT, bpm: 60 / BEAT, kick: 0, I: 0, live: false, title: "", next: "", station: "", song: "" };
+    const gearAt = { x: 0, y: STAGE.H + BOOTH_TOP, z: boothZ(L) };
+    let gearWait = 0, gearTick = 0;
     // The door's neon, EXIT and bulbs, in the colours the room is in.
     const doorNeon = nodes.doorNeon, exitSign = built.exitSign;
     let doorColors = -1;
@@ -1458,7 +1783,7 @@
     // The DJ's place, behind the booth from its back toward the wall and within its ends: Space there changes the
     // channel, for everyone in a shared room.
     const behind = L.r0 - 2.4, stations = BL.timechainPartyRadio.STATIONS.length, djHalf = (180 - boothHalf(L) + 3) * DEG;
-    let chose = false;
+    let chose = false, shown = radio.channel;
     // In a shared room a change waits PARTY_GAP after the last, a little over the room's own gap, so this page never
     // tunes itself to a channel the room refuses (which the room would answer with its own, tuning it back).
     let sentAt = -Infinity;
@@ -1466,7 +1791,7 @@
       const now = performance.now(), net = BL.net.state, shared = net.room === "live" && net.partyRadio && net.zone === "sphere-6";
       if (shared && now - sentAt < PARTY_GAP) return;
       radio.next(); chose = true;
-      screen.channel(radio.station.short);
+      shown = radio.channel; screen.channel(radio.station.short);
       if (shared && BL.net.sendParty(radio.channel)) sentAt = now;
       hud.toast(`Channel ${radio.channel + 1} of ${stations} · ${radio.station.name}${shared ? " · for everyone here" : ""}`);
     } };
@@ -1477,7 +1802,7 @@
       const ch = channel % stations;
       if (ch === radio.channel) return;
       radio.tune(ch);
-      screen.channel(radio.station.short);
+      shown = radio.channel; screen.channel(radio.station.short);
       if (by === BL.net.state.selfId) return;
       const rec = by && BL.net.remotes.get(by), who = rec ? rec.display || rec.login : "";
       BL.hud.toast(`${who ? `${who} changed the channel · ` : ""}Channel ${radio.channel + 1} of ${stations} · ${radio.station.name}`);
@@ -1522,6 +1847,8 @@
       update(dt, t) {
         // The beat: its own steady one, or eased onto the music's tempo and phase; it never runs backward.
         radio.sample(heard);
+        // A channel that never answered puts the dial back on the station still playing.
+        if (radio.channel !== shown) { shown = radio.channel; screen.channel(radio.station.short); }
         rate += ((heard.live ? heard.bpm / 60 : 1 / BEAT) - rate) * Math.min(1, dt * TEMPO_RATE);
         let move = rate * dt;
         if (heard.live) { const off = heard.phase - (beat - Math.floor(beat)); move += (off - Math.round(off)) * Math.min(1, dt * PHASE_RATE); }
@@ -1727,22 +2054,39 @@
           n.scale.x = n.scale.z = 1 + push * 2.5;
           n.glow = 0.2 + 0.6 * kick;
         }
-        // The DJ's rig: the jog wheels and their screens turn at 33 rpm, the play rings blink on the beat, the beat lamps
+        // The DJ's rig: the jog wheels and their screens turn at 33 rpm at 124 BPM, quicker or slower with the tempo,
+        // and pulse on the kick; the play rings blink on the beat, the beat lamps
         // count the bar and the FX button pulses on the kick.
         for (let i = 0; i < 2; i++) {
-          records[i].rotation.y -= dt * 3.49; jogs[i].rotation.y -= dt * 3.49;
+          const spin = dt * 3.49 * rate * BEAT;
+          records[i].rotation.y -= spin; jogs[i].rotation.y -= spin;
+          jogs[i].glow = (0.55 + 0.45 * kick) * dim;
           plays[i].glow = (beat % 1 < 0.5 ? 1 : 0.4) * dim;
         }
         for (let i = 0; i < 4; i++) beatLamps[i].glow = (i === step % 4 ? 0.5 + 0.5 * kick : 0.08) * dim;
         fxOn.glow = (0.45 + 0.55 * kick) * dim;
         // What the radio plays, under the latest block, put away while its station names no song.
-        const song = pinned !== null ? pinned : radio.song;
-        if (song !== playing.song) { playing.song = song; playing.station = radio.station.short; }
+        const song = pinned !== null ? pinned : radio.song, on = radio.playing;
+        if (song !== playing.song || on.short !== playing.station) {
+          playing.song = song; playing.station = on.short;
+          const list = BL.timechainPartyRadio.STATIONS;
+          S.title = song ? `${on.short} · ${song}` : on.short; S.next = `NEXT · ${list[(list.indexOf(on) + 1) % list.length].short}`;
+          S.station = on.name; S.song = song;
+        }
         if (songPicture) songPicture.node.visible = !!song;
-        if (radio.station.name !== laptopStation || song !== laptopSong) {
-          laptopStation = radio.station.name; laptopSong = song;
-          paintLaptop(laptopCtx, laptopStation, laptopSong);
-          laptopSurface.version++;
+        // The gear's screens, while the eye is near enough to read them.
+        if ((gearWait -= dt) <= 0) {
+          gearWait = 1 / DECK.FPS;
+          const cam = BL.scenes.timechain.camera, p = cam && cam.position;
+          if (p && Math.hypot(p.x - gearAt.x, p.y - gearAt.y, p.z - gearAt.z) < DECK.NEAR) {
+            gearTick++;
+            S.t = t; S.beat = beat; S.rate = rate; S.bpm = heard.live ? heard.bpm : rate * 60; S.kick = kick * dim; S.I = I * dim; S.live = heard.live;
+            const d = gearTick & 1, span = DECK.SPAN[d], wv = waves[d];
+            if (!radio.waveform(-span / 2, span / 2, wv[0], wv[1], wv[2])) synthWave(wv[0], wv[1], wv[2], beat, rate, span, I);
+            deckPainters[d].paint(S, wv[0], wv[1], wv[2]); deckSurfaces[d].version++;
+            if (gearTick % 3 === 0) { laptop.paint(S, waves); laptopSurface.version++; }
+            else if (gearTick % 3 === 1) { fxPainter.paint(S); fxSurface.version++; }
+          }
         }
         ball.rotation.y += dt * (0.15 + 0.35 * I + boom * 2.2 + 0.8 * tension);
         ball.glow = (0.55 + 0.35 * I + 0.3 * kick + 0.4 * tension) * dim + boom;
@@ -1781,7 +2125,7 @@
       tap(owner, hud) {
         if (owner.kind === "booth" || owner.kind === "decks" || owner.kind === "speaker") { hud.toast(radio.words()); return true; }
         if (owner.kind !== "live") return false;
-        if (owner.tip === "Now playing") { hud.toast(`${radio.station.name} · ${playing.song || "now playing"}`); return true; }
+        if (owner.tip === "Now playing") { hud.toast(`${radio.playing.name} · ${playing.song || "now playing"}`); return true; }
         hud.toast("The latest block, from mempool.space · the bass drops on every one");
         return true;
       },
