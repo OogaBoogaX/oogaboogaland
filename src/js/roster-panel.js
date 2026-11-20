@@ -6,8 +6,8 @@
 // contributions in the newest oogatron reading, this browser's choice), the away rows behind their Show away button.
 // The strip: their Ooga's face, their total across the five kinds and the day of their first contribution side by
 // side (its year shortened to ’26 on every strip at once when the roster's longest total and longest date would not
-// fit), then the kinds and a chip linking each repository they contributed to (not the org's `.github`) with their
-// count there. A section's rows are made once and kept for the page life, reused on every visit.
+// fit), then the kinds and a chip for each repository they contributed to (not the org's `.github`) with their
+// count there, linking to that repository's issues and pull requests that involve them. A section's rows are made once and kept for the page life, reused on every visit.
 // The hooks are what differs between the pages: `roster` (the contributors: `name`, `display`), `stateFor(c)` and
 // `ageLabel(c)` (their contribution's state and age, `stateAt` and `ageAt` below), `stamp(c)` (when they last
 // contributed), `login(c)` and `joinedAt(c)` (their first contribution where the reading has no `first_seen_at` for them), `stats()` (the newest oogatron reading, normalized), `face(c)` (a canvas or
@@ -308,7 +308,7 @@
       strip.repos.replaceChildren();
       for (const { name, n } of repoList) {
         const a = doc.createElement("a"), b = doc.createElement("b");
-        a.href = REPO_URL + name; a.target = "_blank"; a.rel = "noopener";
+        a.href = `${REPO_URL}${name}/issues?q=${encodeURIComponent(`involves:${login}`)}`; a.target = "_blank"; a.rel = "noopener";
         a.title = `${name}: ${n.toLocaleString()} contribution${n === 1 ? "" : "s"}`;
         b.textContent = statCount(n);
         a.append(name, b);
