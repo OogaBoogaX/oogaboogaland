@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "lane": "daily",
+  "openedOn": "2026-11-19",
+  "round": "8e82f7d44a8e241eda50ae9694cd169ee8340629",
+  "entries": [
+    {
+      "pr": 812,
+      "head": "a1ba909d7f305bcf66e1a3b7d71b2ec55a2e8841",
+      "author": "NEEDcreations",
+      "path": "src/characters/NEEDcreations.js",
+      "base": null,
+      "hash": "7c1cf7261b4fd353cd7df5d7954e6649a0da1de134bdabcde60cbe63ae93c8c3",
+      "lane": "daily"
+    }
+  ],
+  "automation": "obl-character-bundles[bot]"
+}
