@@ -36311,6 +36311,8 @@ scene("dsb", { label: "dsb feeds and audio", url: hubPage(src, "scene=dsb"), ste
     record("dsb entrance: fixed supplied sounds", fixed.uploads === 0 && !fixed.canReplace, JSON.stringify(fixed));
     const supplied = await b.evaluate(`({ durations: __entranceAudio.durations, passage: __entranceAudio.duration, failure: __entranceAudio.failure })`);
     record("dsb audio: all four supplied MP3s decode and determine the passage length", supplied.durations.length === 4 && supplied.durations.every((d) => d > 1 && d < 60) && supplied.passage >= supplied.durations.reduce((sum, d) => sum + d, 0) + 6.99 && !supplied.failure, JSON.stringify(supplied));
+    // The passage is ready on the voices alone; the music decodes after them.
+    await untilPage(b, "__entranceAudio.musicDuration > 0", 10000);
     const music = await b.evaluate(`({ duration: __entranceAudio.musicDuration, loops: __dsbSoundProbe.loops.filter((duration) => duration > 30), levels: __entranceAudio.levels })`);
     record("dsb music: supplied track decodes into one quiet loop beneath full-level speech", music.duration > 30 && music.loops.length === 1 && music.loops[0] === music.duration && music.levels.music <= 0.1 && music.levels.speech === 1, JSON.stringify(music));
     const footsteps = await b.evaluate(`(() => {

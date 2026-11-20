@@ -7,5 +7,6 @@
   Content-Type: application/manifest+json
 
 # `npm run build:site` (scripts/site.mjs --headers) stages this file and adds one immutable rule for each
-# content-hashed file it wrote under /js/ and /css/. Exact paths, never /js/*: a wildcard would also make a 404 there
-# immutable, and a browser that cached one for the page's main script would show a blank page for a year.
+# content-hashed file it wrote under /js/, /css/ and /audio/. Exact paths, never /js/*: a wildcard would also make a 404 there
+# immutable, and a browser that cached one for the page's main script would show a blank page for a year. The pictures
+# under /art/ are too many for a rule each, so the Worker marks them immutable instead (worker/src/art-assets.js).

@@ -14,7 +14,8 @@
 // css/style-<hash>.css, with the jumbotron's snapshot, which every deploy rebakes, in its own
 // js/jumbotron-data-<hash>.js before the code (`externalizePage`), so the 24 pages share one cached copy. The favicons go out as files too (favicon-32.png,
 // favicon-64.png, favicon.ico, apple-touch-icon.png and its -precomposed twin), so none of those addresses answers 404. `--headers
-// <file>` writes that file as _headers plus one immutable rule per file under js/ and css/: exact paths, so a 404 there
+// <file>` writes that file as _headers plus one immutable rule per file under js/, css/ and audio/ (all named by their
+// content hash): exact paths, so a 404 there
 // (a page from one deploy asking another) is never cached for a year. `npm run build:site` passes both.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -140,7 +141,7 @@ What happens after: a plain Ooga is merged the day after it is sent and a custom
 `);
 const headers = process.argv.indexOf("--headers");
 if (headers > 0) {
-  const files = ["js", "css"].flatMap((dir) => existsSync(join(out, dir)) ? readdirSync(join(out, dir)).sort().map((file) => `/${dir}/${file}`) : []);
+  const files = ["js", "css", "audio"].flatMap((dir) => existsSync(join(out, dir)) ? readdirSync(join(out, dir)).sort().map((file) => `/${dir}/${file}`) : []);
   // Cloudflare reads at most 100 rules from _headers.
   const rules = readFileSync(resolve(root, process.argv[headers + 1]), "utf8").trimEnd();
   if (files.length + rules.split("\n").filter((line) => line.startsWith("/")).length > 100) throw new Error("_headers: more than 100 rules");
