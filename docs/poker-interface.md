@@ -82,6 +82,15 @@ over it:
   send reads "Not sent" on the button. The menu closes on a choice, a press
   outside, the view closing or Escape, and Escape closes the menu before it
   closes the view. With no backend or signed out the button never shows.
+- **Tells and fidgets:** every seated figure shows the hand's body language
+  without anyone choosing it: sweat on the brow after 5 seconds on turn (two
+  beads at 10), a gulp facing a bet of half the pot or more, a fold's cards
+  tossed to the middle, an all in's chips pushed in, a winner's cheer and a
+  busted seat's slump, and small fidgets while others act (off under reduced
+  motion). A chosen emote wins over them. Each page works them out from the
+  table's public state alone (see Tells and fidgets in
+  [banana-poker.md](banana-poker.md)); nothing is sent over the wire and no
+  card is read.
 
 ## Live feedback and request handling
 
@@ -163,6 +172,19 @@ Found / maintainer play-tests before marking the PR ready:
   eye in each theme and on a wide-headed or hatted Ooga (so far only Groan,
   Salute and Wow, on one Ooga in Banana Club); the knock, slow clap and shrug;
   the phone menu on a small phone; and a burst at the room's limit.
+- Tells and fidgets: the Node checks cover each tell's trigger and timing, the
+  big-bet rule through real practice hands, precedence, settling, the fairness
+  boundary (a snapshot whose hidden fields throw, and a source naming no card
+  field), the bot hold and an allocation-free frame. The browser suite's checks
+  passed in the controller's run: a bot's fold, all in, cheer and slump at their
+  own seats, the visitor's sweat (and none over a held seat walked away from),
+  the bot hold on the scene's clock, an emote over a running tell, standing up
+  mid-tell, a remote standing up mid-tell, reduced motion, a tell running
+  through the round trip and a fold's toss on Canvas 2D. Reduced motion is read
+  once, when the room is entered. Not verified by eye: each tell and fidget on
+  screen in each theme, the bead's fit on a short, a tall and a remote Ooga, the
+  toss and push on each theme, and Canvas 2D. Also still to check: two real
+  accounts at a live table, and the frame-rate lane.
 
 Keep the existing browser STOP ledger in force. These are acceptance tasks for
 the maintainer, not authorization to retry a blocked browser session. Live

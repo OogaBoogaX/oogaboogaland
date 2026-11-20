@@ -377,6 +377,68 @@
     cache.set(key, built); return built;
   };
   const card = c => BL.pokerCards.geometry(c);
+  // The tells' sweat (poker-tells.js): a pale drop on the brow, then a second running down beside it, two meshes shared
+  // by every table and theme, built about a seat's bead node with +z toward the table. The node stands at a seated
+  // Ooga's brow for the roster's middle height (1.04): 1.8 m up and 0.3 m in front of the chair's centre.
+  const BEAD_Y = 1.8, BEAD_OUT = 0.3, NOOP = () => {};
+  const beadGeometry = M.cached(() => {
+    const drop = (x, y) => M.moved(M.lathe({ segments: 6, profile: [[0, 0.075], [0.016, 0.05], [0.03, 0.02], [0.026, 0.004], [0, 0]], color: "#bfe8ff", emissive: 0.35 }), x, y, 0);
+    const one = drop(0.09, 0), two = M.merge(drop(0.09, 0), drop(-0.06, -0.07));
+    one.castShadow = two.castShadow = false;
+    return { one, two };
+  });
+  // A table's three tell props, made on first use rather than with the room, so a fresh room's node tree is exactly the
+  // one it had before them: a bead node a seat, the tossed card pair (the card backs' geometry) and the pushed stack (the
+  // chip piles' geometry). At most seats + 2 nodes a table, each made once on a tell's event and reused for the room's
+  // life; level 0 and the hides never make one. Once made, placing writes transforms only. A theme switch leaves them as
+  // they are: they hang off the table group, and the card back and the chip they draw with are the same in every theme.
+  const tellProps = (t, g) => {
+    const geos = beadGeometry();
+    const beadAt = j => {
+      if (t.beads[j]) return t.beads[j];
+      const s = SEATS[j], bead = node(geos.one, s.x + Math.sin(s.yaw) * BEAD_OUT, BEAD_Y, s.z + Math.cos(s.yaw) * BEAD_OUT);
+      bead.rotation.y = s.yaw; bead.visible = false; S.addChild(t.root, bead);
+      return t.beads[j] = bead;
+    };
+    const tossNode = () => {
+      if (t.toss) return t.toss;
+      const toss = S.createNode();
+      S.addChild(toss, node(g.back, -0.26), node(g.back, 0.26, 0.015)); toss.visible = false; S.addChild(t.root, toss);
+      return t.toss = toss;
+    };
+    const pushNode = () => {
+      if (t.push) return t.push;
+      const push = node(g.chip); push.scale.y = 5; push.visible = false; S.addChild(t.root, push);
+      return t.push = push;
+    };
+    return {
+      beadAt,
+      setBeads: (j, level) => {
+        if (level > 0) { const b = beadAt(j); b.visible = true; b.geometry = level > 1 ? geos.two : geos.one; }
+        else if (t.beads[j]) t.beads[j].visible = false;
+      },
+      // From seat j's card backs (k 0) to the table's middle (k 1), riding up over the board and shrinking to nothing.
+      placeToss: (j, k) => {
+        k = k > 0 ? (k < 1 ? k : 1) : 0;
+        const toss = tossNode(), from = t.backs[j].position, u = 1 - k;
+        toss.position.x = from.x * u; toss.position.y = from.y + 0.04 * k; toss.position.z = from.z * u;
+        toss.rotation.y = SEATS[j].yaw + k * 0.8;
+        toss.scale.x = toss.scale.y = toss.scale.z = u;
+        toss.visible = k < 1;
+      },
+      hideToss: () => { if (t.toss) t.toss.visible = false; },
+      // From seat j's chip pile (k 0) to the table's middle (k 1), riding up over the board.
+      placePush: (j, k) => {
+        k = k > 0 ? (k < 1 ? k : 1) : 0;
+        const push = pushNode(), from = t.chips[j].position, u = 1 - k;
+        push.position.x = from.x * u; push.position.y = from.y + 0.04 * k; push.position.z = from.z * u;
+        push.visible = true;
+      },
+      hidePush: () => { if (t.push) t.push.visible = false; }
+    };
+  };
+  // Canvas 2D's lite set never builds the props; its methods do nothing and `beadAt` gives null.
+  const LITE_PROPS = Object.freeze({ beadAt: () => null, setBeads: NOOP, placeToss: NOOP, hideToss: NOOP, placePush: NOOP, hidePush: NOOP });
   const build = (id = "gatsby") => {
     const theme = BL.pokerThemes.get(id), g = geometry(theme.id), root = S.createNode(), environment = S.createNode(), tables = [];
     const fixtures = S.createNode();
@@ -413,7 +475,9 @@
       S.addChild(group, agent.root);
       const dealCard = node(g.back, 0, 1.5, -2.4); dealCard.visible = false; S.addChild(group, dealCard);
       S.addChild(root, group);
-      tables.push({ root: group, base, top, rim, felt, pinstripe, chairs, chips, backs, board, button, label, plate: null, agent, dealCard, actors: new Array(SEATS.length).fill(null), version: -1, pulse: 0 });
+      const table = { root: group, base, top, rim, felt, pinstripe, chairs, chips, backs, board, button, label, plate: null, agent, dealCard,
+        beads: SEATS.map(() => null), toss: null, push: null, actors: new Array(SEATS.length).fill(null), version: -1, pulse: 0 };
+      tables.push(Object.assign(table, lite ? LITE_PROPS : tellProps(table, g)));
     }
     let current = null;
     const sparkle = [];

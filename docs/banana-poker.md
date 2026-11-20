@@ -517,6 +517,58 @@ Groan, Salute and Wow have been looked at, on one Ooga in Banana Club); the
 knock, the slow clap and the shrug; the phone menu on a small phone; and a burst
 at the room's limit.
 
+## Tells and fidgets
+
+Every seated figure, the visitor's Ooga, signed-in players, live players'
+stand-ins and computer opponents alike, shows body language that follows the
+hand without anyone choosing it (`poker-tells.js`):
+
+| Tell | When | What shows |
+|---|---|---|
+| Sweat | the seat has been on its turn 5 seconds; two beads at 10 | a bead on the brow, then two, gone when the turn moves or the seat acts |
+| Gulp | the turn reaches a seat facing a bet of half the pot or more | a short head dip and shoulder hunch |
+| Fold toss | the seat's last action becomes Fold | the right hand flicks; its two card backs slide to the middle, shrinking away |
+| All-in push | the seat's last action becomes All in | both arms sweep forward; a chip stack slides from its pile to the middle |
+| Cheer | the hand's result names the seat a winner | both arms up |
+| Slump | the hand's result shows the seat in the hand with no chips left | head down, arms dropped |
+
+A blind is not a bet: the gulp needs a seat to have bet or raised, or gone all
+in for at least the current bet, so a short stack's all in that only calls
+does not count. Computer opponents never sweat. Turn time is counted on each
+page from when it sees the turn reach the seat, so on a live table a bead may
+appear a moment apart on two screens.
+
+While a seat is in the hand and another seat is acting, it fidgets now and
+then: riffling its chips, drumming the rail, or, once folded, only turning its
+head toward the seat on turn. Fidgets come every 4 to 11 seconds, chosen at
+random on each page, so they do not match across pages. Reduced motion turns
+fidgets off and keeps the tells; it is read once, when the room is entered.
+
+A chosen emote always wins over a tell; under it the fold toss, all-in push,
+cheer and slump come first, then the gulp, then fidgets. Sweat is a mark, not a
+pose, so it shows alongside any of them. Every tell and fidget starts and ends
+on the sitting pose, and one cut short by an emote, by the player standing or
+by the chair changing hands leaves no arm turned and no head bowed. On Canvas
+2D the poses stay and the beads, cards and chips do not show.
+
+On a practice table a computer opponent facing a big bet waits one second
+longer before acting, so its gulp can play. Pausing a practice game holds every
+tell where it stands.
+
+Nothing goes over the wire: each page works the tells out from the table state
+it already has, with no Worker, room or protocol change. The fairness boundary
+is binding: the tells are handed only a public view of each table (the phase,
+hand number, whose turn, the pot and current bet, and for each seat its round
+bet, stack, last action, whether it is in the hand or folded, whether it is a
+computer opponent, and the result's winners). No card is on it, so no tell, and
+no computer opponent's wait, can differ with what a seat holds.
+
+The browser checks for the tells passed in the controller's run. Still to
+play-test: each tell and fidget on screen in each theme, and whether a full
+table looks alive or twitchy; the bead's fit on a short, a tall and a remote
+Ooga; the toss and push on each theme; the poses on Canvas 2D; two real
+accounts at a live table; the frame-rate lane.
+
 ## Files and validation handoff
 
 Floor modules: `poker-rules.js`, `poker-cards.js`, `poker-themes.js`,

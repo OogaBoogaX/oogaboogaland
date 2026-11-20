@@ -11,6 +11,7 @@ import { PerformanceObserver } from "node:perf_hooks";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
+import v8 from "node:v8";
 import { createHash, webcrypto } from "node:crypto";
 import { externalizeAudio } from "../scripts/distribution-audio.mjs";
 import { PICTURE_MODULES, externalizeModules, externalizePage, externalizePictures } from "../scripts/distribution-modules.mjs";
@@ -33587,10 +33588,14 @@ const pokerTrip = (() => {
       const click = a => document.querySelector('[data-poker-action="' + a + '"]').click(), t = P.session.tables[1];
       P.select(1); click("join"); click("bots"); click("start");
       let guard = 0; while (t.playing && guard++ < 500) { if (t.snapshot("local-player").legal) click("call"); __ooga.advance(0.81, 1 / 30); }
+      // A moment for the tells to take the result in, so a winner's cheer is running (held by the pause) as the visit is
+      // left; how many run is in the round-trip record's detail (before.tellsRunning), the contract itself the trip's.
+      __ooga.advance(0.2, 1 / 30);
+      let tellsRunning = 0; for (let k = 9; k < 18; k++) if (P.tells.kind[k]) tellsRunning++;
       const paused = P.session.paused;
       if (!paused) P.action("pause");
       if (!P.session.paused) throw new Error("Poker round trip could not pause the local session");
-      return { paused, versions: P.session.tables.map(t => t.version), title: document.querySelector('[data-poker="title"]').textContent, contexts: (window.__pokerContexts || []).length };
+      return { paused, versions: P.session.tables.map(t => t.version), title: document.querySelector('[data-poker="title"]').textContent, contexts: (window.__pokerContexts || []).length, tellsRunning };
     })()`);
     try {
       await check.run(b);
@@ -33620,6 +33625,203 @@ const pokerTrip = (() => {
     }
   } };
 })();
+// Tells at practice tables driven through the game's own actions and the scene's practice beat. Table eight (index 7)
+// holds six bots and table nine (index 8) the visitor and three bots, both dealt by hand (auto-deal off) so nothing deals
+// under a check. `sync` is the panel's Pause pressed twice: a refresh with the beat restarted, so no bot acts for 0.8 s
+// of scene time, inside which a bot is made to act through its table. `calm` (the reduced-motion stand-in) is on for the
+// event checks, so no fidget turns a limb under them; a fold under it is the reduced-motion check's "a fold still tosses".
+// The selected table, the pause and the placard the floor step leaves open for the round trip are put back after.
+const pokerTellsStep = { name: "poker tells", why: "rule: every seated figure shows the hand's tells from public table state, a chosen emote wins over them, nothing is left turned, and a practice bot facing a big bet holds a second", run: async b => {
+  const kit = `const B = __ooga, D = BL.scenes.poker.debug, P = D.poker, T = BL.pokerTells, TELL = T.TELL;
+    const sync = () => { P.action("pause"); P.action("pause"); };
+    const look = c => { const p = c.parts; return { rx: p.armR.rotation.x, ry: p.armR.rotation.y, lx: p.armL.rotation.x, ly: p.armL.rotation.y, hx: p.head.rotation.x, hy: p.head.rotation.y }; };
+    const sitting = o => o.rx === -0.9 && o.lx === -0.9 && o.ry === 0 && o.ly === 0 && o.hx === 0 && o.hy === 0;
+    const nearest = (node, list) => { let best = -1, d = Infinity; list.forEach((n, j) => { const e = Math.hypot(node.position.x - n.position.x, node.position.z - n.position.z); if (e < d) { d = e; best = j; } }); return best; };`;
+  const was = await b.evaluate(`(() => { const P = BL.scenes.poker.debug.poker; return { selected: P.selected, paused: P.session.paused, board: document.getElementById("board-modal").open }; })()`);
+  try {
+    // A bot's fold, a bot's all in, then the hand's result: each moves its own figure, shows its prop at its own seat
+    // and ends on the plain sitting pose.
+    const events = await b.evaluate(`(() => {
+      ${kit}
+      const I = 7, t = P.session.tables[I], view = P.room.tables[I], saved = { calm: P.calm, auto: P.session.autoDeal[I] }, out = {};
+      const actor = j => view.actors[j], turn = () => t.snapshot().turn;
+      try {
+        if (P.session.paused) P.action("pause");
+        P.calm = true;
+        P.select(I); P.action("auto", false); P.action("bots"); P.action("bots"); P.action("start"); sync();
+        // The fold: the folder's arms move and the tossed pair leaves its card backs, every other figure as it was; done by 0.75 s.
+        const base = view.actors.map(a => a && JSON.stringify(look(a)));
+        const j1 = turn();
+        t.act(t.snapshot().seats[j1].id, "fold"); sync(); B.advance(0.1, 1 / 30);
+        const foldMid = { kind: P.tells.kind[I * 9 + j1], arms: look(actor(j1)), toss: !!view.toss && view.toss.visible, from: view.toss ? nearest(view.toss, view.backs) : -1,
+          others: view.actors.every((a, j) => !a || j === j1 || JSON.stringify(look(a)) === base[j]) };
+        B.advance(0.65, 1 / 30);
+        const foldEnd = { arms: look(actor(j1)), toss: !!view.toss && view.toss.visible };
+        out.fold = { j1, foldMid, foldEnd, ok: foldMid.kind === TELL.TOSS && !sitting(foldMid.arms) && foldMid.toss && foldMid.from === j1 && foldMid.others && sitting(foldEnd.arms) && !foldEnd.toss };
+        // The all in: both arms sweep and the stack leaves its chip pile; done by 1.1 s (the beat restarted at 0.6 s).
+        sync();
+        const j2 = turn(), id2 = t.snapshot().seats[j2].id;
+        t.act(id2, "raise", t.snapshot(id2).legal.max); sync(); B.advance(0.1, 1 / 30);
+        const pushMid = { action: t.snapshot().seats[j2].lastAction, kind: P.tells.kind[I * 9 + j2], arms: look(actor(j2)), push: !!view.push && view.push.visible, from: view.push ? nearest(view.push, view.chips) : -1 };
+        B.advance(0.5, 1 / 30); sync(); B.advance(0.5, 1 / 30);
+        const pushEnd = { arms: look(actor(j2)), push: !!view.push && view.push.visible };
+        out.push = { j2, pushMid, pushEnd, ok: pushMid.action === "All in" && pushMid.kind === TELL.PUSH && !sitting(pushMid.arms) && pushMid.push && pushMid.from === j2 && sitting(pushEnd.arms) && !pushEnd.push };
+        // The result: the next bot calls the all in (equal stacks, so one of the two busts), the rest fold, and the hand
+        // runs out. A split pot busts nobody: deal again with an all in and try once more, at most four hands.
+        let hand = null;
+        for (let attempt = 0; attempt < 4 && !hand; attempt++) {
+          if (attempt) {
+            for (const p of t.snapshot().seats) if (p && p.stack === 0) t.refill(p.id);
+            P.action("start"); sync();
+            const id = t.snapshot().seats[turn()].id; t.act(id, "raise", t.snapshot(id).legal.max);
+          }
+          const caller = turn();
+          for (let g = 0; g < 9 && t.playing; g++) { const s = t.snapshot(); if (s.turn < 0) break; t.act(s.seats[s.turn].id, s.turn === caller ? "call" : "fold"); }
+          sync();
+          const won = [], bust = [];
+          P.tellViews[I].seats.forEach((seat, j) => { if (seat.won) won.push(j); else if (seat.seated && seat.inHand && seat.stack === 0) bust.push(j); });
+          if (t.snapshot().result && won.length === 1 && bust.length === 1) hand = { won: won[0], bust: bust[0], attempt };
+        }
+        if (hand) {
+          // Four seconds frame by frame (a push of 1 s may run first, then a slump of 2.4 s): each tell starts once.
+          const kw = I * 9 + hand.won, kb = I * 9 + hand.bust, seen = { cheers: 0, slumps: 0, up: 0, bow: 0 };
+          let lastW = P.tells.kind[kw], lastB = P.tells.kind[kb];
+          for (let f = 0; f < 120; f++) {
+            B.advance(1 / 30, 1 / 30);
+            const w = P.tells.kind[kw], u = P.tells.kind[kb];
+            if (w === TELL.CHEER && lastW !== TELL.CHEER) seen.cheers++;
+            if (u === TELL.SLUMP && lastB !== TELL.SLUMP) seen.slumps++;
+            lastW = w; lastB = u;
+            seen.up = Math.min(seen.up, look(actor(hand.won)).rx); seen.bow = Math.max(seen.bow, look(actor(hand.bust)).hx);
+          }
+          const ends = { won: look(actor(hand.won)), bust: look(actor(hand.bust)) };
+          out.result = { hand, seen, ends, ok: seen.cheers === 1 && seen.slumps === 1 && seen.up < -2 && seen.bow > 0.4 && sitting(ends.won) && sitting(ends.bust) };
+        } else out.result = { hand: null, ok: false };
+      } finally { P.calm = saved.calm; P.session.autoDeal[I] = saved.auto; }
+      return out;
+    })()`);
+    record("rule: a bot's fold moves its arms and tosses its cards from its own seat alone, and it settles to sitting", events.fold.ok, JSON.stringify(events.fold));
+    record("rule: a bot's all in sweeps its arms and pushes a stack from its own chip pile, and it settles to sitting", events.push.ok, JSON.stringify(events.push));
+    record("rule: a hand's winner cheers and the seat it busts slumps, each once for the one result, each ending seated plainly", events.result.ok, JSON.stringify(events.result));
+    // The visitor: sweat on turn, the bot hold measured on the scene's clock, an emote over a running tell, and standing
+    // up mid-tell. Whatever happens, the visitor holds no seat after and the table's auto-deal and `calm` are put back.
+    const visitor = await b.evaluate(`(() => {
+      ${kit}
+      const I = 8, t = P.session.tables[I], view = P.room.tables[I], cave = B.pilot.player, saved = { calm: P.calm, auto: P.session.autoDeal[I] }, out = {};
+      const mine = () => t.snapshot("local-player").legal, heroSeat = () => t.snapshot().seats.findIndex(p => p?.id === "local-player");
+      const deal = () => { for (const p of t.snapshot().seats) if (p?.bot && p.stack === 0) t.refill(p.id); P.action("refill"); P.action("start"); };
+      // Until the visitor's turn, dealing the next hand by hand when one ends first.
+      const toMyTurn = () => { for (let g = 0; g < 600; g++) { if (mine()) return true; if (!t.playing) deal(); B.advance(0.1, 1 / 30); } return false; };
+      const bead = j => view.beads[j];
+      try {
+        P.calm = true;
+        P.select(I); P.action("join"); P.action("auto", false); P.action("bots"); P.action("start");
+        const seat = heroSeat(), k = I * 9 + seat;
+        // An action by the visitor through the panel: the hold the next seat's bot would take (from the public view the
+        // tells hold), whether that seat is a bot, the sweat a frame later, and the scene time until the table changes.
+        const act = (name, value) => {
+          P.action(name, value);
+          const s = t.snapshot(), next = s.turn >= 0 ? s.seats[s.turn] : null, r = { hold: T.botHold(P.tellViews[I]), bot: !!next && next.bot }, after = t.version;
+          let gap = 1 / 60; B.advance(1 / 60, 1 / 60);
+          r.sweat = P.tells.sweat[k]; r.shown = !!bead(seat) && bead(seat).visible;
+          while (t.version === after && gap < 4) { B.advance(1 / 60, 1 / 60); gap += 1 / 60; }
+          r.gap = gap; return r;
+        };
+        // Sweat: one bead from 5 s on turn and two from 10 s, at the Ooga's brow; gone the frame after it acts.
+        toMyTurn(); B.advance(5.2, 0.1);
+        const one = { level: P.tells.sweat[k], shown: !!bead(seat) && bead(seat).visible, verts: bead(seat) ? bead(seat).geometry.verts.length : 0, y: bead(seat) ? bead(seat).position.y : 0 };
+        B.advance(5, 0.1);
+        const two = { level: P.tells.sweat[k], shown: !!bead(seat) && bead(seat).visible, verts: bead(seat) ? bead(seat).geometry.verts.length : 0 };
+        const rootY = cave.root.position.y, h = cave.traits.height * cave.root.scale.y, first = act("call");
+        out.sweat = { one, two, after: { level: first.sweat, shown: first.shown }, rootY, h, ok: one.level === 1 && one.shown && one.y > rootY + 0.5 * h && one.y < rootY + 1.2 * h
+          && two.level === 2 && two.shown && two.verts > one.verts && first.sweat === 0 && !first.shown };
+        // Walking the floor on turn while the seat stays the visitor's: 6 s on, no bead hangs over the empty chair. Sitting
+        // back down (Return to table) starts the chair's turn clock again from nothing.
+        out.walked = { ok: false };
+        if (toMyTurn()) {
+          P.action("walk"); B.advance(6, 0.1);
+          const away = { level: P.tells.sweat[k], shown: !!bead(seat) && bead(seat).visible, seated: document.body.hasAttribute("data-poker-seated"), held: heroSeat() === seat };
+          P.action("return"); B.advance(1 / 30, 1 / 30);
+          const back = { level: P.tells.sweat[k], turnFor: P.tells.turnFor[k], shown: !!bead(seat) && bead(seat).visible, seated: document.body.hasAttribute("data-poker-seated") };
+          out.walked = { away, back, ok: away.held && !away.seated && !away.shown && back.seated && back.level === 0 && back.turnFor < 0.5 && !back.shown };
+        }
+        // The hold: after a call a bot facing no big bet acts on the beat (0.8 s after the action restarts it); after a
+        // raise of three pots a bot facing it acts BOT_HOLD later. Turns that are not one of the two cases are played on.
+        let quiet = first.hold === 0 && first.bot ? first : null, big = null;
+        for (let g = 0; g < 12 && !(quiet && big); g++) {
+          if (!toMyTurn()) break;
+          const l = mine(), s = t.snapshot();
+          if (!big && l.canRaise) { const r = act("raise", Math.min(l.max, Math.max(l.min, s.currentBet + 3 * s.pot))); if (r.hold === T.BOT_HOLD && r.bot) big = r; }
+          else { const r = act("call"); if (!quiet && r.hold === 0 && r.bot) quiet = r; }
+        }
+        out.hold = { quiet, big, ok: !!quiet && !!big && Math.abs(quiet.gap - 0.8) < 0.1 && Math.abs(big.gap - quiet.gap - T.BOT_HOLD) < 0.1 };
+        // An emote chosen mid-toss: the clap poses the Ooga (hands meeting, head level), the toss runs on unseen, and
+        // after both it sits plainly.
+        out.emote = { ok: false };
+        if (toMyTurn()) {
+          P.action("fold"); B.advance(0.15, 1 / 30);
+          const tossing = { kind: P.tells.kind[k], arms: look(cave), toss: !!view.toss && view.toss.visible, from: view.toss ? nearest(view.toss, view.backs) : -1 };
+          P.react(0, "👏"); B.advance(0.2, 1 / 30);
+          const clapping = { kind: P.tells.kind[k], arms: look(cave) };
+          B.advance(BL.pokerEmotes.GESTURE_TIME + 0.2, 1 / 30);
+          const after = look(cave);
+          out.emote = { tossing, clapping, after, ok: tossing.kind === TELL.TOSS && tossing.arms.ry > 0 && tossing.arms.ly === 0 && tossing.toss && tossing.from === seat
+            && clapping.kind === TELL.TOSS && clapping.arms.ry > 0 && clapping.arms.ly === -clapping.arms.ry && clapping.arms.hx === 0 && clapping.arms.hy === 0 && sitting(after) };
+        }
+        // Standing up mid-toss: the Ooga stands with no arm turned, its chair forgets the toss and the pair is gone; once
+        // the seat is released (the hand played out under the pending stand), another table is chosen and nothing turns.
+        out.stood = { ok: false };
+        if (toMyTurn()) {
+          P.action("fold"); B.advance(0.15, 1 / 30);
+          const tossing = { kind: P.tells.kind[k], arms: look(cave) };
+          P.action("stand"); B.advance(1 / 30, 1 / 30);
+          const up = { arms: look(cave), leg: cave.parts.legL.rotation.x, kind: P.tells.kind[k], toss: !!view.toss && view.toss.visible, seated: document.body.hasAttribute("data-poker-seated") };
+          for (let g = 0; g < 120 && heroSeat() >= 0; g++) B.advance(0.5, 1 / 30);
+          P.select(3); B.advance(1 / 30, 1 / 30);
+          const moved = { arms: look(cave), released: heroSeat() < 0, selected: P.selected };
+          const level = o => o.ry === 0 && o.ly === 0 && o.hx === 0 && o.hy === 0;
+          out.stood = { tossing, up, moved, ok: tossing.kind === TELL.TOSS && !sitting(tossing.arms) && level(up.arms) && up.leg === 0 && up.kind === TELL.NONE && !up.toss && !up.seated
+            && level(moved.arms) && moved.released && moved.selected === 3 };
+        }
+      } finally {
+        P.calm = saved.calm; P.session.autoDeal[I] = saved.auto;
+        if (heroSeat() >= 0) { P.select(I); P.action("stand"); for (let g = 0; g < 120 && heroSeat() >= 0; g++) B.advance(0.5, 1 / 30); }
+      }
+      out.clean = heroSeat() < 0 && P.calm === saved.calm && P.session.autoDeal[I] === saved.auto;
+      return out;
+    })()`);
+    record("rule: the visitor on turn sweats one bead at 5 s and two at 10 s at its brow, gone when it acts", visitor.sweat?.ok === true, JSON.stringify(visitor.sweat));
+    record("rule: walking the floor while holding a seat on turn hangs no sweat bead over the empty chair, and sitting back restarts its turn clock", visitor.walked?.ok === true, JSON.stringify(visitor.walked));
+    record("rule: a practice bot facing a big bet acts a second later than one facing none", visitor.hold?.ok === true, JSON.stringify(visitor.hold));
+    record("rule: an emote chosen mid-tell poses the Ooga instead of the tell, and after both it sits plainly", visitor.emote.ok, JSON.stringify(visitor.emote));
+    record("rule: standing up mid-tell leaves no arm turned and no tossed pair, and choosing another table after keeps it so", visitor.stood.ok && visitor.clean, JSON.stringify({ stood: visitor.stood, clean: visitor.clean }));
+    // Reduced motion, as the scene passes it on: with `calm` on, 12 s of play at every playing table shows no fidget at any
+    // of the 90 chairs (a fold still tossed under it, above); with it off the same play fidgets within 12 s (a seat's gap
+    // is at most FIDGET_GAP_MAX, 11 s), so the 12 s could have shown one. The minute's rule itself is the unit tier's.
+    // Coarse 0.2 s steps: a fidget runs 1.2 s, so no sample misses one.
+    const calmRun = await b.evaluate(`(() => {
+      ${kit}
+      const I = 7, saved = { calm: P.calm, auto: P.session.autoDeal[I] };
+      let calmMax = 0, at = -1;
+      try {
+        // Table eight deals on its own from here (its busted bot refilled), beside table ten's bots from the floor step.
+        P.session.autoDeal[I] = true; P.calm = true;
+        for (let f = 0; f < 60; f++) { B.advance(0.2, 0.2); for (let c = 0; c < 90; c++) if (P.tells.fidget[c] > calmMax) calmMax = P.tells.fidget[c]; }
+        P.calm = false;
+        for (let f = 0; f < 60 && at < 0; f++) { B.advance(0.2, 0.2); for (let c = 0; c < 90; c++) if (P.tells.fidget[c]) { at = (f + 1) / 5; break; } }
+      } finally { P.calm = saved.calm; P.session.autoDeal[I] = saved.auto; }
+      return { calmMax, at, ok: calmMax === 0 && at > 0 };
+    })()`);
+    record("rule: with reduced motion the scene's play shows no fidget while a fold still tosses; without it the same play fidgets", calmRun.ok && events.fold.ok, JSON.stringify({ calmRun, fold: events.fold.ok }));
+  } finally {
+    await b.evaluate(`(() => {
+      const D = BL.scenes.poker.debug, P = D.poker;
+      if (P.session.paused !== ${was.paused}) P.action("pause");
+      P.select(${was.selected}); __ooga.advance(1 / 30, 1 / 30);
+      if (${was.board} && !document.getElementById("board-modal").open) { BL.pokerStatues.board().go(5); D.hud.openBoard(BL.pokerStatues.board()); __ooga.advance(1 / 30, 1 / 30); }
+    })()`);
+  }
+} };
 // With POKER_TIMING set, the poker sessions print the room's build time (boot marks) and the CPU cost of a stepped frame
 // (GL calls return before the GPU draws, so this is the issuing cost only), for the frame-rate question.
 const pokerTiming = async (b, label) => {
@@ -33862,6 +34064,15 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
         && !!rising && rising.lx < -1.2 && gone.every(e => e === "") };
       P.react(far.id, "🤔"); frame(); const here = seatsNow(); P.select(2); frame(); const there = seatsNow(); P.select(1); frame(); const back = seatsNow();
       out.tables = { here, there, back, ok: here.every(e => e === "") && there[J] === "🤔" && others(there, J) && back.every(e => e === "") };
+      // A remote mid-tell who stands up: the fake never syncs a table, so no tell can be dealt to it; a gulp half way
+      // through is written into the chair's tell state (its table is not stepped, so it holds there) and the remote's own
+      // frame pose acts it out. Standing (y to the floor) brings the stand-in back, and the remote's own body keeps no
+      // turned arm or bowed head. Then it sits again for the rest of the step.
+      const fk = 2 * 9 + J, fb = () => BL.remotePlayers.body(far.id), turned = c => ({ ry: c.parts.armR.rotation.y, ly: c.parts.armL.rotation.y, hx: c.parts.head.rotation.x, hy: c.parts.head.rotation.y });
+      P.tells.kind[fk] = BL.pokerTells.TELL.GULP; P.tells.t[fk] = 0.5; frame(); const gulping = turned(fb());
+      far.y = 0; frame(); frame(); const stoodUp = { ...turned(fb()), standIn: !!P.room.tables[2].actors[J], kind: P.tells.kind[fk] };
+      far.y = BL.pokerPresence.CHAIR_Y; frame(); frame();
+      out.tellStand = { gulping, stoodUp, ok: gulping.ry > 0 && gulping.hx > 0 && stoodUp.ry === 0 && stoodUp.ly === 0 && stoodUp.hx === 0 && stoodUp.hy === 0 && stoodUp.standIn && stoodUp.kind === 0 };
       P.select(2); frame(); press(head); const open = shows(menu); N.state.room = "connecting"; frame();
       out.off = { open, head: shows(head), strip: shows(strip), menu: shows(menu), ok: open && !shows(head) && !shows(strip) && !shows(menu) };
     } finally {
@@ -33873,7 +34084,7 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
     }
     out.clean = N.sendReaction === saved.send && !P.session.live && !N.remotes.has(7311) && !N.remotes.has(7312) && seatsNow().every(e => e === "") && !shows(head)
       && !t1.snapshot().seats[J] && !t2.snapshot().seats[J] && !t4.snapshot().seats.some(p => p?.id === "local-player") && P.selected === saved.selected;
-    out.ok = !!out.shown && out.shown.head && !out.shown.menu && !!out.escape && out.escape.ok && out.own.ok && out.replace.ok && out.stood.ok && out.remote.ok && out.tables.ok && out.off.ok && out.clean;
+    out.ok = !!out.shown && out.shown.head && !out.shown.menu && !!out.escape && out.escape.ok && out.own.ok && out.replace.ok && out.stood.ok && out.remote.ok && out.tables.ok && !!out.tellStand && out.tellStand.ok && out.off.ok && out.clean;
     return out;
   })()`);
   record("rule: an emote shows at its sender's seat and nowhere else, moves its sender's body, and clears", emotes.ok, JSON.stringify(emotes));
@@ -34005,12 +34216,25 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
     await b.evaluate(`(() => { const P = BL.scenes.poker.debug.pilot; P.release(true); P.goPreset("entrance"); __ooga.advance(2); })()`);
     await b.screenshot(join(process.env.POKER_SHOTS, "poker-floor.png"));
   }
-} }, pokerTrip] });
+} }, pokerTellsStep, pokerTrip] });
 scene("poker", { label: "canvas2d", query: "canvas2d=1", steps: [{ name: "poker canvas2d", why: "rule: the floor and table controls work on the fallback renderer", run: async b => {
   await b.evaluate(`document.querySelector('[data-intro="poker"] .game-intro-go').click()`);
   await pokerTiming(b, "canvas2d");
   const r = await b.evaluate(`(() => { const P = BL.scenes.poker.debug.poker; P.action("join"); P.action("bots"); P.action("start"); __ooga.advance(1); const phase = P.session.tables[0].snapshot().phase; __ooga.advance(2, 1 / 30); return { kind: __ooga.renderer.kind, phase, nodes: __ooga.stats().visibleNodes, crowd: P.crowd.stats().crowd }; })()`);
   record("poker fallback: stone tables, a playable hand and a crowd of six on Canvas 2D", r.kind === "canvas2d" && r.phase !== "waiting" && r.nodes > 120 && r.crowd === 6, JSON.stringify(r));
+  // On Canvas 2D the seat on turn folds (the visitor through the panel, a bot through its table): its toss runs through
+  // the frame's prop calls on the lite set (that the lite set builds no prop is the unit tier's check).
+  const lite = await b.evaluate(`(() => {
+    const B = __ooga, P = BL.scenes.poker.debug.poker, TELL = BL.pokerTells.TELL, t = P.session.tables[0];
+    const sync = () => { P.action("pause"); P.action("pause"); };
+    if (!t.playing) { for (const p of t.snapshot().seats) if (p?.bot && p.stack === 0) t.refill(p.id); P.action("refill"); P.action("start"); }
+    sync();
+    const s = t.snapshot(), j = s.turn;
+    if (s.seats[j].id === "local-player") P.action("fold"); else { t.act(s.seats[j].id, "fold"); sync(); }
+    B.advance(0.3, 1 / 30);
+    return { j, kind: P.tells.kind[j], ok: P.tells.kind[j] === TELL.TOSS };
+  })()`);
+  record("rule: on Canvas 2D a fold runs its toss through the scene's prop calls", lite.ok, JSON.stringify(lite));
 } }] });
 scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="poker"]', required: ["#joy-move", "#joy-look", '[data-poker-action="quick"]'] }), { name: "poker phone actions", why: "rule: seated touch players can read private cards and access legal actions without horizontal overflow", run: async b => {
   const r = await b.evaluate(`(() => { const P = BL.scenes.poker.debug.poker; document.querySelector('[data-poker-action="quick"]').click(); const panel = document.querySelector('[data-poker="focus"]'), r = panel.getBoundingClientRect(); return { fits: !panel.hidden && r.left >= 0 && r.right <= innerWidth && panel.scrollWidth <= panel.clientWidth + 1, seats: document.querySelectorAll(".poker-seats button").length, cards: document.querySelectorAll(".poker-hand .poker-card").length }; })()`);
@@ -36337,6 +36561,169 @@ const pokerMarbleHallChecks = (BL) => {
   }
 };
 // END pokerMarbleHallChecks
+// The tells' pooled props on each poker table (poker-models.js): sweat beads a seat, one tossed card pair and one pushed
+// chip stack a table, each made on first use. Takes the unit tier's `BL` (every module src/index.html lists loaded) and
+// `record(name, ok, detail)`.
+const pokerTellPropChecks = (BL) => {
+  const P = BL.pokerModels, S = BL.scene;
+  const count = n => 1 + n.children.reduce((k, c) => k + count(c), 0);
+  const near = (a, b, e = 1e-9) => Math.abs(a - b) <= e;
+  const METHODS = ["beadAt", "setBeads", "placeToss", "hideToss", "placePush", "hidePush"];
+  // A table group's children before the props: base, top, rim, felt, pinstripe; a chair, chip pile and card backs a
+  // seat; five board cards, the button, the label, the dealer and the dealt card.
+  const BEFORE_CHILDREN = 5 + 3 * P.SEATS.length + 5 + 4;
+  const rooms = [];
+  try {
+    const room = P.build(); rooms.push(room);
+    const g = P.geometry("gatsby"), seats = P.SEATS.length;
+    // Rule: a fresh room builds none of the props, so its node tree is exactly the one it had before them; level 0 and
+    // the hides make nothing either.
+    const fresh = count(room.root);
+    const methods = room.tables.every(t => METHODS.every(m => typeof t[m] === "function"));
+    const none = room.tables.every(t => Array.isArray(t.beads) && t.beads.length === seats && t.beads.every(b => b === null) && t.toss === null && t.push === null && t.root.children.length === BEFORE_CHILDREN);
+    if (methods) for (const t of room.tables) { for (let j = 0; j < seats; j++) t.setBeads(j, 0); t.hideToss(); t.hidePush(); }
+    const still = count(room.root) === fresh && room.tables.every(t => t.beads.every(b => b === null) && t.toss === null && t.push === null);
+    record("poker tell props: a fresh room builds no bead, toss or push, and level 0 and the hides build none", methods && none && still, JSON.stringify({ methods, none, still, children: room.tables[0].root.children.length }));
+    if (!methods) return;
+
+    // Rule: first use makes exactly one node (hidden for beadAt), and every later use reuses it.
+    const t = room.tables[2];
+    let base = count(room.root);
+    const bead = t.beadAt(4), madeBead = count(room.root) === base + 1 && t.beads[4] === bead && !bead.visible && t.root.children.includes(bead);
+    t.setBeads(4, 1); t.setBeads(4, 2); t.setBeads(4, 0); t.beadAt(4);
+    const keptBead = count(room.root) === base + 1 && t.beads[4] === bead;
+    base = count(room.root); t.setBeads(6, 1);
+    const madeBySet = count(room.root) === base + 1 && t.beads[6] && t.beads[6].visible; t.setBeads(6, 0);
+    base = count(room.root); t.placeToss(1, 0);
+    const toss = t.toss, madeToss = toss && count(room.root) === base + 3 && toss.children.length === 2 && t.root.children.includes(toss);
+    t.placeToss(3, 0.5); t.hideToss(); t.placeToss(5, 1);
+    const keptToss = t.toss === toss && count(room.root) === base + 3;
+    base = count(room.root); t.placePush(1, 0);
+    const push = t.push, madePush = push && count(room.root) === base + 1 && t.root.children.includes(push);
+    t.placePush(2, 0.5); t.hidePush(); t.placePush(7, 1);
+    const keptPush = t.push === push && count(room.root) === base + 1;
+    record("poker tell props: first use makes exactly one node and later uses make none", madeBead && keptBead && madeBySet && madeToss && keptToss && madePush && keptPush,
+      JSON.stringify({ madeBead, keptBead, madeBySet, madeToss, keptToss, madePush, keptPush }));
+    t.setBeads(4, 0); t.hideToss(); t.hidePush();
+
+    // Rule: the props cost one geometry each across every table and room: two bead meshes in all, and the card backs' and
+    // the chips' own.
+    const t0 = room.tables[0];
+    t0.setBeads(0, 1); const one = t0.beads[0].geometry; t0.setBeads(0, 2); const two = t0.beads[0].geometry; t0.setBeads(0, 0);
+    for (const x of room.tables) { x.setBeads(3, 1); x.placeToss(0, 0); x.placePush(0, 0); x.hideToss(); x.hidePush(); x.setBeads(3, 0); }
+    const second = P.build(); rooms.push(second);
+    second.tables[3].setBeads(5, 2); second.tables[3].placePush(0, 0);
+    const shared = one && two && one !== two &&
+      room.tables.every(x => x.beads[3].geometry === one && x.toss.children.every(c => c.geometry === g.back) && x.push.geometry === x.chips[0].geometry && x.push.geometry === t0.push.geometry) &&
+      second.tables[3].beads[5].geometry === two && second.tables[3].push.geometry === t0.push.geometry;
+    record("poker tell props: geometry is shared by every table and room, two bead meshes and the existing card back and chip", !!shared);
+
+    // Rule: setBeads shows one bead, two, then none, at that seat alone.
+    t.setBeads(4, 1); const a = t.beads[4].visible && t.beads[4].geometry === one;
+    t.setBeads(4, 2); const b = t.beads[4].visible && t.beads[4].geometry === two;
+    const alone = t.beads.every((n, j) => j === 4 || !n || !n.visible);
+    t.setBeads(4, 0); const gone = !t.beads[4].visible;
+    record("poker tell props: setBeads shows one bead, two, then none, at its own seat alone", a && b && alone && gone, JSON.stringify({ a, b, alone, gone }));
+
+    // Rule: each seat's beads sit at a seated Ooga's brow, a little in front of the seat toward the table and outside it.
+    const brow = P.SEATS.every((s, j) => {
+      const node = t.beadAt(j), n = node.position, out = Math.hypot(n.x - s.x, n.z - s.z), ahead = (n.x - s.x) * Math.sin(s.yaw) + (n.z - s.z) * Math.cos(s.yaw);
+      return n.y > 1.6 && n.y < 2 && out > 0.15 && out < 0.45 && near(ahead, out, 1e-6) && (n.x / 4.85) ** 2 + (n.z / 3.25) ** 2 > 1 && near(node.rotation.y, s.yaw);
+    });
+    record("poker tell props: each bead sits at brow height just in front of its seat, facing the table, outside the table", brow,
+      JSON.stringify(t.beads.slice(0, 3).map(n => [n.position.x, n.position.y, n.position.z].map(v => +v.toFixed(3)))));
+
+    // Rule: the toss runs from the seat's card backs (k 0) to the table's middle (k 1), shrinking to nothing; the push
+    // from the seat's chip pile to the middle; both hide again.
+    let tossOk = true, pushOk = true;
+    for (let j = 0; j < seats; j++) {
+      const back = t.backs[j].position, chip = t.chips[j].position, n = t.toss, c = t.push;
+      t.placeToss(j, 0);
+      tossOk &&= n.visible && near(n.position.x, back.x) && near(n.position.z, back.z) && near(n.position.y, back.y) && near(n.scale.x, 1) && near(n.scale.y, 1) && near(n.scale.z, 1);
+      t.placeToss(j, 0.5);
+      tossOk &&= n.visible && near(n.position.x, back.x / 2) && near(n.position.z, back.z / 2) && n.scale.x > 0 && n.scale.x < 1 && n.scale.y > 0 && n.scale.y < 1;
+      t.placeToss(j, 1);
+      tossOk &&= near(n.position.x, 0) && near(n.position.z, 0) && (!n.visible || n.scale.x === 0);
+      t.placeToss(j, 0.3); t.hideToss(); tossOk &&= !n.visible;
+      t.placePush(j, 0);
+      pushOk &&= c.visible && near(c.position.x, chip.x) && near(c.position.z, chip.z) && near(c.position.y, chip.y);
+      t.placePush(j, 1);
+      pushOk &&= c.visible && near(c.position.x, 0) && near(c.position.z, 0);
+      t.hidePush(); pushOk &&= !c.visible;
+    }
+    record("poker tell props: the toss slides from a seat's card backs to the middle, shrinking to nothing, and hides", tossOk);
+    // Rule: k outside 0..1 lands on its end, and NaN on the start, never a node at a NaN spot.
+    const pose = n => [n.visible, n.position.x, n.position.y, n.position.z, n.scale.x, n.scale.y, n.rotation.y].join();
+    let clamped = true;
+    for (const [place, n] of [[t.placeToss, () => t.toss], [t.placePush, () => t.push]]) for (let j = 0; j < seats; j++) {
+      place(j, 0); const start = pose(n()); place(j, 1); const end = pose(n());
+      place(j, -1); clamped &&= pose(n()) === start;
+      place(j, 2); clamped &&= pose(n()) === end;
+      place(j, NaN); clamped &&= pose(n()) === start && !pose(n()).includes("NaN");
+    }
+    t.hideToss(); t.hidePush();
+    record("poker tell props: the toss and push clamp k below 0 and above 1 to their ends, and NaN to the start", clamped);
+    record("poker tell props: the push slides from a seat's chip pile to the middle and hides", pushOk);
+
+    // Rule: on both table styles the sliding props stay above the felt and inside the padded rail's inner edge (4.55 by 2.95 m).
+    const onFelt = [];
+    for (const theme of ["gatsby", "ember"]) {
+      room.setTheme(theme);
+      const felt = P.geometry(theme).felt;
+      let top = -Infinity; for (let i = 1; i < felt.verts.length; i += 3) top = Math.max(top, felt.verts[i]);
+      for (let j = 0; j < seats; j++) for (let k = 0; k <= 1; k += 0.125) {
+        t.placeToss(j, k); t.placePush(j, k);
+        for (const [what, n] of [["toss", t.toss], ["push", t.push]]) {
+          if (!n.visible) continue;
+          // Each prop is world-updated as its own root, so its points come out in its table's frame.
+          S.updateWorld(n, null);
+          const stack = [n];
+          while (stack.length) {
+            const m = stack.pop();
+            stack.push(...m.children);
+            if (!m.geometry) continue;
+            const v = m.geometry.verts, w = m.world;
+            for (let i = 0; i < v.length; i += 3) {
+              const x = w[0] * v[i] + w[4] * v[i + 1] + w[8] * v[i + 2] + w[12], y = w[1] * v[i] + w[5] * v[i + 1] + w[9] * v[i + 2] + w[13], z = w[2] * v[i] + w[6] * v[i + 1] + w[10] * v[i + 2] + w[14];
+              if ((x / 4.55) ** 2 + (z / 2.95) ** 2 > 1 || y < top - 1e-6) { onFelt.push({ theme, what, j, k }); i = v.length; stack.length = 0; }
+            }
+          }
+        }
+      }
+      t.hideToss(); t.hidePush();
+    }
+    room.setTheme("gatsby");
+    record("poker tell props: on the club's and the caves' tables the toss and push stay above the felt and inside the rail", onFelt.length === 0, JSON.stringify(onFelt.slice(0, 5)));
+
+    // Rule: once made, placing builds nothing; theme switches keep the made nodes on their tables, with their geometry and
+    // their shown or hidden state, and a switch makes none that was not made.
+    for (const x of room.tables) for (let j = 0; j < seats; j++) x.beadAt(j);
+    t.setBeads(2, 2); t.placeToss(3, 0.25); t.placePush(4, 0.5);
+    const before = count(room.root), keep = room.tables.map(x => [x.toss, x.push, ...x.beads]), ids = new Map(), id = geo => { if (!ids.has(geo)) ids.set(geo, ids.size); return ids.get(geo); };
+    // A shown node's transform and geometry; a hidden one is only hidden (where it was last placed does not show).
+    const look = n => n.visible ? [id(n.geometry), n.position.x, n.position.z, n.scale.x, n.rotation.y].join() : "hidden", looks = keep.map(list => list.map(look));
+    const unmade = second.tables[0];
+    for (let i = 0; i < 1000; i++) { const x = room.tables[i % 10], j = i % seats; x.placeToss(j, (i % 17) / 16); x.placePush(j, (i % 13) / 12); x.setBeads(j, i % 3); }
+    const placing = count(room.root) === before;
+    for (const x of room.tables) { for (let j = 0; j < seats; j++) { x.setBeads(j, 1); x.setBeads(j, 0); } x.hideToss(); x.hidePush(); }
+    t.setBeads(2, 2); t.placeToss(3, 0.25); t.placePush(4, 0.5);
+    for (const theme of BL.pokerThemes.themes) { room.setTheme(theme.id); second.setTheme(theme.id); }
+    room.setTheme("gatsby"); second.setTheme("gatsby");
+    const switched = count(room.root) === before && room.tables.every((x, i) => [x.toss, x.push, ...x.beads].every((n, k) => n === keep[i][k] && x.root.children.includes(n) && look(n) === looks[i][k])) &&
+      unmade.toss === null && unmade.push === null && unmade.beads.every(n => n === null);
+    record("poker tell props: placing builds no node once made, and theme switches keep each made node as it was and make none", placing && switched, JSON.stringify({ placing, switched }));
+
+    // Rule: Canvas 2D's lite set never builds the three, whatever is called, and beadAt gives null.
+    P.setLite(true);
+    const lite = P.build(); rooms.push(lite);
+    P.setLite(false);
+    let calm = true, nulls = true;
+    try { for (const x of lite.tables) { nulls &&= x.beadAt(3) === null; x.setBeads(0, 2); x.placeToss(1, 0.5); x.hideToss(); x.placePush(2, 0.5); x.hidePush(); } } catch { calm = false; }
+    const bare = lite.tables.every(x => x.beads.length === seats && x.beads.every(n => n === null) && x.toss === null && x.push === null &&
+      METHODS.every(m => typeof x[m] === "function") && x.root.children.length === BEFORE_CHILDREN);
+    record("poker tell props: the lite set builds no bead, toss or push, its methods do nothing and beadAt gives null", calm && nulls && bare, JSON.stringify({ calm, nulls, bare }));
+  } finally { P.setLite(false); for (const r of rooms) for (const tb of r.tables) tb.agent.dispose(); }
+};
 const pokerChecks = (BL) => {
   const R = BL.pokerRules, c = text => "23456789TJQKA".indexOf(text[0]) + "cdhs".indexOf(text[1]) * 13;
   const cards = text => text.split(" ").map(c);
@@ -37951,6 +38338,422 @@ const pokerEmoteChecks = () => {
   }
   record("poker emotes: six gestures, each starting and ending on the sitting pose and moving in between", E.GESTURES.length === 7 && everyGestureSettles && everyGestureMoves);
   record("poker emotes: a gesture writes only the arms and the head", foreign === 0, "foreign writes " + foreign);
+};
+// The Ember Den's tells and fidgets (poker-tells.js) in a bare context, beside the play-chip rules (poker-rules.js) for
+// one real practice hand: views built by hand on the room's ten tables of nine seats, stepped at 60 a second with a
+// seeded draw; the poses on a stand-in seated caveman whose arms and head hold the sitting pose (poker-models.js's
+// `sitPose`: arms' x -0.9, copied here) and whose every other part records a write; and the fairness boundary, a
+// snapshot whose hidden fields throw if read. The allocation check reads the heap through run.mjs's `v8` import.
+const pokerTellChecks = () => {
+  const context = { window: { BL: {} }, crypto: webcrypto };
+  const source = readFileSync(join(root, "src/js/poker-tells.js"), "utf8");
+  for (const file of ["poker-rules.js"]) runInNewContext(readFileSync(join(root, "src/js", file), "utf8"), context);
+  runInNewContext(source, context);
+  const T = context.window.BL.pokerTells, R = context.window.BL.pokerRules, { TELL, FIDGET } = T;
+  const TABLES = 10, SEATS = 9, DT = 1 / 60, TB = 3, BASE = TB * SEATS;
+  const seeded = (seed) => () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  // A view of a hand in play: seats 0 to 5 seated, in the hand, 1,000 chips each, nothing bet; `turn` on seat 0.
+  const table = (fields) => {
+    const v = T.makeView(SEATS);
+    Object.assign(v, { phase: "flop", hand: 7, turn: 0, pot: 100, currentBet: 0, ended: false }, fields);
+    for (let s = 0; s < SEATS; s++) Object.assign(v.seats[s], s < 6 ? { seated: true, inHand: true, stack: 1000 } : { seated: false });
+    return v;
+  };
+  // Steps one table for `seconds`, calling `each(i)` before every step, and counts each chair's tell starts by kind
+  // (a start is a step that ends with a tell running at t 0) and fidget starts.
+  const run = (state, v, seconds, { calm = true, rand = seeded(1), each = null, starts = null, fidgets = null } = {}) => {
+    const steps = Math.round(seconds / DT);
+    for (let i = 0; i < steps; i++) {
+      if (each) each(i);
+      const before = fidgets ? Array.from(state.fidget) : null;
+      T.step(state, TB, v, DT, rand, calm);
+      for (let k = 0; k < state.kind.length; k++) {
+        if (starts && state.kind[k] && state.t[k] === 0) starts.push([k, state.kind[k], i]);
+        if (fidgets && state.fidget[k] && (!before[k] || state.fidgetT[k] === 0)) fidgets.push([k, state.fidget[k], i]);
+      }
+    }
+  };
+  const primed = (v) => { const state = T.create(TABLES, SEATS); T.step(state, TB, v, DT, seeded(1), true); return state; };
+  const only = (starts, k, kind) => starts.length === 1 && starts[0][0] === k && starts[0][1] === kind;
+  // Each trigger on its own, after a step that saw the hand without it.
+  const triggers = {};
+  {
+    const v = table({ turn: 2 }), state = primed(v), starts = [];
+    run(state, v, 5, { starts, each: i => { if (i === 10) { v.seats[2].lastAction = "Fold"; v.seats[2].folded = true; v.turn = 3; } } });
+    triggers.fold = only(starts, BASE + 2, TELL.TOSS);
+  }
+  {
+    const v = table({ turn: 3 }), state = primed(v), starts = [];
+    run(state, v, 5, { starts, each: i => { if (i === 10) { v.seats[3].lastAction = "All in"; v.seats[3].stack = 0; v.turn = 4; } } });
+    triggers.allIn = only(starts, BASE + 3, TELL.PUSH);
+  }
+  {
+    // The result: seat 4 named a winner, seat 5 left with nothing from this hand, seat 1 with nothing but sitting it out.
+    const v = table({ turn: 4 }), state = primed(v), starts = [];
+    v.seats[1].inHand = false; v.seats[1].stack = 0;
+    run(state, v, 5, { starts, each: i => { if (i === 10) { v.turn = -1; v.phase = "showdown"; v.ended = true; v.seats[4].won = true; v.seats[5].stack = 0; } } });
+    triggers.result = starts.length === 2 && starts.some(s => s[0] === BASE + 4 && s[1] === TELL.CHEER) && starts.some(s => s[0] === BASE + 5 && s[1] === TELL.SLUMP);
+  }
+  {
+    const v = table({ turn: 0, pot: 100, currentBet: 0 }), state = primed(v), starts = [];
+    run(state, v, 5, { starts, each: i => { if (i === 10) { v.seats[0].lastAction = "Bet"; v.seats[0].roundBet = 100; v.currentBet = 100; v.pot = 200; v.turn = 1; } } });
+    triggers.gulp = starts.length === 1 && starts[0][0] === BASE + 1 && starts[0][1] === TELL.GULP;
+  }
+  {
+    // Every other action, and the turn reaching seats facing small bets, start nothing.
+    const v = table({ turn: 0, pot: 100, currentBet: 10 }), state = primed(v), starts = [];
+    const acts = ["Small blind", "Big blind", "Call", "Check", "Bet", "Raise", ""];
+    run(state, v, 8, { starts, each: i => { if (i % 30 === 5) { const s = (i / 30) | 0, seat = s % 6; v.seats[seat].lastAction = acts[s % acts.length]; v.turn = (seat + 1) % 6; } } });
+    triggers.none = starts.length === 0;
+  }
+  record("poker tells: each tell fires on its own trigger at its own chair, once, and no other action or turn fires one", Object.values(triggers).every(Boolean), JSON.stringify(triggers));
+  // Sweat: the seat on turn, timed from when this page saw the turn reach it.
+  {
+    const v = table({ turn: 0 }), state = primed(v), k = BASE;
+    const at = [];
+    for (const until of [4.9, 5.1, 9.9, 10.1]) { run(state, v, until - (at.length ? [4.9, 5.1, 9.9][at.length - 1] : 0)); at.push(state.sweat[k]); }
+    v.turn = 1; run(state, v, DT);
+    const moved = [state.sweat[k], state.turnFor[k]];
+    run(state, v, 6); const next = state.sweat[k + 1];
+    v.seats[1].lastAction = "Check"; run(state, v, DT);
+    const acted = [state.sweat[k + 1], state.turnFor[k + 1]];
+    record("poker tells: sweat is none under 5 s on turn, one bead from 5 s, two from 10 s, and gone when the turn moves or the seat acts",
+      at.join() === "0,1,1,2" && moved.join() === "0,0" && next === 1 && acted[0] === 0 && acted[1] < 0.02, JSON.stringify({ at, moved, next, acted }));
+  }
+  // Gulp: amount to call over the pot, at the edge, once seat 0 has bet.
+  {
+    const gulpAt = (pot, currentBet) => { const v = table({ turn: 0, pot, currentBet: 0 }), state = primed(v); v.seats[0].lastAction = "Bet"; v.currentBet = currentBet; v.turn = 1; run(state, v, DT); return state.kind[BASE + 1] === TELL.GULP; };
+    const half = gulpAt(100, 50), under = gulpAt(100, 49), more = gulpAt(100, 300), noPot = gulpAt(0, 10);
+    record("poker tells: a gulp comes at half the pot to call and not at 0.49, never with nothing in the pot", half && !under && more && !noPot, JSON.stringify({ half, under, more, noPot }));
+  }
+  // Precedence inside the module.
+  {
+    const out = {};
+    // A seat gulping on its turn and then folding tosses at once.
+    let v = table({ turn: 0, pot: 100 }), state = primed(v);
+    v.seats[0].lastAction = "Raise"; v.currentBet = 80; v.turn = 1; run(state, v, 0.2);
+    const gulping = state.kind[BASE + 1] === TELL.GULP;
+    v.seats[1].lastAction = "Fold"; v.seats[1].folded = true; v.turn = 2; run(state, v, DT);
+    out.tossOverGulp = gulping && state.kind[BASE + 1] === TELL.TOSS && state.t[BASE + 1] === 0;
+    // A seat fidgeting goes all in: the push replaces the fidget.
+    v = table({ turn: 0 }); state = primed(v);
+    let shoved = false, replaced = null;
+    run(state, v, 30, { calm: false, each: () => {
+      if (shoved) { if (replaced === null) replaced = state.kind[BASE + 2] === TELL.PUSH && state.fidget[BASE + 2] === 0; }
+      else if (state.fidget[BASE + 2]) { v.seats[2].lastAction = "All in"; v.seats[2].stack = 0; shoved = true; }
+    } });
+    out.pushOverFidget = shoved && replaced === true;
+    // A seat pushing all in, then named a winner, cheers when the push is done; the push is not cut.
+    v = table({ turn: 3 }); state = primed(v);
+    v.seats[3].lastAction = "All in"; v.seats[3].stack = 0; v.turn = -1; run(state, v, DT);
+    v.ended = true; v.phase = "showdown"; v.seats[3].won = true; v.seats[3].stack = 2000; run(state, v, 0.5);
+    const stillPushing = state.kind[BASE + 3] === TELL.PUSH;
+    run(state, v, 0.6);
+    out.cheerAfterPush = stillPushing && state.kind[BASE + 3] === TELL.CHEER;
+    // Fidgets never start while a tell runs at that chair or while it is the seat's turn: seat 0 holds the turn, seat 1
+    // goes all in again every half second, for a minute.
+    v = table({ turn: 0 }); state = primed(v);
+    let overlap = 0, onTurn = 0;
+    run(state, v, 60, { calm: false, each: i => {
+      if (i % 30 === 0) { v.seats[1].lastAction = v.seats[1].lastAction === "All in" ? "Call" : "All in"; }
+      for (let s = 0; s < SEATS; s++) { const k = BASE + s; if (state.fidget[k] && state.kind[k]) overlap++; }
+      if (state.fidget[BASE]) onTurn++;
+    } });
+    out.noFidgetUnderTell = overlap === 0 && onTurn === 0;
+    // A folded seat only looks.
+    v = table({ turn: 0 }); v.seats[4].lastAction = "Fold"; v.seats[4].folded = true; state = primed(v);
+    const folded = [];
+    run(state, v, 120, { calm: false, rand: seeded(9), fidgets: folded });
+    const mine = folded.filter(f => f[0] === BASE + 4);
+    out.foldedOnlyLooks = mine.length > 0 && mine.every(f => f[1] === FIDGET.LOOK) && folded.some(f => f[1] !== FIDGET.LOOK);
+    // A cheer left from the last hand gives way to the new hand's first tell, and the new hand's result fires again.
+    v = table({ turn: 2 }); state = primed(v);
+    v.turn = -1; v.ended = true; v.phase = "showdown"; v.seats[2].won = true; run(state, v, 0.3);
+    const cheering = state.kind[BASE + 2] === TELL.CHEER;
+    Object.assign(v, { hand: 8, ended: false, phase: "preflop", turn: 1, pot: 15, currentBet: 10 });
+    v.seats[2].won = false; v.seats[2].lastAction = "Fold"; v.seats[2].folded = true;
+    run(state, v, DT);
+    const tossed = state.kind[BASE + 2] === TELL.TOSS;
+    run(state, v, 1);
+    v.turn = -1; v.ended = true; v.phase = "showdown"; v.seats[2].won = false; v.seats[3].won = true;
+    const again = []; run(state, v, 3, { starts: again });
+    out.newHandOverCheer = cheering && tossed && only(again, BASE + 3, TELL.CHEER);
+    record("poker tells: an event tell replaces a gulp and a fidget, waits out a push, gives way to the next hand; no fidget under a tell or on turn; a folded seat only looks",
+      Object.values(out).every(Boolean), JSON.stringify(out));
+  }
+  // Calm, and the fidget gap.
+  {
+    let v = table({ turn: 0 }), state = primed(v), fid = [];
+    run(state, v, 60, { calm: true, fidgets: fid });
+    const calmNone = fid.length === 0 && state.fidget.every(f => f === 0);
+    v = table({ turn: 0 }); state = primed(v); fid = [];
+    run(state, v, 60, { calm: false, rand: seeded(4), fidgets: fid });
+    const gaps = [], firsts = [];
+    let everySeat = true;
+    for (let s = 1; s < 6; s++) {
+      const at = fid.filter(f => f[0] === BASE + s).map(f => f[2] * DT);
+      if (!at.length) everySeat = false; else firsts.push(at[0]);
+      for (let i = 1; i < at.length; i++) gaps.push(at[i] - at[i - 1]);
+    }
+    const inRange = gaps.length > 0 && gaps.every(g => g >= T.FIDGET_GAP_MIN - DT && g <= T.FIDGET_GAP_MAX + DT) && firsts.every(f => f >= T.FIDGET_GAP_MIN - DT && f <= T.FIDGET_GAP_MAX + DT);
+    const onlySeated = fid.every(f => f[0] >= BASE + 1 && f[0] < BASE + 6);
+    record("poker tells: calm, a minute brings no fidget; otherwise every seat waiting in the hand fidgets, each 4 to 11 s apart",
+      calmNone && everySeat && inRange && onlySeated && T.FIDGET_GAP_MIN === 4 && T.FIDGET_GAP_MAX === 11,
+      JSON.stringify({ calmNone, everySeat, onlySeated, gaps: gaps.map(g => +g.toFixed(2)), firsts: firsts.map(g => +g.toFixed(2)) }));
+  }
+  // Poses, on a stand-in seated caveman.
+  {
+    const SIT = { armL: [-0.9, 0, 0.1], armR: [-0.9, 0, -0.1], head: [0, 0, 0] };
+    let foreign = 0, writes = 0;
+    const watched = () => {
+      const r = {};
+      for (const k of ["x", "y", "z"]) { let v = 0; Object.defineProperty(r, k, { get: () => v, set: n => { foreign++; v = n; } }); }
+      return r;
+    };
+    const cave = { parts: {}, root: { rotation: watched(), position: watched() } };
+    for (const k of ["legL", "legR", "torso", "club", "snack", "face", "gun"]) cave.parts[k] = { rotation: watched(), position: watched() };
+    // The arms' x and y and the head's x and y are a tell's (each write counted in `writes`); the arms' z and the
+    // head's z are never: a write to one while a pose runs counts as foreign too (the sitting pose writes them with
+    // `counting` off).
+    let counting = false;
+    const axis = (r, k, own) => { let v = 0; Object.defineProperty(r, k, { get: () => v, set: n => { if (counting) { if (own) writes++; else foreign++; } v = n; } }); return r; };
+    for (const k of ["armL", "armR", "head"]) { const r = {}; axis(r, "x", true); axis(r, "y", true); axis(r, "z", false); cave.parts[k] = { rotation: r, position: watched() }; }
+    const sit = () => { counting = false; for (const k in SIT) { const r = cave.parts[k].rotation; r.x = SIT[k][0]; r.y = SIT[k][1]; r.z = SIT[k][2]; } counting = true; };
+    const atSit = () => Object.keys(SIT).every(k => { const r = cave.parts[k].rotation; return r.x === SIT[k][0] && r.y === SIT[k][1] && r.z === SIT[k][2]; });
+    const state = T.create(TABLES, SEATS), k = BASE + 4, YAW = 0.6;
+    const set = (kind, fidget, t) => { state.kind[k] = kind; state.t[k] = kind ? t : 0; state.fidget[k] = fidget; state.fidgetT[k] = fidget ? t : 0; };
+    let settles = true, moves = true, idleSilent = true;
+    const cases = [];
+    for (let kind = 1; kind <= 5; kind++) cases.push([kind, 0]);
+    for (let f = 1; f <= 3; f++) cases.push([0, f]);
+    for (const [kind, f] of cases) {
+      for (const t of [-0.5, 0, 1, 1.5]) { sit(); set(kind, f, t); T.pose(cave, state, k, YAW); if (!atSit()) settles = false; }
+      sit(); set(kind, f, 0.5); T.pose(cave, state, k, YAW); if (atSit()) moves = false;
+      set(kind, f, 1); T.pose(cave, state, k, YAW); if (!atSit()) settles = false;
+      for (let i = 1; i < 60; i++) { sit(); set(kind, f, i / 60); T.pose(cave, state, k, YAW); }
+      // Cut short mid-run: the next pose with nothing running puts the sitting pose back, and the one after writes nothing.
+      sit(); set(kind, f, 0.5); T.pose(cave, state, k, YAW);
+      set(0, 0, 0); T.pose(cave, state, k, YAW); if (!atSit()) settles = false;
+      const w = writes; T.pose(cave, state, k, YAW); if (writes !== w) idleSilent = false;
+    }
+    sit(); set(TELL.CHEER, 0, 0.5); T.pose(cave, state, k, YAW); T.settle(cave); const settled = atSit();
+    record("poker tells: every tell and fidget starts and ends on the sitting pose and moves in between; cut short it settles, then idle writes nothing",
+      settles && moves && idleSilent && settled, JSON.stringify({ settles, moves, idleSilent, settled }));
+    record("poker tells: a tell or fidget writes only the arms and the head", foreign === 0, "foreign writes " + foreign);
+  }
+  // reset, mid-tell.
+  {
+    const v = table({ turn: 2 }), state = primed(v), k = BASE + 2;
+    const clear = () => state.kind[k] === 0 && state.t[k] === 0 && state.fidget[k] === 0 && state.fidgetT[k] === 0 && state.sweat[k] === 0 && state.turnFor[k] === 0;
+    // On turn 6 s (one bead), then a fold: reset mid-toss.
+    run(state, v, 6);
+    const sweating = state.sweat[k] === 1;
+    v.seats[2].lastAction = "Fold"; v.seats[2].folded = true; v.turn = 3; run(state, v, 0.2);
+    const tossing = state.kind[k] === TELL.TOSS && state.t[k] > 0;
+    T.reset(state, k);
+    const midToss = clear();
+    // On turn again 6 s: reset mid-sweat.
+    v.seats[2].folded = false; v.turn = 2; run(state, v, 6);
+    const sweatingAgain = state.sweat[k] === 1;
+    T.reset(state, k);
+    const midSweat = clear();
+    const starts = []; run(state, v, 2, { starts });
+    record("poker tells: reset clears a chair mid-tell and mid-sweat, and the action already seen does not fire again",
+      sweating && tossing && midToss && sweatingAgain && midSweat && starts.length === 0, JSON.stringify({ sweating, tossing, midToss, sweatingAgain, midSweat, starts }));
+  }
+  // Fairness: the view is the only door, and nothing behind it is hidden.
+  {
+    let hiddenUntouched = true;
+    const hide = (o, keys) => { for (const key of keys) Object.defineProperty(o, key, { get() { hiddenUntouched = false; throw new Error("read " + key); } }); return o; };
+    const SECRET = ["cards", "hole", "board", "deck"], SECRET_SEAT = ["cards", "hole", "hand", "board", "deck"];
+    const seat = (fields) => hide(Object.assign({ id: "s", name: "S", bot: false, stack: 1000, inHand: true, folded: false, roundBet: 0, totalBet: 0, lastAction: "" }, fields), SECRET_SEAT);
+    const snap = hide({ phase: "river", turn: 1, dealer: 0, currentBet: 40, hand: 12, version: 3, pot: 120, lastPot: 0, history: [],
+      result: { revealed: true, names: [], awards: [], pots: [{ amount: 100, winners: [2], refund: false }, { amount: 20, winners: [0], refund: true }] },
+      seats: [seat({ lastAction: "Raise", roundBet: 40 }), seat({ bot: true }), seat({ lastAction: "Fold", folded: true }), null, null, null, null, null, null] }, SECRET);
+    const out = T.makeView(SEATS);
+    let viewed = false;
+    try { viewed = T.view(snap, out) === out; } catch { viewed = false; }
+    const copied = out.hand === 12 && out.turn === 1 && out.pot === 120 && out.currentBet === 40 && out.ended && out.phase === "river"
+      && out.seats[0].seated && out.seats[0].roundBet === 40 && out.seats[0].lastAction === "Raise" && out.seats[1].bot && out.seats[2].folded
+      && out.seats[2].won && !out.seats[0].won && !out.seats[3].seated;
+    // The view has no hidden field, and step and botHold, handed views whose hidden fields throw, never read one.
+    const keys = Object.keys(out).concat(Object.keys(out.seats[0]));
+    const cleanView = !keys.some(key => /cards|hole|board|deck/.test(key)) && !Object.keys(out.seats[0]).includes("hand");
+    const guarded = table({ turn: 1, pot: 100, currentBet: 50 }); hide(guarded, SECRET); guarded.seats.forEach(s => hide(s, SECRET_SEAT)); guarded.seats[1].bot = true; guarded.seats[0].lastAction = "Raise";
+    let stepped = false, held = -1;
+    try { const state = T.create(TABLES, SEATS); for (let i = 0; i < 600; i++) T.step(state, TB, guarded, DT, seeded(2), false); stepped = true; held = T.botHold(guarded); } catch { stepped = false; }
+    record("poker tells: the view copies only public fields from a snapshot whose hidden fields throw; step and botHold read only the view; the source names no hidden field",
+      viewed && copied && cleanView && stepped && held === 1 && hiddenUntouched && !/cards|hole|board|deck/.test(source), JSON.stringify({ viewed, copied, cleanView, stepped, held, hiddenUntouched }));
+  }
+  // The bot hold, from the public bet size only.
+  {
+    const hold = (bot, pot, currentBet, roundBet = 0) => { const v = table({ turn: 2, pot, currentBet }); v.seats[2].bot = bot; v.seats[2].roundBet = roundBet; v.seats[0].lastAction = "Raise"; return T.botHold(v); };
+    const r = { half: hold(true, 100, 50), human: hold(false, 100, 50), under: hold(true, 100, 49), paid: hold(true, 100, 60, 20), noPot: hold(true, 0, 10), noTurn: (() => { const v = table({ turn: -1 }); return T.botHold(v); })() };
+    record("poker tells: a bot facing half the pot holds 1 s; a human, a bot facing less, or no pot holds none", r.half === 1 && T.BOT_HOLD === 1 && r.human === 0 && r.under === 0 && r.paid === 0 && r.noPot === 0 && r.noTurn === 0, JSON.stringify(r));
+  }
+  // One real practice hand through the view: seat 0 shoves, seat 1 folds, seat 2 calls all in, and the hand runs out.
+  {
+    const table3 = R.create(), state = T.create(TABLES, SEATS), v = T.makeView(SEATS), starts = [];
+    table3.join("hero", "Hero"); table3.join("b1", "Bot 1", true); table3.join("b2", "Bot 2", true);
+    const look = () => { T.view(table3.snapshot("hero"), v); T.step(state, TB, v, DT, seeded(3), true); for (let k = 0; k < state.kind.length; k++) if (state.kind[k] && state.t[k] === 0) starts.push([k - BASE, state.kind[k]]); };
+    look(); table3.start(); look(); look();
+    const firstTurn = v.turn;
+    table3.act("hero", "raise", 1000); look();
+    table3.act("b1", "fold"); look();
+    // The call ends the hand in the same snapshot, so a result tell waits out its seat's push: two seconds of frames.
+    table3.act("b2", "call"); for (let i = 0; i < 120; i++) look();
+    const snap = table3.snapshot("hero"), winners = new Set(snap.result.pots.filter(p => !p.refund).flatMap(p => p.winners));
+    const of = (seat, kind) => starts.some(s => s[0] === seat && s[1] === kind);
+    const busted = [0, 2].filter(s => snap.seats[s].stack === 0);
+    const ok = firstTurn === 0 && of(0, TELL.PUSH) && of(1, TELL.TOSS) && of(2, TELL.PUSH) && [...winners].every(s => of(s, TELL.CHEER)) && busted.every(s => of(s, TELL.SLUMP))
+      && !of(1, TELL.CHEER) && !of(1, TELL.SLUMP) && starts.filter(s => s[1] === TELL.CHEER).length === winners.size;
+    record("poker tells: a real practice hand's shove, fold, call all in and result each fire once at the acting seat, the winners named by seat index", ok, JSON.stringify({ firstTurn, starts, winners: [...winners], busted }));
+  }
+  // A blind is not a bet: before the flop the first to act faces the big blind, 10 to call into 15, and neither gulps
+  // nor holds; once a seat has raised, the same sizes are a big bet.
+  {
+    const blinds = (raised) => {
+      const v = table({ phase: "preflop", turn: 2, pot: 15, currentBet: 10 });
+      v.seats[1].lastAction = "Small blind"; v.seats[1].roundBet = 5; v.seats[2].lastAction = "Big blind"; v.seats[2].roundBet = 10; v.seats[3].bot = true;
+      if (raised) v.seats[0].lastAction = "Raise";
+      const state = primed(v); v.turn = 3; run(state, v, DT);
+      return { gulp: state.kind[BASE + 3] === TELL.GULP, hold: T.botHold(v) };
+    };
+    const plain = blinds(false), raised = blinds(true);
+    record("poker tells: facing only the blinds there is no gulp and no bot hold; after a raise the same sizes give both",
+      !plain.gulp && plain.hold === 0 && raised.gulp && raised.hold === 1, JSON.stringify({ plain, raised }));
+  }
+  // A short stack calling all in for less than the bet sets no bet: seat 3, first to act with 3 chips, calls all in, and
+  // seat 4 faces only the big blind (10 to call into 18), so neither gulps nor holds. With 30 chips its all in is a
+  // raise to 30, and seat 4 facing it does both. Real sealed tables; the bot is marked on the view, as the hold reads.
+  {
+    const shortAllIn = (chips, raise) => {
+      const seats = new Array(SEATS).fill(null);
+      for (let i = 0; i < 5; i++) seats[i] = { id: "p" + i, name: "P" + i, stack: i === 3 ? chips : 1000 };
+      const table5 = R.createSealed({ seats, dealer: -1, hand: 0, version: 0 }), state = T.create(TABLES, SEATS), v = T.makeView(SEATS);
+      let gulps = 0;
+      const look = () => { T.view(table5.snapshot(null), v); T.step(state, TB, v, DT, seeded(7), true); for (let k = 0; k < state.kind.length; k++) if (state.kind[k] === TELL.GULP && state.t[k] === 0) gulps++; };
+      look(); table5.start(); look();
+      const first = v.turn;
+      if (raise) table5.act("p3", "raise", chips); else table5.act("p3", "call");
+      gulps = 0; look();
+      v.seats[v.turn].bot = true;
+      return { first, action: v.seats[3].lastAction, turn: v.turn, pot: v.pot, toCall: v.currentBet - v.seats[v.turn].roundBet, gulps, hold: T.botHold(v) };
+    };
+    const call = shortAllIn(3, false), shove = shortAllIn(30, true);
+    record("poker tells: a short all in that calls for less than the bet is no big bet (no gulp, no hold); an all in that raises is one (both)",
+      call.first === 3 && call.action === "All in" && call.turn === 4 && call.gulps === 0 && call.hold === 0
+      && shove.action === "All in" && shove.turn === 4 && shove.gulps === 1 && shove.hold === 1, JSON.stringify({ call, shove }));
+  }
+  // Twenty real practice hands of four bots that only check and call: never a big bet, so no gulp and no hold.
+  {
+    const table4 = R.create(), state = T.create(TABLES, SEATS), v = T.makeView(SEATS), ids = ["b0", "b1", "b2", "b3"];
+    ids.forEach((id, i) => table4.join(id, "Bot " + i, true));
+    let gulps = 0, holds = 0, actions = 0, hands = 0;
+    const look = () => { T.view(table4.snapshot(null), v); if (T.botHold(v)) holds++; T.step(state, TB, v, DT, seeded(6), true); for (let k = 0; k < state.kind.length; k++) if (state.kind[k] === TELL.GULP && state.t[k] === 0) gulps++; };
+    look();
+    for (let h = 0; h < 20; h++) {
+      for (const id of ids) table4.refill(id);
+      table4.start(); hands++; look();
+      while (table4.playing) {
+        const s = table4.snapshot(null), id = s.seats[s.turn].id, l = table4.snapshot(id).legal;
+        table4.act(id, l.check ? "check" : "call"); actions++; look();
+      }
+      for (let i = 0; i < 30; i++) look();
+    }
+    record("poker tells: twenty real hands of bots that only check and call bring no gulp and no bot hold", hands === 20 && actions > 60 && gulps === 0 && holds === 0, JSON.stringify({ hands, actions, gulps, holds }));
+  }
+  // Bots never sweat; a human beside them does.
+  {
+    const v = table({ turn: 0 }); v.seats[0].bot = true;
+    const state = primed(v); run(state, v, 12);
+    const bot = state.sweat[BASE];
+    v.turn = 1; run(state, v, 12);
+    const human = state.sweat[BASE + 1];
+    record("poker tells: a bot 12 s on turn shows no sweat; a human shows two beads", bot === 0 && human === 2, JSON.stringify({ bot, human }));
+  }
+  // A table first seen mid-hand, with a fold, an all in and a result already showing, fires nothing on that step or the
+  // next identical one.
+  {
+    const v = table({ turn: -1, phase: "showdown", ended: true });
+    v.seats[1].lastAction = "Fold"; v.seats[1].folded = true; v.seats[2].lastAction = "All in"; v.seats[2].stack = 0; v.seats[3].won = true;
+    const state = T.create(TABLES, SEATS), starts = [];
+    run(state, v, 2 * DT, { starts });
+    v.turn = 4; v.phase = "river"; v.ended = false; v.seats[3].won = false;
+    const fresh = T.create(TABLES, SEATS), later = [];
+    run(fresh, v, 2 * DT, { starts: later });
+    record("poker tells: a table first seen mid-hand fires nothing for what already shows", starts.length === 0 && later.length === 0, JSON.stringify({ starts, later }));
+  }
+  // forget: a table stepped through a fold and a result, forgotten, then seen again on a later hand whose view already
+  // shows a fold, an all in and a result, fires nothing; its chairs are cleared at once.
+  {
+    const v = table({ turn: 2 }), state = primed(v), first = [];
+    run(state, v, 0.5, { starts: first, each: i => { if (i === 2) { v.seats[2].lastAction = "Fold"; v.seats[2].folded = true; v.turn = 3; } if (i === 10) { v.turn = -1; v.ended = true; v.phase = "showdown"; v.seats[4].won = true; } } });
+    const fired = first.some(s => s[1] === TELL.TOSS) && first.some(s => s[1] === TELL.CHEER);
+    T.forget(state, TB);
+    let cleared = true;
+    for (let s = 0; s < SEATS; s++) { const k = BASE + s; if (state.kind[k] || state.fidget[k] || state.sweat[k] || state.turnFor[k] || state.t[k] || state.next[k]) cleared = false; }
+    Object.assign(v, { hand: 11, turn: -1, ended: true, phase: "showdown" });
+    v.seats[1].lastAction = "Fold"; v.seats[1].folded = true; v.seats[5].lastAction = "All in"; v.seats[5].stack = 0; v.seats[4].won = false; v.seats[0].won = true;
+    const after = []; run(state, v, 3, { starts: after });
+    record("poker tells: a forgotten table seen again takes in its new hand and fires nothing; forget clears its chairs", fired && cleared && after.length === 0, JSON.stringify({ fired, cleared, after }));
+  }
+  // A seat that empties mid-cheer, while fidgeting elsewhere and sweating: its chair reads clear.
+  {
+    const v = table({ turn: 3 }), state = primed(v), k = BASE + 3;
+    run(state, v, 6);
+    const sweating = state.sweat[k] === 1;
+    v.turn = -1; v.ended = true; v.phase = "showdown"; v.seats[3].won = true; run(state, v, 0.2);
+    const cheering = state.kind[k] === TELL.CHEER && state.t[k] > 0;
+    state.fidget[k] = FIDGET.DRUM; state.sweat[k] = 1;
+    v.seats[3].seated = false; run(state, v, DT);
+    record("poker tells: a seat that empties mid-cheer reads no tell, fidget or sweat", sweating && cheering && state.kind[k] === 0 && state.fidget[k] === 0 && state.sweat[k] === 0,
+      JSON.stringify({ sweating, cheering, kind: state.kind[k], fidget: state.fidget[k], sweat: state.sweat[k] }));
+  }
+  // A busy table's frames allocate nothing: after a warm-up, five windows of 300,000 rounds of view, step and pose (a
+  // snapshot of stable shape, a seeded draw kept in an Int32Array, so the loop itself allocates nothing), each measured
+  // as the bytes it adds to V8's new space. A window in which a collection ran (V8's GC profiler) is set aside, since a
+  // scavenge empties the space; the quietest window left must add under a byte a frame, and if every window met a
+  // collection the check fails with the numbers. A fresh copy of the module, as the scene has one: the stand-in caves
+  // above, whose parts are accessors, leave the first copy's stores polymorphic, and a polymorphic store boxes every
+  // angle. step also returns nothing and keeps its arrays.
+  {
+    const fresh = { window: { BL: {} } };
+    runInNewContext(source, fresh);
+    const T = fresh.window.BL.pokerTells, FRAMES = 300000, BYTES_PER_FRAME = 1;
+    const newSpace = () => { const spaces = v8.getHeapSpaceStatistics(); for (const sp of spaces) if (sp.space_name === "new_space") return sp.space_used_size; return NaN; };
+    const state = T.create(TABLES, SEATS), out = T.makeView(SEATS), arrays = Object.keys(state).map(k => state[k]);
+    const pots = [{ amount: 100, winners: [2], refund: false }], result = { revealed: false, names: [], awards: [], pots };
+    const snap = { phase: "flop", turn: 0, hand: 7, pot: 100, currentBet: 10, result: null,
+      seats: Array.from({ length: SEATS }, (_, i) => i < 6 ? { id: "s" + i, name: "S", bot: i % 2 === 1, stack: 1000, inHand: true, folded: false, roundBet: 0, totalBet: 0, lastAction: "" } : null) };
+    const acts = ["Call", "Raise", "All in", "Fold", "Check", ""], seed = new Int32Array([5]);
+    const rand = () => { seed[0] = (Math.imul(seed[0], 1103515245) + 12345) | 0; return (seed[0] >>> 8) / 16777216; };
+    // The stand-in cave is made in the module's own context, so its shapes are that context's, as a scene node's are on
+    // the page: a `{ x, y, z }` made here would share run.mjs's shape, which other checks widen to boxed fields.
+    const cave = runInNewContext("const part = () => ({ rotation: { x: 0.5, y: 0.5, z: 0.5 } }); ({ parts: { armL: part(), armR: part(), head: part() } })", fresh);
+    let returned = 0;
+    const frames = (count) => {
+      for (let i = 0; i < count; i++) {
+        if (i % 20 === 0) { const j = (i / 20) | 0, s = j % 6; snap.seats[s].lastAction = acts[j % 6]; snap.turn = (s + 1) % 6; snap.currentBet = j % 3 ? 10 : 120; }
+        if (i % 600 === 599) { if (snap.result) { snap.result = null; snap.hand++; snap.turn = 0; } else { snap.result = result; snap.turn = -1; } }
+        T.view(snap, out);
+        if (T.step(state, TB, out, DT, rand, false) !== undefined) returned++;
+        T.pose(cave, state, BASE + i % SEATS, 0.5);
+      }
+    };
+    frames(50000);
+    const windows = [];
+    for (let w = 0; w < 5; w++) {
+      const profiler = new v8.GCProfiler(), before = newSpace();
+      profiler.start(); frames(FRAMES); const gcs = profiler.stop().statistics.length;
+      windows.push({ gcs, bytes: newSpace() - before });
+    }
+    const quiet = windows.filter(w => w.gcs === 0).map(w => w.bytes), least = quiet.length ? Math.min(...quiet) : NaN;
+    const same = Object.keys(state).every((k, i) => state[k] === arrays[i]);
+    const typed = Object.keys(state).every(k => typeof state[k] === "number" || ArrayBuffer.isView(state[k]));
+    record("poker tells: 300,000 frames of a busy table's view, step and pose add under a byte a frame to new space; step returns nothing and keeps the same typed arrays",
+      least < BYTES_PER_FRAME * FRAMES && returned === 0 && same && typed, JSON.stringify({ least, windows, returned, same, typed }));
+  }
 };
 // The Ember Den's seating rule (poker-presence.js) in a bare context, on the room's layout copied from poker-models.js
 // (`TABLES`, `SEATS`): which remote's sent position is a chair, and which remote a chair is honoured for. Remotes come
@@ -44700,8 +45503,10 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   pokerChecks(BL);
   pokerMarbleChecks(BL);
   pokerMarbleHallChecks(BL);
+  pokerTellPropChecks(BL);
   pokerPresenceChecks();
   pokerEmoteChecks();
+  pokerTellChecks();
   pokerAudioChecks(BL);
   {
     // A roof lip may intersect the visual pose, but a blocked core rejects a mount.
