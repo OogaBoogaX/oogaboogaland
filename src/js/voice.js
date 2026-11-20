@@ -468,10 +468,14 @@
     s.limiter.threshold.value = -1; s.limiter.knee.value = 0; s.limiter.ratio.value = limitRatio(s.gain.gain.value);
     s.limiter.attack.value = 0.003; s.limiter.release.value = 0.1;
     s.meter.source.connect(s.gain);
+    // Local room reflections sit before this voice's gain: mute, range cutoff and
+    // receive volume silence its dry sound and tail together. Never process the microphone.
+    s.acoustics = BL.roomAcoustics.create(audio, s.meter.source, s.gain, 0.6);
     s.gain.connect(s.limiter); s.limiter.connect(audio.destination);
   };
   // Lets go of a voice's audio nodes; a source is bound to its one stream, so nothing here is kept for reuse.
   const unplug = (s) => {
+    s.acoustics?.dispose(); s.acoustics = null;
     if (s.meter) s.meter.source.disconnect();
     if (s.gain) s.gain.disconnect();
     if (s.limiter) s.limiter.disconnect();

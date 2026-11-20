@@ -436,7 +436,10 @@
     // Lying in a hammock keeps the view it was lain down in: combat's look and capture carry on, with the weapons parked
     // under the cloth (the crew refuses them on a seat) and a dot for a crosshair (`syncWeaponHud`).
     const lyingLook = (cave) => active && !!cave && !!cave.camp.seat?.lying && !crew.sleeping && !cave.health.stunned;
-    const restCombat = (cave) => lyingLook(cave) && cave.weapon.aiming;
+    // A swivel seat can keep combat's camera through the first-person/shoulder
+    // handoff without granting permission to equip or fire a weapon.
+    const seatCombatReady = (cave) => lyingLook(cave) || active && !!cave && !!cave.camp.seat?.combatView && !crew.sleeping && !cave.health.stunned;
+    const restCombat = (cave) => seatCombatReady(cave) && cave.weapon.aiming;
     const shoulderBoomPitch = (pitch) => Math.max(pitch, Math.min(0, pitch + SHOULDER_LEVEL));
     // Level and downward aim lift the eye so the head sits below the
     // crosshair and the band beside it stays clear. Looking up sinks the body
@@ -2116,7 +2119,7 @@
         return true;
       }
       // A game's combat intent survives sleep/stuns; readiness still gates aiming and attacks.
-      if (!weaponViewReady(cave) && !lyingLook(cave) && !combatOnly) {
+      if (!weaponViewReady(cave) && !seatCombatReady(cave) && !combatOnly) {
         hud.hint(crew.sleeping ? "Wake this Ooga Booga before entering shooter mode" : "Stand up before entering shooter mode");
         return true;
       }
@@ -2348,7 +2351,7 @@
       if (ctx.jetpackStatus && cave.jetpackOwned) chosen.jet = !!cave.jet;
     };
     // The next `navigate`, in this same tick, keeps this look, pitch and zoom from the Ooga's new heading.
-    let arriving = null;
+    let arriving = null, arrivalMovement = false;
     // A scene's arrival with the visitor's own Ooga: possessed with the view and combat it last had where they carry, its
     // weapon back in hand where this scene allows (the primary when the rifle is not), and the next `navigate` keeping the
     // look, pitch and zoom. Nothing blends in from the old scene's camera, whose coordinates mean nothing here. Before
@@ -2379,12 +2382,14 @@
       // The jetpack this browser last wore, on the page's first arrival.
       if (c === saved && c.jet && !cave.jet && ctx.wearJetpack) ctx.wearJetpack(cave);
       arriving = arrivalKeep;
+      arrivalMovement = true;
       return true;
     };
     // Lifecycle only (a scene's teardown, a switch to another Ooga or a gorilla, an account that may no longer drive it):
     // the camera stays where it is, on a target of its own, until the next possession.
     const release = () => {
       if (firstOnly && player() && !disposed) return;
+      arrivalMovement = false;
       handoff.cancel();
       restoredPose = null;
       endCenteredCarry();
@@ -2706,6 +2711,7 @@
     const readInput = (dt) => {
       readPad();
       if (!active || externalControl || menuOpen) { if (!buttonsHeld) releaseTriggerButton(); return; }
+      if (arrivalMovement) { arrivalMovement = false; controls.takeMovement(); }
       syncAim();
       const a = controls.read();
       // Arrival easing keeps its label; only manual camera input fades it.
@@ -3998,7 +4004,7 @@
       if (cave) {
         if (!touch) rows.push(H.row(["shiftleft"], "Run"));
         rows.push(H.row(touch ? [] : [" "], hud.el.act.textContent.trim() || "Jump / use nearby object", touch ? "Action button" : ""));
-        if (!firstOnly && !ctx.combatOnly?.() && (weaponViewReady(cave) || lyingLook(cave))) add("view", "Toggle view control", "View button");
+        if (!firstOnly && !ctx.combatOnly?.() && (weaponViewReady(cave) || seatCombatReady(cave))) add("view", "Toggle view control", "View button");
         if (!touch && !firstOnly && armed()) rows.push(H.row([], "Zoom / aim", "Hold right mouse click"));
         if (!touch && armed() && shoulderView && !closeWanted) rows.push(H.row(["shiftright"], "Tap to swap shoulder · hold with A/D to peek"));
         if (!touch && birdsEye()) add("north", "Face north", "");

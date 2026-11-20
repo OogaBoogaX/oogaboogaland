@@ -65,7 +65,7 @@
   const STEP_MAX = pilotMod.WALK.step;
   const MATRIX_GATE_HIDDEN_Y = 3.2, MATRIX_BUTTON_REACH = 3.4, MATRIX_BUTTON_USE_REACH = 2.2;
   const MIRROR_GATE_Z = 0.28;
-  const MIRROR_GATE_CLOSED = true;
+  const MIRROR_GATE_CLOSED = false;
   const PORTAL_Z = 0.5, PORTAL_MIN_X = -2.48, PORTAL_MAX_X = 2.48, PORTAL_MIN_Y = 0, PORTAL_MAX_Y = 2.98;
   const RIM_SEAM_DROP = 0.015;
   // The sign's back reaches 0.07 m behind its origin; the Arcade's flat wall sits behind the projecting rim.
@@ -84,6 +84,14 @@
     stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, moonIllumination: 1, moonPhase: 0.5, ambientFloor: 0.18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: 0.002, outdoorDarkestSurfaceEstimate: 0.34, activeLightSource: "sun", latitude: 20, dayOfYear: 172, continuousDay: 171.5, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0, sunriseHour: 6, sunsetHour: 18,
     time: 0, bloomStrength: 0.5, lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, sea: -70, cutawayMaxY: 1e6, birdsEyeCutaway: false, cutawayFade: 0, cutawayRockMix: 0, cutawayRegions: [], cutawayRegionCount: 0, cutawayCloudY: 0, cutawayCloudMix: 0
   };
+  let architectCave = null;
+  // Interior light is independent of outdoor sun/shadows. Security cameras keep
+  // the live outdoor light through their explicit capture-only source.
+  const ARCHITECT_OPTS = Object.assign(Object.create(RENDER_OPTS), {
+    sky: new Float32Array([0.6, 0.58, 0.55]), ground: new Float32Array([0.3, 0.27, 0.24]),
+    directStrength: 0, ambientFloor: 0.75, shadowStrength: 0, lightCount: 0,
+    viewRoots: null, cameraFeedWorldLight: RENDER_OPTS
+  });
   let viewPoseActor = null;
   RENDER_OPTS.beforeView = () => {
     const cave = pilot?.player;
@@ -560,7 +568,7 @@
   let poolShade = 0, poolUnder = 0;
   // Wake before the bridge; a wider sleep radius keeps its effects steady near the boundary.
   const POOL_EFFECTS_NEAR = 44, POOL_EFFECTS_FAR = 52;
-  let poolEffectsActive = false, poolEffectsTime = 0;
+  let poolEffectsActive = false, poolCameraActive = false, poolEffectsTime = 0;
   // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
   let footsteps = null, petReactions = null;
   let weather = null, unsubscribeMempool = null, unsubscribeChain = null, mempoolIsland = null, timechainIsland = null, bifrostIsle = null, repoIsland = null;
@@ -655,6 +663,13 @@
   let phase = null;
   const updatePositionDebug = (force = false) => {
     if (!positionDebug || !camera || !pilot) return;
+    if (architectCave) {
+      positionDebug.dataset.observatory = JSON.stringify({ panels: architectCave.panels.length,
+        broadcast: architectCave.broadcast, time: architectCave.broadcastTime,
+        facePanels: architectCave.panels.filter(p => p.node.geometry === p.portrait).length,
+        faceCaptures: architectCave.cameras.portrait?.captures || 0 });
+    }
+    if (architectCave) positionDebug.dataset.cameras = JSON.stringify(architectCave.feeds.map(f => ({ captures: f.captures, channel: f.channel?.id, pending: f.pending, calls: f.draws, triangles: f.triangles, frameMs: f.frameMs, captureGap: f.captureGap, refreshMs: f.refreshMs, heaviest: f.heaviest })));
     pilot.capturePose(POSITION_POSE);
     const p = camera.position, t = camera.target, up = camera.up;
     const dx = t.x - p.x, dy = t.y - p.y, dz = t.z - p.z;
@@ -2933,16 +2948,19 @@
     return distance2 <= 20 * 20 ? 0 : distance2 <= 40 * 40 ? 0.1 : 0.2;
   };
   const updatePoolEffectsActivity = () => {
+    const waterWasActive = poolEffectsActive || poolCameraActive;
+    // A visible Observatory lake feed needs the water/block poses, never the outdoor weather or wildlife.
+    poolCameraActive = !!architectCave?.active && (architectCave.cameras.observes("rainforest") || architectCave.cameras.observes("rainforest-under"));
     const radius = poolEffectsActive ? POOL_EFFECTS_FAR : POOL_EFFECTS_NEAR;
     const player = clankerPlay?.player || pilot?.player;
-    const active = !gameMode && !cloudPlaying() && (nearPoolEffects(camera.position, radius) || nearPoolEffects(camera.target, radius)
+    const active = !gameMode && !cloudPlaying() && !architectCave?.active && (nearPoolEffects(camera.position, radius) || nearPoolEffects(camera.target, radius)
       || !!player && nearPoolEffects(player.root.position, radius));
+    if (!waterWasActive && (active || poolCameraActive)) mempoolIsland.water.resume();
     if (active === poolEffectsActive) return;
     poolEffectsActive = active;
     weather.pause(!active);
     if (active) {
       // The feed stays live while the geometry rests; paint only its latest reading on return.
-      mempoolIsland.water.resume();
       mempoolIsland.paintings.refresh(chain.snapshot);
       refreshChainSign();
     }
@@ -3580,6 +3598,7 @@
     passTraffic = passTraffic || rageThrown(player);
     const step = !player || player.hop === 0 && player.hopV <= 0;
     const from = Math.max(y, previousY), rise = step ? STEP_MAX : 0;
+    if (architectCave?.contains(x, y, z, player)) return architectCave.supportAt(x, z, from, rise, PLAYER_RADIUS);
     if (cloudPlaying()) return Math.max(island.supportAt(x, z, y, STEP_MAX, ABYSS_FLOOR, PLAYER_RADIUS),
       solids.supportAt(x, z, from, rise, PLAYER_RADIUS),
       ALTAR_HEIGHT <= from + rise && Math.hypot(x, z) < altar.platformRadius + PLAYER_RADIUS ? ALTAR_HEIGHT : -Infinity,
@@ -3588,6 +3607,7 @@
   };
   const abyssAt = (x, z, y, actor = pilot?.player) => playerSupportAt(x, z, y, y, actor) === ABYSS_FLOOR;
   const visualSupportAt = (x, z, y) => {
+    if (architectCave?.contains(x, y, z)) return architectCave.supportAt(x, z, y, STEP_MAX, PLAYER_RADIUS);
     if (cloudPlaying()) return playerSupportAt(x, z, y, y);
     const floor = Math.max(cloudHopper ? cloudHopper.supportAt(x, z, y, STEP_MAX) : -Infinity, bedSupportAt(x, z, y, STEP_MAX, PLAYER_RADIUS), propSupportAt(x, z, y, STEP_MAX, pilot.player), waterSupportAt(x, z, y, STEP_MAX, pilot.player));
     return floor > -Infinity && floor > island.supportAt(x, z, y, STEP_MAX, ABYSS_FLOOR, PLAYER_RADIUS) ? floor : island.smoothSupportAt(x, z, y, STEP_MAX, PLAYER_RADIUS);
@@ -4700,6 +4720,7 @@
   const jetpackAllowed = (cave) => {
     if (cloudHopper?.active) return !cloudHopper.held && cave === cloudHopper.actor;
     const p = cave.root.position, feet = p.y - cave.baseY;
+    if (architectCave?.contains(p.x, feet, p.z, cave)) return false;
     const basement = island.headquarters.basement, hole = basement.hole;
     // Keep thrust through the open shaft and its bevel until the whole body clears the lip.
     // The basement ceiling still separates it from HQ above.
@@ -4752,6 +4773,7 @@
     return radius;
   };
   const mirrorActorSegmentClear = (x, y, z, toX, toY, toZ, height, actor, fixedRadius = 0) => {
+    if (actor && actor === pilot?.player && !clankerPlay.active) return true;
     if (!fixedRadius && !actor) return true;
     const m = mirrorCave.mouth, sr = matrixCave.sr, cr = matrixCave.cr;
     const bounds = BL.scene.boundsOf(mirrorCave.node.geometry), radius = fixedRadius || mirrorActorRadius(actor);
@@ -4792,6 +4814,7 @@
     return ceiling;
   };
   const ceilingAt = (x, z, y, actor = pilot?.player, passengers = true, props = true) => {
+    if (architectCave?.contains(x, y, z, actor)) return BL.architectCave.FLOOR + BL.architectCave.HEIGHT;
     let ceiling = Math.min(island.ceilingAt(x, y, z, PLAYER_RADIUS), entranceCeilingAt(x, z, y, PLAYER_RADIUS), bedCeilingAt(x, z, y, PLAYER_RADIUS), matrixGateCeilingAt(x, z, y), props ? propCeilingAt(x, z, y, PLAYER_RADIUS, actor) : Infinity);
     for (let i = 0; i < CAMERA_OPENINGS.length; i++) {
       const entry = CAMERA_OPENINGS[i], m = entry.mouth, rim = entry.rim;
@@ -5070,6 +5093,7 @@
       && mirrorActorSegmentClear(fromX, y, fromZ, toX, y, toZ, height, actor);
   };
   const walkable = (fromX, fromZ, toX, toZ, y, height = 1.5, actor = pilot?.player) => {
+    if (architectCave?.contains(fromX, y, fromZ, actor)) return architectCave.segmentClear(fromX, y, fromZ, toX, y, toZ, PLAYER_RADIUS, height);
     // An occupied hammock is a wall to walk into, not a cloth to cross (an empty one is stepped onto): whoever is inside it already may leave.
     if (hammock && hammock.blocks(toX, y, toZ, PLAYER_RADIUS) && !hammock.blocks(fromX, y, fromZ, PLAYER_RADIUS)) return false;
     if (Math.hypot(toX, toZ) > worldBound() || crossesSealedCave(fromX, fromZ, toX, toZ, y)) return false;
@@ -5080,11 +5104,14 @@
     return feet + height <= ceilingAt(toX, toZ, feet, actor) + 1e-7 && physicalClearAt(toX, feet + STEP_MAX, toZ, PLAYER_RADIUS, Math.max(0, height - STEP_MAX), actor) && propSegmentClear(fromX, feet + STEP_MAX, fromZ, toX, feet + STEP_MAX, toZ, PLAYER_RADIUS, Math.max(0, height - STEP_MAX), actor) && matrixGateSegmentClear(fromX, y, fromZ, toX, feet, toZ, PLAYER_RADIUS, height) && mirrorActorSegmentClear(fromX, y, fromZ, toX, feet, toZ, height, actor)
       || feet === y && playerEscapeClear(fromX, fromZ, toX, toZ, y, height, actor, STEP_MAX);
   };
-  const flyable = (fromX, fromZ, toX, toZ, y = 0, height = 1.5, actor = pilot?.player) => (Math.hypot(toX, toZ) <= worldBound() || actor?.leap?.thrown) && !crossesSealedCave(fromX, fromZ, toX, toZ, y)
+  const flyable = (fromX, fromZ, toX, toZ, y = 0, height = 1.5, actor = pilot?.player) => architectCave?.contains(fromX, y, fromZ, actor)
+    ? architectCave.segmentClear(fromX, y, fromZ, toX, y, toZ, PLAYER_RADIUS, height)
+    : (Math.hypot(toX, toZ) <= worldBound() || actor?.leap?.thrown) && !crossesSealedCave(fromX, fromZ, toX, toZ, y)
     && (y + height <= ceilingAt(toX, toZ, y, actor) + 1e-7 && physicalClearAt(toX, y, toZ, PLAYER_RADIUS, height, actor) && propSegmentClear(fromX, y, fromZ, toX, y, toZ, PLAYER_RADIUS, height, actor) && bedSegmentClear(fromX, y, fromZ, toX, y, toZ, PLAYER_RADIUS, height) && matrixGateSegmentClear(fromX, y, fromZ, toX, y, toZ, PLAYER_RADIUS, height) && mirrorActorSegmentClear(fromX, y, fromZ, toX, y, toZ, height, actor)
       || playerEscapeClear(fromX, fromZ, toX, toZ, y, height, actor, 0));
   const characterCarryClear = (cave, x, y, z, toX, toY, toZ) => {
     const height = cave.bodyHeight + Math.max(0, cave.viewLift), feet = y + 1e-7, toFeet = toY + 1e-7;
+    if (architectCave?.contains(x, y, z, cave)) return architectCave.segmentClear(x, y, z, toX, toY, toZ, PLAYER_RADIUS, height);
     return Math.hypot(toX, toZ) <= worldBound() && !crossesSealedCave(x, z, toX, toZ, Math.min(y, toY))
       && toY + height <= ceilingAt(toX, toZ, toY, cave) + 1e-7
       && physicalClearAt(toX, toFeet, toZ, PLAYER_RADIUS, height - 1e-7, cave)
@@ -5524,9 +5551,9 @@
       // Distant blocks still update the chain and its notice, without queuing a show for the next visit.
       if (poolEffectsActive) {
         weather.strike({ x: mempoolIsland.place.x, y: mempoolIsland.place.y + mempoolIsland.water.state.shown, z: mempoolIsland.place.z });
-        // A cube takes nothing with it: the backlog says what is left.
-        mempoolIsland.water.block(event.height);
       }
+      // A cube takes nothing with it: the backlog says what is left. Camera viewers see the same live event.
+      if (poolEffectsActive || poolCameraActive) mempoolIsland.water.block(event.height);
       hud.toast(`Block ${event.height} mined${event.txCount ? ` · ${event.txCount} transactions` : ""}`);
     }
   };
@@ -6122,6 +6149,8 @@
     if (player && player.camp.seat) return STAND_ACTION;
     if (player && crew.sleeping) return WAKE_ACTION;
     if (player && pilot.moving) return null;
+    if (player && architectCave?.active && player.hop < 0.03 && player.hopV <= 0)
+      return architectCave.nearbySeat(x, player.root.position.y - player.baseY, z, reach);
     if (player && player.hop < 0.03 && player.hopV <= 0 && headquarters) {
       const feet = player.root.position.y - player.baseY;
       const floor = bedSupportAt(x, z, feet + 0.04, 0, PLAYER_RADIUS);
@@ -6154,6 +6183,7 @@
     else if (action === WAKE_ACTION) crew.wakePlayer();
     else if (action === ROLL_ACTION) crew.dropRoll();
     else if (action === STAND_ACTION) crew.standPlayer(pilot.player, true);
+    else if (action.kind === "architect-chair") architectCave.sit();
     else if (action.kind === "bench") crew.sitPlayer(action);
     else if (action === HAMMOCK_FULL) hud.toast("The hammock is occupied: one Ooga at a time");
     else if (action.kind === "hammock") restInHammock(action);
@@ -6611,7 +6641,12 @@
   };
   const onTap = (hit, p) => {
     if (cloudHopper?.active) return;
-    if (factoryDeparting || bifrostDeparting || islandGuide.holding) return;
+    if (factoryDeparting || bifrostDeparting || islandGuide.holding || architectCave?.arriving) return;
+    if (architectCave?.seated) {
+      if (COARSE) architectCave.toggleView(p?.x, p?.y);
+      else architectCave.enhanceAt(p?.x, p?.y);
+      return;
+    }
     if (gorillaBehindBillboard(hit, p)) return;
     if (debugMovementTap(hit, p)) return;
     // Another player's Ooga under the pointer, in sight (the pool's own exact mesh test and `liveClear`, not the taps'
@@ -6871,8 +6906,13 @@
         hud.hint(COARSE ? "Tap DROP & ROLL! to put the fire out" : "Press Space to drop and roll until the fire goes out");
         hud.setAct("DROP & ROLL!");
       } else if (action === STAND_ACTION) {
-        hud.hint(COARSE ? "Move or tap STAND UP! to get up" : "Move or press Space to stand up");
+        hud.hint(player?.camp.seat === architectCave?.seat
+          ? COARSE ? "Tap a TV to change screens · Look to swivel · Move or STAND UP! to get up" : "Left click · Enhance/restore feed · Right click TV · Face view · Space · Stand"
+          : COARSE ? "Move or tap STAND UP! to get up" : "Move or press Space to stand up");
         hud.setAct("STAND UP!");
+      } else if (action.kind === "architect-chair") {
+        hud.hint(COARSE ? "Tap SIT to use the swivel chair" : "Space · Sit in the swivel chair · Move + Space to jump onto it");
+        hud.setAct("SIT");
       } else if (action.kind === "bench") {
         hud.hint(COARSE ? "Tap SIT to sit facing the fire" : "Press Space to sit facing the fire");
         hud.setAct("SIT");
@@ -7006,6 +7046,7 @@
     return nearest && nearestDistance <= (nearest.ramp.width / 2 + clearance) ** 2 ? nearest : null;
   };
   const updatePlayerCave = (player) => {
+    if (architectCave?.active) { caveEntryPlayer = null; playerCaveIndex = 0; return; }
     if (!player) {
       caveEntryPlayer = null;
       playerCaveIndex = 0;
@@ -7260,6 +7301,7 @@
     return true;
   };
   const updateAreaLabel = () => {
+    if (architectCave?.active) { hud.setAreaLabel("THE OBSERVATORY", pilot.player?.root.position); return; }
     const gorilla = clankerPlay.active ? clankerPlay.player : null, player = gorilla || pilot.player;
     // A look keeps its destination's name: the Ooga stands where it was, away from that place, and the first movement
     // (which ends the look) brings back the Ooga's own area.
@@ -7564,6 +7606,10 @@
     return feet < island.surfaceAt(p.x, p.z) - STEP_MAX && !mempoolIsland.coveredAt(p.x, feet + 0.5, p.z);
   };
   const clampCamera = (p, closeMix = 0, closeClearance = CLEARANCE, smoothStep = false, dt = 0, resetSmooth = false, directView = false, freeMove = false, preserveExitAngle = false) => {
+    if (architectCave?.active) {
+      setCameraCave(0); cameraPreviousValid = false; cameraTerrainValid = false;
+      camera.near = 0.1; architectCave.clampCamera(p); return false;
+    }
     // The course keeps the player's chosen camera offset even through rock.
     // Only its DQ fall sequence holds the eye independently of the Ooga.
     if (cloudPlaying()) {
@@ -8000,7 +8046,7 @@
       }
     }
     if (lawn && lawn.version !== island.path.version) layLawn();
-    if (life) { life.gulls.update(elapsed); life.shore.update(elapsed); life.boats.update(elapsed); }
+    if (life && !architectCave?.active) { life.gulls.update(elapsed); life.shore.update(elapsed); life.boats.update(elapsed); }
     now = elapsed;
     hour = clock.read();
     // A Cloud Hopper run flies under its level's own fixed sky, sampled once as it begins; the clock's hour still
@@ -8034,7 +8080,7 @@
     }
     RENDER_OPTS.time = elapsed;
     updatePoolEffectsActivity();
-    if (poolEffectsActive) poolEffectsTime += dt;
+    if (poolEffectsActive || poolCameraActive) poolEffectsTime += dt;
     // Under the Mempool island's ground the storm is muffled and the daylight shut out: no shadow reaches that
     // island, so its tunnels would otherwise stand in full sun. The fires and the water light them instead.
     // By where the eye is, not what it looks at: a view from outside aimed into the rock is still outdoors.
@@ -8057,10 +8103,8 @@
       RENDER_OPTS.directStrength *= 1 - 0.92 * poolShade;
       for (let i = 0; i < 3; i++) { RENDER_OPTS.sky[i] *= keep; RENDER_OPTS.ground[i] *= keep; }
     }
-    if (poolEffectsActive) {
-      mempoolIsland.water.update(dt, poolEffectsTime, Date.now());
-      mempoolIsland.paintings.update(dt);
-    }
+    if (poolEffectsActive || poolCameraActive) mempoolIsland.water.update(dt, poolEffectsTime, Date.now());
+    if (poolEffectsActive) mempoolIsland.paintings.update(dt);
     if (coilCharge) updateCoilCharge(elapsed);
     // A fire rig pauses with the view: its own clock advances only while its pit is near, so a distant pit
     // freezes its flame and resumes without a catch-up jump.
@@ -8086,8 +8130,8 @@
     const next = daylight.phaseAt(hour);
     if (next !== phase) setPhase(next);
     if (DEBUG) syncDaylightDebug(hour);
-    if (!cloudPlaying()) critters.update(dt, elapsed, RENDER_OPTS.day, RENDER_OPTS.stars, fire.k, 1);
-    if (!gameMode && !cloudPlaying()) updateClouds();
+    if (!cloudPlaying() && !architectCave?.active) critters.update(dt, elapsed, RENDER_OPTS.day, RENDER_OPTS.stars, fire.k, 1);
+    if (!gameMode && !cloudPlaying() && !architectCave?.active) updateClouds();
     updateGameRing(dt, elapsed);
     solids.sync(); totemSolids.sync(); totemFrame++;
     if (gameMode) updateRageThrowMap();
@@ -8260,22 +8304,26 @@
     if (!cloudPlaying()) timechainIsland.gate.view(dt);
     if (factoryMouth && !cloudPlaying()) factoryWalk.eyes.view(dt);
     // Tess moves after the view is set, so a tour's glide has the last word on it.
-    if (!cloudHopper?.active) islandGuide.update(dt, elapsed);
+    if (!cloudHopper?.active && !architectCave?.active && !architectCave?.arriving) islandGuide.update(dt, elapsed);
+    if (architectCave) {
+      architectCave.update(dt); RENDER_OPTS.cameraFeeds = architectCave.active ? architectCave.renderFeeds : null;
+      ARCHITECT_OPTS.viewRoots = architectCave.viewRoots;
+    }
     shareDrivenPose();
-    timechainIsland.site.view(camera.position);
+    if (!architectCave?.active) timechainIsland.site.view(camera.position);
     const firstPerson = clankerPlay.active ? clankerPlay.firstPerson : pilot.closeMix > 0.8 || pilot.mode === "eye-level";
-    if (repoIsland && !cloudPlaying()) repoIsland.afterCamera(camera, firstPerson);
+    if (repoIsland && !cloudPlaying() && !architectCave?.active) repoIsland.afterCamera(camera, firstPerson);
     updateCombatTotemHover();
     for (let i = 0; i < signDetails.length; i++) {
       const sign = signDetails[i], dx = camera.position.x - sign.x, dy = camera.position.y - sign.y, dz = camera.position.z - sign.z;
       const limit = sign.node.geometry === sign.pixels ? 20 : 16;
       sign.node.geometry = dx * dx + dy * dy + dz * dz < limit * limit ? sign.pixels : sign.solid;
     }
-    if (!cloudPlaying()) updateBirdsEyeCutaway(dt);
+    if (!cloudPlaying() && !architectCave?.active) updateBirdsEyeCutaway(dt);
     else {
       clearCutawayHidden(); RENDER_OPTS.cutawayMaxY = 1e6; RENDER_OPTS.birdsEyeCutaway = false;
       RENDER_OPTS.cutawayFade = RENDER_OPTS.cutawayRockMix = RENDER_OPTS.cutawayRegionCount = 0;
-      cloudMask();
+      if (cloudPlaying()) cloudMask();
     }
     updateAreaLabel();
     if (POSITION_DEBUG && elapsed >= positionDebugNext) {
@@ -8705,6 +8753,7 @@
   };
   const zoneOf = (cave, gorilla = false) => {
     const p = cave.root.position, feet = p.y - (gorilla ? 0 : cave.baseY);
+    if (architectCave?.contains(p.x, feet, p.z, cave)) return "mirror";
     if (!gorilla && playerCaveIndex) return caveZone(playerCaveIndex, p.x, feet, p.z);
     if (gorilla && island.cavityAt(p.x, p.z, CAMERA_COLUMN, 0, feet)
       && feet >= CAMERA_COLUMN.floor - 1e-6 && feet < CAMERA_COLUMN.ceiling) {
@@ -8793,6 +8842,8 @@
   };
   // The level the driven body stands at, against nothing but where it is: its zone never changes what it hears.
   const shareBlend = (driven, gorilla, zone) => {
+    // The Observatory shares no acoustic level with the island above it.
+    if (zone === "mirror") { BL.net.setBlend(null, 0); return; }
     const p = driven.root.position, feet = p.y - (gorilla ? 0 : driven.baseY);
     if (levelOf(p.x, feet, p.z, zone, LEVEL_AT)) BL.net.setBlend(LEVEL_AT.to, LEVEL_AT.t);
     else BL.net.setBlend(null, 0);
@@ -10823,7 +10874,9 @@
   // frames of lag only show as an outline catching up. Behind cave rock at 1920x1080 and DPR 2, 15 Hz is a 25 ms
   // frame becoming 19 ms; 30 Hz spent about 19 ms on every other frame.
   const SIGHT_RECOMPUTE_HZ = 15;
+  const drawArchitectExtra = (context, project) => { drawExtra(context, project); architectCave.drawVeil(context); };
   const overlay = (dt) => {
+    if (architectCave?.active || architectCave?.crossing) { fx.drawOverlay(dt, drawArchitectExtra); return; }
     if (cloudPlaying()) {
       fx.drawOverlay(dt, cloudHopper.drawOverlay);
       // An Ooga inside a tornado, or behind it, shows its outline through the funnel, keyed dark so it reads on the
@@ -10966,7 +11019,7 @@
     }
     if (BL.controls.matches(e, "escape") && islandGuide.escape()) { e.preventDefault(); return; }
     // While Tess's tour holds the view, Enter advances it and movement ends it; other island keys, including T, wait.
-    if (islandGuide.holding) return;
+    if (islandGuide.holding || architectCave?.arriving) return;
     if (BL.controls.matches(e, "escape") && debugSelectedGorilla) { selectDebugGorilla(null); e.preventDefault(); return; }
     if (BL.controls.matches(e, "escape")) {
       if (!e.repeat) { if (clankerPlay.active) clankerPlay.escape(); else pilot.escape(); }
@@ -11012,6 +11065,7 @@
     }
   };
   const suspendHub = () => {
+    architectCave?.suspend(); RENDER_OPTS.cameraFeeds = null;
     stopLazyBedding();
     // A kept hammock stays hung; its sitter gets up to go.
     if (hammock) vacateHammock();
@@ -11125,7 +11179,7 @@
     weather.apply(chain.snapshot); mempoolIsland.water.apply(chain.snapshot);
     mempoolIsland.paintings.refresh(chain.snapshot); refreshChainSign();
     // As enter does: the distant island rests until the first proximity check below wakes it.
-    poolEffectsActive = false; poolEffectsTime = 0;
+    poolEffectsActive = poolCameraActive = false; poolEffectsTime = 0;
     if (factoryMouth) factoryMouth.roofEffectsActive = false;
     weather.update(0, null);
     weather.pause(true);
@@ -11266,7 +11320,7 @@
     reuseHub = ctx.hubPolicy === "keep";
     if (heldHub) { resumeHub(ctx); return; }
     ({ renderer, game, world, go, testBananas } = ctx);
-    poolEffectsActive = false; poolEffectsTime = 0;
+    poolEffectsActive = poolCameraActive = false; poolEffectsTime = 0;
     glCanvas = ctx.canvas;
     factoryDeparting = bifrostDeparting = factoryHeld = false;
     Object.assign(factoryWalk, { phase: 0, cave: null, seen: false, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false });
@@ -11322,12 +11376,41 @@
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks, preciseHover: true });
     COMBAT_POINTER.x = COMBAT_POINTER.y = -1; carryTotemHovered = combatTotemHovered = false; combatTotemLink = null;
-    ctx.canvas.addEventListener("pointerleave", () => { COMBAT_POINTER.x = COMBAT_POINTER.y = -1; }, { signal: ctx.signal });
+    ctx.canvas.addEventListener("pointerleave", () => { COMBAT_POINTER.x = COMBAT_POINTER.y = -1; architectCave?.hoverAt(-1, -1); }, { signal: ctx.signal });
+    ctx.canvas.addEventListener("pointermove", event => {
+      if (event.pointerType !== "mouse" || !architectCave?.seated) return;
+      const point = combatPointer(event.clientX, event.clientY);
+      architectCave.hoverAt(point.x, point.y);
+    }, { capture: true, signal: ctx.signal });
+    // Take seated right clicks before the pilot's ADS/double-right-click path.
+    // Keep this local to the room; ordinary island combat bindings stay intact.
+    let architectRightHeld = false;
+    const architectRightClick = event => {
+      if (event.pointerType !== "mouse" || event.button !== 2 && !(event.buttons & 2) && event.type !== "pointercancel") return;
+      if (!architectCave?.seated && !architectRightHeld) return;
+      const down = event.type === "pointerdown" || event.type === "pointermove" && !!(event.buttons & 2);
+      if (event.type === "pointerdown" && !architectRightHeld && architectCave?.seated) {
+        const point = document.pointerLockElement !== ctx.canvas ? combatPointer(event.clientX, event.clientY) : null;
+        architectCave.toggleView(point?.x, point?.y);
+      }
+      architectRightHeld = down;
+      event.preventDefault(); event.stopImmediatePropagation();
+    };
+    for (const type of ["pointerdown", "pointermove", "pointerup", "pointercancel"])
+      ctx.canvas.addEventListener(type, architectRightClick, { capture: true, signal: ctx.signal });
+    ctx.canvas.addEventListener("contextmenu", event => { if (architectCave?.seated) event.preventDefault(); }, { signal: ctx.signal });
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
     pilot = pilotMod.create({ carry: true, renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, clampTarget, clampCamera, observeOrbit: (position, dt) => clampCamera(position, 0, CLEARANCE, false, dt), ceilingAt: (x, z, y, cave) => cloudPlaying() ? Infinity : ceilingAt(x, z, y, cave), birdsEyeMin: BIRDS_EYE_MIN, birdsEyeCeiling, releaseView: releaseCameraView, coarse: COARSE, jetpackStatus: jetpackHudStatus, wearJetpack: (cave) => {
       crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
       crew.wearJetpack(cave, hubModels.jetpack(), hubModels.jetFlame());
     }, mayPossess: mayDriveOoga, combatOnly: () => gameCombatOnly || !!cloudHopper?.intoCombat, noOverhead: () => !!cloudHopper?.active, primaryAction: (down, event) => {
+        if (architectCave?.seated) {
+          if (down) {
+            const point = event && document.pointerLockElement !== ctx.canvas ? combatPointer(event.clientX, event.clientY) : null;
+            architectCave.enhanceAt(point?.x, point?.y);
+          }
+          return true;
+        }
         if (!down && combatTotemLink) {
           const link = combatTotemLink; combatTotemLink = null;
           if (event && onMergeRock()) window.open(link, "_blank", "noopener,noreferrer");
@@ -11338,7 +11421,7 @@
         return combatTotemPress(event);
       },
       modifiedClick: combatTotemPress,
-      aimPointer: combatPointer, captureClick: (x, y) => { const p = combatPointer(x, y); return combatTotemClick(p.x, p.y); }, cameraTargets: () => !cloudPlaying(), fixedFollow: cloudPlaying, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, zone: () => playerCaveIndex } });
+      aimPointer: combatPointer, captureClick: (x, y) => { const p = combatPointer(x, y); if (architectCave?.enhanceAt(p.x, p.y)) return true; return combatTotemClick(p.x, p.y); }, cameraTargets: () => !cloudPlaying(), fixedFollow: cloudPlaying, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, zone: () => playerCaveIndex } });
     chalkboard = BL.chalkboard.create({
       renderer,
       onOpen: () => { pilot.setActive(false); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); },
@@ -11348,6 +11431,7 @@
     yield* pause(slice);
     terrainRampRoof = BL.terrainCutaway.createRampRoof(island.cutawaySource, island.geometry, renderer.releaseGeometry);
     yield* pause(slice);
+    terrainRampRoof.baseGeometry.cameraFeedLabel = "island terrain";
     debugMovementTerrain = place(terrainRampRoof.baseGeometry, 0, 0, 0, 0);
     addChild(root, terrainRampRoof.node);
     placed.push(terrainRampRoof.node);
@@ -11953,6 +12037,11 @@
     BL.net.setHub(true);
     for (const cave of crew.list) crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
     mirrorCave.body = BL.mirrorBody.create(mirrorCave.node, crew.cavemen);
+    pile.core.geometry.cameraFeedKeep = true;
+    models.bananaTileGeometry().cameraFeedKeep = models.bananaTileGeometry(true).cameraFeedKeep = true;
+    architectCave = BL.architectCave.create({ root, renderer, camera, pilot, crew, mirror: mirrorCave, weather, mouths: island.mouths,
+      places: { pool: mempoolIsland.place, repos: repoIsland.spot, sphere: timechainIsland.place, bifrost: bifrostIsle?.site.node.position,
+        hq: island.headquarters, library: LIBRARY, gate: island.gate } });
     yield* pause(slice);
     for (const cave of crew.list) entropyLab.phase.body.track(cave.root, cave.traits.height * 2,
       Math.max(cave.headOpen.verts.length, cave.headClosed.verts.length));
@@ -12136,6 +12225,11 @@
       onDoubleTap: (hit, p) => {
         if (cloudHopper?.active) return;
         if (factoryDeparting || bifrostDeparting || islandGuide.holding) return;
+        if (architectCave?.seated) {
+          if (COARSE) architectCave.toggleView(p?.x, p?.y);
+          else architectCave.enhanceAt(p?.x, p?.y);
+          return;
+        }
         if (gorillaBehindBillboard(hit, p)) return;
         // A keypad button takes every press, so the same number twice (a PIN's 11) is two presses.
         if (hit && hit.owner.kind === "sphere-key") { onTap(hit, p); return; }
@@ -12325,7 +12419,7 @@
           viewInside: viewInsideMatrix
         },
         pilot,
-        renderOpts: RENDER_OPTS,
+        get renderOpts() { return architectCave?.active ? ARCHITECT_OPTS : RENDER_OPTS; },
         lamps,
         lighting: LIGHTING_DEBUG,
         fireSeats,
@@ -12544,7 +12638,7 @@
     cutawayX = cutawayZ = cutawayHeadY = 0;
     cutawayHill = false;
     cutawayPool = 0; poolShade = poolUnder = 0;
-    poolEffectsActive = false; poolEffectsTime = 0;
+    poolEffectsActive = poolCameraActive = false; poolEffectsTime = 0;
     cutawayPlayer = cutawayHandoffPlayer = null;
     cutawayPathBounds = null;
     cutawayTravelRamp = null; cutawayTravelChannel = -1; cutawayTravelStation = 0;
@@ -12579,6 +12673,7 @@
     propSync.dispose();
     remotes = duels = npcSync = propSync = null;
     npcGhosts.dispose(); npcGhosts = null;
+    architectCave?.dispose(); architectCave = null; RENDER_OPTS.cameraFeeds = null;
     crew.dispose();
     critters.dispose();
     fx.dispose();
@@ -12693,6 +12788,7 @@
     hubScene.islandGeometry(set);
   };
   const islandGeometry = (set) => {
+    architectCave?.liveGeometry(set);
     if (cloudHopper?.cabinet.frames) for (const geometry of cloudHopper.cabinet.frames) set.add(geometry);
     cloudHopper?.liveGeometry(set);
     if (islandGuide) islandGuide.liveGeometry(set);
@@ -12729,7 +12825,10 @@
     voiceZone: "none",
     micKey: true,
     get cabinetMenu() { return cloudHopper && cloudHopper.phase === "intro"; },
-    id: "hub", enter, enterSteps, update, overlay, onDonation, previewDonation, onKey, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry, islandGeometry, libraryNook: LIBRARY,
+    id: "hub", enter, enterSteps, update, overlay, onDonation, previewDonation, onKey,
+    get renderOpts() { return architectCave?.active ? ARCHITECT_OPTS : RENDER_OPTS; },
+    stay, leave, stats, liveGeometry, cachedGeometry, islandGeometry, libraryNook: LIBRARY,
+    get architect() { return architectCave; },
     get retained() { return heldHub; }, get elapsed() { return now; },
     get retainedRoot() { return heldHub ? root : null; },
     // Readying the hall takes a slice of frames that are otherwise the island's; the tier does not judge them.
@@ -12742,6 +12841,7 @@
     get inMotion() {
       // A crossing through the Timechain Sphere's doors keeps full rate, so its walk and swoop finish smoothly, and so
       // does a walk through the Factory's shield and its dissolve.
+      if (architectCave?.active) return true;
       if (cloudHopper?.active) return true;
       if (timechainIsland && timechainIsland.gate.busy) return true;
       if (factoryWalk.phase || factoryWalk.still > 0) return true;
@@ -12763,16 +12863,20 @@
     const H = BL.controlsHelp;
     if (cloudHopper?.active) return cloudHopper.controlsHelp(touch);
     const gorilla = clankerPlay?.active, help = gorilla ? clankerPlay.controlsHelp(touch) : pilot.controlsHelp(touch, ["weapon", "attack", "swapWeapon", "jetpack"]);
+    if (architectCave?.seated) {
+      help.rows.push(H.row([], "Switch area feeds / your face", touch ? "Tap a TV" : "Right click a TV"));
+      if (!touch) help.rows.push(H.row([], "Enhance feed to 7×7 / restore", "Left mouse click"));
+    }
     if (!touch) {
       const own = BL.net.ownCharacter(), cave = own && crew.cavemen.get(own.handle);
       if (cave && (!drivesOoga(cave) || clankers.list.some(entry => entry.owner === cave && entry.active && entry.root.visible))) help.rows.push(H.row(BL.controls.shortcutKeys("actor"), "Switch between your Ooga and gorilla"));
       const player = pilot.player;
       if (!gorilla && player) {
-        if (!pilot.birdsEye && player.traits.nunchaku && player.state !== "sleeping" && !player.camp.burning && !player.camp.rolling) help.rows.push(H.row(BL.controls.shortcutKeys("twirl"), "Twirl nunchaku"));
+        if (!architectCave?.active && !pilot.birdsEye && player.traits.nunchaku && player.state !== "sleeping" && !player.camp.burning && !player.camp.rolling) help.rows.push(H.row(BL.controls.shortcutKeys("twirl"), "Twirl nunchaku"));
         if (player.tint) help.rows.push(H.row(BL.controls.shortcutKeys("tint"), "Change colourway"));
       }
     }
-    if (!gorilla) help.title = "Island · " + help.title; return help;
+    if (!gorilla) help.title = (architectCave?.active ? "Observatory · " : "Island · ") + help.title; return help;
   };
   // The map reads this visit's real terrain and door coordinates; it never builds another island.
   hubScene.navigationMap = () => {

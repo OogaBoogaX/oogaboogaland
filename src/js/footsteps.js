@@ -15,7 +15,7 @@
   const SCUFF = 0.5, THUMP = 0.7, ATTACK_S = 0.004, SCUFF_S = 0.09, THUMP_S = 0.07;
 
   const create = () => {
-    let ctx = null, master = null, scuffs = null, thumps = null, muted = false;
+    let ctx = null, master = null, scuffs = null, thumps = null, muted = false, acoustics = null;
     let walker = null, lastPhase = 0, foot = 0, steps = 0;
     muted = BL.sound.muted;
     const soundChannel = BL.sound.channel("footsteps");
@@ -26,6 +26,7 @@
       master = ctx.createGain();
       master.gain.value = muted ? 0 : MASTER;
       master.connect(soundChannel.node(ctx));
+      acoustics = BL.roomAcoustics.create(ctx, master, soundChannel.node(ctx));
       const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
       const data = buffer.getChannelData(0);
       for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
@@ -95,6 +96,7 @@
       if (master) master.gain.setTargetAtTime(on ? 0 : MASTER, ctx.currentTime, 0.015);
     });
     const dispose = () => {
+      acoustics?.dispose(); acoustics = null;
       offSound(); soundChannel.release();
       if (ctx) ctx.close().catch(() => {});
       ctx = master = scuffs = thumps = walker = null;

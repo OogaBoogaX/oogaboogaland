@@ -5224,6 +5224,7 @@ const characterChecks = async () => {
   let inView = true;
   const capture = new Function("boundsOf", "slotInFrustum", "sphereInFrustum", `${source.match(/const CULL_MARGIN = [^;]+;/)[0]}
     ${source.match(/const INSTANCE_FLOATS = [^;]+;/)[0]} const MIRROR_FRUSTUM = [];
+    let cameraFeedCapture = false, cameraFeedRoom = false;
     ${source.slice(start, end)} return { visible: captureInstanceVisible, margin: CULL_MARGIN, stride: INSTANCE_FLOATS };`)(BL.scene.boundsOf, () => inView, () => inView);
   let small = 0, failures = 0;
   const check = (geometry, expected) => {
@@ -6428,6 +6429,37 @@ const dsbSharedDataChecks = async () => {
 // The six rain steps in Node: soak alone picks them, a step holds against a hover on its boundary, and
 // the amount that falls is continuous through them.
 const environmentSoundChecks = async () => {
+  {
+    // Inspect the real parallel effect: no outside allocation, bounded feed-forward
+    // taps, reusable room visits and disposal that preserves the source's dry wire.
+    const acousticContext = { window: {} }, acousticNodes = [];
+    const acousticParam = () => ({ value: 0, cancelScheduledValues() {}, setValueAtTime(v) { this.value = v; }, setTargetAtTime(v) { this.value = v; } });
+    const acousticNode = kind => {
+      const n = { kind, out: new Set(), gain: acousticParam(), frequency: acousticParam(), Q: acousticParam(), pan: acousticParam(), delayTime: acousticParam(),
+        connect(to) { this.out.add(to); }, disconnect(to) { if (to) this.out.delete(to); else this.out.clear(); } };
+      acousticNodes.push(n); return n;
+    };
+    const acousticAudio = { currentTime: 0, createGain: () => acousticNode("gain"), createBiquadFilter: () => acousticNode("filter"),
+      createDelay: () => acousticNode("delay"), createStereoPanner: () => acousticNode("pan") };
+    runInNewContext(await readFile(join(root, "src/js/room-acoustics.js"), "utf8"), acousticContext);
+    const acoustics = acousticContext.window.BL.roomAcoustics, source = acousticNode("source"), output = acousticNode("volume");
+    source.connect(output);
+    const effect = acoustics.create(acousticAudio, source, output, 0.6), lazy = acousticNodes.length === 2;
+    acoustics.setActive(true);
+    const count = acousticNodes.length, send = [...source.out].find(n => n !== output), wet = acousticNodes.find(n => n !== source && n.out.has(output));
+    const taps = acousticNodes.filter(n => n.kind === "delay"), filters = acousticNodes.filter(n => n.kind === "filter");
+    const acyclic = (n, path = new Set()) => !path.has(n) && [...n.out].every(next => acyclic(next, new Set([...path, n])));
+    const routed = source.out.has(output) && send.gain.value === 1 && wet.gain.value === 1 && acyclic(source)
+      && taps.length === 3 && taps.every(n => n.delayTime.value > 0 && n.delayTime.value < 0.12)
+      && filters.some(n => n.type === "highpass") && filters.some(n => n.type === "lowpass");
+    acoustics.setActive(false);
+    const off = send.gain.value === 0 && wet.gain.value === 0 && source.out.has(output);
+    acoustics.setActive(true); const reusedRoom = acousticNodes.length === count;
+    effect.dispose(); acoustics.setActive(false); acoustics.setActive(true);
+    const cleaned = source.out.size === 1 && source.out.has(output) && acousticNodes.slice(2).every(n => !n.out.size) && acousticNodes.length === count;
+    record("room acoustics: short filtered reflections are lazy, feed-forward, routed before volume, gated on exit, reused and fully disconnected without losing dry playback",
+      lazy && routed && off && reusedRoom && cleaned, JSON.stringify({ lazy, routed, off, reusedRoom, cleaned }));
+  }
   const events = new Map(), contexts = [];
   let saved = "off", writable = true;
   const param = () => ({ value: 0, calls: 0, setTargetAtTime(v) { this.value = v; this.calls++; },
@@ -6446,7 +6478,7 @@ const environmentSoundChecks = async () => {
   }
   const context = { window: { addEventListener: (k, fn) => events.set(k, fn) }, AudioContext,
     navigator: { userActivation: { hasBeenActive: true } }, localStorage: { getItem: () => saved, setItem: (k, v) => { if (!writable) throw Error("blocked"); saved = v; } } };
-  for (const file of ["math", "scene", "sound", "footsteps", "pet-reactions"]) runInNewContext(await readFile(join(root, `src/js/${file}.js`), "utf8"), context);
+  for (const file of ["math", "scene", "sound", "room-acoustics", "footsteps", "pet-reactions"]) runInNewContext(await readFile(join(root, `src/js/${file}.js`), "utf8"), context);
   const { sound, footsteps } = context.window.BL, feet = footsteps.create(), walker = { act: { phase: 0 }, hop: 0, ladder: null };
   feet.update(walker); walker.act.phase = Math.PI; feet.update(walker);
   const startsMuted = sound.muted && contexts.length === 0 && feet.steps === 1;
@@ -23645,7 +23677,7 @@ const hubMatrix = { name: "hub matrix", why: "regression: the OBL cave blanked f
     Object.assign(B.camera.position, eye); Object.assign(B.camera.target, target); H.overlay(0);
     return { free, freeAbove, outside, driven, drivenAbove, returned, batches, noDamage, gateLocked: M.gate.locked, wave: !!B.renderOpts.matrix };
   })()`);
-  record("hub matrix: free and following cameras keep their view inside, above and outside the cave, without glyph batches or mirror HP", [r.free, r.freeAbove, r.outside, r.driven, r.drivenAbove, r.returned].every(view => view.black < 64) && !r.batches && !r.wave && r.noDamage && r.gateLocked, JSON.stringify(r));
+  record("hub matrix: free and following cameras keep their view inside, above and outside the cave, without glyph batches or mirror HP", [r.free, r.freeAbove, r.outside, r.driven, r.drivenAbove, r.returned].every(view => view.black < 64) && !r.batches && !r.wave && r.noDamage && !r.gateLocked, JSON.stringify(r));
   const sealed = await b.evaluate(`__ooga.matrixGate.sealed.map(entry => ({ id: entry.mouth.id, visible: entry.node.visible, stop: entry.stopZ }))`);
   record("hub caves: the sealed cave retains its visible seal and collision boundary", sealed.length === 1 && sealed[0].id === "c9"
     && sealed.every(entry => entry.visible && Number.isFinite(entry.stop)), JSON.stringify(sealed));
@@ -23679,13 +23711,1069 @@ const hubMirror = { name: "hub mirror", why: "rule: rifle shots and melee ripple
     const meleeBefore = M.ripples.hits, swung = B.crew.swingWeapon(d);
     B.advance(0.7, 1 / 60);
     return { fired, ripples, swung, meleeRipples: M.ripples.hits - meleeBefore, shots: playerShots, decorative,
-      intact: M.node.geometry === geometry && M.node.visible && !M.node.mirrorReveal && M.gate.locked && !("damage" in M) && !("mirrorDamage" in M.node),
+      intact: M.node.geometry === geometry && M.node.visible && !M.node.mirrorReveal && !M.gate.locked && !("damage" in M) && !("mirrorDamage" in M.node),
       harmless: !B.crew.combatEnabled && !BL.scenes.hub.debug.gameMode && health === d.health.value };
   })()`);
   record("hub mirror: real player and NPC shots and a melee swing ripple intact glass without HP or character damage", physical.fired && physical.ripples > 0 && physical.shots === 1 && physical.harmless && physical.decorative && physical.swung && physical.meleeRipples > 0 && physical.intact, JSON.stringify(physical));
+  const approach = await b.evaluate(`(() => {
+    const B = __ooga, m = B.mirrorCave.mouth;
+    B.pilot.navigate({ position: { x: m.x + Math.sin(m.ry) * 4, y: m.floorY, z: m.z + Math.cos(m.ry) * 4 }, yaw: m.ry, pitch: 0.15, dist: 4 });
+    B.advance(0.3, 1 / 60);
+    const room = BL.scenes.hub.architect;
+    return { prepared: room.prepared, active: room.active, captures: room.feeds.reduce((n, f) => n + f.captures, 0), name: B.pilot.player.traits.name };
+  })()`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
+  await b.evaluate(`__ooga.advance(1, 1 / 60)`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+  const entered = await b.evaluate(`(() => {
+    const B = __ooga, room = BL.scenes.hub.architect;
+    B.advance(1.2, 1 / 60);
+    const glass = room.returnMirror.geometry, v = glass.verts, radius = room.returnMirror.parent.position.z;
+    let cylindrical = glass.faces.length === 32;
+    for (let i = 0; i < v.length; i += 3) cylindrical &&= Math.abs(Math.hypot(v[i], radius - v[i + 2]) - radius) < 1e-6;
+    const bounds = BL.scene.boundsOf(glass);
+    return { active: room.active, feet: B.pilot.player.root.position.y - B.pilot.player.baseY,
+      returnMirror: !!room.returnMirror?.geometry.reflector && room.returnMirror.geometry !== B.mirrorCave.node.geometry,
+      curvedMirror: cylindrical && bounds.max[2] - bounds.min[2] > 0.25
+        && Math.abs(bounds.max[0] - bounds.min[0] - 5) < 1e-6 && bounds.max[1] - bounds.min[1] === 3,
+      parked: !!B.pilot.player.weapon.parked && !B.pilot.player.weapon.primaryOwned && !B.pilot.player.weapon.secondaryOwned && !B.pilot.player.jetpackOwned && !B.pilot.player.jet,
+      name: B.pilot.player.traits.name, feeds: room.feeds.length, captures: room.feeds.reduce((n, f) => n + f.captures, 0) };
+  })()`);
+  const channels = await b.evaluate(`(() => {
+    const B = __ooga, room = BL.scenes.hub.architect, cameras = room.cameras;
+    const slots = room.feeds.map(f => f.geometry), seen = new Set(room.feeds.map(f => f.channel.id));
+    const assigned = new Set();
+    BL.scene.traverseVisible(room.group, node => { if (node.geometry?.imageSurface?.feed) assigned.add(node.geometry.imageSurface.feed.geometry); });
+    const source = room.feeds.find(f => f.channel.id === "bifrost.chamber").source;
+    const isolated = source.root.cameraHidden && !source.root.parent
+      && Array.from(source.meshes).every(g => g.cameraFeedSource === source && g.castShadow === false);
+    const sharedFactory = room.feeds.find(f => f.channel.id === "factory-core").source
+      === room.feeds.find(f => f.channel.id === "factory-lines").source;
+    const sharedArcade = room.feeds.find(f => f.channel.id === "arcade-floor").source
+      === room.feeds.find(f => f.channel.id === "arcade-mezzanine").source;
+    const sharedHangar = room.feeds.find(f => f.channel.id === "hangar-jet").source
+      === room.feeds.find(f => f.channel.id === "hangar-workshop").source;
+    const id = "observatory-regression", rec = { id, body: "test", zone: "bifrost.chamber", poseZone: "bifrost.chamber", x: 1.234, y: 0, z: 2.345, yaw: 0.6 };
+    let livePose = false, staleHidden = false;
+    BL.net.remotes.set(id, rec);
+    try {
+      source.update(0.11);
+      const actor = source.root.children.find(n => n.visible && n.position.x === rec.x && n.position.z === rec.z);
+      livePose = !!actor && actor.rotation.y === rec.yaw;
+      rec.poseZone = "main"; source.update(0.11); staleHidden = !!actor && !actor.visible;
+    } finally { BL.net.remotes.delete(id); }
+    let stable = true, gradual = true, pending = true;
+    const beforePause = room.feeds.map(f => f.channel.id);
+    cameras.setActive(false);
+    const released = source.meshes.size === 0 && source.root.children.length === 0 && room.feeds.every(f => !f.source);
+    cameras.update(90);
+    const paused = room.feeds.every((f, i) => f.channel.id === beforePause[i]);
+    cameras.setActive(true);
+    const rotatingSource = room.feeds.find(f => f.channel.id === "bifrost.chamber").source;
+    for (let i = 0; i < cameras.channels.length; i++) {
+      const before = room.feeds.map(f => f.channel.id);
+      cameras.update(BL.observatoryCameras.SWITCH_SECONDS + 0.1);
+      const changed = room.feeds.filter((f, j) => f.channel.id !== before[j]);
+      gradual &&= changed.length === 1; pending &&= changed.length === 1 && changed[0].pending;
+      stable &&= room.feeds.length === 32 && room.feeds.every((f, j) => f.geometry === slots[j])
+        && new Set(room.feeds.map(f => f.channel.id)).size === 32;
+      for (const feed of room.feeds) seen.add(feed.channel.id);
+    }
+    let privateRefused = false;
+    try { BL.observatoryTimechain.create(B.renderer, 0); } catch { privateRefused = true; }
+    B.advance(0.25, 1 / 60);
+    return { isolated, sharedFactory, sharedArcade, sharedHangar, livePose, staleHidden, stable, gradual, pending, paused, released, privateRefused,
+      rotatedSourceReleased: rotatingSource.meshes.size === 0,
+      publicOnly: !cameras.channels.some(c => c.id === "sphere-0"),
+      all: cameras.channels.every(c => seen.has(c.id)), mounted: slots.every(g => assigned.has(g)) };
+  })()`);
+  record("hub observatory: 32 stable slots rotate public views individually, pause outside and release isolated observers",
+    Object.values(channels).every(Boolean), JSON.stringify(channels));
+  const warmAreas = await b.evaluate(`(async () => {
+    const B = __ooga, room = BL.scenes.hub.architect;
+    for (let i = 0; i < 256 && !room.cameras.warm(); i++) {
+      await new Promise(resolve => setTimeout(resolve, 60));
+      B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+    }
+    return room.feeds.every(f => room.cameras.ready(f));
+  })()`);
+  record("hub observatory: all area replacements prewarm inside the shared capture budget", warmAreas);
+  const chair = await b.evaluate(`(() => {
+    const B = __ooga, room = BL.scenes.hub.architect, floor = BL.architectCave.FLOOR, a = B.pilot.player;
+    const start = { x: a.root.position.x, y: a.root.position.y - a.baseY, z: a.root.position.z };
+    B.pilot.navigate({ position: { x: 0, y: floor, z: 1.5 }, yaw: 0, pitch: 0.1, dist: 4 });
+    B.advance(0.4, 1 / 60);
+    const sit = room.sit(), seat = room.seat;
+    B.pilot.enterClose(true); B.advance(1, 1 / 60);
+    const oldYaw = seat.ry;
+    B.pilot.orbit.yaw += 0.8; B.pilot.orbit.tYaw = B.pilot.orbit.yaw;
+    room.update(1 / 60);
+    const swivel = Math.abs(seat.ry - oldYaw - 0.8) < 1e-6 && a.root.rotation.y === seat.ry;
+    B.advance(1, 1 / 60);
+    const ray = () => {
+      const p = B.camera.position, t = B.camera.target, n = Math.hypot(t.x - p.x, t.y - p.y, t.z - p.z);
+      return [(t.x - p.x) / n, (t.y - p.y) / n, (t.z - p.z) / n];
+    };
+    let previous = ray(), smooth = true, shoulder = true;
+    B.pilot.hooks.onZoom(1.15, {});
+    for (let i = 0; i < 90; i++) {
+      B.advance(1 / 60, 1 / 60);
+      const next = ray();
+      smooth &&= next.reduce((sum, n, j) => sum + n * previous[j], 0) > 0.97;
+      shoulder &&= B.pilot.view === "shoulder" && B.pilot.aiming;
+      previous = next;
+    }
+    B.pilot.hooks.onOrbit(100, 0); B.advance(1, 1 / 60);
+    const dx = B.camera.position.x - a.root.position.x, dz = B.camera.position.z - a.root.position.z;
+    const behind = -(dx * Math.sin(seat.ry) + dz * Math.cos(seat.ry)) / Math.hypot(dx, dz) > 0.8;
+    B.pilot.enterClose(); B.advance(1, 1 / 60);
+    B.pilot.modeAction("mode-toggle"); B.advance(1, 1 / 60);
+    const carryYaw = seat.ry;
+    B.pilot.hooks.onZoom(3, {}); B.advance(1, 1 / 60);
+    const orbitYaw = B.pilot.orbit.yaw;
+    B.pilot.hooks.onOrbit(200, 40); B.advance(1, 1 / 60);
+    const carryOrbit = !B.pilot.closeWanted && !B.pilot.aiming && Math.abs(B.pilot.orbit.yaw - orbitYaw) > 0.2
+      && seat.ry === carryYaw && a.root.rotation.y === carryYaw
+      && a.parts.head.rotation.y === 0 && a.parts.head.rotation.x === 0;
+    // Changing camera intent from third-person carry must work with the loadout parked.
+    B.pilot.modeAction("mode-toggle"); B.advance(1, 1 / 60);
+    const parkedCamera = B.pilot.aiming && !!a.weapon.parked && !a.weapon.equipped && !a.weapon.primaryEquipped;
+    B.pilot.modeAction("mode-toggle"); B.advance(1, 1 / 60);
+    const stand = B.crew.standPlayer(a), clear = !a.camp.seat && !seat.sitter
+      && room.segmentClear(a.root.position.x, floor, a.root.position.z, a.root.position.x, floor, a.root.position.z, 0.3, a.bodyHeight);
+    const top = room.supportAt(0, 0, floor + 1.1, 0);
+    const cushion = top > floor + 0.6 && top < floor + 1 && room.supportAt(0, 0, floor, 0.6) === floor;
+    B.pilot.navigate({ position: { x: 0, y: top, z: 0 }, yaw: 0, pitch: 0.1, dist: 4 });
+    B.advance(0.4, 1 / 60);
+    const onCushion = Math.abs(a.root.position.y - a.baseY - top) < 1e-6 && room.sit();
+    const parked = a.weapon.parked;
+    room.travel(false);
+    const released = !seat.sitter && !a.camp.seat && !room.pen.parent && !a.weapon.parked
+      && a.weapon.primaryOwned === parked.primaryOwned && a.weapon.secondaryOwned === parked.secondaryOwned
+      && a.weapon.ammo === parked.ammo && a.weapon.selectedSlot === parked.selectedSlot;
+    room.travel(true); B.pilot.navigate({ position: start, yaw: 0, pitch: 0.1, dist: 4 }); B.advance(1.1, 1 / 60);
+    return { sit, swivel, smooth, shoulder, behind, carryOrbit, parkedCamera, stand, clear, cushion, onCushion, released };
+  })()`);
+  record("hub observatory: combat zoom stays behind the chair, carry orbits a forward-facing sitter, standing and travel release the seat",
+    Object.values(chair).every(Boolean), JSON.stringify(chair));
+  const broadcast = await b.evaluate(`(async () => {
+    const B = __ooga, room = BL.scenes.hub.architect, panels = room.panels, face = room.cameras.portrait;
+    const sizes = new Set(panels.map(p => p.size)), groups = new Map();
+    for (const p of panels) { if (!groups.has(p.group)) groups.set(p.group, []); groups.get(p.group).push(p); }
+    const mosaics = panels.length === 608 && [1, 2, 3].every(n => sizes.has(n))
+      && Array.from(groups.values()).every(g => g.length === g[0].size ** 2
+        && g.every(p => p.normal.imageSurface.feed === g[0].normal.imageSurface.feed)
+        && new Set(g.map(p => p.normal.imageSurface.rect.join(","))).size === g.length);
+    const neighborRule = panels.every(p => panels.every(q => {
+      const dx = Math.abs(p.col - q.col);
+      return p.group === q.group || Math.abs(p.row - q.row) > 1 || Math.min(dx, 52 - dx) > 1
+        || p.normal.imageSurface.feed !== q.normal.imageSurface.feed;
+    }));
+    room.update(room.faceWait - room.broadcastTime - 0.5);
+    const warm = face.forceCapture && face.pending && room.broadcast === "feeds";
+    // Allow the global capture interval to elapse, then render the real head before the wave.
+    await new Promise(resolve => setTimeout(resolve, 510));
+    B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+    const captured = !face.pending && face.captures > 0 && Object.values(face.camera.up).every(Number.isFinite);
+    room.update(0.6); room.update(1.5);
+    const count = () => panels.filter(p => p.node.geometry === p.portrait).length;
+    const partial = room.broadcast === "to-face" && count() > 0 && count() < panels.length;
+    const mean = list => list.reduce((n, p) => n + p.delay, 0) / list.length;
+    const leads = mean(panels.filter(p => (p.row === 5 || p.row === 6) && p.col < 48))
+      < mean(panels.filter(p => (p.row === 0 || p.row === 11) && p.col < 48))
+      && mean(panels.filter(p => p.distance < 0.2)) < mean(panels.filter(p => p.distance > 0.8));
+    const tighter = BL.architectCave.FACE_SWEEP === 2.8 && panels.every(p => panels.every(q => p.col !== q.col
+      || Math.abs(p.delay - q.delay) < 0.36));
+    const flashed = panels.some(p => p.node.highlight > 0)
+      && panels.every(p => p.node.geometry === p.portrait || p.node.highlight === 0);
+    const flashRevision = room.returnMirror.reflectionRevision;
+    room.update(BL.architectCave.FACE_SWEEP);
+    const full = room.broadcast === "face" && count() === 608 && room.renderFeeds.length === 33
+      && panels.every(p => p.node.geometry.imageSurface.feed === face);
+    room.update(0.2);
+    const flashEnded = panels.every(p => p.node.highlight === 0 && p.flashTime === 0)
+      && room.returnMirror.reflectionRevision > flashRevision;
+    const beforeBackground = face.captures;
+    await new Promise(resolve => setTimeout(resolve, 510));
+    B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+    const background = face.roomTriangles > 0 && face.captures > beforeBackground && face.camera.far > 22 && !face.seedOnly;
+    room.update(room.faceHold); room.update(1.5);
+    const restoring = room.broadcast === "to-feeds" && count() > 0 && count() < panels.length;
+    room.update(BL.architectCave.FACE_SWEEP);
+    const restored = room.broadcast === "feeds" && panels.every(p => p.node.geometry === p.normal);
+    let infill = 0;
+    BL.scene.traverseVisible(room.group, node => {
+      const g = node.geometry;
+      if (g?.architectFeedOnly && g.imageSurface?.feed === face && g.imageSurface.seedFeed !== face && BL.scene.hiddenFromCamera(node)) infill++;
+    });
+    const mirrorFilled = infill === 16 && room.returnMirror.visible && room.returnMirror.geometry.reflector;
+    room.travel(true);
+    const flashReset = panels.every(p => p.node.highlight === 0 && p.flashTime === 0);
+    return { mosaics, neighborRule, warm, captured, partial, leads, tighter, flashed, full, flashEnded, background, restoring, restored, mirrorFilled, flashReset };
+  })()`);
+  record("hub observatory: 608 panels share mosaic textures, the sweep leads from the mirror and its face-only infill preserves the exit",
+    Object.values(broadcast).every(Boolean), JSON.stringify(broadcast));
+  const retiling = await b.evaluate(`(async () => {
+    const B = __ooga, room = BL.scenes.hub.architect, panels = room.panels, random = Math.random;
+    B.pilot.navigate({ position: { x: 0, y: BL.architectCave.FLOOR, z: 1.5 }, yaw: 0, pitch: 0.1, dist: 4 });
+    B.advance(0.3, 1 / 60); room.sit(); room.update(0);
+    for (let i = 0; i < 256 && !room.cameras.warm(); i++) {
+      await new Promise(resolve => setTimeout(resolve, 60));
+      B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+    }
+    const before = panels.map(p => p.node.geometry), old = panels.find(p => p.size === 3);
+    const nine = panels.filter(p => p.group === old.group), slot = old.normal.imageSurface.feed;
+    let blocked, splitOne, singles, mergeOne, merged, ordered, noBlank, retained, partialNeighbors, isolated, flashIsolated;
+    const neighborsValid = () => panels.every(p => panels.every(q => {
+      const sameLayout = !!p.next === !!q.next;
+      const sameGroup = sameLayout && p.group === q.group;
+      return sameGroup || Math.abs(p.row - q.row) > 1
+        || Math.min(Math.abs(p.col - q.col), 52 - Math.abs(p.col - q.col)) > 1
+        || p.node.geometry.imageSurface.feed !== q.node.geometry.imageSurface.feed;
+    }));
+    const stage = roll => {
+      let first = true;
+      Math.random = () => { if (first) { first = false; return (panels.indexOf(old) + 0.1) / panels.length; } return roll; };
+      room.update(room.layoutWait + 0.01);
+      Math.random = random;
+    };
+    try {
+      stage(0.99); // Only this nine-tile patch splits into independent full-frame feeds.
+      const missing = nine[0].next.normal.imageSurface.feed, pending = missing.pending;
+      try {
+        missing.pending = true;
+        room.update(10);
+        blocked = room.layoutPending && missing.forceCapture && panels.every((p, i) => p.node.geometry === before[i]);
+      } finally { missing.pending = pending; }
+      room.update(0);
+      const times = nine.map(p => p.delay).sort((a, b) => a - b);
+      room.update((times[0] + times[1]) / 2);
+      splitOne = nine.filter(p => p.next === null).length === 1
+        && nine.filter(p => p.next !== null).every(p => p.node.geometry === before[panels.indexOf(p)]);
+      flashIsolated = panels.filter(p => p.node.highlight > 0).length === 1
+        && nine.some(p => p.next === null && p.node.highlight > 0);
+      partialNeighbors = neighborsValid();
+      retained = room.renderFeeds.includes(slot) && slot.holdFrame && room.cameras.ready(slot);
+      noBlank = panels.every(p => room.cameras.ready(p.node.geometry.imageSurface.feed));
+      room.update(BL.architectCave.FACE_SWEEP);
+      singles = !room.layoutPending && nine.every(p => p.size === 1 && p.node.geometry === p.normal);
+      isolated = panels.every((p, i) => nine.includes(p) || p.node.geometry === before[i]);
+      stage(0); // Reassemble the same nine tiles, leaving all other groups in place.
+      room.update(0);
+      const group = panels.find(p => p.next?.size === 3).next.group;
+      const joining = panels.filter(p => p.next?.group === group), outgoing = joining.map(p => p.node.geometry);
+      const arrivals = joining.map(p => p.delay).sort((a, b) => a - b);
+      room.update((arrivals[0] + arrivals[1]) / 2);
+      partialNeighbors &&= neighborsValid();
+      mergeOne = joining.filter(p => !p.next).length === 1
+        && joining.every((p, i) => !p.next || p.node.geometry === outgoing[i]);
+      ordered = joining.every(p => joining.every(q => p.row !== q.row || (p.col < 24) !== (q.col < 24)
+        || q.distance - p.distance < 1e-6 || p.delay < q.delay));
+      noBlank &&= panels.every(p => room.cameras.ready(p.node.geometry.imageSurface.feed));
+      room.update(BL.architectCave.FACE_SWEEP);
+      merged = !room.layoutPending && joining.length === 9 && joining.every(p => p.size === 3
+        && p.normal.imageSurface.feed === joining[0].normal.imageSurface.feed)
+        && new Set(joining.map(p => p.normal.imageSurface.rect.join(","))).size === 9;
+      const neighbors = panels.every(p => panels.every(q => p.group === q.group || Math.abs(p.row - q.row) > 1
+        || Math.min(Math.abs(p.col - q.col), 52 - Math.abs(p.col - q.col)) > 1
+        || p.normal.imageSurface.feed !== q.normal.imageSurface.feed));
+      isolated &&= panels.every((p, i) => nine.includes(p) || p.node.geometry === before[i]);
+      return { blocked, splitOne, singles, mergeOne, merged, ordered, noBlank, retained, neighbors, partialNeighbors, isolated, flashIsolated };
+    } finally { Math.random = random; room.travel(true); }
+  })()`);
+  record("hub observatory: one patch splits and assembles tile by tile, preserving every outside screen and holding outgoing images until ready",
+    Object.values(retiling).every(Boolean), JSON.stringify(retiling));
+  const manualScreens = await b.evaluate(`(async () => {
+    const B = __ooga, room = BL.scenes.hub.architect, actor = B.pilot.player;
+    B.pilot.navigate({ position: { x: 0, y: BL.architectCave.FLOOR, z: 1.5 }, yaw: 0, pitch: 0.1, dist: 4 });
+    B.advance(0.3, 1 / 60);
+    const originalHand = actor.parts.fingersR.geometry, originalArm = actor.parts.armR.geometry;
+    const sitting = room.sit(), pen = room.pen.parent === actor.parts.fingersR;
+    const sameFist = actor.parts.fingersR.geometry === originalHand;
+    B.advance(0.3, 1 / 60);
+    room.update(120);
+    const heldFeeds = room.broadcast === "feeds";
+    for (let i = 0; i < 256 && !room.cameras.warm(); i++) {
+      await new Promise(resolve => setTimeout(resolve, 60));
+      B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+    }
+    if (room.layoutPending) { room.update(0); room.update(BL.architectCave.FACE_SWEEP); }
+
+    const armHidden = actor.parts.armR.cameraHidden;
+    // A stationary third-person click, with no hover or pointermove first, reaches the scene's tap hook.
+    const canvas = document.getElementById("scene"), rect = canvas.getBoundingClientRect();
+    const pointer = { bubbles: true, pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0,
+      clientX: rect.left + rect.width * 0.7, clientY: rect.top + rect.height * 0.6 };
+    canvas.dispatchEvent(new PointerEvent("pointerdown", { ...pointer, buttons: 1 }));
+    canvas.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0 }));
+    room.update(0.05);
+    const clicked = room.penButton.position.y < 0.18;
+    const pressed = actor.parts.fingersR.geometry === originalHand && room.penButton.position.y < 0.18;
+    room.update(0.2);
+    const springBack = room.penButton.position.y === 0.19 && actor.parts.fingersR.geometry === originalHand;
+    const pose = () => JSON.stringify([actor.parts.armR.position, actor.parts.armR.rotation, actor.parts.armR.quaternion,
+      actor.parts.forearmR.position, actor.parts.forearmR.rotation, actor.parts.fingersR.position, actor.parts.fingersR.quaternion, room.pen.position]);
+    const seatedPose = pose(), seatedArmX = actor.parts.armR.position.x;
+    B.pilot.enterClose(); B.advance(0.8, 1 / 60);
+    const firstPersonPen = room.pen.parent === actor.parts.fingersR && actor.parts.fingersR.geometry === originalHand
+      && actor.parts.armR.geometry === originalArm && actor.parts.armR.cameraHidden === armHidden;
+    B.pilot.hooks.onOrbit(0, 180); B.advance(0.3, 1 / 60);
+    const arm = actor.parts.armR, target = { ...B.camera.target }, pivotY = arm.position.y, pivotZ = arm.position.z;
+    const rigid = () => JSON.stringify([actor.parts.forearmR?.rotation, actor.parts.forearmR?.quaternion,
+      actor.parts.fingersR.rotation, actor.parts.fingersR.quaternion, room.pen.position]);
+    const grip = rigid();
+    const aimPen = elevation => {
+      const eye = B.camera.position, yaw = actor.root.rotation.y;
+      B.camera.target.x = eye.x + Math.sin(yaw) * Math.cos(elevation);
+      B.camera.target.y = eye.y + Math.sin(elevation);
+      B.camera.target.z = eye.z + Math.cos(yaw) * Math.cos(elevation);
+      room.update(0); return arm.rotation.x;
+    };
+    const low = aimPen(-1.4), lowX = arm.position.x, level = aimPen(0), levelX = arm.position.x;
+    const raised = aimPen(0.6), raisedX = arm.position.x, ceiling = aimPen(1.4);
+    const lateral = lowX === seatedArmX && Math.abs(raisedX) < Math.abs(lowX)
+      && Math.abs(levelX) <= Math.abs(lowX) && Math.sign(raisedX) === Math.sign(lowX);
+    const steady = pose(); room.update(0); room.update(0);
+    const noDrift = pose() === steady;
+    const cappedLift = level < low && raised <= level && Math.abs(raised - ceiling) < 1e-6
+      && Math.abs(ceiling + Math.PI / 2) < 1e-6 && aimPen(-1.4) === low;
+    const trackingPitch = aimPen(-0.6);
+    BL.scene.updateWorld(actor.root, actor.root.parent?.world);
+    const hand = actor.parts.fingersR, center = BL.scene.boundsOf(hand.geometry).center, m = hand.world, eye = B.camera.position;
+    const dx = m[0] * center[0] + m[4] * center[1] + m[8] * center[2] + m[12] - eye.x;
+    const dy = m[1] * center[0] + m[5] * center[1] + m[9] * center[2] + m[13] - eye.y;
+    const dz = m[2] * center[0] + m[6] * center[1] + m[10] * center[2] + m[14] - eye.z;
+    const forward = dx * Math.sin(actor.root.rotation.y) + dz * Math.cos(actor.root.rotation.y);
+    const screenY = (dy * Math.cos(-0.6) - forward * Math.sin(-0.6))
+      / (forward * Math.cos(-0.6) + dy * Math.sin(-0.6)) / Math.tan(B.camera.fov / 2);
+    const followsEye = trackingPitch < low && trackingPitch > ceiling && Math.abs(screenY + 0.75) < 0.03;
+    const rigidShoulder = rigid() === grip && arm.position.y === pivotY && arm.position.z === pivotZ
+      && arm.rotation.y === 0 && arm.rotation.z === 0;
+    const higherPen = (!actor.modelled || room.pen.position.x < 0) && room.pen.position.z === 0;
+    Object.assign(B.camera.target, target); room.update(0);
+    B.pilot.exitClose(); B.advance(0.8, 1 / 60);
+    const carryRestored = pose() === seatedPose;
+    await new Promise(resolve => setTimeout(resolve, 510));
+    B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+    room.update(0.01); room.update(BL.architectCave.FACE_SWEEP + 0.01); room.update(120);
+    const heldFace = room.broadcast === "face";
+    room.toggleView(); room.update(0); room.update(BL.architectCave.FACE_SWEEP + 0.01); room.update(120);
+    const restored = room.broadcast === "feeds";
+    const stand = B.crew.standPlayer(actor); room.update(0);
+    const released = !room.pen.parent && !room.toggleView() && actor.parts.fingersR.geometry === originalHand && actor.parts.armR.cameraHidden === armHidden;
+    room.update(room.faceWait - 0.5);
+    const automatic = room.cameras.portrait.forceCapture;
+    room.travel(true); B.advance(1.1, 1 / 60);
+    return { sitting, pen, sameFist, heldFeeds, firstPersonPen, lateral, noDrift, carryRestored, cappedLift, followsEye, rigidShoulder, higherPen, clicked, pressed, springBack, heldFace, restored, stand, released, automatic };
+  })()`);
+  record("hub observatory: seated pen toggles persistent views, standing removes it and resumes automatic transitions",
+    Object.values(manualScreens).every(Boolean), JSON.stringify(manualScreens));
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "s", code: "KeyS" });
+  await b.evaluate(`__ooga.advance(1, 1 / 60)`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "s", code: "KeyS" });
+  const returned = await b.evaluate(`(() => {
+    const B = __ooga, room = BL.scenes.hub.architect, count = () => room.feeds.reduce((n, f) => n + f.captures, 0);
+    const before = count(); B.advance(0.8, 1 / 60);
+    return { active: room.active, frozen: count() === before, feet: B.pilot.player.root.position.y - B.pilot.player.baseY, name: B.pilot.player.traits.name };
+  })()`);
+  record("hub mirror: nearby preparation stays idle, real walking enters 32 live feeds and returns the same Ooga with captures stopped",
+    approach.prepared && !approach.active && approach.captures === 0 && entered.active && entered.feet < -40
+      && entered.returnMirror && entered.curvedMirror && entered.parked && entered.feeds === 32 && entered.captures > 0 && !returned.active && returned.frozen && returned.feet > -10
+      && entered.name === approach.name && returned.name === approach.name, JSON.stringify({ approach, entered, returned }));
   await trip("hub").run(b);
-  const back = await b.evaluate(`(() => { const M = __ooga.mirrorCave; return M.node.visible && M.node.geometry.faces.length > 0 && !M.node.mirrorReveal && M.gate.locked && !("damage" in M) && !("mirrorDamage" in M.node); })()`);
-  record("hub mirror: the unbreakable pane and locked gate remain intact after leaving and returning", back);
+  const back = await b.evaluate(`(() => { const M = __ooga.mirrorCave; return M.node.visible && M.node.geometry.faces.length > 0 && !M.node.mirrorReveal && !M.gate.locked && !("damage" in M) && !("mirrorDamage" in M.node); })()`);
+  record("hub mirror: the unbreakable pane and open gate remain intact after leaving and returning", back);
+  const backward = await b.evaluate(`(() => {
+    const B = __ooga, room = BL.scenes.hub.architect, m = B.mirrorCave.mouth, results = [];
+    const key = type => window.dispatchEvent(new KeyboardEvent(type, { key: "s", code: "KeyS", bubbles: true }));
+    const angle = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) < 0.02;
+    for (const close of [false, true]) {
+      if (close) B.pilot.enterClose(); else B.pilot.exitClose();
+      B.pilot.navigate({ position: { x: m.x + Math.sin(m.ry) * 1.2, y: m.floorY, z: m.z + Math.cos(m.ry) * 1.2 },
+        yaw: m.ry + Math.PI + 0.2, pitch: 0.24, dist: 4, framed: true });
+      B.advance(1.1, 1 / 60);
+      const view = B.pilot.view, pitch = B.pilot.orbit.pitch, distance = B.pilot.orbit.dist;
+      key("keydown");
+      for (let i = 0; i < 60 && !room.active; i++) B.advance(1 / 60, 1 / 60);
+      const facing = room.active && angle(B.pilot.orbit.yaw, Math.PI + 0.2)
+        && Math.abs(B.pilot.orbit.pitch - pitch) < 0.02 && Math.abs(B.pilot.orbit.dist - distance) < 0.02 && B.pilot.view === view;
+      const z = B.pilot.player.root.position.z;
+      B.advance(0.12, 1 / 60); key("keyup");
+      const departingMirror = room.active && B.pilot.player.root.position.z < z - 0.2;
+      // Back through the room's mirror too, continuing on the island without another keydown.
+      B.pilot.navigate({ position: { x: 0, y: BL.architectCave.FLOOR, z: 9.8 }, yaw: 0.2, pitch: 0.24, dist: 4, framed: true });
+      B.advance(1.1, 1 / 60); key("keydown");
+      for (let i = 0; i < 60 && room.active; i++) B.advance(1 / 60, 1 / 60);
+      const returned = !room.active && angle(B.pilot.orbit.yaw, m.ry + 0.2) && B.pilot.view === view;
+      const p = B.pilot.player.root.position, along = () => (p.x - m.x) * Math.sin(m.ry) + (p.z - m.z) * Math.cos(m.ry), before = along();
+      B.advance(0.12, 1 / 60); key("keyup");
+      results.push({ close, facing, departingMirror, returned, departingIslandMirror: along() > before + 0.2 });
+    }
+    return results;
+  })()`);
+  record("hub mirror: backward crossings preserve first/third-person view and keep held S walking away in both directions",
+    backward.every(r => r.facing && r.departingMirror && r.returned && r.departingIslandMirror), JSON.stringify(backward));
+  const curvedExit = await b.evaluate(`(() => {
+    const B = __ooga, room = BL.scenes.hub.architect, results = [];
+    for (const x of [0, 1.8, -1.8]) {
+      room.travel(true);
+      const radius = room.returnMirror.parent.position.z, depth = Math.sqrt(radius * radius - x * x);
+      B.pilot.navigate({ position: { x, y: BL.architectCave.FLOOR, z: depth - 0.05 }, yaw: 0, pitch: 0, dist: 4 });
+      room.update(1.1);
+      const beforeGlass = room.active;
+      B.crew.player.root.position.z = depth + 0.02;
+      const walkable = BL.architectCave.clear(x, depth + 0.02, 0.4);
+      room.update(0);
+      results.push({ x, beforeGlass, walkable, crossed: !room.active });
+    }
+    return results;
+  })()`);
+  record("hub observatory: curved return glass triggers at its center and sides, with no early flat-plane exit",
+    curvedExit.every(r => r.beforeGlass && r.walkable && r.crossed), JSON.stringify(curvedExit));
+  const reflectedFlashes = await b.evaluate(`(() => {
+    const B = __ooga, R = B.renderer, quality = R.quality, root = BL.scene.createNode(), camera = BL.scene.createCamera();
+    const canvas = document.createElement("canvas"); canvas.width = canvas.height = 2;
+    const paint = canvas.getContext("2d"); paint.fillStyle = "#283c50"; paint.fillRect(0, 0, 2, 2);
+    const quad = () => ({ verts: [-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0],
+      faces: [{ i: [0, 1, 2, 3], color: [255, 255, 255], emissive: 1 }], lines: [], castShadow: false });
+    const screen = quad(), glass = quad(); glass.reflector = true;
+    screen.architectRoom = true; screen.imageSurface = { canvas, rect: [-1, -1, 2, 2], version: 0, feed: { geometry: screen } };
+    const tv = BL.scene.createNode({ geometry: screen, position: { x: 0, y: 1, z: -1 } });
+    const mirror = BL.scene.createNode({ geometry: glass, position: { x: 0, y: 1, z: 3 }, rotation: { x: 0, y: Math.PI, z: 0 }, reflectionRevision: 0 });
+    BL.scene.addChild(root, tv, mirror);
+    Object.assign(camera.position, { x: 0, y: 1, z: 0 }); Object.assign(camera.target, { x: 0, y: 1, z: 3 });
+    const display = document.getElementById("scene"), sample = document.createElement("canvas"); sample.width = sample.height = 1;
+    const pixels = sample.getContext("2d", { willReadFrequently: true }), rows = [];
+    const draw = () => {
+      R.render(root, camera, { clear: [0, 0, 0] });
+      pixels.drawImage(display, display.width / 2, display.height / 2, 1, 1, 0, 0, 1, 1);
+      const p = pixels.getImageData(0, 0, 1, 1).data; return p[0] + p[1] + p[2];
+    };
+    try {
+      for (const tier of ["low", "medium", "high"]) {
+        R.setQuality(tier); tv.visible = false; mirror.reflectionRevision++;
+        for (let i = 0; i < 8; i++) draw();
+        const empty = draw(); tv.visible = true; mirror.reflectionRevision++; const base = draw();
+        let tracks = true;
+        // Alternate on consecutive frames: a cadence-only capture misses at least one low-tier flash or release.
+        for (let i = 0; i < 6; i++) {
+          tv.highlight = i % 2 ? 0 : 0.9; mirror.reflectionRevision++;
+          const value = draw(); tracks &&= i % 2 ? Math.abs(value - base) < 5 : value > base + 15;
+        }
+        rows.push({ tier, screenRetained: base > empty + 15, tracks });
+      }
+      return rows;
+    } finally { R.releaseGeometry(screen); R.releaseGeometry(glass); R.setQuality(quality); R.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
+  })()`);
+  record("hub observatory: mirror captures TV images and each flash/release on consecutive frames at every quality tier",
+    reflectedFlashes.every(r => r.screenRetained && r.tracks), JSON.stringify(reflectedFlashes));
+  const heldMovement = await b.evaluate(`(() => {
+    const key = (type, key, code, repeat = false) => window.dispatchEvent(new KeyboardEvent(type, { key, code, repeat, bubbles: true }));
+    key("keydown", "w", "KeyW"); key("keydown", "d", "KeyD"); key("keydown", "Shift", "ShiftLeft");
+    const input = BL.controls.create({ tabNavigation: true });
+    input.takeMovement();
+    const a = input.read(), held = a.y > 0 && a.x > 0 && a.sprint;
+    input.reset(); key("keyup", "w", "KeyW"); key("keyup", "d", "KeyD"); key("keyup", "Shift", "ShiftLeft");
+    input.takeMovement(); const released = !input.read().y && !input.read().x && !input.read().sprint;
+    key("keydown", "s", "KeyS"); input.reset(); input.takeMovement(); const backward = input.read().y < 0;
+    key("keydown", "Tab", "Tab"); key("keyup", "Tab", "Tab"); key("keydown", "s", "KeyS", true);
+    input.reset(); input.takeMovement(); const cancelled = input.read().y === 0;
+    key("keyup", "s", "KeyS"); input.dispose(); __ooga.pilot.controls.reset();
+    return { held: !!held, released, backward, cancelled };
+  })()`);
+  record("land arrival input: new controls recover held diagonal movement and sprint, but not released or Tab-cancelled keys",
+    Object.values(heldMovement).every(Boolean), JSON.stringify(heldMovement));
+} };
+const hubObservatoryIsolation = { name: "hub observatory isolation", why: "regression: outdoor shadows made the enclosed floor look clipped and outdoor graphs were collected every room frame", run: async (b) => {
+  const isolation = await b.evaluate(`(async () => {
+    const B = __ooga, R = B.renderer, hub = BL.scenes.hub, room = hub.architect;
+    if (!B.pilot.player) B.pilot.possess(B.cavemen.get("portlandhodl"));
+    room.travel(true); B.advance(0.5, 1 / 60);
+    const geometry = BL.models.box({ w: 0.2, h: 0.2, d: 0.2, color: "#ff00ff" });
+    const inside = BL.scene.createNode({ geometry, position: { x: 2, y: -47, z: 4 } });
+    const outside = BL.scene.createNode({ geometry, position: { x: 25, y: 3, z: 0 } });
+    BL.scene.addChild(hub.root, inside, outside); room.update(0);
+    BL.scene.updateWorld(outside, hub.root.world);
+    const opts = { ...B.renderOpts, cameraFeeds: null }, oldWorld = outside.world[12];
+    outside.position.x++;
+    const passes = R.stats.shadowPassCount;
+    R.render(hub.root, B.camera, opts);
+    const base = R.stats, notTracked = outside.world[12] === oldWorld;
+    const localRoots = opts.viewRoots.includes(room.group) && opts.viewRoots.includes(B.pilot.player.root)
+      && opts.viewRoots.includes(inside) && !opts.viewRoots.includes(outside);
+    const noOutside = base.captureOnlyInstances === 0, noShadows = base.shadowPassCount === passes && base.shadowDraws === 0;
+    const indoorLight = opts.directStrength === 0 && opts.shadowStrength === 0 && opts.ambientFloor === 0.75 && opts.lightCount === 0;
+    const feed = room.feeds.find(f => !f.channel.build), before = feed.captures;
+    const captureOpts = { ...opts, cameraFeeds: [feed] }; feed.forceCapture = true;
+    let captured = false, separate = false, capturedCount = 0;
+    // Automatic frames must use this same feed selection; otherwise they can
+    // consume the shared capture interval just before every manual sample.
+    const render = R.render;
+    R.render = (root, camera, options, rigs) => {
+      const result = render(root, camera, root === hub.root ? captureOpts : options, rigs);
+      const now = R.stats;
+      if (now.captureOnlyInstances > 0) {
+        captured = feed.captures > before && outside.world[12] === outside.position.x;
+        separate = now.viewInstances === base.viewInstances;
+        capturedCount = now.captureOnlyInstances;
+      }
+      return result;
+    };
+    try {
+      for (let i = 0; i < 40 && !captured; i++) {
+        await new Promise(resolve => setTimeout(resolve, 30));
+        R.render(hub.root, B.camera, captureOpts);
+      }
+      R.render = render;
+      R.render(hub.root, B.camera, opts);
+      const idleAgain = R.stats.captureOnlyInstances === 0 && R.stats.viewInstances === base.viewInstances;
+      room.travel(false); B.advance(0.2, 1 / 60);
+      const restored = !B.renderOpts.viewRoots && B.renderOpts.shadowStrength > 0 && R.stats.shadowPassCount > passes;
+      return { localRoots, notTracked, noOutside, noShadows, indoorLight, captured, separate, idleAgain, restored,
+        viewInstances: base.viewInstances, capturedCount };
+    } finally {
+      R.render = render;
+      BL.scene.removeChild(hub.root, inside); BL.scene.removeChild(hub.root, outside); R.releaseGeometry(geometry);
+      room.travel(true); B.advance(0.2, 1 / 60);
+    }
+  })()`);
+  record("hub observatory: room-only frames skip outdoor transforms, draws and shadows; a live feed alone collects outside; exit restores daylight",
+    ["localRoots", "notTracked", "noOutside", "noShadows", "indoorLight", "captured", "separate", "idleAgain", "restored"].every(k => isolation[k]), JSON.stringify(isolation));
+} };
+const hubObservatoryFloor = { name: "hub observatory floor reflection", why: "regression: glossy floor clipping must exclude its backing and preserve coverage", run: async (b) => {
+  const floorReflection = await b.evaluate(`(async () => {
+    const B = __ooga, R = B.renderer, quality = R.quality, root = BL.scene.createNode(), floor = BL.architectCave.FLOOR;
+    const disc = center => {
+      const g = { verts: [center, 0, 0], faces: [], lines: [], castShadow: false };
+      for (let i = 0; i <= 48; i++) { const a = i * Math.PI / 24; g.verts.push(Math.sin(a) * 11, Math.cos(a) * 11, 0); }
+      for (let i = 1; i <= 48; i++) g.faces.push({ i: [0, i + 1, i], color: [0, 0, 0], emissive: 1 });
+      return g;
+    };
+    const backing = disc(0), fan = disc(0), shifted = disc(2);
+    // Isolate coverage from the room's artistic reflection strength. On black,
+    // its 0.3 strength stays below the pixel signal cutoff at an elevated view.
+    // Full strength makes backing leaks and fan seams more visible, not less.
+    for (const g of [fan, shifted]) { g.reflector = true; g.gloss = 1; }
+    const ceiling = { verts: [-30, -30, 0, 30, -30, 0, 30, 30, 0, -30, 30, 0],
+      faces: [{ i: [0, 1, 2, 3], color: [255, 255, 255], emissive: 1 }], lines: [], castShadow: false };
+    const ground = BL.scene.createNode({ geometry: backing, position: { x: 0, y: floor, z: 0 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 } });
+    const polish = BL.scene.createNode({ geometry: fan, position: { x: 0, y: floor + 0.014, z: 0 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, reflectionRevision: 0 });
+    BL.scene.addChild(root, ground, polish, BL.scene.createNode({ geometry: ceiling, position: { x: 0, y: floor + 9, z: 0 }, rotation: { x: Math.PI / 2, y: 0, z: 0 } }));
+    const camera = BL.scene.createCamera({ far: 90 }), display = document.getElementById("scene"), sample = document.createElement("canvas");
+    sample.width = 48; sample.height = 32;
+    const pixels = sample.getContext("2d", { willReadFrequently: true }), rows = [];
+    const draw = async (visible, geometry, reflective = true) => {
+      ground.visible = visible; polish.geometry = geometry; polish.visible = reflective; polish.reflectionRevision++;
+      for (let i = 0; i < 4; i++) {
+        R.render(root, camera, { clear: [0, 0, 0], bloomStrength: 0 });
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      R.render(root, camera, { clear: [0, 0, 0], bloomStrength: 0 });
+      pixels.drawImage(display, 0, 0, 48, 32); return pixels.getImageData(0, 0, 48, 32).data.slice();
+    };
+    try {
+      for (const tier of ["high", "low"]) for (const height of [4.5, 0.3]) {
+        R.setQuality(tier);
+        Object.assign(camera.position, { x: -0.7, y: floor + height, z: 5.5 });
+        Object.assign(camera.target, { x: 1.7, y: floor, z: 2 });
+        const unreflected = await draw(false, fan, false);
+        const reference = await draw(false, fan), backed = await draw(true, fan), retiled = await draw(true, shifted);
+        let lit = 0, backingLeaks = 0, seams = 0;
+        // The near-floor view can see the ceiling directly. Count only pixels
+        // made bright by the reflection, never the source itself or post effects.
+        for (let i = 0; i < reference.length; i += 4) if (reference[i] > 40 && unreflected[i] < 10) {
+          lit++; if (Math.abs(reference[i] - backed[i]) > 4) backingLeaks++;
+          if (Math.abs(backed[i] - retiled[i]) > 4) seams++;
+        }
+        rows.push({ tier, height, lit, backingLeaks, seams });
+      }
+      return rows;
+    } finally {
+      for (const g of [backing, fan, shifted, ceiling]) R.releaseGeometry(g);
+      R.setQuality(quality); R.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+    }
+  })()`);
+  record("hub observatory: glossy floor excludes its backing and stays continuous across different triangle fans and near-plane views",
+    floorReflection.every(r => r.lit > 128 && r.backingLeaks < r.lit * 0.02 && r.seams < r.lit * 0.02), JSON.stringify(floorReflection));
+} };
+const hubObservatoryAdmission = { name: "hub observatory admission", why: "rule: only mirror travel grants room collision, equipment and zone ownership", run: async b => {
+  const result = await b.evaluate(`(() => {
+    const B = __ooga, room = BL.scenes.hub.architect, a = B.pilot.player, S = B.headquarters.solids;
+    const F = BL.architectCave.FLOOR, m = B.mirrorCave.mouth;
+    room.travel(false); B.advance(1.1, 1 / 60);
+    const place = (x, y, z) => B.pilot.navigate({ position: { x, y, z }, yaw: 0, pitch: 0.1, dist: 4 });
+    place(13, -47, 0);
+    B.crew.setJetpackOwnership(a, true); B.crew.wearJetpack(a, BL.hubModels.jetpack(), BL.hubModels.jetFlame());
+    B.advance(0.1, 1 / 60);
+    const outside = !room.active && !room.contains(13, -47, 0) && !!a.jet && BL.net.state.zone !== "mirror"
+      && S.supportAt(13, 0, -47, -47, a) < F && S.ceilingAt(13, 0, -47, a) > F + BL.architectCave.HEIGHT
+      && S.flyable(13, 0, 13.2, 0, -47, a.bodyHeight, a);
+    B.crew.removeJetpack(a); B.crew.setJetpackOwnership(a, false);
+    place(0, -35, 0); B.advance(0.1, 1 / 60);
+    const shaft = !room.active && S.supportAt(0, 0, -35, -35, a) < F && BL.net.state.zone !== "mirror";
+    B.advance(4, 1 / 60);
+    const respawn = !room.active && a.root.position.y - a.baseY > -32;
+    const atMirror = z => place(m.x + Math.sin(m.ry) * z, m.floorY, m.z + Math.cos(m.ry) * z);
+    atMirror(0.8); room.update(1.1); atMirror(0.4); room.update(0.01); B.advance(2, 1 / 60);
+    const entered = room.active && room.contains(a.root.position.x, F, a.root.position.z)
+      && S.supportAt(0, 7.8, F, F, a) === F && BL.net.state.zone === "mirror";
+    const other = [...B.cavemen.values()].find(c => c !== a);
+    const foreign = !!other && !room.contains(0, F, 7.8, other) && S.supportAt(0, 7.8, F, F, other) < F;
+    place(0, F, BL.architectCave.RADIUS); room.update(0.1); B.advance(2, 1 / 60);
+    const exited = !room.active && !room.contains(0, F, 7.8) && BL.net.state.zone !== "mirror";
+    return { outside, shaft, respawn, entered, foreign, exited };
+  })()`);
+  record("Observatory admission: abyss flyers keep equipment and respawn; only mirror crossings enable room physics and zone",
+    Object.values(result).every(Boolean), JSON.stringify(result));
+} };
+
+const hubObservatoryLake = { name: "hub observatory lake", why: "rule: a visible lake camera follows mined blocks without waking outdoor effects", run: async b => {
+  await b.evaluate(`(() => { window.requestAnimationFrame = () => 0; })()`);
+  await b.sleep(50);
+  const result = await b.evaluate(`(() => {
+    const B = __ooga, hub = BL.scenes.hub, room = hub.architect, pool = B.poolIsland;
+    // Hold renderer visibility fixed to exercise the observer's demand gate independently of the wall layout.
+    let time = hub.elapsed;
+    const step = seconds => { for (let i = 0; i < Math.round(seconds * 60); i++) hub.update(1 / 60, time += 1 / 60); };
+    const feed = room.feeds.find(f => f.channel.id === "rainforest-under");
+    const started = pool.water.state.started;
+    for (const f of room.feeds) f.visible = false;
+    step(0.1);
+    BL.mempool.emit({ type: "block", height: 999991 });
+    const hidden = pool.water.state.started === started && pool.water.state.queued === 0;
+    feed.visible = true; step(0.1);
+    BL.mempool.emit({ type: "block", height: 999992 });
+    step(3);
+    const live = pool.water.state.cubes === 1 && pool.water.state.started === started + 1;
+    const isolated = !pool.effectsActive;
+    step(20);
+    const finished = pool.water.state.cubes === 0 && pool.water.state.queued === 0;
+    for (const f of room.feeds) f.visible = false;
+    step(0.1);
+    BL.mempool.emit({ type: "block", height: 999993 });
+    const stopped = pool.water.state.started === started + 1 && pool.water.state.queued === 0;
+    return { hidden, live, isolated, finished, stopped, looksUp: feed.camera.target.y > feed.camera.position.y };
+  })()`);
+  record("Observatory lake: visible feed animates mined blocks to completion with weather asleep and unseen feeds idle",
+    Object.values(result).every(Boolean), JSON.stringify(result));
+} };
+
+const hubObservatoryFocus = { name: "hub observatory focus", why: "rule: seated mouse buttons select one enhanced 7x7 feed or the face view without blank tiles or losing the saved layout", run: async b => {
+  await b.evaluate(`(() => {
+    const B = __ooga, room = BL.scenes.hub.architect;
+    B.pilot.navigate({ position: { x: 0, y: BL.architectCave.FLOOR, z: 1.5 }, yaw: 0, pitch: 0.1, dist: 4 });
+    B.pilot.player.weapon.aiming = false; B.pilot.refreshCombat(); B.pilot.exitClose(false);
+    B.advance(0.4, 1 / 60);
+    if (!room.sit()) throw new Error("Could not sit in the Observatory chair");
+    B.advance(0.2, 1 / 60); window.requestAnimationFrame = () => 0;
+  })()`);
+  const voice = await b.evaluate(`(() => {
+    BL.net.setBlend("hq-basement", 1); __ooga.advance(0.2, 1 / 60);
+    const s = BL.net.state;
+    return { zone: s.zone, to: s.blendTo, t: s.blendT,
+      gain: BL.voiceBlend.gain("mirror", s.blendTo, s.blendT, "mirror", null, 0) };
+  })()`);
+  record("Observatory voice: the room clears an island basement blend and hears an unlinked room visitor", voice.zone === "mirror" && voice.to === null && voice.t === 0 && voice.gain === 1, JSON.stringify(voice));
+  await b.sleep(50);
+  await b.evaluate(`(() => {
+    const B = __ooga, R = B.renderer, hub = BL.scenes.hub, room = hub.architect;
+    const now = performance.now.bind(performance); let stamp = now() + 1001;
+    Object.defineProperty(performance, "now", { configurable: true, value: () => stamp });
+    R.setQuality("high"); R.setScale(0.5);
+    const D = window.__focusCheck = { B, R, hub, room, now, overBudget: false,
+      step(n, dt = 1 / 60, frameMs = 16.7) { for (let i = 0; i < n; i++) {
+        stamp += frameMs; room.update(dt);
+        const before = room.renderFeeds.reduce((sum, f) => sum + f.captures, 0);
+        R.render(hub.root, B.camera, B.renderOpts);
+        if (room.renderFeeds.reduce((sum, f) => sum + f.captures, 0) - before > 1) this.overBudget = true;
+      } },
+      aim(col, row) {
+        const p = room.panels.find(p => p.col === col && p.row === row);
+        BL.scene.updateWorld(room.group, room.group.parent.world);
+        Object.assign(B.camera.position, { x: 0, y: BL.architectCave.FLOOR + 2.8, z: 0 });
+        Object.assign(B.camera.target, { x: p.node.world[12], y: p.node.world[13], z: p.node.world[14] });
+        this.step(1, 0);
+        const rect = document.getElementById("scene").getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      },
+      same(p, saved) { return p.normal === saved.normal && p.group === saved.group && p.size === saved.size; },
+      snapshot() { return room.panels.map(p => ({ normal: p.normal, group: p.group, size: p.size })); },
+      surfaces(extra) { return room.feeds.every(f => f.tiles.size <= 28)
+        && room.feeds.reduce((sum, f) => sum + f.surfaces.length - f.tiles.size, 0) === extra; },
+      edges() {
+        const focus = room.enhancement, groups = new Map(), affected = new Set(), current = new Map();
+        const inside = p => focus && (p.col - focus.col + 52) % 52 < 7 && p.row >= focus.row && p.row < focus.row + 7;
+        room.panels.forEach((p, i) => {
+          const base = this.baseline[i];
+          if (!groups.has(base.group)) groups.set(base.group, []);
+          groups.get(base.group).push({ p, base });
+          if (!current.has(p.group)) current.set(p.group, []);
+          current.get(p.group).push(p);
+          if (inside(p)) affected.add(p);
+        });
+        let retained = true, cuts = 0;
+        for (const members of groups.values()) {
+          const outside = members.filter(({ p }) => !inside(p)), base = members[0].base;
+          if (base.size < 2 || !outside.length || outside.length === members.length) continue;
+          cuts++; for (const { p } of outside) affected.add(p);
+          const kept = outside.filter(({ p }) => p.normal.imageSurface.feed === base.normal.imageSurface.feed);
+          retained &&= kept.length > 0 && kept[0].p.size < base.size && kept.length === kept[0].p.size ** 2
+            && kept.every(({ p }) => p.group === kept[0].p.group)
+            && outside.every(({ p }) => kept.some(k => k.p === p) || p.size === 1);
+        }
+        const complete = [...current.values()].every(members => {
+          const first = members[0], row = Math.floor(first.group / 52), col = first.group % 52;
+          return members.length === first.size ** 2 && members.every(p => p.size === first.size
+            && p.normal.imageSurface.feed === first.normal.imageSurface.feed
+            && p.row >= row && p.row < row + first.size && (p.col - col + 52) % 52 < first.size);
+        });
+        return { cuts, retained, complete, untouched: room.panels.every((p, i) => affected.has(p) || this.same(p, this.baseline[i])) };
+      }
+    };
+    // Finish any ordinary patch already in flight before taking the baseline.
+    for (let i = 0; i < 200 && room.layoutPending; i++) D.step(1);
+    D.baseline = D.snapshot(); D.surfaceCount = room.feeds.reduce((sum, f) => sum + f.surfaces.length, 0);
+  })()`);
+  const click = async (col, row) => {
+    const p = await b.evaluate(`__focusCheck.aim(${col}, ${row})`);
+    await b.click(p.x, p.y);
+  };
+  try {
+    // Settle only the renderer's adaptive clock, without advancing the room's
+    // random regrouping timer. Hover then runs through the actual mouse hook.
+    await b.evaluate('__focusCheck.step(1800, 0)');
+    const hoverPoint = await b.evaluate('__focusCheck.aim(24, 5)');
+    await b.mouse('mouseMoved', hoverPoint.x, hoverPoint.y);
+    const moving = await b.evaluate(`(() => {
+      const D = __focusCheck, room = D.room, x = D.R.size.width / 2, y = D.R.size.height / 2;
+      for (let i = 0; i < 40; i++) { room.hoverAt(x + (i % 2 ? 100 : -100), y); D.step(1); }
+      const quiet = room.feeds.every(f => !f.prewarm);
+      room.hoverAt(x, y); D.step(20);
+      return quiet && room.feeds.every(f => !f.prewarm);
+    })()`);
+    record("Observatory hover: fast movement and short pauses do not prewarm camera detail", moving);
+    const warmed = await b.evaluate(`(() => {
+      const D = __focusCheck, room = D.room;
+      let f, start = 0;
+      for (let i = 0; i < 120; i++) {
+        D.step(1); f = room.feeds.find(f => f.prewarm);
+        if (f && f.captureWidth === 1200) { start = D.R.cameraFeedBlend(f); break; }
+      }
+      if (!f) return { warmed: false };
+      const channel = f.channel; room.cameras.update(16);
+      // Measure the renderer fade without letting an unrelated random patch
+      // legitimately cancel this hover request halfway through the assertion.
+      D.step(10, 0); const middle = D.R.cameraFeedBlend(f);
+      D.step(30, 0); const end = D.R.cameraFeedBlend(f);
+      return { warmed: f.captureWidth === 1200, exclusive: room.feeds.filter(f => f.prewarm).length === 1,
+        pinned: channel === f.channel, normalCadence: f.refreshMs >= 160,
+        blend: start > 0.9 && middle > 0 && middle < start && end === 0, bounded: !D.overBudget };
+    })()`);
+    record("Observatory hover: settled cursor warms one pinned feed and blends its resolution smoothly without extra captures", Object.values(warmed).every(Boolean), JSON.stringify(warmed));
+    const cancelled = await b.evaluate(`(() => {
+      const D = __focusCheck; D.room.hoverAt(-1, -1); D.step(1);
+      const clear = D.room.feeds.every(f => !f.prewarm);
+      for (let i = 0; i < 200 && D.room.layoutPending; i++) D.step(1);
+      D.baseline = D.snapshot(); D.surfaceCount = D.room.feeds.reduce((sum, f) => sum + f.surfaces.length, 0);
+      return clear;
+    })()`);
+    record("Observatory hover: leaving the view cancels speculative detail", cancelled);
+    await b.evaluate(`(() => {
+      const D = __focusCheck, room = D.room, cols = 52;
+      const assign = (p, f, size, col, row) => {
+        p.normal = room.cameras.panel(f, size, p.col - col, p.row - row, p.pitchX, 0.75, p.scaleX, p.scaleY, 10.8 - 0.025 - 0.068 * 0.71);
+        p.node.geometry = p.normal; p.size = size; p.group = row * cols + col;
+        D.R.prepareGeometry(p.normal);
+      };
+      // Known 2x2/3x3 mosaics straddle both the first expansion and the wrapped
+      // expansion above the mirror. Every remaining panel starts as a full shot.
+      for (const p of room.panels) assign(p, room.feeds[(p.col + p.row * 5) % 32], 1, p.col, p.row);
+      for (const [col, row, size] of [[19, 3, 3], [27, 7, 2], [1, 6, 3], [46, 9, 2]]) {
+        const inside = p => p.col >= col && p.col < col + size && p.row >= row && p.row < row + size;
+        const adjacent = room.panels.filter(p => !inside(p) && p.col >= col - 1 && p.col <= col + size && p.row >= row - 1 && p.row <= row + size);
+        const f = room.feeds.find((f, i) => i !== 17 && i !== 6 && adjacent.every(p => p.normal.imageSurface.feed !== f));
+        for (const p of room.panels) if (inside(p)) assign(p, f, size, col, row);
+      }
+      D.baseline = D.snapshot();
+    })()`);
+    await click(24, 5);
+    const wave = await b.evaluate(`(() => {
+      const D = __focusCheck, room = D.room, focus = room.enhancement;
+      if (!focus) return { selected: false };
+      const pending = room.panels.filter(p => p.next), originals = new Map(room.panels.map(p => [p, p.node.geometry]));
+      const large = pending.filter(p => p.next.size === 7);
+      const ready = room.cameras.ready;
+      room.cameras.ready = f => f === focus.feed ? false : ready(f);
+      D.step(10, 0.1);
+      const held = room.panels.every(p => p.node.geometry === originals.get(p));
+      room.cameras.ready = ready;
+      // The enlargement and its edge repairs wait for their destination pictures.
+      for (let i = 0; i < 60 && !ready(focus.feed); i++) D.step(1);
+      D.step(1, 0); D.step(1, 0.5);
+      const replaced = large.filter(p => p.node.geometry !== originals.get(p)).length;
+      const outside = room.panels.filter(p => !pending.includes(p)).every(p => p.node.geometry === originals.get(p));
+      const noBlank = pending.every(p => p.node.geometry === originals.get(p) || ready(p.node.geometry.imageSurface.feed));
+      D.step(100);
+      return { selected: true, count: large.length, held, partial: replaced > 0 && replaced < 49, outside, noBlank,
+        complete: !room.layoutPending && room.panels.filter(p => p.size === 7).length === 49,
+        areaMode: room.broadcast === "feeds" };
+    })()`);
+    record("Observatory focus: left click expands exactly 49 tiles progressively, preserving outside tiles and holding unready replacements", Object.values(wave).every(v => v === true || v === 49), JSON.stringify(wave));
+    const edges = await b.evaluate('__focusCheck.edges()');
+    record("Observatory focus: partially covered 2x2 and 3x3 mosaics become complete smaller shots while retaining each displaced feed once", edges.cuts === 2 && edges.retained && edges.complete && edges.untouched, JSON.stringify(edges));
+    // A slow real startup may have reached level zero before the controlled
+    // clock starts: allow its six-second cooldown, two eight-second upgrades
+    // and two-second admission, plus one scheduled capture. Keep the same target.
+    await b.evaluate(`(() => { const D = __focusCheck, f = D.room.enhancement?.feed;
+      for (let i = 0; f && i < 1800 && (f.detail !== 3 || f.captureWidth !== 1200); i++) D.step(1);
+    })()`);
+    const quality = await b.evaluate(`(() => {
+      const D = __focusCheck, f = D.room.enhancement?.feed;
+      if (!f) return { enhanced: false };
+      const channel = f.channel; D.room.cameras.update(16);
+      return { enhanced: true, detail: f.detail, width: f.captureWidth, level: f.adaptiveLevel, frameMs: f.frameMs, pinned: f.channel === channel,
+        exclusive: D.room.feeds.filter(f => f.enhanced).length === 1, bounded: !D.overBudget,
+        surfaces: D.surfaces(49) };
+    })()`);
+    record("Observatory focus: one pinned feed preserves the original 6x6 pixel density without adding captures or unbounded screen geometry", quality.enhanced && quality.detail === 3 && quality.width === 1200 && quality.width / 7 >= 1024 / 6 && quality.pinned && quality.exclusive && quality.bounded && quality.surfaces, JSON.stringify(quality));
+    const cadence = await b.evaluate(`(() => {
+      const D = __focusCheck, f = D.room.enhancement.feed;
+      const before = D.room.renderFeeds.map(f => f.captures), selected = f.captures;
+      D.step(360);
+      const total = D.room.renderFeeds.reduce((sum, f, i) => sum + f.captures - before[i], 0), focused = f.captures - selected;
+      return { focused, others: total - focused, total, bounded: !D.overBudget };
+    })()`);
+    record("Observatory focus: enhanced picture receives about 15 updates per second while other feeds share the remaining capture slots", cadence.focused >= 80 && cadence.focused <= 92 && cadence.others >= 60 && cadence.total <= 181 && cadence.bounded, JSON.stringify(cadence));
+    if (process.env.OBSERVATORY_SHOTS) {
+      mkdirSync(process.env.OBSERVATORY_SHOTS, { recursive: true });
+      await b.screenshot(join(process.env.OBSERVATORY_SHOTS, 'enhanced-7x7.png'));
+    }
+    const slow = await b.evaluate(`(() => {
+      const D = __focusCheck, f = D.room.enhancement.feed;
+      D.step(200, 0.05, 50);
+      const before = D.room.renderFeeds.map(f => f.captures), selected = f.captures;
+      D.step(120, 0.05, 50);
+      const total = D.room.renderFeeds.reduce((sum, f, i) => sum + f.captures - before[i], 0), focused = f.captures - selected;
+      return { focused, others: total - focused, total, detail: f.detail, width: f.captureWidth, bounded: !D.overBudget };
+    })()`);
+    record("Observatory focus: slow frames reduce enhanced cadence and detail without starving other feeds or exceeding the global budget", slow.focused >= 16 && slow.focused <= 24 && slow.others >= 12 && slow.total <= 49 && slow.detail === 1 && slow.width === 304 && slow.bounded, JSON.stringify(slow));
+    await click(24, 5);
+    const restored = await b.evaluate(`(() => { const D = __focusCheck; D.step(100); return !D.room.enhancement && !D.room.layoutPending
+      && D.room.panels.every((p, i) => D.same(p, D.baseline[i]))
+      && D.room.feeds.every(f => !f.enhanced) && D.surfaces(0); })()`);
+    record("Observatory focus: clicking the enlargement restores its exact saved small-grid layout and releases its surfaces", restored);
+    await click(24, 5); await b.evaluate('__focusCheck.step(100)');
+    await click(50, 4);
+    const moved = await b.evaluate(`(() => {
+      const D = __focusCheck; D.step(100); const focus = D.room.enhancement;
+      const large = D.room.panels.filter(p => p.size === 7);
+      return { one: !!focus && D.room.feeds.filter(f => f.enhanced).length === 1 && large.length === 49,
+        includesClick: large.some(p => p.col === 50 && p.row === 4), mirrorClear: large.every(p => p.col < 48 || p.row >= 4),
+        continuous: large.some(p => p.col < 48) && large.some(p => p.col >= 48),
+        outside: D.edges().untouched, edges: D.edges().cuts === 2 && D.edges().retained && D.edges().complete,
+        released: D.surfaces(49) };
+    })()`);
+    record("Observatory focus: another feed replaces the old enlargement across the mirror columns without covering the exit or retaining old geometry", Object.values(moved).every(Boolean), JSON.stringify(moved));
+    const right = async p => { await b.mouse('mousePressed', p.x, p.y, { button: 'right', buttons: 2 }); await b.mouse('mouseReleased', p.x, p.y, { button: 'right', buttons: 0 }); };
+    await b.evaluate('__focusCheck.aiming = __focusCheck.B.pilot.aiming; __focusCheck.selected = __focusCheck.room.enhancement.feed');
+    // A miss must not click the pen or become a delayed toggle after dragging onto a TV.
+    const miss = await b.evaluate(`(() => { const D = __focusCheck; D.aim(50, 6);
+      Object.assign(D.B.camera.target, { x: 0, y: BL.architectCave.FLOOR, z: 4 }); D.step(1, 0);
+      const r = document.getElementById("scene").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    await b.mouse('mousePressed', miss.x, miss.y, { button: 'right', buttons: 2 });
+    const screen = await b.evaluate('__focusCheck.aim(50, 6)');
+    await b.mouse('mouseMoved', screen.x, screen.y, { button: 'right', buttons: 2 });
+    await b.mouse('mouseReleased', screen.x, screen.y, { button: 'right', buttons: 0 });
+    await b.evaluate('__focusCheck.step(100)');
+    const ignored = await b.evaluate('__focusCheck.room.broadcast === "feeds" && __focusCheck.room.panels.every(p => p.node.geometry === p.normal)');
+    record("Observatory right click: a floor miss and held drag onto a screen do not toggle the broadcast", ignored);
+    const p = await b.evaluate('__focusCheck.aim(50, 6)');
+    await right(p);
+    const radialWave = await b.evaluate(`(() => {
+      const D = __focusCheck, room = D.room, at = (col, row) => room.panels.find(p => p.col === col && p.row === row);
+      for (let i = 0; i < 120 && room.broadcast !== "to-face"; i++) D.step(1, 0);
+      const origin = at(50, 6), changed = room.panels.filter(p => p.node.geometry === p.portrait);
+      const first = changed.length === 1 && changed[0] === origin;
+      D.step(1, 0.14);
+      const spread = [at(49, 6), at(51, 6), at(50, 5), at(50, 7)].every(p => p.node.geometry === p.portrait);
+      const farHeld = [at(50, 11), at(24, 6)].every(p => p.node.geometry === p.normal);
+      const bounded = room.panels.every(p => p.delay < BL.architectCave.FACE_SWEEP);
+      D.delays = room.panels.map(p => p.delay);
+      return { first, spread, farHeld, bounded, flashed: origin.flashTime > 0 };
+    })()`);
+    record("Observatory right click: the selected tile leads a flashed wave above, below and around the wall while distant tiles hold their pictures", Object.values(radialWave).every(Boolean), JSON.stringify(radialWave));
+    // Queue a return from the far side while the first wave is still running.
+    const other = await b.evaluate('__focusCheck.aim(24, 4)'); await right(other);
+    const queued = await b.evaluate(`(() => { const D = __focusCheck, room = D.room;
+      D.step(1, 0); const unchanged = room.panels.every((p, i) => p.delay === D.delays[i]);
+      for (let i = 0; i < 300 && room.broadcast !== "face"; i++) D.step(1);
+      const face = room.broadcast === "face" && room.panels.every(p => p.node.geometry === p.portrait);
+      for (let i = 0; i < 120 && !room.panels.some(p => p.node.geometry === p.normal); i++) D.step(1, 0);
+      const changed = room.panels.filter(p => p.node.geometry === p.normal);
+      return { unchanged, face, returnOrigin: changed.length === 1 && changed[0].col === 24 && changed[0].row === 4 };
+    })()`);
+    await b.evaluate('for (let i = 0; i < 360 && __focusCheck.room.broadcast !== "feeds"; i++) __focusCheck.step(1)');
+    const returned = await b.evaluate('__focusCheck.room.broadcast === "feeds" && __focusCheck.room.panels.every(p => p.node.geometry === p.normal && !p.saved) && !__focusCheck.room.enhancement && __focusCheck.room.feeds.every(f => !f.enhanced && f.surfaces.length === f.tiles.size) && __focusCheck.B.pilot.aiming === __focusCheck.aiming');
+    record("Observatory right click: a queued return keeps both wave origins, restores the smaller area grids and releases their enhancement without changing combat intent", Object.values(queued).every(Boolean) && returned, JSON.stringify({ ...queued, returned }));
+    // Face enhancement starts from singles after the area selection was cleared.
+    await right(await b.evaluate('__focusCheck.aim(50, 6)'));
+    await b.evaluate('__focusCheck.step(360); __focusCheck.areaBeforeFace = __focusCheck.snapshot()');
+    await click(50, 6);
+    const faceFocus = await b.evaluate(`(() => {
+      const D = __focusCheck, room = D.room, focus = room.faceEnhancement;
+      if (!focus) return { selected: false };
+      const pending = room.panels.filter(p => p.next), originals = new Map(room.panels.map(p => [p, p.node.geometry]));
+      const ready = room.cameras.ready; room.cameras.ready = f => f === focus.feed ? false : ready(f);
+      D.step(10, 0.1);
+      const held = room.panels.every(p => p.node.geometry === originals.get(p)); room.cameras.ready = ready;
+      for (let i = 0; i < 60 && !ready(focus.feed); i++) D.step(1);
+      D.step(1, 0); D.step(1, 0.5);
+      const replaced = pending.filter(p => p.node.geometry !== originals.get(p)).length;
+      const noBlank = pending.every(p => p.node.geometry === originals.get(p) || ready(p.node.geometry.imageSurface.feed));
+      D.step(100);
+      const large = room.panels.filter(p => p.portrait !== p.portraitSingle);
+      return { selected: true, held, partial: replaced > 0 && replaced < 49, noBlank, count: large.length,
+        clicked: large.some(p => p.col === 50 && p.row === 6), mirrorClear: large.every(p => p.col < 48 || p.row >= 4),
+        outside: room.panels.filter(p => !pending.includes(p)).every(p => p.node.geometry === originals.get(p)),
+        source: large.every(p => p.node.geometry.imageSurface.feed === room.cameras.portrait),
+        cropped: new Set(large.map(p => p.node.geometry.imageSurface.rect.join())).size === 49,
+        area: room.panels.every((p, i) => D.same(p, D.areaBeforeFace[i])),
+        complete: room.broadcast === "face" && !room.layoutPending };
+    })()`);
+    record("Observatory face enhancement: the clicked face becomes one continuous 49-tile picture with progressive ready images, a clear mirror and an unchanged area layout", faceFocus.count === 49 && Object.entries(faceFocus).every(([k, v]) => k === "count" || v === true), JSON.stringify(faceFocus));
+    const faceDetail = await b.evaluate(`(() => { const D = __focusCheck, f = D.room.cameras.portrait;
+      for (let i = 0; i < 1800 && f.captureWidth !== 1200; i++) D.step(1);
+      D.step(40);
+      return { width: f.captureWidth, detail: f.detail, room: f.roomBackground, live: !f.seedOnly,
+        bounded: !D.overBudget, surfaces: f.surfaces.length - f.tiles.size === 49,
+        noNewFeeds: D.room.renderFeeds.length === 33 };
+    })()`);
+    record("Observatory face enhancement: the shared live portrait reaches 1200px within the existing capture and geometry budgets", faceDetail.width === 1200 && faceDetail.detail === 3 && faceDetail.room && faceDetail.live && faceDetail.bounded && faceDetail.surfaces && faceDetail.noNewFeeds, JSON.stringify(faceDetail));
+    if (process.env.OBSERVATORY_SHOTS) await b.screenshot(join(process.env.OBSERVATORY_SHOTS, 'enhanced-face-7x7.png'));
+    await click(24, 5); await b.evaluate('__focusCheck.step(100)');
+    const faceMoved = await b.evaluate(`(() => { const D = __focusCheck, room = D.room, large = room.panels.filter(p => p.portrait !== p.portraitSingle);
+      return large.length === 49 && large.some(p => p.col === 24 && p.row === 5) && !large.some(p => p.col === 50)
+        && room.cameras.portrait.surfaces.length - room.cameras.portrait.tiles.size === 49;
+    })()`);
+    await click(24, 5); await b.evaluate('__focusCheck.step(100)');
+    const faceRestored = await b.evaluate(`(() => { const room = __focusCheck.room;
+      return !room.faceEnhancement && !room.cameras.portrait.enhanced && room.panels.every(p => p.node.geometry === p.portraitSingle)
+        && room.cameras.portrait.surfaces.length === room.cameras.portrait.tiles.size;
+    })()`);
+    record("Observatory face enhancement: another face moves the sole enlarged patch and clicking it again restores all singles and releases temporary geometry", faceMoved && faceRestored, JSON.stringify({ faceMoved, faceRestored }));
+    await click(24, 5); await b.evaluate('__focusCheck.step(100)');
+    await right(await b.evaluate('__focusCheck.aim(24, 5)'));
+    await b.evaluate('__focusCheck.step(1); for (let i = 0; i < 360 && __focusCheck.room.broadcast !== "feeds"; i++) __focusCheck.step(1)');
+    const areaBack = await b.evaluate('__focusCheck.room.panels.every((p, i) => p.node.geometry === p.normal && __focusCheck.same(p, __focusCheck.areaBeforeFace[i]))');
+    await right(await b.evaluate('__focusCheck.aim(24, 5)')); await b.evaluate('__focusCheck.step(360)');
+    const faceBack = await b.evaluate('!__focusCheck.room.faceEnhancement && !__focusCheck.room.cameras.portrait.enhanced && __focusCheck.room.panels.every(p => p.portrait === p.portraitSingle && p.node.geometry === p.portraitSingle) && __focusCheck.room.cameras.portrait.surfaces.length === __focusCheck.room.cameras.portrait.tiles.size');
+    record("Observatory face enhancement: right-click clears the enlargement and returning shows singles with temporary surfaces released", areaBack && faceBack, JSON.stringify({ areaBack, faceBack }));
+    const stood = await b.evaluate(`(() => { const D = __focusCheck; D.B.crew.standPlayer(D.B.pilot.player); D.step(100);
+      const faceCleared = !D.room.faceEnhancement && !D.room.cameras.portrait.enhanced && D.room.panels.every(p => p.portrait === p.portraitSingle);
+      for (let i = 0; i < 1500 && (D.room.enhancement || D.room.layoutPending || D.room.broadcast !== "feeds"); i++) D.step(1);
+      return faceCleared && !D.room.enhancement && D.room.feeds.every(f => !f.enhanced) && D.room.panels.every((p, i) => D.same(p, D.baseline[i])); })()`);
+    record("Observatory focus: standing restores the ordinary layout and releases enhancement priority", stood);
+  } finally { await b.evaluate('Object.defineProperty(performance, "now", {configurable:true,value:__focusCheck.now})'); }
+} };
+const hubObservatoryAuthored = { name: "hub observatory authored detail", why: "rule: focused scenery builds incrementally, blends in and releases without entering its source scene", run: async b => {
+  await b.evaluate(`(() => { __ooga.advance(0.4, 1 / 60); window.requestAnimationFrame = () => 0; })()`);
+  await b.sleep(50);
+  for (const id of ["sphere-1", "sphere-2", "sphere-3", "sphere-4", "sphere-5", "sphere-6", "sphere-7", "factory.hall", "factory.hangar", "arcade.hall"]) {
+    const r = await b.evaluate(`(async () => {
+      const id = ${JSON.stringify(id)}, R = __ooga.renderer;
+      await BL.deferred.load(id.startsWith("sphere-") ? "timechain" : id === "factory.hall" ? "factory-scene" : id === "factory.hangar" ? "hangar-scene" : "arcade-scene");
+      const source = id.startsWith("sphere-") ? BL.observatoryTimechain.create(R, Number(id.slice(7))) : BL.observatoryWorkshops.create(R, id);
+      BL.observatoryDetail.attach(source, id, R);
+      const baseline = source.meshes.size, f = source.focus; let stamp = 0, steps = 0;
+      while (f.state !== "ready" && f.state !== "unavailable" && steps < 2400) {
+        f.restore(); source.setDetail(2); f.apply(true, stamp += 80, true); steps++;
+        if (steps % 8 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      const grown = source.meshes.size > baseline, batches = f.batches, state = f.state, error = f.error;
+      f.restore(); source.setDetail(0);
+      const coarse = source.root.children.slice(0, -1).some(n => n.visible && !n.geometry?.cameraFeedVisitor)
+        && !source.root.children.at(-1).visible;
+      const scope = "observatory-detail-" + id, M = BL.timechainRoomModels, roomId = Number(id.slice(7));
+      const snapshot = () => ({ shell: M.sphere(roomId), plan: M.plan(roomId),
+        statue: roomId === 3 ? M.KINDS.temple.statue() : null,
+        canvases: M.geometries(roomId).map(g => g.imageSurface?.canvas).filter(Boolean) });
+      const before = id.startsWith("sphere-") ? M.withScope(scope, snapshot) : null;
+      f.clear(); let released = source.meshes.size === baseline && !source.root.children.at(-1).children.length;
+      BL.models.assertReleased(scope);
+      if (before) {
+        // Re-reading under a disposable owner must rebuild CPU payloads too, not just GPU wrappers.
+        const probe = scope + "-probe", after = M.withScope(probe, snapshot);
+        released &&= before.shell !== after.shell && before.plan !== after.plan
+          && (!before.statue || before.statue !== after.statue)
+          && before.canvases.length > 0 && after.canvases.every(c => !before.canvases.includes(c));
+        BL.models.release(probe, ["hub", "timechain"]); BL.models.assertReleased(probe);
+      }
+      // Cancelling while the deferred Promise is pending cannot attach late geometry.
+      const load = BL.deferred.load; let resolve;
+      BL.deferred.load = () => new Promise(r => { resolve = r; });
+      try { f.apply(true, stamp + 80, true); f.clear(); resolve(); await Promise.resolve(); }
+      finally { BL.deferred.load = load; }
+      const cancelled = f.state === "idle" && source.meshes.size === baseline;
+      source.dispose();
+      return { state, error, grown, batches, steps, coarse, released, cancelled, scene: __ooga.scene };
+    })()`);
+    record(`Observatory authored detail: ${id} builds actual scenery, retains the coarse view and releases cancelled work`, r.state === "ready" && r.grown && r.batches > 0 && r.coarse && r.released && r.cancelled && r.scene === "hub", JSON.stringify(r));
+  }
+  const retained = await b.evaluate(`(() => {
+    const M = BL.timechainRoomModels, scope = "observatory-detail-owner-check";
+    try { M.withScope(scope, () => { throw new Error("cancelled build"); }); } catch {}
+    const scene = M.sphere(7), statue = M.KINDS.temple.statue();
+    const shared = M.withScope(scope, () => M.sphere(7)), sharedStatue = M.withScope(scope, () => M.KINDS.temple.statue());
+    BL.models.release(scope, ["timechain"]);
+    return scene === shared && M.sphere(7) === scene && statue === sharedStatue && M.KINDS.temple.statue() === statue;
+  })()`);
+  record("Observatory authored detail: observer cleanup preserves a Timechain-owned mesh and scope restores after cancellation", retained);
+  await b.evaluate(`(() => {
+    const B = __ooga, R = B.renderer, hub = BL.scenes.hub, room = hub.architect;
+    B.pilot.navigate({ position: { x: 0, y: BL.architectCave.FLOOR, z: 1.5 }, yaw: 0, pitch: 0.1, dist: 4 });
+    B.advance(0.3, 1 / 60); if (!room.sit()) throw new Error("Could not sit for scenery check");
+    B.advance(0.2, 1 / 60); R.setQuality("high"); R.setScale(0.5);
+    const now = performance.now.bind(performance); let stamp = now() + 1001;
+    Object.defineProperty(performance, "now", { configurable: true, value: () => stamp });
+    const D = window.__authoredCheck = { B, R, hub, room, now, overBudget: false, blended: false,
+      step(n, dt = 1 / 60) { for (let i = 0; i < n; i++) {
+        stamp += 16.7; room.update(dt);
+        const before = room.renderFeeds.reduce((n, f) => n + f.captures, 0);
+        R.render(hub.root, B.camera, B.renderOpts);
+        if (room.renderFeeds.reduce((n, f) => n + f.captures, 0) - before > 1) this.overBudget = true;
+        if (this.feed?.source.focus.batches && R.cameraFeedBlend(this.feed) > 0) this.blended = true;
+      } }
+    };
+    D.step(1800, 0);
+    const feed = D.feed = room.feeds.find(f => f.channel.id === "sphere-7");
+    const p = room.panels.find(p => p.normal.imageSurface.feed === feed);
+    BL.scene.updateWorld(room.group, room.group.parent.world);
+    Object.assign(B.camera.position, { x: 0, y: BL.architectCave.FLOOR + 2.8, z: 0 });
+    Object.assign(B.camera.target, { x: p.node.world[12], y: p.node.world[13], z: p.node.world[14] });
+    D.step(1, 0); room.enhanceAt();
+  })()`);
+  try {
+    await b.evaluate(`(() => { const D = __authoredCheck; for (let i = 0; i < 180 && !D.feed.source.focus.batches; i++) D.step(1); })()`);
+    if (process.env.OBSERVATORY_SHOTS) {
+      mkdirSync(process.env.OBSERVATORY_SHOTS, { recursive: true });
+      await b.screenshot(join(process.env.OBSERVATORY_SHOTS, "authored-building.png"));
+    }
+    const r = await b.evaluate(`(() => {
+      const D = __authoredCheck, f = D.feed;
+      for (let i = 0; i < 2400 && (f.source.focus.state !== "ready" || D.room.layoutPending); i++) D.step(1);
+      D.step(90);
+      return { state: f.source.focus.state, error: f.source.focus.error, enhanced: D.room.enhancement?.feed === f,
+        batches: f.source.focus.batches, width: f.captureWidth, triangles: f.triangles, blended: D.blended,
+        balanced: D.room.feeds.every(other => other === f || other.detail <= 1 && other.refreshMs >= 1000), bounded: !D.overBudget };
+    })()`);
+    record("Observatory authored detail: the selected 7x7 fades in real scenery while other feeds relinquish detail and refresh time", r.state === "ready" && r.enhanced && r.width === 1200 && r.triangles > 1000 && r.blended && r.balanced && r.bounded, JSON.stringify(r));
+    if (process.env.OBSERVATORY_SHOTS) await b.screenshot(join(process.env.OBSERVATORY_SHOTS, "authored-planetarium-7x7.png"));
+    const cancelled = await b.evaluate(`(() => { const D = __authoredCheck, source = D.feed.source;
+      D.B.crew.standPlayer(D.B.pilot.player); D.step(360);
+      return source.focus.state === "idle" && source.focus.batches === 0;
+    })()`);
+    record("Observatory authored detail: standing releases the focused room scenery", cancelled);
+  } finally { await b.evaluate('Object.defineProperty(performance, "now", {configurable:true,value:__authoredCheck.now})'); }
 } };
 // Distant mirrors keep refreshing at reduced resolution; low also bounds refreshes and retained GPU targets.
 const hubMirrorMedium = { name: "hub mirror medium size", why: "regression: lower tiers replaced distant mirror reflections with a grey face instead of keeping a cheaper live reflection", run: async (b) => {
@@ -28313,6 +29401,39 @@ const bootFixture = async (b, body) => {
   await b.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: script.result.identifier });
 };
 const bootWait = (b, condition, ms = 15000) => b.evaluate(`new Promise(resolve=>{const start=performance.now(),tick=()=>{let value=false;try{value=!!(${condition});}catch{}if(value||performance.now()-start>${ms})resolve(value);else setTimeout(tick,25);};tick();})`);
+const hubRendererFailure = { name: "hub renderer failure", why: "regression: black loading curtains hid the renderer failure message and retry control", run: async b => {
+  const normal = await b.evaluate(`(() => { const c = document.getElementById("curtain");
+    return !c || !c.dataset.failed && getComputedStyle(c.querySelector(".curtain-label")).visibility === "hidden"; })()`);
+  const url = await b.evaluate("location.href");
+  const script = await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+    window.__rendererFailure = { attempts: [], warnings: 0 };
+    const get = HTMLCanvasElement.prototype.getContext, warn = console.warn;
+    HTMLCanvasElement.prototype.getContext = function(type, ...args) {
+      if (this.id === "scene") { __rendererFailure.attempts.push(type); throw new Error("renderer failure fixture"); }
+      return get.call(this, type, ...args);
+    };
+    console.warn = (...args) => { if (args[0] === "WebGL2 renderer failed, using Canvas 2D fallback" && args[1]?.message === "renderer failure fixture") __rendererFailure.warnings++; else warn(...args); };
+  })()` });
+  try {
+    await b.open(url);
+    const failed = await bootWait(b, 'document.getElementById("curtain")?.dataset.failed === "true"');
+    const r = await b.evaluate(`(() => {
+      const c = document.getElementById("curtain"), saying = document.getElementById("curtain-saying"), button = saying.querySelector("button"), rect = button?.getBoundingClientRect();
+      return { ...__rendererFailure, text: saying.textContent, visible: !!button && getComputedStyle(button).visibility === "visible" && rect.width > 0 && rect.height > 0,
+        focused: document.activeElement === button, usable: !!button && !button.closest("[inert]"),
+        hit: !!button && document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === button,
+        x: rect?.x + rect?.width / 2, y: rect?.y + rect?.height / 2 };
+    })()`);
+    record("renderer failure: normal loading stays black, but both failed renderers show a focused and clickable retry", normal && failed && r.attempts.includes("webgl2") && r.attempts.includes("2d") && r.warnings === 1 && r.text.includes("The island could not open.") && r.visible && r.focused && r.usable && r.hit, JSON.stringify(r));
+    await b.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: script.result.identifier });
+    if (r.hit) {
+      await b.mouse("mousePressed", r.x, r.y, { button: "left", buttons: 1 });
+      await b.mouse("mouseReleased", r.x, r.y, { button: "left", buttons: 0 });
+      const recovered = await bootWait(b, 'window.__ooga?.scene === "hub"', 25000);
+      record("renderer failure: retry reloads into a playable island", recovered);
+    }
+  } finally { await b.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: script.result.identifier }).catch(() => {}); }
+} };
 const hubBootHold = { name: "hub boot hold", why: "regression: sliced cold boot accepted canvas, HUD and keyboard input before the first visit was ready", run: async (b) => {
   await bootFixture(b, `
     const H=BL.scenes.hub,steps=H.enterSteps,createPilot=BL.pilot.create,S=window.__bootHold={released:false,paused:false,actions:0};
@@ -28387,6 +29508,7 @@ const hubBootDonationReplay = { name: "hub boot donation replay", why: "regressi
   const state = await b.evaluate(`({ready:${ready},captured:!!window.__bootDonation?.fn,seen:__bootDonationState.seen,donations:__ooga.game.state.donations,toast:document.getElementById("toast").textContent})`);
   record("hub boot donation replay: the real subscription replays a boot tip to the arriving scene exactly once", paused && captured && ready && state.seen === 1 && state.donations === 1 && /1\.2K|1,200/.test(state.toast), JSON.stringify(state));
 } };
+scene("hub", { label: "renderer failure", steps: [hubRendererFailure] });
 scene("hub", { label: "boot lifecycle", query: "terrainworker=0", steps: [hubBootHold, hubBootFailure, hubBootPagehide, hubBootTierUploads, hubBootDonationReplay] });
 // A scene with no enterSteps is entered in one go: a throw there must end at the Reload notice, not throw again every frame.
 const ordinaryEntryFailure = { name: "ordinary entry failure", why: "regression: a throw from an ordinary scene's enter left every later frame throwing on a black screen with no way out", run: async (b) => {
@@ -28466,7 +29588,7 @@ scene("hub", { label: "entry failure", query: "hubcache=release", steps: [{ name
   await hubEntryFailure(b, "first");
 } }] });
 scene("hub", { label: "kept entry failure", query: "hubcache=keep", steps: [{ name: "hub kept entry failure", why: "regression: a kept hub resumes inside the first entry slice, where an error repeated the swap instead of offering Reload", run: b => hubEntryFailure(b, "resume") }] });
-scene("hub", { label: "entry spinner", query: "hubcache=keep", steps: [{ name: "hub entry spinner", why: "regression: transparent build and entry holds repainted spinner arcs without clearing them, accumulating a solid ring", run: async (b) => {
+scene("hub", { label: "black loading", query: "hubcache=keep", steps: [{ name: "hub black loading", why: "rule: build and entry holds stay opaque black without spinner graphics, including instant crossings", run: async (b) => {
   const rows = await b.evaluate(`(async () => {
     const B = __ooga, L = BL.scenes.lab, canvas = document.getElementById("overlay"), ctx = canvas.getContext("2d");
     const saved = { build: L.buildSteps, enter: L.enterSteps, clear: ctx.clearRect, fill: ctx.fillRect, arc: ctx.arc };
@@ -28476,7 +29598,7 @@ scene("hub", { label: "entry spinner", query: "hubcache=keep", steps: [{ name: "
     ctx.fillRect = function(x, y, w, h) {
       const a = S.audit;
       if (a && x === 0 && y === 0 && w === canvas.clientWidth && h === canvas.clientHeight) {
-        a.frames++; a.opaque = this.globalAlpha === 1; a.clear = null;
+        a.frames++; a.opaque = this.globalAlpha === 1 && this.fillStyle === "#000000"; a.clear = null;
         if (a.opaque) a.black++;
       }
       return saved.fill.call(this, x, y, w, h);
@@ -28529,9 +29651,9 @@ scene("hub", { label: "entry spinner", query: "hubcache=keep", steps: [{ name: "
       ctx.clearRect = saved.clear; ctx.fillRect = saved.fill; ctx.arc = saved.arc;
     }
   })()`);
-  record("hub entry spinner: repeated transparent build and entry frames erase a bounded square covering each spinner before repainting, while black holds keep their opaque fill",
-    rows.length === 4 && rows.every(row => row.frames > 100 && row.arcs > 100 && row.covered && row.bounded && row.blackIntact
-      && (row.label.startsWith("instant") ? row.fade === 0 && row.black === 0 && row.clears > 0 : row.fade === 1 && row.black === row.frames && row.clears === 0)), JSON.stringify(rows));
+  record("hub loading: repeated build and entry holds are opaque black with no spinner, for regular and instant crossings",
+    rows.length === 4 && rows.every(row => row.frames > 100 && row.arcs === 0 && row.black === row.frames
+      && row.fade === (row.label.startsWith("instant") ? 0 : 1)), JSON.stringify(rows));
 } }] });
 scene("hub", { query: "ooga=portlandhodl:clank:lab,obl,lf&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=bc1gui:clank:lab,obl,lf&ooga=DrNeski:clank:lab,obl,lf&ooga=2140data:clank:lab,obl,lf", steps: [{ name: "work movement cave trips", why: "regression: cave traffic aimed through obstacles, started backwards detours and got trapped behind players by short lane hints", run: workCaveTrips }] });
 scene("hub", { label: "hammock", query: "solo=1&character=portlandhodl&pos=0", steps: [hubHammockEntry, hubHammockGetUp, hubHammockRopes, hubHammockEnds, hubHammock, hubHammockCamera, hubHammockRemoval] });
@@ -34371,7 +35493,11 @@ scene("hub", { label: "shoulder replay", query: "solo=1&character=portlandhodl&w
 for (const character of ["portlandhodl", "w-s-bitcoin"]) for (const opts of [{ w: 1920, h: 1080 }, PHONE_SIZE]) {
   scene("hub", { label: "players camera targeting " + character, query: "solo=1&character=" + character + "&weapon=1&mode=shoulder&combat=1", opts, steps: [hubPlayersAim] });
 }
-scene("hub", { label: "mirror", query: "status=chillin", steps: [hubJumbotron, hubMirrorMedium, hubMirror] });
+scene("hub", { label: "mirror", query: "status=chillin", steps: [hubJumbotron, hubMirrorMedium, hubMirror, hubObservatoryIsolation, hubObservatoryFloor] });
+scene("hub", { label: "observatory focus", query: "view=architect&character=w-s-bitcoin&combat=0&pos=0", steps: [hubObservatoryFocus] });
+scene("hub", { label: "observatory lake", query: "view=architect&character=w-s-bitcoin&pos=0", steps: [hubObservatoryLake] });
+scene("hub", { label: "observatory admission", query: "view=architect&character=w-s-bitcoin&pos=0", steps: [hubObservatoryAdmission] });
+scene("hub", { label: "observatory authored detail", query: "view=architect&character=w-s-bitcoin&combat=0&pos=0", steps: [hubObservatoryAuthored] });
 scene("hub", { label: "matrix", steps: [hubMatrix] });
 scene("hub", { label: "oogatron popups", url: hubPage(dist, "pos=0"), steps: [oogatronPopups] });
 scene("hub", { label: "oogatron popups phone", url: hubPage(dist, "pos=0"), opts: PHONE_SIZE, steps: [oogatronPopups] });
@@ -37813,7 +38939,7 @@ const footstepChecks = BL => {
 // when someone is listed, without touching the visitor's own mute or telling the room. voice.js runs in a fixture
 // with a fake microphone, peer connection and Worker, so every state of the track is read directly.
 const voiceAloneChecks = async () => {
-  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),ops=[],netMuted=[],emits=[];
+  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/room-acoustics.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),ops=[],netMuted=[],emits=[];
   const track={enabled:true,stop(){},clone(){return {enabled:true,stop(){}};}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
   class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
   class Audio {constructor(){this.muted=false;}pause(){}play(){return Promise.resolve();}}
@@ -37861,7 +38987,7 @@ const voiceAloneChecks = async () => {
 };
 // A fresh fixture of voice.js for the failure paths: whatever the SFU refuses is named in `failing`, and timers are held.
 const voiceFailureChecks = async () => {
-  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
+  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/room-acoustics.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
   const page=(joined=false,AudioContext=undefined)=>{
     const timers=[],calls=[],bodies=[],pcs=[],failing=new Set(),holds=new Map();let holdLeave=null;
     const track={enabled:true,stopped:false,stop(){this.stopped=true;},clone(){return {enabled:true,stop(){}};}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
@@ -37943,7 +39069,7 @@ const voiceFailureChecks = async () => {
 // Someone who pressed Join voice comes back in voice, muted, on their first press, with the microphone never touched
 // until they unmute; only Leave voice ends that. voice.js runs per "page" over one shared localStorage.
 const voiceReturnChecks = async () => {
-  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
+  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/room-acoustics.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
   const stored=new Map(),settle=()=>new Promise(r=>setTimeout(r,0));
   const page=({active=false,zone="outside",denied=false}={})=>{
     const ops=[],told=[],presses=new Map();let mics=0;
@@ -38036,7 +39162,7 @@ const voiceHandoffChecks = () => {
 };
 // iOS keeps every element at 1; both paths must sound the same at every step.
 const voiceHearingChecks = async () => {
-  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),settle=()=>new Promise(r=>setTimeout(r,0));
+  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/room-acoustics.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),settle=()=>new Promise(r=>setTimeout(r,0));
   const remote=(login,zone,x,z,placed=true)=>({login,zone,poseZone:placed?zone:null,x,y:0,z});
   const rig=(ios,webAudio=true,saved=null,store=new Map())=>{
     const ops=[],bodies=[],netMuted=[],timers=new Map(),els=[],pulled=[],gains=[],limiters=[],ctxs=[],handlers=new Map(),subscribers=new Set();let timerId=0,onTrack=null,captures=0;
@@ -42348,7 +43474,11 @@ const raceRigChecks = async () => {
     // shader loops over them (to 4678b5f4); the second is zero in every other scene.
     // The Block Party's glass floors add uGlassGrazing, a geometry's scale on how much reflective glass pales toward a
     // glancing view (to 94dab4cf); it is 1 for every other geometry, so DSB Land's water is as it was.
-    "94dab4cf8dafb0f84ca86f7ccb0af7f7e0e92724e9fe06616829c802dbac0f90",
+    // The Observatory adds uCanvasFeed for camera texture orientation and uChrome for polished chair metal
+    // (to edd7c63c); both uniforms are 0 for every other geometry.
+    // Observatory quality fades add uCanvasPrevious and uCanvasBlend (to a5600e80).
+    // uCanvasBlend stays 0 outside a transitioning camera feed; ordinary output is unchanged.
+    "a5600e80e22eaa8b0c5f7bd50a087bf2165bc07401f73f41abea2cdf1aa59496",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));
@@ -43028,7 +44158,7 @@ const reviewCrowdAndFallbackProof = async () => {
   near.nonInteractive=false;const driven=c.occupied(body,0,0,0);
   const renderer=await readFile(join(root,"src/js/gl-renderer.js"),"utf8");
   const collect=renderer.slice(renderer.indexOf("    const collect ="),renderer.indexOf("    const updateRig ="));
-  const seen=[],r={rigMode:false,hiddenFromCutaway:()=>false,cutawayFade:0,foliageGeometry:n=>n.geometry,screenVisible:()=>true,recordFor:g=>{seen.push(g);return {active:true};},suppressed:0,CULL_MARGIN:0,sphereInFrustum:()=>true};
+  const seen=[],r={rigMode:false,collectingCapture:false,scopedView:false,hiddenFromCutaway:()=>false,cutawayFade:0,foliageGeometry:n=>n.geometry,screenVisible:()=>true,recordFor:g=>{seen.push(g);return {active:true};},suppressed:0,CULL_MARGIN:0,sphereInFrustum:()=>true};
   runInNewContext(collect+"this.collect=collect;this.collectRig=collectRig;",r);
   const geo={meshRig:{}},original={faces:[{}]},aggregate={geometry:geo,instanceData:[],instanceCount:1},part={geometry:original,meshRigSource:geo.meshRig,instanceData:[],instanceCount:1};
   r.collect(aggregate);r.collect(part);const cpu=seen.length===1&&seen[0]===original;
@@ -43417,7 +44547,7 @@ const studioCatalogueProof = async () => {
 
 // Exercise the shipped voice lifecycle with deferred permissions/signaling and no real devices/network.
 const studioVoiceLifecycleProof = async () => {
-  const source=await readFile(join(root,"src/js/duel-listening.js"),"utf8")+await readFile(join(root,"src/js/voice.js"),"utf8");
+  const source=await readFile(join(root,"src/js/duel-listening.js"),"utf8")+await readFile(join(root,"src/js/room-acoustics.js"),"utf8")+await readFile(join(root,"src/js/voice.js"),"utf8");
   const fixture=(gathering="complete",candidate=true,failFirstPeer=false,voiceTurn=false,stunDead=false)=>{
     const calls=[],streams=[],peers=[],elements=[],timers=new Map(),failing=new Map(),clock={at:null};let timerId=0,gum=0,permission=null,publishResponse=null,deferred=null,peerAttempts=0;
     class Peer {

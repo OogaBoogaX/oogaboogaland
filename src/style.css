@@ -94,7 +94,14 @@ body {
   justify-content: center;
   overflow: hidden;
   pointer-events: none;
+  background: #000;
+  transition: opacity 0.9s ease;
 }
+
+.curtain[data-open="true"] { opacity: 0; }
+.curtain-half, .curtain-label { visibility: hidden; }
+.curtain[data-failed="true"] { pointer-events: auto; }
+.curtain[data-failed="true"] .curtain-label { visibility: visible; }
 
 .curtain-half {
   position: absolute;

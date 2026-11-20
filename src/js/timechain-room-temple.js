@@ -13,7 +13,7 @@
   "use strict";
   const BL = window.BL;
   const RM = BL.timechainRoomModels, CH = BL.timechainCharts, ROOMS = BL.timechainRooms;
-  const { face, blank, ballGeo, UP, DOWN } = RM.helpers;
+  const { face, blank, ballGeo, owned, UP, DOWN } = RM.helpers;
   const { merge, noShadow } = BL.models;
   const DEG = Math.PI / 180, TAU = Math.PI * 2;
   const smooth = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -271,13 +271,13 @@
     geo.spacers = spacers;
     return geo;
   };
-  // Built once per page in steps at the doorway (`steps`), or whole when the plan asks for it first.
+  // Built once per owning visit, in doorway steps or whole when the plan asks for it first.
   const statueRead = BL.models.cachedSteps(statueBuild);
-  const statue = () => BL.models.withScope("timechain", statueRead);
+  const statue = () => owned(statueRead);
   // Each step false once the statue is built, so the doorway spends no frame on the steps left over.
   const steps = () => {
     let it = null, done = false;
-    const advance = () => BL.models.withScope("timechain", () => {
+    const advance = () => owned(() => {
       if (done) return false;
       if (!it) it = statueRead.steps();
       const end = performance.now() + BUDGET;
