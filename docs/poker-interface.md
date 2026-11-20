@@ -72,6 +72,16 @@ over it:
   held in its chair while seated, and stands idle rather than frozen
   mid-stride while watching a table unseated. Losing a live seat with the
   view open closes the view.
+- **Emotes:** with a live room connection and an Ooga to drive, an Emote
+  button sits beside Walk the floor (in the status strip on phones, 44px tall)
+  and opens a menu of ten emotes, each an emoji and its name: a dropdown on
+  desktop, a sheet along the foot of the view on phones. A choice sends the
+  room's existing reaction; the emoji shows over the sender's face at their seat
+  and their seated Ooga acts out six of them (see Table emotes in
+  [banana-poker.md](banana-poker.md) for the set and who sees what). A refused
+  send reads "Not sent" on the button. The menu closes on a choice, a press
+  outside, the view closing or Escape, and Escape closes the menu before it
+  closes the view. With no backend or signed out the button never shows.
 
 ## Live feedback and request handling
 
@@ -140,6 +150,19 @@ Found / maintainer play-tests before marking the PR ready:
   falls back to the stand-in), a full table of nine real players, a player
   sitting down from the aisle, held items against the rail, and the sitting
   pose by eye in all five themes.
+- Emotes: the browser suite checks the Emote button and menu (Escape closing
+  the menu before the view, a press outside, Walk the floor from the keyboard),
+  the visitor's own emote at their seat with its gesture and its clearing, a
+  gesture replaced mid-run leaving the head level, standing mid-gesture, a
+  matched player's emote at their seat with their Ooga gesturing, a burst
+  showing the newest, the seat clearing when the player leaves, an emote at
+  another table showing only once the view switches there, the button going
+  when the connection drops, and on a phone the 44px button and the open menu on
+  screen with the table still fitting. The room's socket is faked there. Still
+  to check: two real accounts trading emotes at a live table; each gesture by
+  eye in each theme and on a wide-headed or hatted Ooga (so far only Groan,
+  Salute and Wow, on one Ooga in Banana Club); the knock, slow clap and shrug;
+  the phone menu on a small phone; and a burst at the room's limit.
 
 Keep the existing browser STOP ledger in force. These are acceptance tasks for
 the maintainer, not authorization to retry a blocked browser session. Live

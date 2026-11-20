@@ -21,6 +21,40 @@
   // input, made in `enter`: a table whose chairs changed hands rebuilds its figures and the panel its faces.
   let owner = null, lastOwner = null, lastBody = null, presenceInput = null;
   const seatOf = (t, s) => snapshots[t].seats[s];
+  // Table emotes (poker-emotes.js), made in `enter`: for each of the 90 chairs who sits there as last seen (the visitor's
+  // Ooga or its remote record), the emoji showing and its time left, a count of the emotes it took (so a repeat restarts
+  // the seat's pop), and the gesture playing and how far through it is; the panel's nine seats remember which chair's
+  // emote they show. `heroChair` is the visitor's own chair, written in `sit`.
+  let emoteBy = null, emoteEmoji = null, emoteTime = null, emoteCount = null, gestureKind = null, gestureT = null;
+  let shownChair = null, shownCount = null, heroChair = -1, unsubscribeReactions = null;
+  // A gesture dropped mid-run leaves no limb turned: the arms' y and a bowed head back to rest (the arms' x is the
+  // sitting or standing pose's own, written every frame).
+  const BOWS = ["armsUp", "headInHands", "shrug"];
+  const settle = (cave, kind) => {
+    const p = cave.parts;
+    if (p.armL) p.armL.rotation.y = 0; if (p.armR) p.armR.rotation.y = 0;
+    if (p.head && BOWS.includes(BL.pokerEmotes.GESTURES[kind])) p.head.rotation.x = 0;
+  };
+  const settleAt = k => {
+    const by = emoteBy[k], kind = gestureKind[k];
+    if (kind && by) { const cave = by === avatar ? avatar : remotes.body(by.id); if (cave) settle(cave, kind); }
+  };
+  const dropEmote = k => {
+    settleAt(k);
+    emoteEmoji[k] = ""; emoteTime[k] = 0; gestureKind[k] = 0; gestureT[k] = 0;
+  };
+  // A reaction from the room (id 0 is the visitor's own): it shows at the sender's chair, the visitor's while seated or
+  // the one Level 1 matched that remote to, and plays its gesture there; a sender with no chair shows at none.
+  const onReaction = (id, emoji) => {
+    let k = -1;
+    if (id === 0) { if (seated) k = heroChair; } else for (let c = 0; c < 90; c++) if (owner[c] && owner[c].id === id) { k = c; break; }
+    if (k < 0) return;
+    emoteEmoji[k] = emoji; emoteTime[k] = BL.pokerEmotes.SHOW_TIME; emoteCount[k]++;
+    const e = BL.pokerEmotes.byEmoji(emoji);
+    // A gesture cut short by a newer one is settled first, so a bowed head or a turned arm the new one never writes is not left so.
+    if (e && e.gesture) { if (gestureKind[k]) settleAt(k); gestureKind[k] = e.gesture; gestureT[k] = 0; }
+  };
+  const emote = id => { const e = BL.pokerEmotes.EMOTES.find(x => x.id === id); return !!e && BL.net.sendReaction(e.emoji); };
   // The room's music and sound (poker-audio.js): where the visitor hears from, written in place each frame, the crowd's
   // footfalls handed on to it, and whether a table's result may dip the music (not on the visit's first refresh).
   let audio = null, cheers = false;
@@ -117,7 +151,7 @@
     const p = BL.pokerModels.TABLES[selected], s = BL.pokerModels.SEATS[index];
     avatar.root.position.x = p.x + s.x; avatar.root.position.z = p.z + s.z;
     avatar.root.position.y = avatar.baseY + BL.pokerPresence.CHAIR_Y; avatar.root.rotation.y = s.yaw;
-    pilot.controls.reset(); pilot.setActive(false); seated = true;
+    pilot.controls.reset(); pilot.setActive(false); seated = true; heroChair = index >= 0 ? selected * 9 + index : -1;
     document.body.dataset.pokerSeated = "true";
   };
   const syncTable = i => {
@@ -306,6 +340,8 @@
     tableView = false;
     owner = new Array(90).fill(null); lastOwner = new Array(90).fill(null); lastBody = new Array(90).fill(null);
     presenceInput = { tables: BL.pokerModels.TABLES, seats: BL.pokerModels.SEATS, remotes: BL.net.remotes, zone: null, live: false, heroId: null, seatOf };
+    emoteBy = new Array(90).fill(null); emoteEmoji = new Array(90).fill(""); emoteTime = new Float32Array(90); emoteCount = new Int32Array(90);
+    gestureKind = new Uint8Array(90); gestureT = new Float32Array(90); shownChair = new Int16Array(9).fill(-1); shownCount = new Int32Array(9); heroChair = -1;
     game = ctx.game; world = ctx.world; go = ctx.go; renderer = ctx.renderer; crowdTimer = 0; leaving = false; timer = 0; HERO = "local-player"; connecting = false;
     if (ctx.from === "bifrost") document.querySelector('[data-intro="poker"]').hidden = true;
     session = world.poker || (world.poker = { tables: Array.from({ length: 10 }, () => BL.pokerRules.create()), selected: 0, pendingStand: false });
@@ -366,7 +402,12 @@
     const name = [world.pilot, requested, BL.net.preferredCharacter()?.handle].find(n => BL.contributors.activeRoster.some(c => c.name === n && mayPick(c))) || (BL.contributors.activeRoster.find(mayPick) || BL.contributors.activeRoster[0]).name;
     world.pilot = null;
     const playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
-    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: false, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => { const i = nearPlacard(); if (i >= 0) openPlacard(i); else select(selected); }, residentPose: cave => { if (!seated || cave !== avatar) return false; BL.pokerModels.sitPose(avatar); return true; } };
+    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: false, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => { const i = nearPlacard(); if (i >= 0) openPlacard(i); else select(selected); }, residentPose: cave => {
+      if (!seated || cave !== avatar) return false;
+      BL.pokerModels.sitPose(avatar);
+      if (heroChair >= 0 && gestureKind[heroChair] && emoteBy[heroChair] === avatar) BL.pokerEmotes.gesture(avatar, gestureKind[heroChair], gestureT[heroChair]);
+      return true;
+    } };
     people = shared.crew = BL.crew.create(shared);
     for (const cave of people.cavemen.values()) {
       cave.weapon.primaryOwned = cave.weapon.secondaryOwned = false;
@@ -388,21 +429,26 @@
     remotes = BL.remotePlayers.create({ root, crew: people, fx, posed: (cave, feetY, rec) => {
       cave.parts.club.visible = cave.parts.gun.visible = false;
       const state = BL.pokerPresence.stateOf(BL.pokerModels.TABLES, BL.pokerModels.SEATS, owner, rec);
-      if (state === 1) BL.pokerModels.sitPose(cave); else if (state === 2) cave.root.visible = false;
+      if (state === 1) {
+        BL.pokerModels.sitPose(cave);
+        const k = BL.pokerPresence.seatAt(BL.pokerModels.TABLES, BL.pokerModels.SEATS, rec.x, rec.y, rec.z);
+        if (gestureKind[k] && emoteBy[k] === rec) BL.pokerEmotes.gesture(cave, gestureKind[k], gestureT[k]);
+      } else if (state === 2) cave.root.visible = false;
     } });
+    unsubscribeReactions = BL.net.subscribeReactions(onReaction);
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
     audio = BL.pokerAudio.create(); cheers = false;
     mirror.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
     if (seatTable >= 0 && !pendingStand) sit(session.tables[seatTable].snapshot().seats.findIndex(s => s?.id === HERO));
     while (faces.length < BL.pokerRules.SEATS) { const f = { key: "", cave: null, tag: null, paint: canvas => BL.hud.renderFaceIcon(canvas, f.cave, null, 96) }; faces.push(f); }
-    panel = BL.pokerHud.create(action, select, faceFor); panel.setDealer(room.tables[0].agent); setTheme(theme.id); refresh(); cheers = true; setView(seatTable >= 0 && !pendingStand);
+    panel = BL.pokerHud.create(action, select, faceFor, emote, hud); panel.setDealer(room.tables[0].agent); setTheme(theme.id); refresh(); cheers = true; setView(seatTable >= 0 && !pendingStand);
     // After the theme's floor is set, so the crowd's lattice is read once.
     crowd = BL.pokerCrowd.create({ root, fx, walkable: BL.pokerModels.walkable, spots: BL.pokerModels.spots(theme.id), publicState,
       others: () => crowdBodies, visitor: () => crowdBodies[0] === ownBody ? ownBody : null,
       day: Math.floor(Date.now() / 86400000), cap: crowdCap(), onStep });
     scene.root = root; scene.camera = camera; scene.input = input;
-    scene.debug = { camera, pilot, hud, crew: people, cavemen: people.cavemen, controls: pilot.controls, poker: { session, room, action, select, snapshots, renderOpts, crowd, audio } };
+    scene.debug = { camera, pilot, hud, crew: people, cavemen: people.cavemen, controls: pilot.controls, poker: { session, room, action, select, snapshots, renderOpts, crowd, audio, react: onReaction, get selected() { return selected; } } };
     if (new URLSearchParams(location.search).get("pokerLive") === "1") action("connect");
   };
   const update = (dt, elapsed) => {
@@ -440,6 +486,20 @@
       if (changed) { seatFigures(i); rehoused = true; }
     }
     if (rehoused) updatePanel();
+    // Emotes: a chair that changed hands or emptied (the visitor's own once they stand) drops its emote and gesture; the
+    // rest count down, a gesture ending the frame after it was posed at its end. The selected table's seats show what is
+    // left, at a seat the panel shows as occupied, written only when a seat's emote changes.
+    for (let k = 0; k < 90; k++) {
+      const by = seated && k === heroChair ? avatar : owner[k];
+      if (emoteBy[k] !== by) { dropEmote(k); emoteBy[k] = by; }
+      if (emoteTime[k] > 0 && (emoteTime[k] -= dt) <= 0) { emoteTime[k] = 0; emoteEmoji[k] = ""; }
+      if (gestureKind[k]) { if (gestureT[k] >= 1) gestureKind[k] = 0; else gestureT[k] += dt / BL.pokerEmotes.GESTURE_TIME; }
+    }
+    for (let i = 0; i < 9; i++) {
+      const k = selected * 9 + i, want = emoteTime[k] > 0 && snapshots[selected]?.seats[i] ? k : -1, count = want < 0 ? 0 : emoteCount[k];
+      if (want !== shownChair[i] || count !== shownCount[i]) { shownChair[i] = want; shownCount[i] = count; panel.showEmote(i, want < 0 ? "" : emoteEmoji[k]); }
+    }
+    panel.setEmoteAvailable(BL.net.state.reactions && BL.net.state.room === "live" && !!people.player);
     footsteps.update(drivenHere);
     // The room is heard from the Ooga driven here, else the visitor's own, facing the view's way on the floor; a view
     // straight down keeps the last facing.
@@ -514,14 +574,14 @@
     S.stepTweens(dt); fx.update(dt, elapsed);
   };
   const extra = (c, project) => remotes.drawNames(c, project);
-  const onKey = e => { if (BL.controls.matches(e, "view") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && modeAction("mode-toggle")) { e.preventDefault(); return true; } if (BL.controls.matches(e, "escape")) { if (panel.focused) action("walk"); else if (seatTable >= 0 && !pendingStand) action("stand"); else if (!pilot.escape()) leaveFloor(); return true; } if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera(); return false; };
+  const onKey = e => { if (BL.controls.matches(e, "view") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && modeAction("mode-toggle")) { e.preventDefault(); return true; } if (BL.controls.matches(e, "escape")) { if (panel.closeEmoteMenu()) return true; if (panel.focused) action("walk"); else if (seatTable >= 0 && !pendingStand) action("stand"); else if (!pilot.escape()) leaveFloor(); return true; } if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera(); return false; };
   const leave = () => {
     visit++; pendingLive?.dispose(); pendingLive = null;
     session.selected = selected; session.pendingStand = pendingStand;
     if (session.live) session.live.dispose();
     BL.net.setPokerVoice(null);
     world.pilot = pilot.player ? pilot.player.traits.name : null;
-    unsubscribeAccount(); unsubscribeAccount = null; BL.net.setBody(null);
+    unsubscribeAccount(); unsubscribeAccount = null; unsubscribeReactions(); unsubscribeReactions = null; BL.net.setBody(null);
     for (const t of room.tables) t.agent.dispose();
     hud.closeBoard(); room.fountain.dispose(); room.statues.dispose();
     BL.pokerModels.setFloor("gatsby"); BL.pokerModels.setLite(false);
@@ -541,6 +601,7 @@
     hud = panel = pilot = fx = people = avatar = room = mirror = input = session = game = world = go = null;
     snapshots.fill(null);
     owner = lastOwner = lastBody = presenceInput = null;
+    emoteBy = emoteEmoji = emoteTime = emoteCount = gestureKind = gestureT = shownChair = shownCount = null; heroChair = -1;
     for (const f of faces) { f.cave = f.tag = null; f.key = ""; }
     return { targets: count };
   };

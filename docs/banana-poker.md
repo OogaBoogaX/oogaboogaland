@@ -459,6 +459,64 @@ aisle (their Ooga eases into the chair already in the sitting pose); cast
 members' held items against the rail now that seated arms reach forward; and
 the sitting pose by eye in each theme.
 
+## Table emotes
+
+A player in the table view can send one of ten emotes from the Emote button
+(`poker-emotes.js`). Each is one emoji sent as the room's existing reaction,
+under the room's existing limit, so the protocol is unchanged and nothing new
+goes over the wire. Six of them have a gesture, which the sender's seated Ooga
+acts out over about a second and a half:
+
+| Emote | Emoji | Gesture |
+|---|---|---|
+| Nice hand | 👍 | knocks the table twice |
+| Good game | 🤝 | none |
+| Wow | 😮 | both arms up |
+| Phew | 😅 | none |
+| Laugh | 😂 | none |
+| Groan | 😩 | head in hands |
+| Slow clap | 👏 | three slow claps |
+| Thinking | 🤔 | none |
+| Shrug | 🤷 | shrugs |
+| Salute | 🫡 | salutes |
+
+The emoji shows over the sender's face at their seat for as long as a reaction
+shows on the floor, popping in and fading out (no motion under reduced motion).
+A newer emote from the same seat replaces the older one, so a burst shows one at
+a time. Any other emoji a player sends from the ordinary reaction bar also shows
+at their seat, with no gesture. Every gesture starts and ends on the sitting
+pose; one cut short by a newer gesture, by the player standing or by the chair
+changing hands leaves no arm turned and no head bowed.
+
+Who sees what:
+
+| Sender | Their seat in the table view | On the floor |
+|---|---|---|
+| The visitor, seated | the emoji at their own seat | the emoji over their head, and their Ooga gestures |
+| A live player matched at the viewed table | the emoji at their seat, for players and watchers of that table alike | the emoji over their head, and their Ooga gestures |
+| A player seated in a chair that is open on this page's table | nothing (the seat shows as open) | the emoji over their head, and their Ooga gestures |
+| A matched player at another table | nothing in this view; it shows there when the view switches to that table | as above |
+| A watcher on the rail, or anyone with no chair (the visitor too) | nothing at any seat | the emoji over their head |
+
+Computer opponents and live players' stand-ins do not emote. On a practice table
+the visitor's emote shows at their own seat on their own page only, since that
+table exists only there.
+
+The button shows only while the page has a live room connection that takes
+reactions and the visitor is driving an Ooga, which is when the room would
+accept one; with no backend, or signed out, it never appears, and if the
+connection drops it goes, taking an open menu with it. When the room refuses a
+send (the page's own limit, or the connection just dropped) the button reads
+"Not sent" until the menu next opens. The menu closes on a choice, on a press
+outside it, when the table view closes, and on Escape; Escape closes the menu
+first and leaves the table view only on the next press.
+
+Still to play-test: two real accounts trading emotes at a live table; each
+gesture by eye in each theme and on a wide-headed or hatted Ooga (so far only
+Groan, Salute and Wow have been looked at, on one Ooga in Banana Club); the
+knock, the slow clap and the shrug; the phone menu on a small phone; and a burst
+at the room's limit.
+
 ## Files and validation handoff
 
 Floor modules: `poker-rules.js`, `poker-cards.js`, `poker-themes.js`,

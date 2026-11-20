@@ -26584,6 +26584,93 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
         && left.standIn && left.face !== null && left.face === left.own && clean };
   })()`);
   record("rule: a signed-in player at a chair sits as themselves, alone in that seat, and the stand-in returns when they go", presence.ok, JSON.stringify(presence));
+  // Emotes. Faked: the room's two flags the scene reads for availability (`reactions`, `room`), the visitor's send
+  // (`BL.net.sendReaction` stubbed to accept and, as the real one does after a send, hand the scene's subscriber
+  // `(0, emoji)`), a remote's reaction (handed to that same subscriber, `debug.poker.react`, as net.js would from the
+  // socket), the remotes and `session.live` as the presence check above fakes them. Real: the button, the menu, Escape,
+  // the scene's chair matching, timing, the seats' emoji and the bodies' gestures. The visitor at table five; the
+  // presence check's remote matched at table two's fourth chair, a second remote at table three's.
+  const emotes = await b.evaluate(`(() => {
+    const B = __ooga, P = BL.scenes.poker.debug.poker, N = BL.net, M = BL.pokerModels, E = BL.pokerEmotes, J = 3;
+    const click = a => document.querySelector('[data-poker-action="' + a + '"]').click(), frame = () => B.advance(1 / 30, 1 / 30);
+    // Escape as the keyboard sends it, to the focused element, so it passes the window's capture listeners (the HUD's
+    // popup close) before the director's own on the way back up (sent to the window itself, the director's ran first); a
+    // press as the pointer makes one, its pointerdown (which the HUD's outside-press close and the panel's capture
+    // listener read) and then its click.
+    const esc = () => (document.activeElement || document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+    const down = n => { const r = n.getBoundingClientRect(); n.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, composed: true, pointerId: 1, isPrimary: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 })); };
+    const press = n => { down(n); n.click(); };
+    const head = document.querySelector('.poker-table-tools [data-poker="emote"]'), strip = document.querySelector('.poker-status-strip [data-poker="emote"]'), menu = document.querySelector('[data-poker="emote-menu"]');
+    const pick = id => { press(head); press(menu.querySelector('[data-emote="' + id + '"]')); };
+    const viewing = () => document.body.hasAttribute("data-poker-table-view");
+    const shows = n => !n.hidden && n.getClientRects().length > 0;
+    const seatsNow = () => [...document.querySelectorAll(".poker-seat-emote")].map(n => n.hidden ? "" : n.textContent);
+    const others = (list, j) => list.every((e, i) => i === j || e === "");
+    const names = BL.contributors.activeRoster.filter(c => c.name !== "portlandhodl").map(c => c.name);
+    const peer = (id, t, body) => { const spot = M.TABLES[t], chair = M.SEATS[J]; return { id, login: "emote-peer-" + id, display: "Emote peer " + id, body, zone: N.state.zone, poseZone: N.state.zone,
+      x: spot.x + chair.x, y: BL.pokerPresence.CHAIR_Y, z: spot.z + chair.z, yaw: chair.yaw, voice: false, muted: false }; };
+    const near = peer(7311, 1, names[0]), far = peer(7312, 2, names[1]), t1 = P.session.tables[1], t2 = P.session.tables[2], t4 = P.session.tables[4];
+    const arms = c => c ? { lx: c.parts.armL.rotation.x, ly: c.parts.armL.rotation.y, rx: c.parts.armR.rotation.x, ry: c.parts.armR.rotation.y, head: c.parts.head.rotation.x } : null;
+    const saved = { reactions: N.state.reactions, room: N.state.room, send: N.sendReaction, selected: P.selected };
+    const out = {};
+    try {
+      N.state.reactions = true; N.state.room = "live";
+      P.select(4); click("join"); frame();
+      const cave = B.pilot.player, heroSeat = t4.snapshot().seats.findIndex(p => p?.id === "local-player");
+      out.shown = { head: shows(head), menu: shows(menu), seat: heroSeat };
+      // Escape closes the menu first and the table view only on the next press; a press outside closes the menu; Walk the
+      // floor from the keyboard (a click with no pointerdown) takes the menu with the view, and it is shut when the view reopens.
+      press(head); const opened = shows(menu); esc(); frame();
+      const once = { menu: shows(menu), view: viewing() }; esc(); frame();
+      const second = { view: viewing() }; click("return"); frame();
+      press(head); const reopened = shows(menu); down(document.querySelector('[data-poker="title"]')); const outside = { menu: shows(menu), view: viewing() };
+      press(head); const again = shows(menu); click("walk"); frame(); const walkedOut = { menu: !menu.hidden }; click("return"); frame();
+      const returned = { menu: !menu.hidden, view: viewing() };
+      out.escape = { opened, once, second, reopened, outside, again, walkedOut, returned, ok: opened && !once.menu && once.view && !second.view && reopened && !outside.menu && outside.view
+        && again && !walkedOut.menu && !returned.menu && returned.view };
+      N.sendReaction = e => { P.react(0, e); return true; };
+      pick("clap"); frame();
+      const sat = { lx: -0.9 }, picked = { menu: shows(menu), label: head.textContent, seats: seatsNow() };
+      B.advance(0.5, 1 / 30); const mid = arms(cave);
+      B.advance(E.SHOW_TIME, 1 / 30); const after = { seats: seatsNow(), arms: arms(cave) };
+      out.own = { picked, mid, after, ok: !picked.menu && picked.label === "Emote" && picked.seats[heroSeat] === "👏" && others(picked.seats, heroSeat)
+        && mid.lx !== sat.lx && after.seats.every(e => e === "") && after.arms.lx === -0.9 && after.arms.ly === 0 && after.arms.ry === 0 };
+      // A gesture replacing one that bows the head mid-run (Groan, then Nice hand) leaves the head level and no arm turned.
+      pick("groan"); B.advance(0.5, 1 / 30); const groaning = arms(cave); pick("nice"); B.advance(E.GESTURE_TIME + 0.2, 1 / 30); const replaced = arms(cave);
+      out.replace = { groaning, replaced, ok: groaning.head > 0.3 && replaced.head === 0 && replaced.ly === 0 && replaced.ry === 0 };
+      B.advance(E.SHOW_TIME, 1 / 30);
+      // Standing mid-gesture (Walk the floor) drops the emote and leaves no arm turned.
+      pick("salute"); B.advance(0.5, 1 / 30); const saluting = arms(cave);
+      click("walk"); frame(); const walked = { seats: seatsNow(), arms: arms(cave) };
+      out.stood = { saluting, walked, ok: saluting.ry !== 0 && walked.seats.every(e => e === "") && walked.arms.ly === 0 && walked.arms.ry === 0 };
+      click("return"); click("stand"); frame();
+      // The remotes: seats taken by their names first (synced by the practice timer), then live as the scene reads it.
+      P.select(1); t1.join("emote-guest-1", near.display, false, J); t2.join("emote-guest-2", far.display, false, J); B.advance(0.9, 1 / 30);
+      P.session.live = { deadline: null, connection: "live", busy: false, fairness: null, action() {}, dispose() {} };
+      N.remotes.set(near.id, near); N.remotes.set(far.id, far); frame(); frame();
+      const body = () => BL.remotePlayers.body(near.id);
+      P.react(near.id, "👏"); frame(); const first = seatsNow(); B.advance(0.5, 1 / 30); const moving = arms(body());
+      P.react(near.id, "😮"); P.react(near.id, "🤔"); P.react(near.id, "😮"); frame(); const burst = seatsNow(); B.advance(0.5, 1 / 30); const rising = arms(body());
+      N.remotes.delete(near.id); frame(); const gone = seatsNow();
+      out.remote = { first, moving, burst, rising, gone, ok: first[J] === "👏" && others(first, J) && !!moving && moving.lx !== -0.9 && burst[J] === "😮" && others(burst, J)
+        && !!rising && rising.lx < -1.2 && gone.every(e => e === "") };
+      P.react(far.id, "🤔"); frame(); const here = seatsNow(); P.select(2); frame(); const there = seatsNow(); P.select(1); frame(); const back = seatsNow();
+      out.tables = { here, there, back, ok: here.every(e => e === "") && there[J] === "🤔" && others(there, J) && back.every(e => e === "") };
+      P.select(2); frame(); press(head); const open = shows(menu); N.state.room = "connecting"; frame();
+      out.off = { open, head: shows(head), strip: shows(strip), menu: shows(menu), ok: open && !shows(head) && !shows(strip) && !shows(menu) };
+    } finally {
+      N.sendReaction = saved.send; N.state.reactions = saved.reactions; N.state.room = saved.room;
+      delete P.session.live; N.remotes.delete(7311); N.remotes.delete(7312);
+      for (const [t, id] of [[t1, "emote-guest-1"], [t2, "emote-guest-2"]]) if (t.snapshot().seats.some(p => p?.id === id)) t.leave(id);
+      if (t4.snapshot().seats.some(p => p?.id === "local-player")) click("stand");
+      P.select(saved.selected); B.advance(0.9, 1 / 30);
+    }
+    out.clean = N.sendReaction === saved.send && !P.session.live && !N.remotes.has(7311) && !N.remotes.has(7312) && seatsNow().every(e => e === "") && !shows(head)
+      && !t1.snapshot().seats[J] && !t2.snapshot().seats[J] && !t4.snapshot().seats.some(p => p?.id === "local-player") && P.selected === saved.selected;
+    out.ok = !!out.shown && out.shown.head && !out.shown.menu && !!out.escape && out.escape.ok && out.own.ok && out.replace.ok && out.stood.ok && out.remote.ok && out.tables.ok && out.off.ok && out.clean;
+    return out;
+  })()`);
+  record("rule: an emote shows at its sender's seat and nowhere else, moves its sender's body, and clears", emotes.ok, JSON.stringify(emotes));
   // Banana Club's marble hall in play: standing up from tables 5 and 6 (the pair either side of the fountain) lands on
   // open floor beside the pool; the fountain's water moves from frame to frame; a cave theme takes the fountain, statues
   // and marble out of the room and Banana Club brings them back whole. The theme and seat are put back whatever happens.
@@ -26722,6 +26809,36 @@ scene("poker", { label: "canvas2d", query: "canvas2d=1", steps: [{ name: "poker 
 scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="poker"]', required: ["#joy-move", "#joy-look", '[data-poker-action="quick"]'] }), { name: "poker phone actions", why: "rule: seated touch players can read private cards and access legal actions without horizontal overflow", run: async b => {
   const r = await b.evaluate(`(() => { const P = BL.scenes.poker.debug.poker; document.querySelector('[data-poker-action="quick"]').click(); const panel = document.querySelector('[data-poker="focus"]'), r = panel.getBoundingClientRect(); return { fits: !panel.hidden && r.left >= 0 && r.right <= innerWidth && panel.scrollWidth <= panel.clientWidth + 1, seats: document.querySelectorAll(".poker-seats button").length, cards: document.querySelectorAll(".poker-hand .poker-card").length }; })()`);
   record("poker phone: nine seat choices and two private cards fit the panel", r.fits && r.seats === 9 && r.cards === 2, JSON.stringify(r));
+  // The room faked only as far as the scene reads it for the Emote button (`reactions`, `room`), restored after. Open,
+  // the menu lies inside the screen and its first and last emotes are uncovered; Escape closes it and leaves the table
+  // view open, and a press outside closes it again; closed, the table still fits as above,
+  // and the private cards and the betting actions shown lie inside the screen and are uncovered.
+  const em = await b.evaluate(`(() => {
+    const N = BL.net, saved = { reactions: N.state.reactions, room: N.state.room };
+    const inside = r => r.width > 0 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
+    const uncovered = n => { const r = n.getBoundingClientRect(), hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!hit && (hit === n || n.contains(hit)); };
+    const fit = () => {
+      const panel = document.querySelector('[data-poker="focus"]'), r = panel.getBoundingClientRect();
+      const dock = [...document.querySelectorAll('.poker-hand .poker-card, .poker-actions button')].filter(n => n.getClientRects().length);
+      return { fits: !panel.hidden && r.left >= 0 && r.right <= innerWidth && panel.scrollWidth <= panel.clientWidth + 1, seats: document.querySelectorAll(".poker-seats button").length, cards: document.querySelectorAll(".poker-hand .poker-card").length,
+        dock: dock.length, dockOk: dock.length > 0 && dock.every(n => inside(n.getBoundingClientRect()) && uncovered(n)) };
+    };
+    try {
+      N.state.reactions = true; N.state.room = "live"; __ooga.advance(1 / 30, 1 / 30);
+      const button = document.querySelector('.poker-status-strip [data-poker="emote"]'), menu = document.querySelector('[data-poker="emote-menu"]'), br = button.getBoundingClientRect();
+      const shown = { visible: !button.hidden && inside(br) && uncovered(button), height: br.height };
+      // Pressed as a finger does (its pointerdown, then its click); Escape sent to the focused element as the keyboard sends it.
+      const press = n => { const r = n.getBoundingClientRect(); n.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, composed: true, pointerId: 1, pointerType: "touch", isPrimary: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 })); };
+      press(button); button.click();
+      const items = menu.querySelectorAll("button"), open = { visible: !menu.hidden && inside(menu.getBoundingClientRect()), ends: uncovered(items[0]) && uncovered(items[items.length - 1]) };
+      (document.activeElement || document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+      const escaped = { menu: menu.hidden, view: document.body.hasAttribute("data-poker-table-view") };
+      press(button); button.click(); const reopened = !menu.hidden; press(document.querySelector('[data-poker="title"]'));
+      const closed = { menu: menu.hidden, reopened, ...fit() };
+      return { shown, open, escaped, closed, ok: shown.visible && shown.height >= 44 && open.visible && open.ends && escaped.menu && escaped.view && reopened && closed.menu && closed.fits && closed.seats === 9 && closed.cards === 2 && closed.dockOk };
+    } finally { N.state.reactions = saved.reactions; N.state.room = saved.room; __ooga.advance(1 / 30, 1 / 30); }
+  })()`);
+  record("rule: the Emote button and its open menu are on screen, and the table still fits", em.ok, JSON.stringify(em));
   if (process.env.POKER_SHOTS) await b.screenshot(join(process.env.POKER_SHOTS, "poker-phone.png"));
 } }] });
 scene("hub", { label: "gorilla population restoration", query: "status=clankin", exclusive: true, opts: { motion: true }, steps: [hubGorillaPopulation] });
@@ -30588,6 +30705,44 @@ const ghostAudioChecks = async () => {
       &&out.walk.reschedules>0&&out.walk.reschedules<=52&&out.walk.decodes===0&&out.walk.loads===0&&out.walk.end===0
       &&Math.abs(out.mid-0.35*Math.SQRT1_2)<1e-4&&out.hushed===0&&out.after===1&&out.muted===0&&out.unmuted===out.mid
       &&!out.disposed.playing&&out.disposed.sources===0&&out.disposed.contexts===1&&out.disposed.state==="closed"&&out.disposed.sound,JSON.stringify(out));
+};
+// The Ember Den's table emotes (poker-emotes.js) in a bare context, beside the room's reaction policy over emoji-data.js:
+// the ten in the menu's order, each an emoji the room accepts; and the six gestures on a stand-in seated caveman whose
+// arms and head hold the sitting pose (poker-models.js's `sitPose`: arms' x -0.9, copied here) and whose every other part
+// records a write.
+const pokerEmoteChecks = () => {
+  const context = { window: { BL: {} } };
+  for (const file of ["emoji-data.js", "reaction-policy.js", "poker-emotes.js"]) runInNewContext(readFileSync(join(root, "src/js", file), "utf8"), context);
+  const E = context.window.BL.pokerEmotes, policy = context.window.BL.reactionPolicy;
+  const names = E.EMOTES.map(e => e.name), allAccepted = E.EMOTES.every(e => policy.valid(e.emoji)), unique = new Set(E.EMOTES.map(e => e.emoji)).size === 10;
+  record("poker emotes: ten, each a different emoji the room accepts, named, in the menu's order", names.join() === "Nice hand,Good game,Wow,Phew,Laugh,Groan,Slow clap,Thinking,Shrug,Salute" && allAccepted && unique, names.join());
+  record("poker emotes: an emoji finds its emote with or without a skin tone, and any other emoji finds none", E.byEmoji("👍").id === "nice" && E.byEmoji("👍🏽").id === "nice" && E.byEmoji("👏🏿").id === "clap" && E.byEmoji("🔥") === null && E.byEmoji("") === null);
+  const SIT = { armL: [-0.9, 0, 0.1], armR: [-0.9, 0, -0.1], head: [0, 0, 0] };
+  let foreign = 0;
+  const watched = () => {
+    const r = {};
+    for (const k of ["x", "y", "z"]) { let v = 0; Object.defineProperty(r, k, { get: () => v, set: n => { foreign++; v = n; } }); }
+    return r;
+  };
+  const cave = { parts: {}, root: { rotation: watched(), position: watched() } };
+  for (const k of ["legL", "legR", "torso", "club", "snack", "face", "gun"]) cave.parts[k] = { rotation: watched(), position: watched() };
+  // The arms' z and the head's y and z are never a gesture's: a write to one while a gesture runs counts as foreign too
+  // (the sitting pose itself writes them with `counting` off).
+  let counting = false;
+  const offAxis = (r, k) => { let v = 0; Object.defineProperty(r, k, { get: () => v, set: n => { if (counting) foreign++; v = n; } }); return r; };
+  for (const k of ["armL", "armR", "head"]) cave.parts[k] = { rotation: offAxis(k === "head" ? offAxis({ x: 0 }, "y") : { x: 0, y: 0 }, "z"), position: watched() };
+  const sit = () => { counting = false; for (const k in SIT) { const r = cave.parts[k].rotation; r.x = SIT[k][0]; r.y = SIT[k][1]; r.z = SIT[k][2]; } counting = true; };
+  const atSit = () => Object.keys(SIT).every(k => { const r = cave.parts[k].rotation; return r.x === SIT[k][0] && r.y === SIT[k][1] && r.z === SIT[k][2]; });
+  let everyGestureSettles = true, everyGestureMoves = true;
+  for (let kind = 1; kind < E.GESTURES.length; kind++) {
+    for (const t of [-0.5, 0, 1, 1.5]) { sit(); E.gesture(cave, kind, t); if (!atSit()) everyGestureSettles = false; }
+    // From any mid-run pose, the last frame puts the sitting pose back.
+    sit(); E.gesture(cave, kind, 0.5); if (atSit()) everyGestureMoves = false;
+    E.gesture(cave, kind, 1); if (!atSit()) everyGestureSettles = false;
+    for (let i = 1; i < 60; i++) { sit(); E.gesture(cave, kind, i / 60); }
+  }
+  record("poker emotes: six gestures, each starting and ending on the sitting pose and moving in between", E.GESTURES.length === 7 && everyGestureSettles && everyGestureMoves);
+  record("poker emotes: a gesture writes only the arms and the head", foreign === 0, "foreign writes " + foreign);
 };
 // The Ember Den's seating rule (poker-presence.js) in a bare context, on the room's layout copied from poker-models.js
 // (`TABLES`, `SEATS`): which remote's sent position is a chair, and which remote a chair is honoured for. Remotes come
@@ -37338,6 +37493,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   pokerMarbleChecks(BL);
   pokerMarbleHallChecks(BL);
   pokerPresenceChecks();
+  pokerEmoteChecks();
   pokerAudioChecks(BL);
   {
     // A roof lip may intersect the visual pose, but a blocked core rejects a mount.
