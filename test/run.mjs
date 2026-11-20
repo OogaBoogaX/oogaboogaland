@@ -26417,10 +26417,14 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
     let guard = 0; while (t.playing && guard++ < 500) { if (t.snapshot("local-player").legal) click("call"); B.advance(0.81, 1 / 30); }
     const done = t.snapshot(), total = done.seats.reduce((n, s) => n + s.stack, 0), shown = document.querySelector('[data-poker="street"]').textContent;
     click("stand"); P.select(9); click("bots"); click("start"); B.advance(1, 1 / 30);
-    return { count, seats, dealers, privateCards, modeHeld, phase: done.phase, total, shown, tableTen: P.session.tables[9].snapshot().hand, standing: !document.body.hasAttribute("data-poker-seated") };
+    const L = P.renderOpts.lights, lit = [];
+    for (let i = 0; i < 10; i++) lit.push(BL.pokerModels.TABLES.findIndex(p => Math.abs(p.x - L[i * 8]) < 1e-3 && Math.abs(p.z - L[i * 8 + 2]) < 1e-3));
+    const tableLights = new Set(lit.filter(i => i >= 0)).size, lightCount = P.renderOpts.lightCount;
+    return { count, seats, dealers, privateCards, modeHeld, phase: done.phase, total, shown, tableTen: P.session.tables[9].snapshot().hand, standing: !document.body.hasAttribute("data-poker-seated"), tableLights, lightCount };
   })()`);
   record("poker local play: ten suited dealers, 90 chairs, nine-player settlement, table ten playable and private snapshots", r.count === 10 && r.seats && r.dealers && r.privateCards && r.phase === "showdown" && r.total === 9000 && r.shown === "Hand complete" && r.tableTen === 1 && r.standing, JSON.stringify(r));
   record("poker modes: table focus keeps X and the portrait from changing the seated Ooga's mode", r.modeHeld);
+  record("poker light: the lowest tier's ten lights are the ten tables, with the room's three and Banana Club's own after them", r.tableLights === 10 && r.lightCount === 16, JSON.stringify({ tableLights: r.tableLights, lightCount: r.lightCount }));
   if (process.env.POKER_SHOTS) {
     await b.evaluate(`(() => { const P = BL.scenes.poker.debug.pilot; P.release(true); P.goPreset("entrance"); __ooga.advance(2); })()`);
     await b.screenshot(join(process.env.POKER_SHOTS, "poker-floor.png"));
@@ -28289,6 +28293,53 @@ const pokerChecks = (BL) => {
   const walk = BL.pokerModels.walkable, actor = { bodyRadius: 0.65 };
   record("poker floor: wide spectators can traverse the main and row aisles; table and chair sweeps collide", walk(0, 34, 0, -34, 0, 2, actor) && walk(-21, 18, 21, 18, 0, 2, actor) && !walk(-18, 24, -4, 24, 0, 2, actor) && !walk(22, 0, 26, 0, 0, 2, actor));
   {
+    const P = BL.pokerModels, a = { bodyRadius: 0.65 }, out = { x: 0, z: 0 };
+    P.setFloor("gatsby");
+    const club = walk(0, 34, 0, -34, 0, 2, a) && walk(-21, 18, 21, 18, 0, 2, a) && walk(-21, -18, 21, -18, 0, 2, a) &&
+      !walk(10, -33, 10, -34.8, 0, 2, a) && !walk(20, 31, 22.3, 31, 0, 2, a) && !walk(-19, -31, -22, -31, 0, 2, a) &&
+      walk(3.9, -30, 3.9, -18, 0, 2, a) && !walk(3.5, -27.6, 6.5, -27.6, 0, 2, { bodyRadius: 0.4 });
+    const moved = P.nearestClear(10, -35.3, a, out), kept = P.nearestClear(0, 29, a, { x: 0, z: 0 });
+    const clear = Math.hypot(moved.x - 10, moved.z + 35.3) <= 4 && walk(moved.x, moved.z, moved.x, moved.z, 0, 2, a) && kept.x === 0 && kept.z === 29;
+    P.setFloor("crystal");
+    const cave = walk(10, -33, 10, -34.8, 0, 2, a) && walk(20, 31, 22.3, 31, 0, 2, a);
+    P.setFloor("gatsby");
+    record("poker furniture: Banana Club's fittings collide, its aisles keep their width, and the caves stay open", club && clear && cave);
+    record("poker furniture: a saved spot inside the bar no longer holds", !BL.visitSpot.holds({ x: 10, y: 0, z: -34.2, yaw: 0 }, P.walkable, a));
+  }
+  {
+    const P = BL.pokerModels, L = P.lights("gatsby");
+    record("poker furniture lights: Banana Club adds three after the room's, the caves none",
+      L.length === 24 && L[0] === -10 && L[8] === 10 && L[16] === Math.fround(20.6) && L[17] === Math.fround(2.4) && L[19] === 7 &&
+      BL.pokerThemes.themes.filter(t => t.id !== "gatsby").every(t => P.lights(t.id).length === 0));
+    const room = P.build();
+    try {
+      const wall = room.root.children[0].children.filter(n => n.geometry === P.geometry("gatsby").fanlight && Math.abs(n.position.z + 36.35) < 0.01);
+      record("poker furniture: the bar's shelves replace the far wall's fanlights and the room keeps its three top-level parts",
+        wall.length === 0 && room.root.children.length === 2 + room.tables.length &&
+        room.tables[P.HIGH_ROLLER].pinstripe.geometry !== room.tables[0].pinstripe.geometry);
+    } finally { for (const t of room.tables) t.agent.dispose(); }
+  }
+  {
+    const room = BL.pokerModels.build();
+    try {
+      const club = room.sparkle.length === 12 && new Set(room.sparkle.map(n => n.geometry)).size === 4 &&
+        room.sparkle.every(n => n.geometry.castShadow === false);
+      room.setTheme("ember"); const cave = room.sparkle.length === 0;
+      room.setTheme("gatsby");
+      record("poker chandeliers: three fixtures share four crystal meshes in Banana Club and none hang in the caves", club && cave && room.sparkle.length === 12);
+    } finally { for (const t of room.tables) t.agent.dispose(); }
+  }
+  {
+    // Rule: Canvas 2D paints every face on the CPU, so it gets a lighter Banana Club with the same fittings and glints.
+    const P = BL.pokerModels, full = P.geometry("gatsby"), faces = g => BL.compactGeometry?.storageOf(g)?.count ?? g.faces.length, rooms = [];
+    try {
+      P.setLite(true); const room = P.build(); rooms.push(room);
+      const lite = room.sparkle.length === 12 && new Set(room.sparkle.map(n => n.geometry)).size === 4 && faces(P.geometry("gatsby").shell) < faces(full.shell);
+      P.setLite(false); rooms.push(P.build());
+      record("poker lite club: Canvas 2D's Banana Club keeps twelve glints on four meshes with fewer shell faces, and the full set comes back", lite && P.geometry("gatsby") === full);
+    } finally { P.setLite(false); for (const r of rooms) for (const t of r.tables) t.agent.dispose(); }
+  }
+  {
     // Contract: changing the scenery during a hand must keep pick targets,
     // chairs, dealers and private/public card nodes alive without growing the room.
     const room = BL.pokerModels.build(), targets = room.tables.map(t => t.top), dealers = room.tables.map(t => t.agent);
@@ -28306,6 +28357,12 @@ const pokerChecks = (BL) => {
       room.setTheme("gatsby");
       record("poker themes: repeated switches preserve seats, dealers and dealt cards with a bounded scene", stable && count(room.root) === baseline && BL.pokerModels.geometry("invalid") === BL.pokerModels.geometry("gatsby"));
     } finally { for (const t of room.tables) t.agent.dispose(); }
+  }
+  {
+    const T = BL.pokerThemes, club = T.get("gatsby"), caves = T.themes.filter(t => t.id !== "gatsby");
+    record("poker light: only Banana Club dims and narrows its table lights",
+      caves.every(t => t.tableRange === undefined && t.tableY === undefined && t.bloom === undefined && t.directStrength === undefined) &&
+      caves.map(t => t.ambient).join() === "0.51,0.52,0.55,0.54" && caves.every(t => club.ambient < t.ambient && club.directStrength < 0.38) && club.tableRange < 14);
   }
 };
 const pokerProtocolChecks = async () => {

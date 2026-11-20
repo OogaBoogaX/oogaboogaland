@@ -4,11 +4,12 @@
   const BL = window.BL;
   const themes = [
     {
-      id: "gatsby", name: "Banana Club", short: "Club", detail: "Ivory stone, emerald felt and golden chandelier light.", lamp: 0,
+      id: "gatsby", name: "Banana Club", short: "Club", detail: "Dim emerald hall, diamond chandeliers, a lit bar and pools of light on every table.", lamp: 0,
       stone: ["#b4ab92", "#c5bba2", "#b0a68d", "#baaf93", "#7e8068", "#d0c6ab"],
       wood: "#775338", accent: "#c8a45f", mineral: "#dac390", felt: "#317459", panel: "#245749", runner: "#376653",
       ui: { accent: "#dfbe77", bright: "#f4dda2", ink: "#213023", text: "#f5efdf", muted: "#c1d0bb", surface: "#243e33", deep: "#142820", halo: "#45654f", rail: "#d3c5a5", feltLight: "#3b7963", feltDark: "#164332" },
-      sky: [0.62, 0.57, 0.45], ground: [0.31, 0.36, 0.27], direct: [0.88, 0.77, 0.58], ambient: 0.48,
+      sky: [0.40, 0.33, 0.24], ground: [0.14, 0.18, 0.14], direct: [0.88, 0.77, 0.58], ambient: 0.2,
+      tableRange: 9, tableY: 4.4, bloom: 0.45, directStrength: 0.14,
       tableLight: [1, 0.84, 0.58], roomLight: [1, 0.87, 0.63]
     },
     {

@@ -15,7 +15,8 @@
   const targets = [], snapshots = new Array(10);
   let HERO = "local-player", connecting = false, unsubscribeAccount = null, remotes = null, footsteps = null;
   let visit = 0, pendingLive = null;
-  const NO_ACTORS = [];
+  const NO_ACTORS = [], CLEAR = { x: 0, z: 0 };
+  let extraLights = new Float32Array(0);
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the room
   // every frame, so signed-in players on the floor hear each other (voice needs a driven Ooga).
   const mayPossess = cave => BL.net.mayDrive(cave.traits.name, BL.contributors.stateFor(cave.contributor) === "working");
@@ -49,7 +50,13 @@
   const setTheme = id => {
     theme = Themes.get(id); room.setTheme(theme.id); panel.setTheme(theme.id);
     session.theme = theme.id;
-    renderOpts.sky = theme.sky; renderOpts.ground = theme.ground; renderOpts.direct = theme.direct; renderOpts.ambientFloor = theme.ambient;
+    renderOpts.sky = theme.sky; renderOpts.ground = theme.ground; renderOpts.direct = theme.direct; renderOpts.ambientFloor = theme.ambient; renderOpts.bloomStrength = theme.bloom ?? 0.24; renderOpts.directStrength = theme.directStrength ?? 0.38;
+    // A theme's fittings may stand where a standing Ooga is: it steps to the nearest spot clear of them.
+    BL.pokerModels.setFloor(theme.id);
+    // A theme's own lights (Banana Club's bar and cage) follow the room's thirteen, in slots no tier keeps first.
+    extraLights = BL.pokerModels.lights(theme.id); renderOpts.lightCount = 13 + extraLights.length / 8;
+    const p = avatar && (seatTable < 0 || pendingStand) ? avatar.root.position : null;
+    if (p && !BL.pokerModels.walkable(p.x, p.z, p.x, p.z, 0, avatar.bodyHeight, avatar)) { BL.pokerModels.nearestClear(p.x, p.z, avatar, CLEAR); p.x = CLEAR.x; p.z = CLEAR.z; }
   };
   const leaveFloor = () => { if (leaving) return; if (session.live && seatTable >= 0) { panel.notice("Stand between hands before leaving. You can walk the floor while connected."); return; } if (go("bifrost", null, true)) leaving = true; };
   const setView = focused => {
@@ -259,6 +266,8 @@
     hud.onPreset(presetView);
     hud.onAction((a, v) => { if (a === "leave") leaveFloor(); else if (a === "reset-view") pilot.resetCamera(); else if (a === "act") pilot.action(); else if (a === "mode-preset") return presetView(v); else if (a.startsWith("mode-")) modeAction(a); });
     fx = BL.fx.create({ root, input, hooks, hud, game: ctx.game, world, renderer: ctx.renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 5, z: -34 } });
+    // Canvas 2D paints every face on the CPU, so it gets Banana Club's lighter set of the same fittings.
+    BL.pokerModels.setLite(ctx.renderer.kind === "canvas2d");
     room = BL.pokerModels.build(theme.id); S.addChild(root, room.root);
     for (let i = 0; i < 10; i++) { input.add(room.tables[i].top, { kind: "poker", index: i }); targets.push(room.tables[i].top); }
     // The return mirror is set into the far wall, facing down the central aisle.
@@ -294,6 +303,7 @@
     avatar.root.rotation.y = Math.PI; pilot.possess(avatar);
     // A reload of this tab stands where the Ooga stood on the floor (visit-spot.js), while it can walk on from there.
     const stood = ctx.from === null ? BL.visitSpot.take("poker", "") : null;
+    BL.pokerModels.setFloor(theme.id);
     if (stood && Math.abs(stood.y) < 0.05 && BL.visitSpot.holds(stood, BL.pokerModels.walkable, avatar)) pilot.navigate({ position: stood, yaw: stood.yaw - Math.PI, pitch: 0.18, dist: 4 });
     else pilot.navigate({ position: { x: 0, y: 0, z: 29 }, yaw: 0, pitch: 0.18, dist: 4 });
     keepCameraInside();
@@ -306,7 +316,7 @@
     if (seatTable >= 0 && !pendingStand) sit(session.tables[seatTable].snapshot().seats.findIndex(s => s?.id === HERO));
     panel = BL.pokerHud.create(action, select); setTheme(theme.id); refresh(); setView(seatTable >= 0 && !pendingStand);
     scene.root = root; scene.camera = camera; scene.input = input;
-    scene.debug = { camera, pilot, hud, crew: people, cavemen: people.cavemen, controls: pilot.controls, poker: { session, room, action, select, snapshots } };
+    scene.debug = { camera, pilot, hud, crew: people, cavemen: people.cavemen, controls: pilot.controls, poker: { session, room, action, select, snapshots, renderOpts } };
     if (new URLSearchParams(location.search).get("pokerLive") === "1") action("connect");
   };
   const update = (dt, elapsed) => {
@@ -334,7 +344,7 @@
     const near = selected, lights = renderOpts.lights;
     for (let slot = 0; slot < 10; slot++) {
       const i = (near + slot) % 10, p = BL.pokerModels.TABLES[i], o = slot * 8;
-      lights[o] = p.x; lights[o + 1] = 5.1; lights[o + 2] = p.z; lights[o + 3] = 14;
+      lights[o] = p.x; lights[o + 1] = theme.tableY ?? 5.1; lights[o + 2] = p.z; lights[o + 3] = theme.tableRange ?? 14;
       lights[o + 4] = theme.tableLight[0]; lights[o + 5] = theme.tableLight[1]; lights[o + 6] = theme.tableLight[2];
       const v = room.tables[i]; v.pulse = Math.max(0, v.pulse - dt);
       // Floating table names face the visitor and clear the overhead view with the fixtures.
@@ -350,6 +360,9 @@
       lights[o] = 0; lights[o + 1] = 6.15; lights[o + 2] = (i - 1) * 24; lights[o + 3] = 13;
       lights[o + 4] = theme.roomLight[0]; lights[o + 5] = theme.roomLight[1]; lights[o + 6] = theme.roomLight[2];
     }
+    // The chandeliers' crystals glint, each ring on its own beat.
+    for (let i = 0; i < room.sparkle.length; i++) { const n = room.sparkle[i]; n.glow = 0.7 + 0.3 * Math.sin(elapsed * 1.3 + n.ring * 1.1 + n.fixture * 2.1); }
+    for (let i = 0; i < extraLights.length; i++) lights[104 + i] = extraLights[i];
     if (!session.live && !session.paused) {
       timer += dt;
       for (let i = 0; i < 10; i++) if (session.autoDeal[i] && snapshots[i].result) nextHand[i] = Math.max(0, nextHand[i] - dt);
@@ -391,6 +404,7 @@
     world.pilot = pilot.player ? pilot.player.traits.name : null;
     unsubscribeAccount(); unsubscribeAccount = null; BL.net.setBody(null);
     for (const t of room.tables) t.agent.dispose();
+    BL.pokerModels.setFloor("gatsby"); BL.pokerModels.setLite(false);
     remotes.dispose(); remotes = null; footsteps.dispose(); footsteps = null;
     people.dispose(); fx.dispose(); pilot.dispose();
     for (const n of targets) input.remove(n); targets.length = 0;

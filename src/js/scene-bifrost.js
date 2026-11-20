@@ -117,12 +117,14 @@
   DSB_LIGHT.lights.set([-24, 5, -15, 14, 0.8, 0.25, 1, 0, -12, 5, -15, 14, 1, 0.8, 0.2, 0]);
   const POKER_LIGHT = {
     clear: [0.1, 0.12, 0.09], sky: null, ground: null, direct: null, directStrength: 0.38, ambientFloor: 0.48, sun: { x: 0.2, y: 1, z: 0.3 },
-    shadowCenter: { x: 0, y: 1.5, z: 0 }, shadowExtent: 35, bloomStrength: 0.24, lights: new Float32Array(13 * 8), lightCount: 13
+    shadowCenter: { x: 0, y: 1.5, z: 0 }, shadowExtent: 35, bloomStrength: 0.24, lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 13
   };
   const pokerLight = (theme) => {
     POKER_LIGHT.sky = theme.sky; POKER_LIGHT.ground = theme.ground; POKER_LIGHT.direct = theme.direct; POKER_LIGHT.ambientFloor = theme.ambient;
-    BL.pokerModels.TABLES.forEach((p, i) => POKER_LIGHT.lights.set([p.x, 5.1, p.z, 14, ...theme.tableLight, 0], i * 8));
+    POKER_LIGHT.directStrength = theme.directStrength ?? 0.38; POKER_LIGHT.bloomStrength = theme.bloom ?? 0.24;
+    BL.pokerModels.TABLES.forEach((p, i) => POKER_LIGHT.lights.set([p.x, theme.tableY ?? 5.1, p.z, theme.tableRange ?? 14, ...theme.tableLight, 0], i * 8));
     for (let i = 0; i < 3; i++) POKER_LIGHT.lights.set([0, 6.15, (i - 1) * 24, 13, ...theme.roomLight, 0], (10 + i) * 8);
+    const extra = BL.pokerModels.lights(theme.id); POKER_LIGHT.lights.set(extra, 104); POKER_LIGHT.lightCount = 13 + extra.length / 8;
     return POKER_LIGHT;
   };
   const SHOTS = {

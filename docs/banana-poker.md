@@ -101,12 +101,22 @@ them. Reloading resets practice chips.
 
 ## Visual revision: Gatsby meets Ooga Booga Land
 
-The underground room now uses ivory limestone, emerald upholstery, brass
-sunburst wall panels and geometric floor inlays. Three chandelier clusters are
-built with the world's existing hanging lantern and cable kit. Hanging vines
-keep the tropical island character. Warmer, brighter ambient light lifts the
-room; the first ten point lights still serve the ten tables on the low tier.
-Decoration sits overhead or against the walls, outside the spectator aisles.
+Banana Club is a dim, high-class hall. The ambient light is low and each of
+the ten tables sits in its own pool of light. Three tiered diamond chandeliers
+hang down the room, and their crystal rings glint, each ring on its own beat.
+A two-wing bar stands backlit on the far wall, a cashier cage stands on the
+side wall near the mirror end, and the two far corners are lounges with sofas,
+low tables and palms. Table 10 is the high-roller table: it stands on a red
+carpet. A short velvet rope between two posts stands on the aisle side at each
+end of the table, not all round it, and the stretch by the chairs is left
+open. The floor is green carpet with a brass
+inlay. Hanging vines keep the tropical island character.
+
+The furniture collides with walkers and exists only in Banana Club. Switching
+theme while standing moves the visitor to the nearest spot clear of the new
+room's furniture. The lowest renderer tier still spends its ten point lights on
+the ten tables; the room's three lights follow, and the bar and cage lights come
+after those.
 
 Cards now have rounded paper edges, proper suit shapes, corner ranks at both
 ends, traditional numbered pip layouts, original double-ended Jack/Queen/King
@@ -130,7 +140,7 @@ The original Banana Club remains the default.
 
 | Theme | Room character |
 | --- | --- |
-| Banana Club | Ivory limestone, emerald felt, brass fanlights and chandeliers. |
+| Banana Club | Dim emerald hall, diamond chandeliers, a backlit bar, cashier cage, lounge corners and a roped high-roller table. |
 | Crystal Grotto | Blue stone, cyan/amethyst wall crystals, teal lanterns and lagoon felt. |
 | Ember Cavern | Basalt colors, glowing amber fissures, copper trim and warm red felt. |
 | Jungle Ruins | Mossy limestone bands, hanging vines, rune stones and fern-green felt. |
