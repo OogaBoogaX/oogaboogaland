@@ -15,6 +15,10 @@
   const targets = [], snapshots = new Array(10);
   let HERO = "local-player", connecting = false, unsubscribeAccount = null, remotes = null, footsteps = null;
   let visit = 0, pendingLive = null;
+  // The room's music and sound (poker-audio.js): where the visitor hears from, written in place each frame, the crowd's
+  // footfalls handed on to it, and whether a table's result may dip the music (not on the visit's first refresh).
+  let audio = null, cheers = false;
+  const EAR = { x: 0, z: 0, fx: 0, fz: 1 }, onStep = (name, x, z) => audio.cue(name, x, z);
   // The crowd walking the floor (poker-crowd.js), as many as the renderer's tier carries, giving way to the bodies in
   // `crowdBodies`: the visitor's Ooga and the other players here, rewritten in place each frame.
   let crowd = null, renderer = null, crowdTimer = 0;
@@ -70,6 +74,7 @@
     // A theme's fittings may stand where a standing Ooga is: it steps to the nearest spot clear of them.
     BL.pokerModels.setFloor(theme.id);
     if (crowd) crowd.refloor(BL.pokerModels.spots(theme.id));
+    audio.setTheme(theme.id);
     // A theme's own lights (Banana Club's bar and cage) follow the room's thirteen, in slots no tier keeps first.
     extraLights = BL.pokerModels.lights(theme.id); renderOpts.lightCount = 13 + extraLights.length / 8;
     const p = avatar && (seatTable < 0 || pendingStand) ? avatar.root.position : null;
@@ -79,7 +84,7 @@
   const setView = focused => {
     panel.setFocused(focused); pilot.controls.reset();
     BL.net.setPokerVoice(focused ? selected : null);
-    pilot.setActive(!focused);
+    pilot.setActive(!focused); audio.setSeated(focused);
   };
   const modeAction = name => !leaving && !panel.focused && (seatTable < 0 || pendingStand) && pilot.modeAction(name);
   const placeInAisle = () => {
@@ -98,9 +103,13 @@
     document.body.dataset.pokerSeated = "true";
   };
   const syncTable = i => {
-    const t = session.tables[i], view = room.tables[i], s = t.snapshot(i === seatTable && !pendingStand ? HERO : null);
+    const t = session.tables[i], view = room.tables[i], s = t.snapshot(i === seatTable && !pendingStand ? HERO : null), was = snapshots[i];
     snapshots[i] = s; view.version = t.version; view.pulse = 0.7;
-    if (s.result && completed[i] !== s.hand) { completed[i] = s.hand; nextHand[i] = 5; }
+    if (s.result && completed[i] !== s.hand) {
+      completed[i] = s.hand; nextHand[i] = 5;
+      // A hand ending at the table the visitor sits at or watches, won or lost, dips the music, only when this visit saw it played.
+      if (cheers && was && (!was.result || was.hand !== s.hand) && (i === seatTable || panel.focused && i === selected)) audio.win();
+    }
     for (let j = 0; j < BL.pokerModels.SEATS.length; j++) {
       const p = s.seats[j], slot = BL.pokerModels.SEATS[j];
       view.backs[j].visible = !!p && p.inHand && !p.folded && s.phase !== "showdown";
@@ -334,15 +343,16 @@
     remotes = BL.remotePlayers.create({ root, crew: people, fx, posed: cave => { cave.parts.club.visible = cave.parts.gun.visible = false; } });
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
+    audio = BL.pokerAudio.create(); cheers = false;
     mirror.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
     if (seatTable >= 0 && !pendingStand) sit(session.tables[seatTable].snapshot().seats.findIndex(s => s?.id === HERO));
-    panel = BL.pokerHud.create(action, select); setTheme(theme.id); refresh(); setView(seatTable >= 0 && !pendingStand);
+    panel = BL.pokerHud.create(action, select); setTheme(theme.id); refresh(); cheers = true; setView(seatTable >= 0 && !pendingStand);
     // After the theme's floor is set, so the crowd's lattice is read once.
     crowd = BL.pokerCrowd.create({ root, fx, walkable: BL.pokerModels.walkable, spots: BL.pokerModels.spots(theme.id), publicState,
       others: () => crowdBodies, visitor: () => crowdBodies[0] === ownBody ? ownBody : null,
-      day: Math.floor(Date.now() / 86400000), cap: crowdCap() });
+      day: Math.floor(Date.now() / 86400000), cap: crowdCap(), onStep });
     scene.root = root; scene.camera = camera; scene.input = input;
-    scene.debug = { camera, pilot, hud, crew: people, cavemen: people.cavemen, controls: pilot.controls, poker: { session, room, action, select, snapshots, renderOpts, crowd } };
+    scene.debug = { camera, pilot, hud, crew: people, cavemen: people.cavemen, controls: pilot.controls, poker: { session, room, action, select, snapshots, renderOpts, crowd, audio } };
     if (new URLSearchParams(location.search).get("pokerLive") === "1") action("connect");
   };
   const update = (dt, elapsed) => {
@@ -363,6 +373,12 @@
     if (drivenHere && !leaving && seatTable < 0) BL.visitSpot.note("poker", "", drivenHere);
     remotes.update(dt);
     footsteps.update(drivenHere);
+    // The room is heard from the Ooga driven here, else the visitor's own, facing the view's way on the floor; a view
+    // straight down keeps the last facing.
+    const heard = (drivenHere || avatar).root.position, lx = camera.target.x - camera.position.x, lz = camera.target.z - camera.position.z, fl = Math.hypot(lx, lz);
+    EAR.x = heard.x; EAR.z = heard.z;
+    if (fl > 1e-4) { EAR.fx = lx / fl; EAR.fz = lz / fl; }
+    audio.update(dt, EAR);
     crowdBodies.length = 0;
     if (avatar.root.visible) { ownBody.x = avatar.root.position.x; ownBody.z = avatar.root.position.z; ownBody.radius = avatar.bodyRadius; crowdBodies.push(ownBody); }
     const remoteBodies = remotes.actors();
@@ -440,6 +456,8 @@
     BL.pokerModels.setFloor("gatsby"); BL.pokerModels.setLite(false);
     remotes.dispose(); remotes = null; footsteps.dispose(); footsteps = null;
     crowd.dispose(); crowd = null; crowdBodies.length = 0; renderer = null;
+    // After the crowd, so no footfall reaches a closed context.
+    audio.dispose(); audio = null; cheers = false;
     people.dispose(); fx.dispose(); pilot.dispose();
     for (const n of targets) input.remove(n); targets.length = 0;
     mirror.phase.dispose(); mirror.body.dispose(); mirror.glass.mirrorRipples = null;

@@ -76,10 +76,11 @@ Auto deal defaults on and waits at least five seconds after settlement. It
 refills busted computer seats for free between hands. A busted human stops the
 loop and chooses a free refill explicitly. Auto deal can be disabled per table;
 Pause practice pauses all local tables. Optional synthesized deal/turn/win sounds
-start only after opting in, with no audio downloads. The history keeps the last
-twelve completed public hand summaries per table during this floor visit; it
-never archives a player's private or folded cards. Card motion respects the
-reduced-motion preference.
+start only after opting in, with no audio downloads. The room's own music and
+sound play without opting in once the page has had a click or key (see Sound).
+The history keeps the last twelve completed public hand summaries per table
+during this floor visit; it never archives a player's private or folded cards.
+Card motion respects the reduced-motion preference.
 
 WASD/sticks move the spectator; drag/look controls use the shared pilot. The
 central aisle and passages between table rows remain walkable. **Walk the floor**
@@ -220,6 +221,27 @@ On an M-series Mac the full crowd of 16 costs about 164 draw calls and 77,000
 triangles a frame over the empty floor; the lowest tier's six cost about 69
 draw calls and 30,000 triangles. Building a member takes 4 to 8 ms, one every
 0.15 s.
+
+## Sound
+
+The room plays quiet lounge music: a bass, a piano and brushes in swing time,
+three tunes in turn with a short rest between them. Under it is the murmur of
+the room, louder near the bar and the tables, with chips clicking at the tables
+and glasses at the bar. The crowd's heels, canes and walking frame are heard
+where they step, quieter further away and to the side they are on.
+
+The music plays on the speaker panel's **Music** row, the one every place's
+music shares, and while you are in the room the panel shows **Room hum** for
+the murmur and every placed sound. The table's own deal, turn and win sounds
+keep their **Poker table** row. The page mute silences all of them.
+
+The music dips while a table's playing view is open, and dips further for a
+moment when a hand ends at the table you sit at or watch, then comes back. It
+does not dip for a hand that had already ended when you came in.
+
+Everything is synthesized in the page (`src/js/poker-audio.js`): no audio files
+and no network. Nothing sounds until the page has had a click or a key, and
+leaving the room stops it.
 
 ## Chips and rules
 

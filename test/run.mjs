@@ -26376,10 +26376,15 @@ const pokerTrip = (() => {
     const before = await b.evaluate(`(() => {
       const P = BL.scenes.poker.debug.poker;
       if (P.session.live) throw new Error("Poker round trip needs a local session");
+      // Leave seated at a practice table whose hand has just ended, so the visit the trip comes back to opens with the
+      // visitor in that seat and the table showing that result: the one case the music's dip must ignore on entry.
+      const click = a => document.querySelector('[data-poker-action="' + a + '"]').click(), t = P.session.tables[1];
+      P.select(1); click("join"); click("bots"); click("start");
+      let guard = 0; while (t.playing && guard++ < 500) { if (t.snapshot("local-player").legal) click("call"); __ooga.advance(0.81, 1 / 30); }
       const paused = P.session.paused;
       if (!paused) P.action("pause");
       if (!P.session.paused) throw new Error("Poker round trip could not pause the local session");
-      return { paused, versions: P.session.tables.map(t => t.version), title: document.querySelector('[data-poker="title"]').textContent };
+      return { paused, versions: P.session.tables.map(t => t.version), title: document.querySelector('[data-poker="title"]').textContent, contexts: (window.__pokerContexts || []).length };
     })()`);
     try {
       await check.run(b);
@@ -26388,6 +26393,19 @@ const pokerTrip = (() => {
         return { paused: P.session.paused, local: !P.session.live, versions: P.session.tables.map(t => t.version), title: document.querySelector('[data-poker="title"]').textContent };
       })()`);
       record("poker round trip: both visits compare the same paused local hand and table", after.local && after.paused && after.title === before.title && JSON.stringify(after.versions) === JSON.stringify(before.versions), JSON.stringify({ before, after }));
+      // The first visit's sound once it has gone, and the music of the visit the trip came back to: the visitor seated
+      // at table two with its table view open, the table showing the hand that ended before the trip, and no hand marked.
+      const sound = await b.evaluate(`(() => {
+        const P = BL.scenes.poker.debug.poker, first = window.__pokerFirstAudio, now = P.audio, made = (window.__pokerContexts || []).slice(0, ${before.contexts});
+        const s = P.snapshots[1];
+        return { firstOpen: first ? first.stats.open : null, made: made.length, closed: made.filter(c => c.state === "closed").length, fresh: now !== first, hands: now.stats.hands,
+          seated: document.body.hasAttribute("data-poker-seated") && P.session.tables[1].snapshot().seats.some(p => p?.id === "local-player"),
+          viewing: document.body.hasAttribute("data-poker-table-view"), result: !!(s && s.result), phase: s && s.phase };
+      })()`);
+      record("rule: the room's music closes when the visitor leaves (every context made before the trip is closed after it)",
+        sound.firstOpen === false && sound.made > 0 && sound.closed === sound.made && sound.fresh, JSON.stringify(sound));
+      record("rule: coming back seated at a table already showing its result marks no hand for the music's dip",
+        sound.seated && sound.viewing && sound.result && sound.hands === 0, JSON.stringify(sound));
     } finally {
       await b.evaluate(`(() => {
         const P = BL.scenes.poker.debug?.poker;
@@ -26398,6 +26416,9 @@ const pokerTrip = (() => {
 })();
 scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor and play", why: "playthrough: a visitor walks the floor, fills a table, plays to settlement and stands without exposing hidden cards", run: async b => {
   await b.evaluate(`document.querySelector('[data-intro="poker"] .game-intro-go').click()`);
+  // Every AudioContext the page makes from here on, so the round trip can see the visit's own closed after it leaves.
+  await b.evaluate(`(() => { const A = window.AudioContext; window.__pokerContexts = []; window.AudioContext = class extends A { constructor(...a) { super(...a); window.__pokerContexts.push(this); } }; })()`);
+  const silent = await b.evaluate(`({ ...BL.scenes.poker.debug.poker.audio.stats })`);
   // The crowd fills to its tier's cap, then a minute on the floor (members walking, sitting, talking) keeps the heap
   // within the soaks' tenth.
   await b.send("HeapProfiler.enable");
@@ -26412,6 +26433,9 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
     JSON.stringify({ ...capped, heapMB: [heapBefore, heapAfter].map(n => +(n / 1e6).toFixed(2)) }));
   const walking = await walkKeys(b, "portlandhodl", 0, 18, [0, 1.5], 0.45);
   record("poker walking: spectators move with WASD from two camera angles", allWalk(walking), JSON.stringify(walking));
+  const heard = await b.evaluate(`(() => { const A = BL.scenes.poker.debug.poker.audio; window.__pokerFirstAudio = A; return { open: A.stats.open, contexts: A.stats.contexts, made: window.__pokerContexts.length }; })()`);
+  record("rule: the room's music opens on the visitor's first key",
+    !silent.open && silent.contexts === 0 && heard.open && heard.contexts === 1, JSON.stringify({ before: { open: silent.open, contexts: silent.contexts }, heard }));
   await walkingModeControls(b, "poker");
   const r = await b.evaluate(`(() => {
     const B = __ooga, P = BL.scenes.poker.debug.poker, click = a => document.querySelector('[data-poker-action="' + a + '"]').click();
@@ -26444,16 +26468,17 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
     click("start");
     const t = P.session.tables[0], privateCards = t.snapshot().seats.every(s => s.cards.every(c => c === null));
     let guard = 0; while (t.playing && guard++ < 500) { if (t.snapshot("local-player").legal) click("call"); B.advance(0.81, 1 / 30); }
-    const done = t.snapshot(), total = done.seats.reduce((n, s) => n + s.stack, 0), shown = document.querySelector('[data-poker="street"]').textContent;
+    const done = t.snapshot(), total = done.seats.reduce((n, s) => n + s.stack, 0), shown = document.querySelector('[data-poker="street"]').textContent, hands = P.audio.stats.hands;
     click("stand"); P.select(9); click("bots"); click("start"); B.advance(1, 1 / 30);
     const L = P.renderOpts.lights, lit = [];
     for (let i = 0; i < 10; i++) lit.push(BL.pokerModels.TABLES.findIndex(p => Math.abs(p.x - L[i * 8]) < 1e-3 && Math.abs(p.z - L[i * 8 + 2]) < 1e-3));
     const tableLights = new Set(lit.filter(i => i >= 0)).size, lightCount = P.renderOpts.lightCount;
-    return { count, seats, dealers, privateCards, modeHeld, phase: done.phase, total, shown, tableTen: P.session.tables[9].snapshot().hand, standing: !document.body.hasAttribute("data-poker-seated"), tableLights, lightCount, dressed };
+    return { count, seats, dealers, privateCards, modeHeld, phase: done.phase, total, shown, hands, tableTen: P.session.tables[9].snapshot().hand, standing: !document.body.hasAttribute("data-poker-seated"), tableLights, lightCount, dressed };
   })()`);
   record("rule: a computer opponent sits as a dressed guest, a seat keeps its character, and a seat changing hands leaves one figure on the table", r.dressed.ok, JSON.stringify(r.dressed));
   record("poker local play: ten suited dealers, 90 chairs, nine-player settlement, table ten playable and private snapshots", r.count === 10 && r.seats && r.dealers && r.privateCards && r.phase === "showdown" && r.total === 9000 && r.shown === "Hand complete" && r.tableTen === 1 && r.standing, JSON.stringify(r));
   record("poker modes: table focus keeps X and the portrait from changing the seated Ooga's mode", r.modeHeld);
+  record("rule: the hand played out at the visitor's own table marks one hand for the music (one win() call)", r.hands === 1, JSON.stringify({ hands: r.hands }));
   record("poker light: the lowest tier's ten lights are the ten tables, with the room's three and Banana Club's own after them", r.tableLights === 10 && r.lightCount === 16, JSON.stringify({ tableLights: r.tableLights, lightCount: r.lightCount }));
   if (process.env.POKER_SHOTS) {
     await b.evaluate(`(() => { const P = BL.scenes.poker.debug.pilot; P.release(true); P.goPreset("entrance"); __ooga.advance(2); })()`);
@@ -29789,6 +29814,319 @@ const ghostAudioChecks = async () => {
       &&out.walk.reschedules>0&&out.walk.reschedules<=52&&out.walk.decodes===0&&out.walk.loads===0&&out.walk.end===0
       &&Math.abs(out.mid-0.35*Math.SQRT1_2)<1e-4&&out.hushed===0&&out.after===1&&out.muted===0&&out.unmuted===out.mid
       &&!out.disposed.playing&&out.disposed.sources===0&&out.disposed.contexts===1&&out.disposed.state==="closed"&&out.disposed.sound,JSON.stringify(out));
+};
+// The Ember Den's music and room sound (poker-audio.js) on a fake AudioContext that counts every node it makes: no
+// context before a gesture or while the page is muted, one after, both channels held until dispose, and a minute of
+// frames building nothing after init. Every frequency set on a voice is logged by the oscillator's type or the filter's
+// (lowpass tone filters left out), so the lounge's tunes can be heard as data; every param keeps the times scheduled on
+// it, so a cancel that deletes a note already scheduled is counted (`lost`), and every oscillator type set is counted.
+// Listeners are kept by target, type, function and capture flag, as the browser keeps them.
+const pokerAudioChecks = (BL) => {
+  const ctxs = [], entries = [], held = [], timers = new Map();
+  let nodes = 0, closed = 0, released = 0, toDestination = 0, soundFn = null, log = null, watch = null, timerId = 0, lost = 0, typeSets = 0;
+  // `kind` and `of` (the node the param belongs to) tag a param for `watch`, which lists every call on it, cancels included.
+  const param = (owner, kind, of) => {
+    const p = { value: 0, at: [], last: 0 };
+    for (const m of ["setValueAtTime", "exponentialRampToValueAtTime", "linearRampToValueAtTime", "setTargetAtTime", "cancelScheduledValues", "cancelAndHoldAtTime"]) p[m] = (v, t, c) => {
+      if (watch && kind) watch.push({ kind, m, v, t, c, p, of });
+      if (m === "cancelScheduledValues" || m === "cancelAndHoldAtTime") { const keep = p.at.filter(e => e < v); lost += p.at.length - keep.length; p.at = keep; return; }
+      p.at.push(t);
+      p.last = v;
+      if (m === "setValueAtTime" && owner && log && owner.type !== "lowpass") log(owner.type, v, t);
+    };
+    return p;
+  };
+  const node = (extra) => { nodes++; return Object.assign({ connect(to) { this.to = to; if (to && to.destination) toDestination++; }, disconnect() {}, start() {}, stop() {} }, extra); };
+  class Ctx {
+    constructor() { ctxs.push(this); this.currentTime = 0; this.state = "running"; this.sampleRate = 800; this.destination = { destination: true }; this.gains = []; }
+    createGain() { const g = node({}); g.gain = param(null, "gain", g); this.gains.push(g); return g; }
+    createOscillator() { const o = node({ detune: param() }); let type = "sine"; Object.defineProperty(o, "type", { get: () => type, set: v => { type = v; typeSets++; } }); o.frequency = param(o, "freq", o); return o; }
+    createBiquadFilter() { const f = node({ Q: param(), gain: param(), type: "lowpass" }); f.frequency = param(f); return f; }
+    createStereoPanner() { const p = node({}); p.pan = param(null, "pan", p); return p; }
+    createBuffer(c, n) { return { getChannelData: () => new Float32Array(n) }; }
+    createBufferSource() { return node({ buffer: null, loop: false }); }
+    resume() { return Promise.resolve(); }
+    close() { this.state = "closed"; closed++; return Promise.resolve(); }
+  }
+  // Every channel taken is also taken from the real sound.js (which throws on a name it does not have), so the
+  // speaker panel's list for the place is read from the app itself.
+  const real = { window: { addEventListener() {} } };
+  runInNewContext(readFileSync(join(root, "src/js/sound.js"), "utf8"), real);
+  const realSound = real.window.BL.sound, channelNodes = {};
+  const sound = { muted: false, subscribe: fn => { soundFn = fn; return () => { soundFn = null; }; },
+    channel: id => { held.push(id); const own = realSound.channel(id);
+      return { id, gain: 1, level: 1, node: () => channelNodes[id] || (channelNodes[id] = { channel: id }), subscribe: () => () => {}, show() {}, release() { own.release(); released++; } }; } };
+  const mute = on => { sound.muted = on; soundFn(on); };
+  const activation = { hasBeenActive: false };
+  const capture = o => o === true || !!(o && o.capture);
+  const target = name => ({
+    addEventListener: (k, fn, o) => entries.push({ name, k, fn, cap: capture(o) }),
+    removeEventListener: (k, fn, o) => { const i = entries.findIndex(e => e.name === name && e.k === k && e.fn === fn && e.cap === capture(o)); if (i >= 0) entries.splice(i, 1); } });
+  const fire = (name, k) => { for (const e of entries.slice()) if (e.name === name && e.k === k) e.fn(); };
+  const window = { BL: { sound, pokerModels: BL.pokerModels }, ...target("window") };
+  const document = { hidden: false, ...target("document") };
+  const setHidden = on => { document.hidden = on; fire("document", "visibilitychange"); };
+  // The room's own chips and glasses draw from Math.random; here it is mulberry32 from a fixed seed, so every run hears the same room.
+  let seed = 0x5eed;
+  const seeded = Object.assign(Object.create(Math), { random: () => {
+    seed = seed + 1831565813 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  } });
+  const context = { window, document, navigator: { userActivation: activation }, AudioContext: Ctx, Math: seeded, Float32Array,
+    setTimeout: (fn) => { timers.set(++timerId, fn); return timerId; }, clearTimeout: id => { timers.delete(id); } };
+  const tick = () => { const [id, fn] = [...timers][0]; timers.delete(id); fn(); };
+  runInNewContext(readFileSync(join(root, "src/js/math.js"), "utf8"), context);
+  runInNewContext(readFileSync(join(root, "src/js/poker-audio.js"), "utf8"), context);
+  const A = window.BL.pokerAudio.create(), ear = { x: 0, z: 0, fx: 0, fz: 1 }, snap = () => ({ ...A.stats, contexts: ctxs.length });
+  A.update(1 / 60, ear);
+  const before = snap();
+  mute(true); activation.hasBeenActive = true;
+  fire("window", "pointerdown"); A.update(1 / 60, ear);
+  const mutedFirst = snap();
+  mute(false); A.update(1 / 60, ear);
+  const after = snap(), nodesAfterInit = nodes, ctx = ctxs[0], panel = realSound.channels().map(c => c.id).join();
+  for (let i = 0; i < 3600; i++) { if (ctx) ctx.currentTime += 1 / 60; A.update(1 / 60, ear); }
+  const nodesAfterMinute = nodes;
+  A.dispose();
+  const leftListening = entries.length, panelAfter = realSound.channels().length;
+  // Created while the page is already muted: a gesture and a frame open nothing.
+  sound.muted = true;
+  const M = window.BL.pokerAudio.create();
+  fire("window", "pointerdown"); M.update(1 / 60, ear);
+  const mutedAtCreate = ctxs.length - 1;
+  M.dispose(); sound.muted = false;
+  record("poker audio: no context before a gesture or while muted, one after, none after dispose; the music on the shared Music channel, so the place lists only Room hum",
+    before.contexts === 0 && mutedFirst.contexts === 0 && after.contexts === 1 && after.open &&
+    after.tones === 10 && after.noises === 5 && closed === 1 && held.join() === "music,room,music,room" && released === 4 &&
+    panel === "room" && panelAfter === 0 &&
+    leftListening === 0 && mutedAtCreate === 0 && entries.length === 0 && toDestination === 0,
+    JSON.stringify({ before, mutedFirst, after, closed, held, released, panel, panelAfter, leftListening, mutedAtCreate, toDestination, open: A.stats.open, tones: window.BL.pokerAudio.TONES, noises: window.BL.pokerAudio.NOISES }));
+  record("poker audio: a minute of playing builds no node after init", nodesAfterInit > 0 && nodesAfterInit === nodesAfterMinute, JSON.stringify({ nodesAfterInit, nodesAfterMinute }));
+
+  // The lounge's tunes. A fresh instance plays from the first tune's top; `frames(I, seconds)` plays it at 60 frames
+  // a second on its own context's clock, its first frame scheduling the tune's first step.
+  const S = window.BL.pokerAudio.SONGS, chordCount = window.BL.pokerAudio.CHORDS.length;
+  const fnv = text => { let h = 2166136261; for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619); return h >>> 0; };
+  const fresh = () => { const I = window.BL.pokerAudio.create(); fire("window", "pointerdown"); return { I, ctx: ctxs[ctxs.length - 1] }; };
+  // `away` hears from too far for any room cue, so the tunes are heard alone.
+  const away = { x: 0, z: 400, fx: 0, fz: 1 };
+  const frames = (run, seconds, e = away) => { for (let i = 0; i < seconds * 60; i++) { run.ctx.currentTime += 1 / 60; run.I.update(1 / 60, e); } };
+  // The first chorus of slowBlues hashed, and the bass's approach on beat 3 of the first chorus's last bar (to its own
+  // F7: 82.41 or 92.50 Hz) and of the third chorus's last bar (to afterHours' Cmaj7: 61.74 or 69.30 Hz).
+  const tuneRun = () => {
+    const run = fresh(), events = [], out = { bass: 0, wrap: null, turn: null };
+    log = (kind, v, t) => {
+      const st = run.I.stats;
+      if (st.song !== "slowBlues") return;
+      if (st.bar < 12) { events.push(kind + ":" + Math.round(t * 1000) + ":" + v.toFixed(2)); if (kind === "triangle") out.bass++; }
+      if (kind === "triangle" && st.step === 9 && st.bar === 11) out.wrap = v.toFixed(2);
+      if (kind === "triangle" && st.step === 9 && st.bar === 35) out.turn = v.toFixed(2);
+    };
+    frames(run, 95);
+    log = null; run.I.dispose();
+    return { hash: fnv(events.join()), events: events.length, ...out };
+  };
+  const a = tuneRun(), b = tuneRun();
+  // A minute hidden with no frame, then one frame: only the steps due in the next 0.12 s are scheduled, at least one,
+  // and the tune stands where one played without a gap stands at the same instant (its last frame at the gap's time).
+  const control = fresh();
+  frames(control, 5);
+  const gapAt = control.ctx.currentTime + 60;
+  for (let i = 1; i < 3600; i++) { control.ctx.currentTime += 1 / 60; control.I.update(1 / 60, away); }
+  control.ctx.currentTime = gapAt; control.I.update(1 / 60, away);
+  const want = { song: control.I.stats.song, bar: control.I.stats.bar, step: control.I.stats.step };
+  control.I.dispose();
+  const gap = fresh(), times = new Set();
+  frames(gap, 5);
+  gap.ctx.currentTime += 60;
+  const gapLanded = gap.ctx.currentTime === gapAt;
+  log = (kind, v, t) => times.add(Math.round(t * 1000));
+  gap.I.update(1 / 60, away);
+  log = null;
+  const burstAfterGap = times.size, landed = { song: gap.I.stats.song, bar: gap.I.stats.bar, step: gap.I.stats.step };
+  // Hidden, one background tick keeps the music scheduled 2 s ahead, but none while muted; shown, and after dispose,
+  // no timer is left.
+  const hidden = {};
+  setHidden(true);
+  hidden.armed = timers.size;
+  const now = gap.ctx.currentTime += 0.5;
+  let ahead = 0;
+  log = (kind, v, t) => { ahead = Math.max(ahead, t - now); };
+  tick();
+  log = null;
+  hidden.ahead = +ahead.toFixed(2); hidden.rearmed = timers.size;
+  mute(true); hidden.muted = timers.size;
+  mute(false); hidden.unmuted = timers.size;
+  setHidden(false); hidden.shown = timers.size;
+  mute(true); setHidden(true); hidden.hiddenMuted = timers.size; setHidden(false);
+  // Muted mid-tune with frames running, the tune keeps time; unmuted, it carries on rather than restarting.
+  const playing = { song: gap.I.stats.song, bar: gap.I.stats.bar };
+  frames(gap, 5);
+  playing.muted = { song: gap.I.stats.song, bar: gap.I.stats.bar };
+  mute(false); frames(gap, 3);
+  playing.unmuted = { song: gap.I.stats.song, bar: gap.I.stats.bar };
+  setHidden(true); gap.I.dispose(); document.hidden = false;
+  hidden.disposed = timers.size;
+  // Hidden for ten seconds of 500 ms ticks: every note scheduled keeps its envelope and no oscillator is retyped.
+  const H = fresh(), typesAfterInit = typeSets;
+  frames(H, 1);
+  const lostBefore = lost, scheduledBefore = H.I.stats.scheduled;
+  setHidden(true);
+  for (let i = 0; i < 20; i++) { H.ctx.currentTime += 0.5; tick(); }
+  setHidden(false);
+  const kept = { lost: lost - lostBefore, retyped: typeSets - typesAfterInit, scheduled: H.I.stats.scheduled - scheduledBefore };
+  H.I.dispose();
+  const destinationAtEnd = toDestination;
+  record("poker music: the three charts parse to bars of known chords", S.map(s => s.bars.length).join() === "12,16,12" && S.every(s => s.bars.every(c => c < chordCount)), JSON.stringify({ songs: S.map(s => s.id + ":" + s.bars.join(" ")), chordCount }));
+  record("poker music: a chorus schedules the same notes on every run and one bass note a beat, approaching its own top between choruses and the next tune's at the end",
+    a.hash === b.hash && a.bass === 12 * 4 && a.events > a.bass && ["82.41", "92.50"].includes(a.wrap) && ["61.74", "69.30"].includes(a.turn), JSON.stringify({ a, b }));
+  record("poker music: a hidden minute skips its steps instead of replaying them, muted or not the tune keeps time, and the background tick runs only while hidden and heard",
+    burstAfterGap >= 1 && burstAfterGap <= 2 && gapLanded && JSON.stringify(landed) === JSON.stringify(want) &&
+    hidden.armed === 1 && hidden.ahead > 1.3 && hidden.ahead <= 2 && hidden.rearmed === 1 && hidden.muted === 0 && hidden.unmuted === 1 &&
+    hidden.shown === 0 && hidden.hiddenMuted === 0 && hidden.disposed === 0 &&
+    playing.muted.song === playing.song && playing.muted.bar > playing.bar && playing.unmuted.song === playing.song && playing.unmuted.bar > playing.muted.bar,
+    JSON.stringify({ burstAfterGap, gapLanded, landed, want, hidden, playing }));
+  record("poker music: hidden ticks keep every scheduled note's envelope, retype no oscillator, and nothing ever reaches the destination",
+    kept.lost === 0 && kept.retyped === 0 && kept.scheduled > 0 && destinationAtEnd === 0, JSON.stringify({ kept, destinationAtEnd }));
+
+  // The room. A cue heard from the origin facing +z (so +x is on the left): the voices it gates, its peak level and its
+  // last pan, read from the params it schedules.
+  const placed = fresh();
+  const heard = (name, x, z, run = placed) => {
+    watch = []; run.I.cue(name, x, z);
+    const w = watch; watch = null;
+    const gains = w.filter(e => e.kind === "gain"), pans = w.filter(e => e.kind === "pan");
+    return { voices: new Set(gains.map(e => e.p)).size, level: Math.max(0, ...gains.filter(e => e.m === "exponentialRampToValueAtTime").map(e => e.v)), pan: pans.length ? pans[pans.length - 1].v : null };
+  };
+  placed.I.update(0, ear);
+  const near = heard("heel", 0, 2), far = heard("heel", 0, 20), left = heard("heel", 5, 0), right = heard("heel", -5, 0), beyond = heard("heel", 0, 31);
+  const stats = { ...placed.I.stats };
+  const recipes = ["chip", "glass", "cane", "walker"].map(name => heard(name, 0, 3).voices);
+  placed.I.dispose();
+  // The bed's level at the bar and the mirror end, then on the same visit after switching to a cave and back.
+  const bedRun = fresh(), roomBus = bedRun.ctx.gains.find(g => g.to === channelNodes.room), bedStage = bedRun.ctx.gains.find(g => g.to === roomBus);
+  const barEar = { x: 10, z: -33, fx: 0, fz: -1 };
+  bedRun.I.update(0.2, barEar);
+  const bedAtBar = bedStage.gain.last;
+  bedRun.I.update(0.2, { x: 0, z: 34, fx: 0, fz: 1 });
+  const bedAtMirror = bedStage.gain.last;
+  bedRun.I.setTheme("crystal");
+  frames(bedRun, 15, barEar);
+  const caveBed = bedStage.gain.last, caveGlass = bedRun.I.pools.roomSines.some(v => v.until > 0);
+  bedRun.I.setTheme("gatsby");
+  frames(bedRun, 15, barEar);
+  const clubBed = bedStage.gain.last, clubGlass = bedRun.I.pools.roomSines.some(v => v.until > 0);
+  bedRun.I.dispose();
+  // A minute of play near the bar with the room's own chips and glasses sounding: no voice stolen, the music's
+  // scheduled notes all kept, no node built and no oscillator retyped.
+  const busy = fresh(), nodesBefore = nodes, lostAtStart = lost, typesAtStart = typeSets;
+  frames(busy, 60, { x: 0, z: -12, fx: 0, fz: -1 });
+  const minute = { steals: busy.I.stats.steals, cues: busy.I.stats.cues, dropped: busy.I.stats.dropped, busy: busy.I.stats.busy, scheduled: busy.I.stats.scheduled, lost: lost - lostAtStart, nodes: nodes - nodesBefore, retyped: typeSets - typesAtStart };
+  busy.I.dispose();
+  // Every one-shot on the room bus: what a glass, a cane and a walker schedule (gains, pans, pitches) leads through the
+  // connect graph to the room channel, never the music's, and the music's tone pools are left as they were.
+  const busOf = n => { while (n && n.to && !n.to.channel) n = n.to; return n && n.to ? n.to.channel : null; };
+  const routed = fresh();
+  routed.I.update(0, ear);
+  const musicUntil = () => [...routed.I.pools.triangles, ...routed.I.pools.sines].map(v => v.until).join();
+  const untilBefore = musicUntil();
+  watch = []; routed.I.cue("glass", 0, 3); routed.I.cue("cane", 0, 3); routed.I.cue("walker", 0, 3);
+  const rw = watch; watch = null;
+  const routes = { gated: new Set(rw.filter(e => e.kind === "gain").map(e => e.p)).size, buses: [...new Set(rw.map(e => busOf(e.of)))],
+    musicKept: musicUntil() === untilBefore, roomTones: routed.I.stats.roomTones, exported: window.BL.pokerAudio.ROOM_TONES };
+  routed.I.dispose();
+  // A full pool drops the next cue instead of taking a voice: two glasses fill the room's two sines and five heels the
+  // five noise voices, at one instant; a third glass and a sixth heel gate nothing, cut nothing and count as busy.
+  const full = fresh();
+  full.I.update(0, ear);
+  for (let i = 0; i < 2; i++) full.I.cue("glass", 0, 3);
+  for (let i = 0; i < 5; i++) full.I.cue("heel", 0, 3);
+  const lostAtFull = lost, extraGlass = heard("glass", 0, 3, full), extraHeel = heard("heel", 0, 3, full);
+  const crowded = { glass: extraGlass.voices, heel: extraHeel.voices, busy: full.I.stats.busy, dropped: full.I.stats.dropped, lost: lost - lostAtFull };
+  full.I.dispose();
+  // A steal on the music's own pool: every bass voice made to look busy for ten seconds, then a second of play. The
+  // next bass note takes one anyway, holds and eases its gain down before the new attack, cancels its pitch from the
+  // same instant, and counts one steal.
+  const thief = fresh();
+  frames(thief, 1);
+  for (const v of thief.I.pools.triangles) v.until = thief.ctx.currentTime + 10;
+  const stealsAtStart = thief.I.stats.steals;
+  watch = []; frames(thief, 1);
+  const sw = watch; watch = null;
+  const fade = sw.find(e => e.kind === "gain" && e.m === "setTargetAtTime" && e.v < 0.001);
+  const onFaded = fade ? sw.filter(e => e.p === fade.p) : [], fadeAt = onFaded.indexOf(fade);
+  const hold = onFaded.find(e => e.m === "cancelAndHoldAtTime"), attack = onFaded.slice(fadeAt + 1).find(e => e.m === "setValueAtTime");
+  const pitch = fade ? sw.filter(e => e.kind === "freq" && e.of.to && e.of.to.to === fade.of) : [];
+  const steal = { steals: thief.I.stats.steals - stealsAtStart, fadeAt, holdAt: hold && hold.v, fadeFrom: fade && fade.t,
+    attackAfter: attack && fade ? +(attack.t - fade.t).toFixed(4) : null, pitchCancelledAt: (pitch.find(e => e.m === "cancelScheduledValues") || {}).v,
+    pitchSetAfter: attack && pitch.some(e => e.m === "setValueAtTime" && e.t === attack.t) };
+  thief.I.dispose();
+  // The ducks, read from the music bus's own gain: the target in force at a moment, replayed from every call on it,
+  // cancels included. Sitting dips it, a win dips it further for a moment and comes back to the seated level, a mute
+  // and unmute while seated comes back seated too, and standing returns it to the free level.
+  const duckRun = fresh(), bus = duckRun.ctx.gains.find(g => g.to === channelNodes.music), busCalls = [];
+  duckRun.I.update(0, away);
+  watch = busCalls;
+  const levelAt = t => {
+    let kept = [];
+    for (const e of busCalls) {
+      if (e.p !== bus.gain) continue;
+      if (e.m === "cancelScheduledValues" || e.m === "cancelAndHoldAtTime") kept = kept.filter(k => k.t < e.v);
+      else kept.push(e);
+    }
+    let best = null;
+    for (const k of kept) if (k.t <= t && (!best || k.t >= best.t)) best = k;
+    return best ? best.v : bus.gain.value;
+  };
+  const duckNow = () => duckRun.ctx.currentTime;
+  // The bus's last ease: the time it starts, its target and how long it takes to come within 5% (three time constants).
+  const lastEase = () => { const e = busCalls.filter(c => c.p === bus.gain && c.m === "setTargetAtTime").pop(); return e && { t: e.t, v: e.v, over: +(e.c * 3).toFixed(6) }; };
+  const free = levelAt(duckNow());
+  duckRun.I.setSeated(true);
+  const seated = levelAt(duckNow()), sitEase = lastEase();
+  frames(duckRun, 1);
+  duckRun.I.win();
+  const wonAt = duckNow(), won = levelAt(wonAt + 0.1), afterWin = levelAt(wonAt + 1.6), winReturn = lastEase();
+  frames(duckRun, 2);
+  mute(true);
+  const mutedSeated = levelAt(duckNow());
+  mute(false);
+  const afterMute = levelAt(duckNow());
+  duckRun.I.setSeated(false);
+  const stoodUp = levelAt(duckNow());
+  // Standing up while a win still holds: the dip holds to its end, then the music comes back to the free level, not the seated one.
+  duckRun.I.setSeated(true);
+  frames(duckRun, 1);
+  duckRun.I.win();
+  const overlapAt = duckNow();
+  frames(duckRun, 0.5);
+  duckRun.I.setSeated(false);
+  const overlap = { during: levelAt(duckNow()), after: levelAt(overlapAt + 1.6), back: lastEase() };
+  watch = null;
+  duckRun.I.dispose();
+  const same = (a, b) => Math.abs(a - b) < 1e-9;
+  record("poker audio: sitting ducks the music over 0.6 s, a win dips it further and comes back 1.5 s later over 0.6 s, and standing mid-win comes back free",
+    seated < free && won < seated && afterWin === seated && stoodUp === free && mutedSeated === 0 && afterMute === seated
+      && sitEase.v === seated && same(sitEase.over, 0.6) && winReturn.v === seated && same(winReturn.t, wonAt + 1.5) && same(winReturn.over, 0.6)
+      && overlap.during === won && overlap.after === free && overlap.back.v === free && same(overlap.back.t, overlapAt + 1.5) && same(overlap.back.over, 0.6),
+    JSON.stringify({ free, seated, won, afterWin, mutedSeated, afterMute, stoodUp, sitEase, wonAt, winReturn, overlapAt, overlap }));
+  record("poker room sound: a glass, a cane and a walker sound on the room's own tone voices through the room bus, never the music's",
+    routes.gated === 3 && routes.buses.join() === "room" && routes.musicKept && routes.roomTones === 4 && routes.exported === 4, JSON.stringify(routes));
+  record("poker room sound: a cue finding its pool full is dropped as busy, gating no voice and cutting no envelope",
+    crowded.glass === 0 && crowded.heel === 0 && crowded.busy === 2 && crowded.dropped === 0 && crowded.lost === 0, JSON.stringify(crowded));
+  record("poker music: a stolen voice is held and eased down before the new note's attack, its pitch cancelled from then, and the steal counted",
+    steal.steals === 1 && steal.fadeAt > 0 && steal.holdAt === steal.fadeFrom && steal.attackAfter >= 0.012 && steal.pitchCancelledAt === steal.fadeFrom && steal.pitchSetAfter === true,
+    JSON.stringify(steal));
+  record("poker room sound: a cue is louder near and to its own side, and silent past thirty metres",
+    near.level > far.level && left.pan < 0 && right.pan > 0 && beyond.voices === 0 && stats.cues === 5 && recipes.every(v => v === 1),
+    JSON.stringify({ near, far, left, right, beyond, cues: stats.cues, recipes }));
+  record("poker room sound: the bar swells the bed and plays glass cues only while Banana Club is active",
+    bedAtBar > bedAtMirror && caveBed < bedAtBar && !caveGlass && clubBed === bedAtBar && clubGlass,
+    JSON.stringify({ bedAtBar, bedAtMirror, caveBed, caveGlass, clubBed, clubGlass }));
+  record("poker room sound: a minute of play with the room's own chips and glasses steals no voice from the music, cuts no scheduled note, builds no node and retypes no oscillator",
+    minute.steals === 0 && minute.lost === 0 && minute.nodes === 0 && minute.retyped === 0 && minute.cues > minute.dropped && minute.busy === 0 && minute.scheduled > 0, JSON.stringify(minute));
 };
 const exteriorEnrichmentChecks = BL => {
   const S=BL.scene,root=S.createNode(),land=BL.dsbGeography.build(),renderer={kind:"webgl2",quality:"high"},camera=S.createCamera();camera.position.y=110;
@@ -36158,6 +36496,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   bigBitcoinChecks(BL);
   if(ARGS.includes("big-unit"))return;
   pokerChecks(BL);
+  pokerAudioChecks(BL);
   {
     // A roof lip may intersect the visual pose, but a blocked core rejects a mount.
     const solid = (_x, y, z) => y > 1 && z >= 0;
