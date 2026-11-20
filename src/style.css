@@ -1665,6 +1665,8 @@ body[data-active-scene="block"] .mode-hud {
 
 .roster-stats-kinds[hidden] { display: none; }
 .roster-stats-kinds span { white-space: nowrap; }
+/* Comments and merges: activity, outside the contribution total above them. */
+.roster-stats-also { margin-top: -3px; color: var(--muted); }
 
 .roster-stats-repos {
   display: flex;

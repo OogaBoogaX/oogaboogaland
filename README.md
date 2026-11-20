@@ -240,12 +240,14 @@ Then read [AGENTS.md](AGENTS.md): the module layout, the engine patterns, how to
 
 For a new project cave or independently hosted land, use the [connection contract](docs/cave-connections.md) and [submission template](docs/templates/cave-connection.md). The **Caves and lands** directory in ₿IFRÖST (also at `/bifrost`) lists the integrated caves and independent sites. External sites open in the same tab without transferring OBL account, inventory or voice data; browser Back returns to OBL.
 
-Open your PR as a **draft** and tell your AI assistant to keep it draft while the
-work is in progress. Finish the implementation and authorized local checks, then
-update the description with the result, validation and any remaining acceptance
-work before selecting **Ready for review**. That signals a finished change for
-maintainers to review. If substantial new work is needed, return the PR to draft;
-small review fixes can stay ready. Batch related fixes before pushing, and let
+Open your PR as a **draft** as soon as the work has its first commit, and tell your
+AI assistant to keep it draft while the work is in progress, committing and pushing
+at each working checkpoint so the branch keeps up with the work. Finish and polish
+the implementation and authorized local checks, then update the description with
+the result, validation and any remaining acceptance work before selecting **Ready
+for review**. That signals a finished change for maintainers to review. If
+substantial new work is needed, return the PR to draft; small review fixes can stay
+ready. Once it is ready, batch related fixes before pushing, and let
 required CI pass before merging. Drafts can still run some CI; draft status keeps
 unfinished work out of the review queue and character intake.
 

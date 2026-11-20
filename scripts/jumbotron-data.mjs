@@ -42,9 +42,11 @@ vm.runInNewContext(readFileSync(join(root, "src", "js", "activity-repos.js"), "u
 stats = context.window.BL.activityRepos.normalizeStats(stats);
 
 // Ship public handles and activity only, never profile names or metadata.
-const counts = ({ commits, prs, reviews, issues, comments }) => ({ commits, prs, reviews, issues, comments });
-const weekly = (rows) => rows.map(({ week, commits, prs, reviews, issues, comments }) => ({ week, commits, prs, reviews, issues, comments }));
-const boards = (lb) => Object.fromEntries(["commits", "prs", "reviews", "comments", "issues"].map((kind) => [kind,
+// merges come only from an Oogatron that counts them apart from commits; an older one's snapshot has none.
+const withMerges = (merges) => (merges === undefined ? {} : { merges });
+const counts = ({ commits, prs, reviews, issues, comments, merges }) => ({ commits, prs, reviews, issues, comments, ...withMerges(merges) });
+const weekly = (rows) => rows.map(({ week, commits, prs, reviews, issues, comments, merges }) => ({ week, commits, prs, reviews, issues, comments, ...withMerges(merges) }));
+const boards = (lb) => Object.fromEntries(["commits", "prs", "reviews", "comments", "issues", "merges"].filter((kind) => kind !== "merges" || Array.isArray(lb.merges)).map((kind) => [kind,
   (lb[kind] || []).map(({ login, count }) => ({ login, count }))
 ]));
 const snapshot = {

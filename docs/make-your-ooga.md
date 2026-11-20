@@ -363,7 +363,8 @@ draft: the bot never reads a draft, so nothing happens to it, however long the p
   building or debugging. Mark it **ready for review** only after the work and authorized
   checks are complete, and record the validation and any remaining acceptance work in
   its description. Return it to draft for substantial new work; small review fixes can
-  stay ready. Batch related fixes before pushing. Commit as the player. Do not
+  stay ready. While it is draft, commit and push each round the player approves; once
+  it is ready, batch related fixes before pushing. Commit as the player. Do not
   force-push over commits the bot has read.
 - The bot reads the file as text and never runs it. It copies an accepted file into one of
   two standing bundle PRs, says which and why, and **closes your PR on purpose**: the
