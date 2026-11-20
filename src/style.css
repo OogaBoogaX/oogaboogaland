@@ -9902,6 +9902,548 @@ body[data-active-scene="stacker"] .joysticks {
   display: none;
 }
 
+/* Ooga Raid: one stick moves and aims, so the look stick stays away; Jump! and Fire sit under the right thumb. */
+body[data-active-scene="raid"] #joy-look {
+  display: none;
+}
+
+body[data-active-scene="raid"] #act,
+#raid-fire {
+  position: absolute;
+  left: auto;
+  bottom: calc(120px + var(--safe-bottom));
+  z-index: 13;
+  min-width: 80px;
+  min-height: 56px;
+  transform: none;
+}
+
+body[data-active-scene="raid"] #act {
+  right: calc(116px + var(--safe-right));
+}
+
+#raid-fire {
+  right: calc(20px + var(--safe-right));
+  background: linear-gradient(#f08a6a, var(--danger));
+}
+
+#raid-fire:hover,
+#raid-fire.virtual-hover,
+#raid-fire:focus-visible {
+  background: linear-gradient(#f6a083, #ec6a52);
+}
+
+/* A wide touch screen stacks Jump! over the messages at the foot of the page, over the game's screen; in the raid
+   the button goes to the thumb instead, and the messages keep their own places. */
+@media (pointer: coarse) and (min-width: 721px) {
+  body[data-active-scene="raid"] .bottom-hud,
+  body[data-active-scene="raid"] .bottom-hud>.message-stack {
+    display: contents;
+  }
+
+  body[data-active-scene="raid"] .message-stack>.toast,
+  body[data-active-scene="raid"] .message-stack>.hint {
+    position: absolute;
+    max-width: min(620px, calc(100vw - 32px));
+    transform: translate(-50%, 8px);
+  }
+
+  body[data-active-scene="raid"] .message-stack>.toast.show,
+  body[data-active-scene="raid"] .message-stack>.hint.show {
+    transform: translate(-50%, 0);
+  }
+}
+
+/* The raid's calls stay on one line: centred from the middle, the notice would otherwise wrap at half the width. They
+   hang inside the screen's top edge on every layout (the scene writes where), never down among a phone's thumb
+   controls, where the race's notice goes. */
+#raid .raid-notice {
+  top: var(--raid-notice-top, calc(84px + var(--safe-top)));
+  bottom: auto;
+  white-space: nowrap;
+}
+
+/* The strip stands beside the 8 by 7 screen on a wide display and under it on a tall one: the scene's fit writes
+   which into data-raid-fit on #raid and where into --raid-hud-top, in CSS pixels from the top of #raid. */
+.raid-strip .raid-hud {
+  top: var(--raid-hud-top, calc(74px + var(--safe-top)));
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 8px 12px;
+  white-space: normal;
+}
+
+.raid-stat {
+  display: grid;
+  gap: 1px;
+  min-width: 64px;
+}
+
+.raid-stat span {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.raid-stat b {
+  color: var(--paper);
+  font-size: 14px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.race-hud-left .raid-stat b {
+  color: var(--accent-text);
+}
+
+.raid-stat small {
+  color: var(--muted);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+
+.raid-stat small[data-on="true"] {
+  color: #f5c542;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Wide, each panel stands just off the frame's side rather than at the page's edge, so on a large display the stats
+   stay beside the play and not across the room from it (the margin is SIDE_PX at least, wider than a panel). */
+#raid[data-raid-fit="wide"] .raid-strip .race-hud-left {
+  left: auto;
+  right: calc(100% - var(--raid-screen-edge, 140px) + 12px);
+}
+
+#raid[data-raid-fit="wide"] .raid-strip .race-hud-right {
+  right: auto;
+  left: calc(100% - var(--raid-screen-edge, 140px) + 12px);
+}
+
+#raid[data-raid-fit="tall"] .raid-strip .raid-hud {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: none;
+}
+
+/* Player 2's stats join each panel when two play: a third row beside the screen, a second line under it when tall. */
+.raid-stat[hidden] {
+  display: none;
+}
+
+#raid[data-raid-fit="tall"][data-raid-players="2"] .raid-strip .raid-hud {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 6px 12px;
+}
+
+/* The stage card between stages: the next stage's number over its carved name, a third of the way down the screen (the scene writes where). */
+.raid-card {
+  position: absolute;
+  left: 50%;
+  top: var(--raid-card-top, 40%);
+  transform: translate(-50%, -50%);
+  max-width: calc(100vw - 32px);
+  padding: 12px 24px 14px;
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+  text-align: center;
+  pointer-events: none;
+}
+
+.raid-card-kicker {
+  margin: 0 0 6px;
+  color: var(--accent-text);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.raid-card h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+/* The boss card: the boss's carved name under a red kicker as it enters, where the stage card stands, slammed in big and
+   settling, with a red edge so it never reads as the stage card. */
+.raid-bosscard {
+  border-color: var(--danger);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 24px rgba(226, 76, 52, 0.45);
+  animation: raid-boss-in 0.45s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+.raid-bosscard .raid-card-kicker {
+  color: #ff8a73;
+}
+
+.raid-bosscard h2 {
+  font-size: clamp(20px, 5.4vw, 26px);
+}
+
+@keyframes raid-boss-in {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(1.8); filter: brightness(2.4); }
+  45% { opacity: 1; }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: none; }
+}
+
+/* The weapon callout: a pickup's name popping in big over the lower play (the scene writes where), held on one line. */
+.raid-call {
+  position: absolute;
+  left: 50%;
+  top: var(--raid-call-top, 60%);
+  transform: translate(-50%, -50%);
+  max-width: calc(100vw - 32px);
+  color: var(--paper);
+  font-size: clamp(24px, 6.5vw, 44px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.65), 0 0 18px rgba(245, 197, 66, 0.75);
+  pointer-events: none;
+  animation: raid-call-in 0.9s ease-out both;
+}
+
+.raid-call[hidden] {
+  display: none;
+}
+
+@keyframes raid-call-in {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  18% { opacity: 1; transform: translate(-50%, -50%) scale(1.25); color: #f5c542; }
+  32% { transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 1; transform: translate(-50%, -62%) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .raid-bosscard,
+  .raid-call {
+    animation: none;
+  }
+}
+
+/* The title card's one-or-two-players choice: the pick pressed, the other plain wood. */
+.raid-players button[aria-pressed="false"] {
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--paper);
+  box-shadow: none;
+}
+
+/* The choice a pad's d-pad has marked, which A or Start plays. */
+.raid-players button[data-pad-mark] {
+  outline: 3px solid #9fe6c8;
+  outline-offset: 2px;
+}
+
+.raid-players-help {
+  margin: 8px 0 0;
+  white-space: pre-line;
+  text-align: center;
+}
+
+/* The title card's record: the best score over the furthest stage reached, two lines split on purpose. */
+#raid-intro-best {
+  white-space: pre-line;
+}
+
+/* The title card holds more than most (the players, the stage select, the best), so it keeps to the band between the
+   top bar and the folded sheet's tab, whose buttons stay in reach, and scrolls inside it only on a screen too short. */
+#raid-intro {
+  top: calc(50% + 4px + (var(--safe-top) - var(--safe-bottom)) / 2);
+  max-height: calc(100% - 100px - var(--safe-top) - var(--safe-bottom));
+  overflow-y: auto;
+}
+
+/* In one column on a phone its rules and the players sit closer, so the whole card, Raid! and Exit Game included, fits
+   in that band. */
+@media (max-width: 520px) {
+  #raid-intro .game-rules {
+    gap: 3px;
+  }
+
+  #raid-intro .game-rules li {
+    padding-block: 3px;
+  }
+
+  #raid-intro .raid-players {
+    margin-top: 10px;
+  }
+}
+
+/* The boss bar: a boss main's hit points left, hung on the screen's top edge in the strip of page the fit keeps clear
+   above it, so it never covers play (the scene writes where and how wide; 20px tall in all). */
+.raid-boss {
+  position: absolute;
+  left: 50%;
+  top: var(--raid-boss-top, calc(74px + var(--safe-top)));
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+  width: var(--raid-boss-w, 240px);
+  max-width: calc(100vw - 32px);
+  height: 20px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  /* Grained wood without the planks' corner nails, which would sit on the label at this height. */
+  background: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.05) 0 2px, transparent 2px 11px), var(--wood);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.raid-boss[hidden] {
+  display: none;
+}
+
+.raid-boss-name {
+  color: var(--accent-text);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.raid-boss-track {
+  display: block;
+  height: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.6);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.raid-boss-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(#ff8a73, var(--danger));
+  transform-origin: left center;
+}
+
+.raid-pause h2 {
+  text-align: center;
+}
+
+.raid-pause-help {
+  margin: 8px 0 12px;
+  text-align: center;
+}
+
+/* Shaman's Secrets: a carved-stone tablet over the title card (the Konami code opens it), the secrets as toggles in two
+   columns, one on a phone. It flashes and settles as it opens. */
+.race-results.raid-secrets {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  border-color: var(--stone-dk);
+  background: var(--tablet);
+  box-shadow: var(--tablet-shadow), 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 0 100vmax rgba(8, 6, 4, 0.45);
+  text-align: center;
+  animation: raid-secrets-in 0.7s ease-out both;
+}
+
+.raid-secrets h2 {
+  color: #9fe6c8;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.6)) drop-shadow(0 0 10px rgba(120, 230, 190, 0.45));
+}
+
+.raid-secret-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.raid-secret {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 9px;
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  text-align: left;
+  cursor: pointer;
+}
+
+.raid-secret b {
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.raid-secret small {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.3;
+}
+
+.raid-secret i {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--muted);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.raid-secret[aria-pressed="true"] {
+  border-color: #3f8f6e;
+  background: rgba(60, 170, 120, 0.22);
+}
+
+.raid-secret[aria-pressed="true"] i {
+  background: #3f8f6e;
+  color: var(--paper);
+}
+
+.raid-secret[data-locked="true"] {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.raid-secret:focus-visible,
+.raid-secret[data-focus="true"] {
+  outline: 2px solid #9fe6c8;
+  outline-offset: 1px;
+}
+
+.raid-secrets-help {
+  white-space: pre-line;
+}
+
+.raid-secrets .actions {
+  grid-template-columns: 1fr;
+  justify-items: center;
+}
+
+.raid-secrets .actions button {
+  min-width: 140px;
+}
+
+@keyframes raid-secrets-in {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.9); filter: brightness(3) saturate(0.4); }
+  30% { opacity: 1; filter: brightness(2.2) saturate(0.6); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .race-results.raid-secrets {
+    animation: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .raid-secret-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* The title card's stage chooser while the stage select is on: a step either way round the stage's name. */
+.raid-start {
+  display: grid;
+  grid-template-columns: 38px 1fr 38px;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 10px;
+}
+
+.raid-start[hidden] {
+  display: none;
+}
+
+.raid-start-step {
+  height: 38px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(#e2a04a, var(--accent));
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 700;
+  box-shadow: 0 3px 0 var(--nail);
+  cursor: pointer;
+}
+
+.raid-start-pick {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 4px 8px;
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  background: var(--tablet);
+  box-shadow: var(--tablet-shadow);
+}
+
+.raid-start-pick span {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.raid-start-pick b {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* The chooser's keys, one line under it across all three columns. */
+.raid-start-help {
+  grid-column: 1 / -1;
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* Mirror mode: the raid's picture flipped left to right (both canvases, so the overlay keeps to the play); the HUD is
+   the DOM's and reads as ever. The scene sets the flag while a run with it plays and clears it in leave. */
+body[data-raid-mirror] #scene,
+body[data-raid-mirror] #overlay {
+  transform: scaleX(-1);
+}
+
+/* The mark a run with secrets on wears in the strip. */
+.raid-stat small.raid-cheat-mark {
+  color: #9fe6c8;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.raid-stat small.raid-cheat-mark[hidden] {
+  display: none;
+}
+
 /* A tiki torch: the badge burns hottest at its foot, a flame licks up from its top and it stands on a bamboo pole. */
 .carnival-streak {
   position: absolute;

@@ -4323,11 +4323,11 @@
       sprig(gr, W / 2 + 0.02, -H / 6, 0.03, 0.4, -1, 0.3, 2, 0.22, leaf);
     });
   });
-  // The back room's door, closed for good: rough logs stood side by side and bound with two ropes, in a frame of
+  // The back room's door, Ooga Raid's way in: rough logs stood side by side and bound with two ropes, in a frame of
   // stone slabs, a bone ring for a handle, a peephole barred with bones, crossed bones pegged on under a timber plank
-  // brushed in chalk with where the poker is not; a coconut-shell lantern sitting on the lintel, its carved holes glowing
-  // so the sign reads in the dark under the deck; and a liana draped along the lintel and down the frame's outer
-  // side, leaves bunched at the lintel's ends.
+  // brushed in chalk with the game's name and its house rule; a coconut-shell lantern sitting on the lintel, its carved
+  // holes glowing so the sign reads in the dark under the deck; and a liana draped along the lintel and down the frame's
+  // outer side, leaves bunched at the lintel's ends.
   const backDoor = cached(() => {
     const { withJungle, liana, sagPoints, sprig, log } = BL.hubModels, round = [], flat = [], w = 1.3, h = 2.2, leaf = mulberry32(23);
     for (const sx of [-1, 1]) flat.push(bevelBox({ w: 0.2, h: h + 0.1, d: 0.26, color: "#6b625a", bevel: 0.05, offset: { x: sx * (w / 2 + 0.1), y: (h + 0.1) / 2, z: 0.02 } }));
@@ -4339,8 +4339,8 @@
     // Pegged across the door and its frame, so the frame's slabs never cover its ends.
     flat.push(bevelBox({ w: 1.66, h: 0.38, d: 0.05, color: TIMBER, bevel: 0.02, offset: { y: 1.55, z: 0.18 } }));
     for (const sx of [-1, 1]) round.push(moved(ball(0.022, TIMBER_DK, 6), sx * 0.76, 1.55, 0.21));
-    const words = brushWord(geometry(), "NO POKER HERE!", 0, 1.625, 0.12, 0.02, EARTH_CHALK, 0.35, 0.207);
-    flat.push(brushWord(words, "(MAYBE SOMEWHERE ELSE?)", 0, 1.465, 0.066, 0.012, EARTH_CHALK, 0.3, 0.207));
+    const words = brushWord(geometry(), "OOGA RAID", 0, 1.615, 0.17, 0.028, EARTH_CHALK, 0.35, 0.207);
+    flat.push(brushWord(words, "NO PAPER MONEY!", 0, 1.435, 0.066, 0.012, EARTH_CHALK, 0.3, 0.207));
     for (const sx of [-1, 1]) round.push(moved(turnedZ(boneBar(0.5, 0.025), sx * 0.6), 0, 0.8, 0.16));
     // The lantern: a coconut on the lintel, holes carved round its front with the fire glowing through them.
     const lamp = { y: h + 0.31, z: 0.08 };

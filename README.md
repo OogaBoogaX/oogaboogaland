@@ -65,7 +65,7 @@ The HUB banner's text and buttons shrink smoothly as the window narrows. Visible
 
 Roster colours show activity across every OogaBoogaX repo: yellow worked in the last hour, orange in the last day, gray asleep. The panel follows the minute-by-minute contribution feed in every scene, including the Sphere; activity ages keep updating while you stay there. Working Oogas load bananas at the pile and shoot them into their project's cave, where their gorilla companions build. HQ's ramps lead down to a basement of beds.
 
-Around the rim: **EntropyLab** (11 o'clock), **B.C.A.** (10), Banana Certified Accounting, where suited gorillas count bananas on abacuses, the **Lightning Factory** (2), **Ooga Arcade** (3), where a cabinet opens each game, the **Mempool island** (4) and the **Timechain Sphere** (southwest). Every game opens on a title card; **Enter** starts, **Escape** leaves.
+Around the rim: **EntropyLab** (11 o'clock), **B.C.A.** (10), Banana Certified Accounting, where suited gorillas count bananas on abacuses, the **Lightning Factory** (2), **Ooga Arcade** (3), where a cabinet opens each game and the back door opens Ooga Raid, the **Mempool island** (4) and the **Timechain Sphere** (southwest). Every game opens on a title card; **Enter** starts, **Escape** leaves.
 
 ## Playing together
 
@@ -112,6 +112,10 @@ Playing is free everywhere on the island; the only payments are ones you choose 
 - **Ooga Drop:** jump from the plane, fly through eight hoops (**W S** pitch, **A D** roll, **Q E** turn), **Space** pulls the chute, land on the pile.
 - **Ooga Orbit:** build a rocket, launch, reach the Sky Top at 500 up, spacewalk to measure the space rock (**V**), then fall home shield first and chute onto the pad.
 - **Ooga Mine:** a mining tycoon about margin. Place gear, watch power, heat and the halving, put out fires, and mine 21 coin within the hour. **W A S D** walk, **Space** works, **V** looks round, **P** pauses; the run saves as you go.
+- **Ooga Raid:** through Ooga Arcade's back door, a side-on run and gun as your own Ooga against the Fiat Legion: eight stages with a boss each (the Jungle Shore, The Counting House, The Hashrate Tower, The Treasury Vaults, The Lightning Factory Floor, Mempool Lake, Bifrost Pass and The Reserve), then round again, harder. One hit and you are down: three lives, three continues, more lives from 20,000 points. **A D** run, **W S** aim (**S** on the ground lies prone, wading it ducks under), **Space** jumps (**S** with **Space** drops off a ledge), **J** or a click fires; alone, the arrow keys move too. In the bank rooms, hold **W** at the open bars to walk on. **1** or **2** on the title card picks the players; player 2 runs and aims with the arrows, **,** jumps and **.** fires. **P** pauses, **Escape** opens the pause card, **Enter** continues at game over, **M** mutes.
+  - **Gamepads** (standard mapping): the stick or d-pad runs and aims, **A** jumps, **B** or **X** fires, **Start** pauses. Alone, every pad plays player 1; with two, the first pad is player 1 and the second player 2 (a lone pad is player 2, and player 1 keeps the keys).
+  - **Touch:** the stick runs and aims, **Jump!** jumps and a held **Fire** fires; **Pause** is in the header. Player 2 needs a keyboard or a pad.
+  - Your best score, the furthest stage and a finished loop are kept, and a run pays arcade tickets. On the signed-in site only signed-in players raid.
 - **The Agent:** double-click it to play; **Left Shift** gallops, **Space** jumps, and a second press while airborne adds a double jump. Each jump is 50% higher than an Ooga's. **C** beats its chest. **Right Shift + A** summons or releases it in scenes with an Agent.
 
 ## Weather
@@ -120,7 +124,7 @@ The mempool is the Mempool island: transactions arriving make its weather (six s
 
 ## Debug
 
-Each game and cave has an address to share, with its own preview card: `/oogarally`, `/oogadrop`, `/oogaorbit`, `/oogamine`, `/mempool`, `/dsb`, `/entropylab`, `/bca`, `/lightning` and `/sphere`. `/donate` opens the hub with its donation window. They work on the site and under `npm run serve`, and as `oogaboogaland.html#/oogarally` when the file is opened from disk; routes live in `src/js/routes.js`, and `npm run cards` recaptures the cards. `?scene=lab`, `race`, `drop`, `orbit`, `mine` or `dsb` opens that scene; `?nosim=1` silences the simulator and every feed; `?canvas2d=1` forces the Canvas 2D fallback; `?debug=1` exposes `window.__ooga`. AGENTS.md lists every flag and fixture.
+Each game and cave has an address to share, with its own preview card: `/oogarally`, `/oogadrop`, `/oogaorbit`, `/oogamine`, `/oogaraid`, `/mempool`, `/dsb`, `/entropylab`, `/bca`, `/lightning` and `/sphere`. `/donate` opens the hub with its donation window. They work on the site and under `npm run serve`, and as `oogaboogaland.html#/oogarally` when the file is opened from disk; routes live in `src/js/routes.js`, and `npm run cards` recaptures the cards. `?scene=lab`, `race`, `drop`, `orbit`, `mine`, `raid` or `dsb` opens that scene; `?nosim=1` silences the simulator and every feed; `?canvas2d=1` forces the Canvas 2D fallback; `?debug=1` exposes `window.__ooga`. AGENTS.md lists every flag and fixture.
 
 With `debug=1&totemglow=1`, keep all Merge Rock totems' animated glow patterns at full strength, including continuous pulses on the rings between heads and soft pulses across their painted details. This also works with `nosim=1`. Add `time=2200` to see them at night. The flag leaves repository timestamps and celebrations unchanged.
 

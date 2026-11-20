@@ -1,7 +1,8 @@
 // Code a hosted page fetches only once it is needed: the Timechain rooms; DSB Land (its terrain, town, interiors, menus
 // and their art, ~0.9 MB gzipped), which ₿IFRÖST's chamber also builds a picture of; the arcade's games (their rules,
 // the retro cabinets and the hall's sound), loaded by the arcade and every game in it, and the scenes of every game in
-// the hall but a stage cabinet (`carnival-scene`, on that base); Block Frenzy's scene, trivia and sound (not its rules,
+// the hall but a stage cabinet (`carnival-scene`, on that base); Ooga Raid, behind the hall's back door (`raid-scene`,
+// on the same base, whose chip its music plays on); Block Frenzy's scene, trivia and sound (not its rules,
 // models or live wire, which the arcade's hall reads); the poker room (all but its
 // themes, which tint the island's ₿IFRÖST window), loaded by the room and ₿IFRÖST; and Ooga Drop's diver and sound (not its
 // models, whose canopy Ooga Orbit's capsule lands under). Rally's tracks, racers, items, HUD and sound, Mine's HUD, sound
@@ -28,7 +29,7 @@
   // Only scene implementation groups depend on a base group, and the Timechain rooms on the Block Party's radio, which
   // the keypad outside loads alone to start it early; no base group depends on a scene shell. The Lightning Jet
   // Hangar, walked into from the Factory and left back into it, builds on the Factory's scene group.
-  const SCENE_BASE = { "arcade-scene": "arcade", "carnival-scene": "arcade", "drop-scene": "drop", "race-scene": "race", "mine-scene": "mine", "orbit-scene": "orbit", "hangar-scene": "factory-scene", timechain: "party-radio" };
+  const SCENE_BASE = { "arcade-scene": "arcade", "carnival-scene": "arcade", "raid-scene": "arcade", "drop-scene": "drop", "race-scene": "race", "mine-scene": "mine", "orbit-scene": "orbit", "hangar-scene": "factory-scene", timechain: "party-radio" };
   const loading = new Map(), attempts = new Map();
   let stale = false, staleHandler = null;
   // A file that answers 404 is gone for good: the site was deployed since this page loaded.

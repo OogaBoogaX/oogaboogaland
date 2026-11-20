@@ -47,6 +47,8 @@
         description: "Behind the Lightning Factory, the hangar where Lightning Jet v2 is being built: the Jet in its dock, its crew at work and the project's progress on the wall." },
       { path: "oogaarcade", scene: "arcade", title: "Ooga Arcade",
         description: "A torchlit cave of arcade cabinets, one for every Ooga game: walk up to Ooga Rally, Drop, Orbit or Mine and play, or take the upper hall's zipline to Block Frenzy." },
+      { path: "oogaraid", scene: "raid", image: "oogaraid", title: "Ooga Raid",
+        description: "Play your own Ooga side-on through eight stages, from the jungle shore to the Chairman's Engine, and drive out the Fiat Legion." },
       { path: "sphere", scene: "hub", place: "timechain", image: "sphere", title: "Timechain Sphere",
         description: "The Timechain Sphere's doors: choose one of eight rooms at the keypad, from a planetarium and a conference room to a meditation temple, a block party, a mining museum and a movie theater." },
       // The rooms, each its own kind of place and its own address (timechain-rooms.js), at their keypad numbers; 8 and 9

@@ -6,6 +6,8 @@ import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
+import { getHeapStatistics, setFlagsFromString } from "node:v8";
+import { PerformanceObserver } from "node:perf_hooks";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
@@ -4415,7 +4417,7 @@ const orbitFlow = async (b) => {
 // perf floor; `perf` runs the perf floor alone; `unit` (or nothing) runs only the global tier.
 // Two lanes limit concurrent WebGL boot pressure; four produced long startups
 // and a GPU context loss during the full suite.
-const SCENES = ["hub", "lab", "studio", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
+const SCENES = ["hub", "lab", "studio", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "raid", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
 for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "ooga-chat-app", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
@@ -9924,6 +9926,6720 @@ const gameRulesChecks = async () => {
       if (wheelAt(to) !== k || turns < 3 || turns >= 4) missed.push({ from, k, at, got: wheelAt(to), turns });
     }
     record("jackpot wheel: a spin pays back 75 to 90% of its cost on average, the jackpot is ten spins' worth, and every wedge stops under the clapper wherever the spin aims in it", V.length === 20 && ev >= cost * 0.75 && ev <= cost * 0.9 && jackpot >= cost * 10 && missed.length === 0, JSON.stringify({ ev, cost, jackpot, missed: missed.slice(0, 4) }));
+  }
+};
+// Ooga Raid's save rules, through the game module as a page loads it (the record, the loop flag, the cap, and
+// Shaman's Secrets settling no best and paying nothing).
+const raidSaveChecks = async () => {
+  const store = new Map();
+  const context = { window: {}, URLSearchParams, location: { search: "" }, localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) } };
+  for (const name of GAME_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+  runInNewContext(await readFile(new URL("../src/js/raid-stages.js", import.meta.url), "utf8"), context);
+  const BL = context.window.BL;
+  record("game rules: the save's raid stage count is the run's (game.js keeps the count so the stages load with the raid's code)",
+    BL.game.RAID_STAGES === BL.raidStages.STAGES.length, JSON.stringify({ game: BL.game.RAID_STAGES, stages: BL.raidStages.STAGES.length }));
+  {
+    const make = () => BL.game.create();
+    // Ooga Raid's record: a run that scored nothing or less than the best, on no further stage and with no loop, or one
+    // that names no stage or no sane loop flag, changes nothing; a better one survives a reload; and a stored record that
+    // is not a sane score on a known stage with a boolean loop flag loads as none, dropped alone (the tickets beside it
+    // stay). NaN is stored as null, as JSON writes it.
+    const raider = make(), stages = BL.raidStages.STAGES.length;
+    const records = [raider.recordRaid({ score: 12000, stage: 0, looped: false }), !raider.recordRaid({ score: 9000, stage: 0, looped: false }),
+      !raider.recordRaid({ score: 12000, stage: 0, looped: false }), !raider.recordRaid({ score: 0, stage: 0, looped: false }),
+      !raider.recordRaid({ score: 5e6, stage: 99, looped: true }), !raider.recordRaid({ score: Infinity, stage: 0, looped: true }),
+      !raider.recordRaid({ score: 5e6, stage: 0, looped: "yes" }), raider.recordRaid({ score: 21800, stage: 0, looped: false })];
+    const reloaded = make().state.raid.best;
+    const survives = !!reloaded && reloaded.score === 21800 && reloaded.stage === 0 && reloaded.looped === false;
+    const good = JSON.parse(store.get("oogaboogaland.v1")), tickets = good.arcade.tickets;
+    const tampered = [{ score: -5, stage: 0, looped: true }, { score: null, stage: 0, looped: true }, { score: 1e12, stage: 0, looped: true },
+      { score: "21800", stage: 0, looped: true }, { score: 21800, stage: stages, looped: true }, { score: 21800, stage: -1, looped: true },
+      { score: 21800, stage: 0.5, looped: true }, { score: 21800, stage: "0", looped: true }, { score: 21800, stage: 0, looped: "yes" },
+      { score: 21800, stage: 0, looped: 1 }, { score: 21800, stage: 0, looped: null }, 42, [21800]];
+    const loaded = tampered.map((best) => {
+      store.set("oogaboogaland.v1", JSON.stringify({ ...good, raid: { best } }));
+      const state = make().state;
+      return state.raid.best === null && state.arcade.tickets === tickets;
+    });
+    store.set("oogaboogaland.v1", JSON.stringify(good));
+    record("game rules: a raid best is kept only when it is a sane number, a known stage and a boolean loop flag, and only a better score is a new best",
+      records.every(Boolean) && survives && loaded.every(Boolean), JSON.stringify({ records, reloaded, loaded }));
+    // A save from before the loop was kept (its `cleared` beside the stage, no `looped`) loads with the loop not done.
+    store.set("oogaboogaland.v1", JSON.stringify({ ...good, raid: { best: { score: 4321, stage: 0, cleared: true } } }));
+    const old = make().state.raid.best;
+    record("game rules: a raid save from before the loop flag loads its score and stage with the loop not done",
+      JSON.stringify(old) === JSON.stringify({ score: 4321, stage: 0, looped: false }), JSON.stringify(old));
+    // The furthest stage and the loop are kept apart from the best score: a lower score that went further records the
+    // stage, a better score on an earlier stage keeps it, a completed loop is kept for good, and only a better score
+    // reports a new best.
+    store.set("oogaboogaland.v1", JSON.stringify(good));
+    const far = stages - 1, runner = make(), after = [];
+    const steps = [runner.recordRaid({ score: 9000, stage: far, looped: false }), runner.recordRaid({ score: 30000, stage: 0, looped: false }),
+      runner.recordRaid({ score: 100, stage: 0, looped: true }), runner.recordRaid({ score: 50, stage: 0, looped: false })];
+    after.push(make().state.raid.best);
+    const furthest = far >= 1 && JSON.stringify(steps) === JSON.stringify([false, true, false, false])
+      && JSON.stringify(after[0]) === JSON.stringify({ score: 30000, stage: far, looped: true });
+    store.set("oogaboogaland.v1", JSON.stringify(good));
+    record("game rules: a raid run's furthest stage and completed loop are kept apart from its best score, and only a better score is a new best",
+      furthest, JSON.stringify({ far, steps, after }));
+    // A score at or over the save's cap (ten million; the campaign loops without end) is kept just under it, not refused.
+    const looper = make(), capped = [looper.recordRaid({ score: 1e7, stage: 0, looped: true }), looper.recordRaid({ score: 2e7, stage: 0, looped: true })];
+    const top = make().state.raid.best;
+    store.set("oogaboogaland.v1", JSON.stringify(good));
+    record("game rules: a raid score at or over the save's cap of ten million is kept just under it rather than refused, and survives a reload",
+      JSON.stringify(capped) === JSON.stringify([true, false]) && JSON.stringify(top) === JSON.stringify({ score: 9999999, stage: 0, looped: true }), JSON.stringify({ capped, top }));
+    // Shaman's Secrets: a run settled with any secret on that changes the rules (a rule alone, the stage select starting
+    // past stage 1, or a rule beside the looks) saves no record and pays no tickets, where the same run with none, or with
+    // only the looks on (big heads, banana peels, mirror mode) and the stage select starting at stage 1, is saved and paid; secrets turned on survive a reload of the save; the stage select and mirror mode are refused
+    // until earned (a record past stage 4, then a completed loop) and a saved one not yet earned, or no secret at all,
+    // loads off, as does a start that is no stage.
+    store.set("oogaboogaland.v1", JSON.stringify(good));
+    const shaman = make(), before = { best: JSON.stringify(shaman.state.raid.best), tickets: shaman.state.arcade.tickets };
+    const cheated = [[["lives"], 0], [["stages"], 3], [["heads", "peels", "mirror", "slow"], 0]].map(([cheats, start]) => shaman.settleRaid({ score: 99000, stage: 7, looped: true, tickets: 49, cheats, start })), afterCheat = make().state;
+    const refusedCheat = cheated.every((c) => c.best === false && c.paid === 0 && c.cheated === true) && JSON.stringify(afterCheat.raid.best) === before.best && afterCheat.arcade.tickets === before.tickets;
+    const fair = shaman.settleRaid({ score: 26000, stage: 3, looped: false, tickets: 13, cheats: [], start: 0 }), afterFair = make().state;
+    const looks = shaman.settleRaid({ score: 27000, stage: 3, looped: false, tickets: 13, cheats: ["heads", "peels", "mirror", "stages"], start: 0 }), afterLooks = make().state;
+    const paidFair = fair.best === true && fair.paid === 13 && fair.cheated === false && afterFair.raid.best.score === 26000 && afterFair.arcade.tickets === before.tickets + 13
+      && looks.best === true && looks.paid === 13 && looks.cheated === false && afterLooks.raid.best.score === 27000 && afterLooks.arcade.tickets === before.tickets + 26;
+    const openSecrets = BL.game.RAID_CHEATS.filter((id) => shaman.raidUnlocked(id));
+    const toggles = [shaman.setRaidCheat("slow", true), shaman.setRaidCheat("heads", true), shaman.setRaidCheat("lives", true), shaman.setRaidCheat("lives", false),
+      !shaman.setRaidCheat("stages", true), !shaman.setRaidCheat("mirror", true), !shaman.setRaidCheat("wings", true), shaman.setRaidStart(5), !shaman.setRaidStart(99)];
+    const keptSecrets = make().state.raid, persists = JSON.stringify(keptSecrets.cheats) === JSON.stringify(["slow", "heads"]) && keptSecrets.start === 5;
+    const earner = make();
+    earner.recordRaid({ score: 1, stage: 4, looped: false });
+    const stagesEarned = earner.setRaidCheat("stages", true) && !earner.setRaidCheat("mirror", true);
+    earner.recordRaid({ score: 1, stage: 4, looped: true });
+    const mirrorEarned = earner.setRaidCheat("mirror", true) && JSON.stringify(make().state.raid.cheats) === JSON.stringify(["slow", "heads", "stages", "mirror"]);
+    store.set("oogaboogaland.v1", JSON.stringify({ ...good, raid: { best: { score: 100, stage: 3, looped: false }, cheats: ["mirror", "stages", "wings", "lives", 7], start: 99 } }));
+    const tamperedSecrets = make().state.raid, lockedOff = JSON.stringify(tamperedSecrets.cheats) === JSON.stringify(["lives"]) && tamperedSecrets.start === 0;
+    store.set("oogaboogaland.v1", JSON.stringify(good));
+    record("game rules: a raid run settled with any of Shaman's Secrets on that changes the rules saves no best and pays no tickets, the same run with none, or with only big heads, banana peels, mirror mode and the stage select starting at stage 1, does; secrets survive a reload, and the stage select and mirror mode stay locked until stage 4 is cleared and the loop done",
+      refusedCheat && paidFair && JSON.stringify(openSecrets) === JSON.stringify(BL.game.RAID_CHEATS.slice(0, 8)) && toggles.every(Boolean) && persists && stagesEarned && mirrorEarned && lockedOff,
+      JSON.stringify({ cheated, fair, looks, openSecrets, toggles, keptSecrets, stagesEarned, mirrorEarned, tamperedSecrets }));
+  }
+};
+// Ooga Raid's music (raid-audio.js) in the retro cabinets' tune format, which carnival-audio.js reads at load and throws
+// on a line that is not whole bars: every tune's notes are in range and end inside the tune, each stage of the run has a
+// loop of its own (no two alike) and so does the boss, the clear's jingle, game over's sting and the ending play once,
+// and the ending is done within the ending's card.
+const raidMusicChecks = async () => {
+  const context = { window: { BL: {} } };
+  for (const name of [...RAID_SOURCES, "carnival-audio", "raid-audio"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+  const { raidAudio: A, raidStages: S, raidCampaign: K } = context.window.BL, SONGS = A.SONGS, faults = [];
+  for (const [id, t] of Object.entries(SONGS)) {
+    if (!(t.n > 0 && t.n % 16 === 0 && t.step > 0 && t.lead.length === t.n && t.bass.length === t.n && t.drum.length === t.n)) faults.push(`${id}: not whole bars`);
+    for (const [part, notes, lens, low, high] of [["lead", t.lead, t.leadLen, 48, 96], ["bass", t.bass, t.bassLen, 24, 64]]) {
+      for (let i = 0; i < t.n; i++) if (notes[i] && (notes[i] < low || notes[i] > high || lens[i] < 1 || i + lens[i] > t.n)) faults.push(`${id}: ${part} step ${i}`);
+    }
+    if (t.drum.some((d) => d < 0 || d > 3)) faults.push(`${id}: drum`);
+  }
+  const loops = [...S.STAGES.map((g) => g.id), "boss"], once = ["clear", "over", "ending"];
+  const distinct = new Set(loops.map((id) => SONGS[id] && Array.from(SONGS[id].lead).join())).size === loops.length;
+  const ending = SONGS.ending ? SONGS.ending.n * SONGS.ending.step : -1;
+  record("raid music: every tune parses into whole bars with its notes in range, each stage of the run has a loop of its own, no two alike, the boss has one, the clear's jingle, game over's sting and the ending play once, and the ending is done within the ending's card",
+    faults.length === 0 && loops.every((id) => SONGS[id] && SONGS[id].once === false) && once.every((id) => SONGS[id] && SONGS[id].once === true) && Object.keys(SONGS).length === loops.length + once.length
+      && distinct && ending > 0 && ending <= K.TUNE.ENDING + 1e-9, JSON.stringify({ faults, ids: Object.keys(SONGS), distinct, ending }));
+};
+const RAID_LEGIONS = [
+  "raid-legion-counting", "raid-legion-tower", "raid-legion-treasury",
+  "raid-legion-field", "raid-legion-factory", "raid-legion-lake", "raid-legion-pass", "raid-legion-reserve"
+];
+const RAID_SOURCES = ["math", "raid-stages", "raid-enemies", ...RAID_LEGIONS, "raid-terrain", "raid-sim", "raid-autopilot", "raid-campaign"];
+// Stages 5 to 8's types, as the stage specs' enemy table gives them with the rulings since (RAM takes one hit point and is
+// shut for life; ARC_PYLON, an emplacement, starts shut until the screen opens it): each one's tier, hit points (a boss
+// main's base), points, box origin, the flags it starts with, and whether it is a boss main and scaled.
+const RAID_W6 = Object.freeze({
+  AUDITOR: [0, 1, 300, 0.5, ["SHIELD"], false, false], TAX_COLLECTOR: [0, 1, 200, 0.5, [], false, false],
+  REPO_TRUCK: [2, 12, 2000, 1, ["MACHINE"], false, false], ARC_PYLON: [1, 6, 1000, 0.35, ["MACHINE", "SHUT"], false, false],
+  FEE_EEL: [0, 1, 300, 0.25, ["SHUT", "GHOST"], false, false], SHARD_THROWER: [0, 1, 300, 0.5, [], false, false],
+  SPARK: [4, 0, 0, 0.15, [], false, false], ICICLE: [0, 1, 100, 0, [], false, false],
+  RAM: [2, 1, 0, 0, ["SHUT", "MACHINE"], false, false], CAPACITOR: [1, 8, 1000, 0, ["MACHINE", "SHUT"], false, false],
+  GRID_WARDEN: [3, 44, 18000, 1, ["MACHINE", "SHUT"], true, true], LEVIATHAN: [3, 48, 20000, 0.4, ["MACHINE", "SHUT", "GHOST"], true, true],
+  MECH: [2, 56, 25000, 1.6, ["MACHINE", "SHUT"], true, true], MECH_POD: [1, 8, 1000, 0, ["MACHINE"], false, false],
+  ENGINE_PRESS: [2, 12, 2000, 0, ["MACHINE", "SHUT"], false, false], ENGINE_POD: [3, 40, 6000, 0, ["MACHINE", "SHUT"], false, false],
+  CHAIRMAN_ENGINE: [3, 64, 30000, 1, ["MACHINE", "SHUT"], true, true], DROP_CRATE: [0, 1, 100, 0.25, [], false, false]
+});
+// Shaman's Secrets' rules, through raid-sim's and raid-campaign's own create (the view's three are the scene's): each
+// secret does what its toggle says for both players (30 lives, and the fan and rapid fire again after a death, the barrier
+// for good, the Legion's shots at half speed over the same path), a continue under endless continues spends none and
+// gives the lives back, the stage select starts the campaign on its stage, bits that are no secrets or a stage that is
+// none throw, and a run with none hashes as one made without the option while one with any hashes apart.
+const raidSecretsChecks = async () => {
+  const context = { window: { BL: {} } };
+  for (const name of RAID_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+  const { raidStages: S, raidSim: M, raidCampaign: C } = context.window.BL, X = M.CHEAT, R = M.RULES;
+  const pair = M.create({ seed: 3, players: 2, cheats: X.LIVES | X.SPREAD | X.RAPID | X.BARRIER });
+  pair.simulate(20);
+  const p = pair.state, both = (a, v) => a[0] === v && a[1] === v;
+  const start = { lives: both(p.pLives, M.CHEAT_TUNE.LIVES), fan: both(p.pWeapon, M.WEAPON.FAN), rapid: both(p.pRapid, 1), barrier: both(p.pBarrier, Math.fround(R.BARRIER)) };
+  // A death without the barrier: the beam picked up is lost, and the Ooga drops in again with the fan and rapid fire.
+  const one = M.create({ seed: 2, cheats: X.LIVES | X.SPREAD | X.RAPID }), o = one.state;
+  one.simulate(3);
+  o.pWeapon[0] = M.WEAPON.BEAM; o.pRapid[0] = 0; o.pInvincible[0] = 0;
+  one.spawn(M.ENEMY.SHOT, o.px[0], o.py[0] + 0.5, 0);
+  let died = false;
+  for (let n = 0; n < 1200 && !(died && o.pState[0] !== M.PSTATE.DEAD); n++) { one.simulate(M.FIXED); if (o.pState[0] === M.PSTATE.DEAD) died = true; }
+  const respawn = { died, lives: o.pLives[0], weapon: o.pWeapon[0], rapid: o.pRapid[0] };
+  const endless = M.create({ seed: 1, cheats: X.CONTINUES | X.LIVES }), e = endless.state;
+  e.phase = M.PHASE.OVER; e.pLives[0] = 0;
+  endless.continueRun();
+  const continued = { continues: e.continues, lives: e.pLives[0], phase: e.phase };
+  const flown = (cheats) => {
+    const sim = M.create({ seed: 1, cheats }), s = sim.state;
+    sim.simulate(1);
+    s.eType.fill(0); s.spawnTimer = 1e9; s.listCursor = 1e6;
+    const k = sim.spawn(M.ENEMY.SHOT, s.camX + 6, 3, 4), x = s.ex[k];
+    sim.simulate(0.25);
+    return x - s.ex[k];
+  };
+  const slow = [flown(0), flown(X.SLOW)];
+  const hashed = (o) => { const sim = M.create({ seed: 5, ...o }); sim.simulate(3); return sim.hash(); };
+  const hashes = [hashed({}), hashed({ cheats: 0 }), hashed({ cheats: X.RAPID })];
+  const camp = C.create({ seed: 1, stages: S.STAGES, start: 3, cheats: X.LIVES | X.CONTINUES });
+  const throws = (f) => { try { f(); return false; } catch { return true; } };
+  const refused = [throws(() => M.create({ cheats: 64 })), throws(() => M.create({ cheats: 1.5 })), throws(() => C.create({ stages: S.STAGES, start: S.STAGES.length }))];
+  record("raid secrets: 30 lives, the fan and rapid fire from the start and again after a death, the barrier for good, and slowed shots for both players; endless continues spend none; the stage select starts the campaign on its stage; a run with none hashes as before and one with any apart",
+    Object.values(start).every(Boolean) && respawn.died && respawn.lives === 28 && respawn.weapon === M.WEAPON.FAN && respawn.rapid === 1 &&
+      continued.continues === R.CONTINUES && continued.lives === 29 && continued.phase === M.PHASE.PLAY && slow[0] > 0.2 && Math.abs(slow[1] - slow[0] / 2) < 1e-3 &&
+      hashes[0] === hashes[1] && hashes[2] !== hashes[0] && camp.state.stageIndex === 3 && camp.sim.stage === S.STAGES[3] && camp.sim.state.cheats === (X.LIVES | X.CONTINUES) && refused.every(Boolean),
+    JSON.stringify({ start, respawn, continued, slow, hashes, camp: [camp.state.stageIndex, camp.sim.stage.id], refused }));
+};
+const raidChecks = async () => {
+  // The heap checks below count numbers boxed by code V8 has not yet optimized. Node 24, like Chrome, optimizes a function
+  // with Maglev after some 400 calls; Node 22 ships without Maglev and leaves it unoptimized until TurboFan's 3,000, so a
+  // routine the sim calls only now and then (a lob's flight, a drone's hover, the spawner's dice) can cross that line in
+  // a window and box there, which the browser never does. The same 400 for TurboFan has Node 22 tier as the page does.
+  setFlagsFromString("--invocation-count-for-turbofan=400");
+  const context = { window: { BL: {} } };
+  for (const name of RAID_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+  const { raidStages: S, raidSim: M } = context.window.BL;
+  const st = S.STAGES[0];
+  record("raid stages: every stage passes its own validation, and every side stage is whole screens of 16 by 14 cells",
+    S.STAGES.every((g) => S.validate(g).length === 0 && (g.kind !== "side" || g.cols === g.screens * S.SCREEN_W && g.rows === S.SCREEN_H && g.cells.length === g.cols * g.rows)),
+    JSON.stringify(S.STAGES.map((g) => S.validate(g))));
+  record("raid stages: outside the grid is wall to the sides, open air above and a pit below",
+    S.cellAt(st, -1, 3) === S.KIND.SOLID && S.cellAt(st, st.cols, 3) === S.KIND.SOLID && S.cellAt(st, 3, st.rows) === S.KIND.EMPTY && S.cellAt(st, 3, -1) === S.KIND.EMPTY);
+  // No ground anywhere, the lock past the last screen and a placed record a number short.
+  const short = S.parse({ id: "short", name: "Short", rows: ["#"], start: { col: 0, row: 1 }, lockScreen: 0, spawner: { base: 0 }, placed: [[3, 3, S.ENEMY.CLERK]] });
+  const broken = { ...st, cells: new Uint8Array(st.cells.length), lockScreen: st.screens, placed: short.placed };
+  const sideFaults = S.validate(broken);
+  // Placed types that are nothing, no enemy, a part its main puts on, a sensor and a carrier carrying no item, and a
+  // spawner base the loop and weapon cuts would take to nothing.
+  const misplaced = S.parse({
+    id: "misplaced", name: "Misplaced", rows: [...Array(S.SCREEN_H - 1).fill("................"), "################"], start: { col: 0, row: 1 }, lockScreen: 0,
+    spawner: { base: 120 }, placed: [[1, 1, S.ENEMY.FREE, 0], [2, 1, 200, 0], [3, 1, S.ENEMY.CAPACITOR, 0], [4, 1, S.ENEMY.SENSOR, 9], [5, 1, S.ENEMY.CARRIER, 0]]
+  });
+  const typeFaults = S.validate(misplaced);
+  record("raid stages: validation names a start with no ground under it, a scroll lock past the last screen, a placed record short of four numbers, placed types that are no registered enemy or a part, a carrier or sensor carrying no item, and a spawner base the cuts would pass",
+    sideFaults.length === 3 && [/no ledge, water or solid/, /scroll lock on screen 12/, /placed record 0 is not four numbers/].every((re) => sideFaults.some((f) => re.test(f))) &&
+    typeFaults.length === 6 && [/record 0 is type 0, which is no registered/, /record 1 is type 200/, /record 2 is a CAPACITOR, a part its main GRID_WARDEN/, /record 3 is a SENSOR carrying 9/, /record 4 is a CARRIER carrying 0/, /spawner base 120 is neither 0 nor over 135/].every((re) => typeFaults.some((f) => re.test(f))),
+    JSON.stringify({ sideFaults, typeFaults }));
+  {
+    // The three stage kinds. A climb is screens listed bottom first, each top row first; rooms are back walls in metres.
+    const sky = Array(S.SCREEN_H).fill("................"), floor = [...sky.slice(1), "################"];
+    const tower = S.parse({ kind: "climb", id: "tower", name: "Tower", screens: [floor, [".=======........", ...sky.slice(1)]], start: { col: 3, row: 2 }, lockScreen: 1, spawner: { base: 0 }, placed: [] });
+    const { climb, rooms } = S.TEST;
+    record("raid stages: the Jungle Shore and a stage authored without a kind are side stages",
+      st.kind === "side" && S.parse({ id: "plain", name: "Plain", rows: floor, start: { col: 3, row: 2 }, lockScreen: 0, spawner: { base: 0 }, placed: [] }).kind === "side");
+    record("raid stages: a climb is one screen wide and its screens' rows high, row 0 at the bottom, and the test climb passes its own validation",
+      tower.kind === "climb" && tower.cols === S.SCREEN_W && tower.rows === 2 * S.SCREEN_H && tower.screens === 2 &&
+      S.cellAt(tower, 5, 0) === S.KIND.SOLID && S.cellAt(tower, 0, tower.rows - 1) === S.KIND.EMPTY && S.cellAt(tower, 1, tower.rows - 1) === S.KIND.LEDGE &&
+      S.validate(tower).length === 0 && climb.kind === "climb" && climb.screens === 3 && climb.rows === 3 * S.SCREEN_H && climb.cols === S.SCREEN_W && climb.start.row < S.SCREEN_H && S.validate(climb).length === 0,
+      JSON.stringify({ tower: S.validate(tower), climb: S.validate(climb) }));
+    record("raid stages: the test rooms are two rooms and a boss room with no cells, each target four numbers and each wave three, and pass their own validation",
+      rooms.kind === "rooms" && rooms.cells === undefined && rooms.rooms.length === 3 && rooms.rooms[2].boss && !rooms.rooms[0].boss && !rooms.rooms[1].boss &&
+      rooms.rooms.every((room) => room.targets.length % 4 === 0 && room.waves.length % 3 === 0) && rooms.rooms[0].targets.length >= 4 && S.validate(rooms).length === 0,
+      JSON.stringify(S.validate(rooms)));
+    // A climb whose first screen is a row short and second a row long (two whole screens of rows between them), a start
+    // off the bottom screen with nothing under it, a scroll lock past the top, placed records out of row order and one
+    // a number short.
+    const leaning = S.parse({
+      kind: "climb", id: "leaning", name: "Leaning", screens: [sky.slice(1), [...sky, sky[0]]], start: { col: 3, row: 16 }, lockScreen: 2, spawner: { base: 0 },
+      placed: [[4, 9, S.ENEMY.CLERK, 0], [4, 3, S.ENEMY.CLERK, 0], [5, 4, S.ENEMY.CLERK]]
+    });
+    const climbFaults = S.validate(leaning);
+    record("raid stages: validation names a climb's short and long screens, a start with no ground and off the bottom screen, a lock past the top, records out of row order and a short record",
+      leaning.rows === 2 * S.SCREEN_H && climbFaults.length === 7 &&
+      [/screen 0 from the bottom is 13 rows/, /screen 1 from the bottom is 15 rows/, /no ledge, water or solid/, /bottom screen, rows/, /scroll lock on screen 2/, /record 1 at row 3 comes after row/, /placed record 2 is not four numbers/].every((re) => climbFaults.some((f) => re.test(f))),
+      JSON.stringify(climbFaults));
+    // A room with no target and waves out of time order, then a last room that is no boss room, with a target off the
+    // wall, a target and a wave a number short, a door past its edge and a wave sent through a door it does not have.
+    const shut = S.parse({
+      kind: "rooms", id: "shut", name: "Shut", rooms: [
+        { targets: [], doors: [2], waves: [[3, S.ENEMY.RUNNER, 0], [1, S.ENEMY.RUNNER, 0]], boss: false },
+        { targets: [[9, 1, S.ENEMY.SENSOR, 0], [2, 2, S.ENEMY.SENSOR]], doors: [8.5], waves: [[0, S.ENEMY.RUNNER, 1], [1, S.ENEMY.RUNNER]], boss: false }
+      ]
+    });
+    const roomFaults = S.validate(shut);
+    record("raid stages: validation names a room with no target, waves out of order, a target off the wall, a sensor target carrying no item, short records, a door past the wall, a wave through a missing door and a last room that is no boss room",
+      roomFaults.length === 9 &&
+      [/room 0 has no target/, /room 1: target 0 is a SENSOR carrying 0/, /room 0: wave 1 at/, /room 1: target 0 at/, /room 1: target 1 is not four numbers/, /room 1: door 0/, /room 1: wave 0 .*door 1/, /room 1: wave 1 is not three numbers/, /last room/].every((re) => roomFaults.some((f) => re.test(f))),
+      JSON.stringify(roomFaults));
+  }
+
+  // The sim's core: time, movement and the one-way scroll, driven only through setInput, tick and simulate.
+  const run = (bits, seconds, opts) => { const sim = M.create({ seed: 7, ...opts }); sim.setInput(bits); sim.simulate(seconds); return sim; };
+  {
+    const a = run(M.IN.RIGHT | M.IN.FIRE, 20), b = run(M.IN.RIGHT | M.IN.FIRE, 20), c = M.create({ seed: 8 });
+    c.setInput(M.IN.RIGHT | M.IN.FIRE); c.simulate(20);
+    record("raid sim: a seed replays the same run and another seed does not", a.hash() === b.hash() && a.hash() !== c.hash());
+    const late = M.create({ seed: 7 });
+    const steps = late.tick(10), after = late.tick(0);   // the rest of the long frame is dropped, not owed
+    record("raid sim: a frame of any length runs at most four steps", steps > 0 && steps <= M.MAX_SUBSTEPS && after === 0, JSON.stringify({ steps, after }));
+  }
+  // Two screens: flat floor at 1.5 m to column 21, a ledge 1 m up over the floor (columns 14 to 17), a second ledge
+  // from column 20 out over a 2 m pit (columns 22 to 25), a step of floor and a wall. No placed enemies and no edge spawner.
+  const TEST_ROWS = [
+    "............................####",
+    "............................####",
+    "............................####",
+    "............................####",
+    "............................####",
+    "............................####",
+    "............................####",
+    "............................####",
+    "............................####",
+    "..............====..======..####",
+    "............................####",
+    "######################....######",
+    "######################....######",
+    "######################....######"
+  ];
+  const testStage = S.parse({ id: "test", name: "Test", rows: TEST_ROWS, start: { col: 2, row: 12 }, lockScreen: 1, spawner: { base: 0 }, placed: [] });
+  const until = (sim, done, limit = 10) => { for (let t = 0; t < limit && !done(); t += M.FIXED) sim.simulate(M.FIXED); };
+  const tap = (sim, bits) => { sim.setInput(bits); sim.simulate(0.05); sim.setInput(0); };
+  {
+    const sim = M.create({ seed: 7, stage: testStage }), s = sim.state;
+    sim.simulate(1);                                   // land from the drop-in
+    const x0 = s.px[0]; sim.setInput(M.IN.RIGHT); sim.simulate(1);
+    const ran = s.px[0] - x0;
+    sim.setInput(M.IN.LEFT | M.IN.RIGHT); const x1 = s.px[0]; sim.simulate(0.5);
+    const held = s.px[0] - x1;
+    sim.setInput(M.IN.UP | M.IN.DOWN); sim.simulate(0.1);
+    const level = s.pFace[0] > 0 ? 0 : 4;   // the level aim the way it faces: up held alone would aim 2, down alone lie prone
+    record("raid movement: an Ooga runs at the run speed, and opposed buttons read as neither",
+      Math.abs(ran - M.TUNE.RUN) < 0.05 && held === 0 && s.pPose[0] === M.POSE.STAND && s.pAim[0] === level, JSON.stringify({ ran, held, pose: s.pPose[0], aim: s.pAim[0], level }));
+  }
+  {
+    const sim = M.create({ seed: 7, stage: testStage }), s = sim.state;
+    sim.simulate(1);
+    const floor = s.py[0], landed = s.pState[0];
+    let top = floor;
+    tap(sim, M.IN.JUMP);
+    for (let i = 0; i < 180; i++) { sim.simulate(M.FIXED); top = Math.max(top, s.py[0]); }
+    const apex = top - floor, want = M.TUNE.JUMP_V * M.TUNE.JUMP_V / (2 * M.TUNE.GRAVITY);
+    record("raid movement: a jump peaks at the jump height and lands",
+      landed === M.PSTATE.NORMAL && Math.abs(apex - want) < 0.05 && s.py[0] === floor && s.pvy[0] === 0 && s.pPose[0] === M.POSE.STAND,
+      JSON.stringify({ landed, apex, want, y: s.py[0], vy: s.pvy[0], pose: s.pPose[0] }));
+  }
+  {
+    // rule: the jump the maintainer asked for, 1.5 times as far as the 21.33 m/s² one (its running jump 0.75 s at RUN,
+    // 1.41 m), and the reference's air control: in the air the Ooga drifts at RUN the way it last pressed. Measured on the
+    // floor of the test stage (x 0 to 11), its first ledge (x 7 to 9, 1 m up) and the pit past the floor's end (x 11).
+    const sim = M.create({ seed: 7, stage: testStage }), s = sim.state, T = M.TUNE, step = T.RUN * M.FIXED;
+    const air = () => s.pPose[0] === M.POSE.JUMP, hold = (bits, n) => { sim.setInput(bits); for (let i = 0; i < n; i++) sim.simulate(M.FIXED); };
+    sim.simulate(1);
+    hold(M.IN.RIGHT, 30);
+    const x0 = s.px[0];
+    hold(M.IN.RIGHT | M.IN.JUMP, 1);
+    sim.setInput(M.IN.RIGHT); until(sim, () => !air(), 3);
+    const running = s.px[0] - x0, want = 1.5 * (2 * 8 / 21.33) * T.RUN;
+    // Released halfway up it keeps drifting right; pressed left once, it drifts left, released again or not.
+    hold(M.IN.RIGHT | M.IN.JUMP, 1); hold(0, 20);
+    let xa = s.px[0]; hold(0, 20);
+    const kept = s.px[0] - xa;
+    hold(M.IN.LEFT, 1); xa = s.px[0]; hold(0, 20);
+    const reversed = s.px[0] - xa;
+    sim.setInput(0); until(sim, () => !air(), 3);
+    // A jump with no direction goes straight up until one is pressed.
+    xa = s.px[0]; hold(M.IN.JUMP, 1); hold(0, 40);
+    const straight = s.px[0] - xa;
+    sim.setInput(0); until(sim, () => !air(), 3);
+    // Off the floor's end into the pit, left pressed at once: it keeps walking right through its coyote time and on until
+    // it has fallen LOCK_FALL from where that time ran out (read from the state: the step its `pCoyote` reaches 0 starts
+    // the lock at its height then), how far it stood under that at the start of each step: the last that went right,
+    // the first that did not.
+    sim.setInput(M.IN.RIGHT); until(sim, () => air(), 6);
+    let lockedRight = 0, turned = null, from = null;
+    sim.setInput(M.IN.LEFT);
+    for (let i = 0; i < 120 && air() && s.pState[0] === M.PSTATE.NORMAL; i++) {
+      const x = s.px[0], y = s.py[0], c = s.pCoyote[0]; sim.simulate(M.FIXED);
+      if (from === null && c > 0 && s.pCoyote[0] === 0) from = y;
+      const fallen = from === null ? 0 : from - y;
+      if (s.px[0] > x) lockedRight = fallen;
+      else if (turned === null) turned = fallen;
+    }
+    // Down and jump through the first ledge with right held: straight down until it has fallen LOCK_FALL.
+    const drop = M.create({ seed: 7, stage: testStage }), d = drop.state;
+    drop.simulate(1); drop.setInput(M.IN.RIGHT); until(drop, () => d.px[0] >= 8); drop.setInput(M.IN.JUMP); drop.simulate(M.FIXED);
+    drop.setInput(0); until(drop, () => d.pPose[0] !== M.POSE.JUMP, 3);
+    const ledge = d.py[0], dx = d.px[0];
+    drop.setInput(M.IN.DOWN | M.IN.JUMP); drop.simulate(M.FIXED);
+    drop.setInput(M.IN.RIGHT);
+    let still = 0, moved = null;
+    for (let i = 0; i < 120 && d.pPose[0] === M.POSE.JUMP; i++) {
+      const fallen = ledge - d.py[0]; drop.simulate(M.FIXED);
+      if (d.px[0] === dx) still = fallen; else if (moved === null) moved = fallen;
+    }
+    const near = (v, w) => Math.abs(v - w) <= step * 1.01;
+    record("raid movement: a running jump carries 1.5 times the old jump's 1.41 m, within a step; in the air the drift latches (a release keeps it, the other way reverses it, a jump with no direction goes straight up), and a walk off a ledge keeps its way through its coyote time and until it has fallen LOCK_FALL from where that ran out, and a drop through one goes straight down until it has fallen LOCK_FALL",
+      Math.abs(running - want) <= step * 1.01 && near(kept, 20 * step) && near(reversed, -20 * step) && straight === 0 &&
+        from !== null && lockedRight > T.LOCK_FALL - 0.15 && lockedRight < T.LOCK_FALL && turned !== null && turned >= T.LOCK_FALL && turned < T.LOCK_FALL + 0.15 &&
+        ledge === 2.5 && still > T.LOCK_FALL - 0.15 && still < T.LOCK_FALL && moved !== null && moved >= T.LOCK_FALL && moved < T.LOCK_FALL + 0.15,
+      JSON.stringify({ running, want, kept, reversed, straight, from, lockedRight, turned, ledge, still, moved }));
+  }
+  {
+    // rule: the hidden forgivenesses (COYOTE, JUMP_BUFFER), on the test stage's floor and the pit past its end. A jump
+    // pressed 0.08 s after walking off the floor's end still lifts the Ooga over where the press found it, and one at
+    // 0.12 s does not; jumping straight up, a jump pressed 0.08 s before it lands (the landing step read from a twin run
+    // with no second press) takes it up again within two steps of landing, and one pressed 0.12 s before does not.
+    // regression: a buffered press only jumps. Pressed (no down) just over the ledge it is falling back onto, then down
+    // held as it lands, it neither drops the Ooga through the ledge nor jumps (it once dropped through).
+    const air = (s) => s.pPose[0] === M.POSE.JUMP;
+    const coyote = (after) => {
+      const sim = M.create({ seed: 7, stage: testStage }), s = sim.state;
+      sim.simulate(1); sim.setInput(M.IN.RIGHT); until(sim, () => air(s), 6);
+      for (let n = Math.round(after / M.FIXED); n > 0; n--) sim.simulate(M.FIXED);
+      const at = s.py[0]; let rise = -Infinity;
+      sim.setInput(M.IN.RIGHT | M.IN.JUMP); sim.simulate(M.FIXED); sim.setInput(M.IN.RIGHT);
+      for (let i = 0; i < 30 && s.pState[0] === M.PSTATE.NORMAL; i++) { rise = Math.max(rise, s.py[0] - at); sim.simulate(M.FIXED); }
+      return +rise.toFixed(3);
+    };
+    const jumpUp = () => { const sim = M.create({ seed: 7, stage: testStage }); sim.simulate(1); sim.setInput(M.IN.JUMP); sim.simulate(M.FIXED); sim.setInput(0); return sim; };
+    const ref = jumpUp();
+    let land = 1;
+    for (; air(ref.state) && land < 600; land++) ref.simulate(M.FIXED);
+    const buffer = (before) => {
+      const sim = jumpUp(), s = sim.state;
+      for (let k = 1; k < land - Math.round(before / M.FIXED); k++) sim.simulate(M.FIXED);
+      sim.setInput(M.IN.JUMP); sim.simulate(M.FIXED); sim.setInput(0);
+      until(sim, () => !air(s), 3);
+      const floor = s.py[0];
+      let again = false;
+      for (let i = 0; i < 2; i++) { sim.simulate(M.FIXED); if (s.pvy[0] > 0 && s.py[0] > floor) again = true; }
+      return again;
+    };
+    const bufferDown = () => {
+      const sim = M.create({ seed: 7, stage: testStage }), s = sim.state;
+      sim.simulate(1);
+      sim.setInput(M.IN.RIGHT); until(sim, () => s.px[0] >= 8, 20); sim.setInput(M.IN.JUMP); sim.simulate(M.FIXED); sim.setInput(0); until(sim, () => !air(s), 3);
+      const ledge = s.py[0];
+      sim.setInput(M.IN.JUMP); sim.simulate(M.FIXED); sim.setInput(0);
+      until(sim, () => s.pvy[0] < 0 && s.py[0] - ledge < 0.05, 3);
+      sim.setInput(M.IN.JUMP); sim.simulate(M.FIXED); sim.setInput(M.IN.DOWN);
+      let lowest = ledge, highest = -Infinity;
+      for (let i = 0; i < 60; i++) { sim.simulate(M.FIXED); lowest = Math.min(lowest, s.py[0]); if (!air(s)) highest = Math.max(highest, s.py[0]); }
+      return { ledge, lowest: +lowest.toFixed(3), landedAt: +highest.toFixed(3), onLedge: ledge > 2 && Math.abs(lowest - ledge) < 1e-6 && Math.abs(s.py[0] - ledge) < 1e-6 && !air(s) };
+    };
+    const r = { c08: coyote(0.08), c12: coyote(0.12), b08: buffer(0.08), b12: buffer(0.12), land, down: bufferDown() };
+    record("raid movement: a jump 0.08 s after walking off a ledge still lifts the Ooga and one at 0.12 s does not; a jump pressed 0.08 s before landing fires as it lands and one at 0.12 s does not; landing with down held, a buffered jump neither drops through the ledge nor jumps",
+      r.c08 > 1 && r.c12 <= 0 && r.b08 && !r.b12 && r.down.onLedge, JSON.stringify(r));
+  }
+  {
+    const sim = M.create({ seed: 7, stage: testStage }), s = sim.state, ledge = 5 * S.CELL;   // the top of row 4
+    const walkTo = (x) => { sim.setInput(M.IN.RIGHT); until(sim, () => s.px[0] >= x); sim.setInput(0); };
+    sim.simulate(1);
+    const floor = s.py[0];
+    walkTo(8); tap(sim, M.IN.JUMP); sim.simulate(1);                 // under the first ledge, up through it
+    const up = s.py[0];
+    tap(sim, M.IN.DOWN | M.IN.JUMP); sim.simulate(1);                // floor below: drops through
+    const down = s.py[0];
+    walkTo(10.25); tap(sim, M.IN.JUMP); sim.simulate(1);             // onto the second ledge over the floor
+    walkTo(11.75);                                                   // out over the pit
+    const over = s.py[0];
+    tap(sim, M.IN.DOWN | M.IN.JUMP); sim.simulate(1);                // nothing below: stays
+    const kept = s.py[0];
+    record("raid movement: a ledge is jumped up through, stood on, and dropped from with down and jump only when there is ground below",
+      up === ledge && down === floor && over === ledge && kept === ledge && s.pvy[0] === 0 && s.pState[0] === M.PSTATE.NORMAL,
+      JSON.stringify({ ledge, floor, up, down, over, kept, x: s.px[0], state: s.pState[0] }));
+  }
+  {
+    const sim = M.create({ seed: 7, stage: testStage }), s = sim.state;
+    sim.simulate(1);
+    let cam = s.camX, back = false, behind = false;
+    const watch = (bits, seconds) => {
+      sim.setInput(bits);
+      for (let t = 0; t < seconds; t += M.FIXED) {
+        sim.simulate(M.FIXED);
+        if (s.camX < cam) back = true;
+        if (s.px[0] < s.camX) behind = true;
+        cam = s.camX;
+      }
+    };
+    watch(M.IN.RIGHT, 4);
+    const far = s.camX;
+    watch(M.IN.LEFT, 4);
+    record("raid movement: the screen scrolls one way, and an Ooga cannot walk back past its left edge",
+      far > 0 && s.camX === far && !back && !behind && s.px[0] - s.camX < 0.05, JSON.stringify({ far, camX: s.camX, px: s.px[0], back, behind }));
+  }
+  {
+    const sim = M.create({ seed: 7, stage: testStage }), s = sim.state;   // stopped at the death, since the Ooga drops back in after it
+    sim.setInput(M.IN.RIGHT); until(sim, () => s.pState[0] === M.PSTATE.DEAD, 8);
+    record("raid movement: a fall off the bottom of the screen kills", s.pState[0] === M.PSTATE.DEAD && s.py[0] < 0, JSON.stringify({ state: s.pState[0], x: s.px[0], y: s.py[0] }));
+  }
+
+  // Lives, death and continues. Deaths come from walking into a pit, score from the award verb.
+  const PS = M.PSTATE, R = M.RULES, SCREEN = S.SCREEN_W * S.CELL;
+  {
+    // The rule sheet's numbers (the design's section 6) as literals, since every other check reads them back from RULES:
+    // a wrong number there would pass them all. Frame counts are at 60 a second; the tickets are what the arcade pays.
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const got = {
+      lives: [R.LIVES, R.CONTINUES, R.LIVES_MAX], extra: [R.EXTRA_FIRST, R.EXTRA_STEP, R.EXTRA_CUTOFF],
+      frames: [R.RESPAWN_INVINCIBLE === 128 / 60, Math.round(R.RESPAWN_INVINCIBLE / M.FIXED), R.BARRIER === 1024 / 60],
+      shots: [R.CAPS, R.FAN_PER_SHOT, R.BEAM_SEGMENTS, R.STRENGTH, R.DAMAGE], spawner: [R.SPAWN_STRENGTH_CUT, R.SPAWN_LOOP_CUT, R.SPAWN_LOOPS_MAX],
+      boss: R.BOSS_HP_STRENGTH, screen: [S.SCREEN_W, S.SCREEN_H, S.CELL, M.ENEMY_SLOTS], tickets: [0, 1999, 2000, 199999, 200000, 1e9].map(M.tickets)
+    };
+    record("raid rules: the rule sheet's numbers: two lives in reserve, three continues, at most 99 lives, extra lives at 20,000 then every 30,000 to the cut-off, 128 frames of invincibility, 1,024 of barrier, the five weapons' caps and strengths, the spawner's cuts, 8 boss hit points a strength point, 16 by 14 half-metre cells, 16 enemy slots, and a ticket for every 2,000 points to 100",
+      same(got, {
+        lives: [2, 3, 99], extra: [20000, 30000, 2995200], frames: [true, 256, true],
+        shots: [[4, 6, 4, 10, 3], 5, 3, [0, 2, 1, 3, 2], 1], spawner: [5, 40, 3],
+        boss: 8, screen: [16, 14, 0.5, 16], tickets: [0, 0, 1, 99, 100, 100]
+      }), JSON.stringify(got));
+  }
+  const settle = (sim) => until(sim, () => sim.state.pState[0] === PS.NORMAL || sim.state.pState[0] === PS.OUT, 5);
+  const dieInPit = (sim, bits = M.IN.RIGHT) => { sim.setInput(bits); until(sim, () => sim.state.pState[0] === PS.DEAD, 30); sim.setInput(0); };
+  {
+    const s = M.create({ seed: 7, stage: testStage }).state;
+    record("raid lives: a run starts with two lives in reserve and three continues", s.pLives[0] === R.LIVES && s.continues === R.CONTINUES,
+      JSON.stringify({ lives: s.pLives[0], continues: s.continues }));
+  }
+  {
+    const sim = M.create({ seed: 7, stage: testStage }), s = sim.state;
+    settle(sim);
+    s.pWeapon[0] = M.WEAPON.FAN; s.pRapid[0] = 1;
+    dieInPit(sim);
+    const camX = s.camX, seen = [s.pState[0]];
+    for (let t = 0; t < 5 && s.pState[0] !== PS.NORMAL; t += M.FIXED) { sim.simulate(M.FIXED); if (seen.at(-1) !== s.pState[0]) seen.push(s.pState[0]); }
+    record("raid lives: a death costs a life, the weapon and rapid fire, and drops the Ooga back in on the same screen",
+      s.pLives[0] === R.LIVES - 1 && s.pWeapon[0] === M.WEAPON.RIFLE && s.pRapid[0] === 0 && seen.join() === [PS.DEAD, PS.DROP, PS.NORMAL].join() &&
+        s.camX === camX && s.px[0] >= camX && s.px[0] <= camX + SCREEN,
+      JSON.stringify({ lives: s.pLives[0], weapon: s.pWeapon[0], rapid: s.pRapid[0], seen, camX, after: s.camX, px: s.px[0] }));
+  }
+  {
+    const sim = M.create({ seed: 7, stage: testStage }), s = sim.state;
+    // Step to the landing, then count the steps the Ooga cannot be hurt for, with enemies holding fire throughout.
+    const land = () => {
+      let dropHeld = true;
+      for (let i = 0; i < 1200 && s.pState[0] !== PS.NORMAL; i++) { sim.simulate(M.FIXED); if (s.pState[0] === PS.DROP && s.attack !== 0) dropHeld = false; }
+      const atLanding = s.pInvincible[0];
+      let steps = 0, held = true;
+      // A runner put down on the Ooga every half second while it lasts walks through it without a kill.
+      // The first one has an item under it in a lower slot, which is taken as the Ooga walks through the runner.
+      let touches = 0, walked = true, took = false;
+      while (s.pInvincible[0] > 0 && steps < 1000) {
+        if (steps % 60 === 0 && steps < 180) { sim.spawn(M.ENEMY.RUNNER, s.px[0], s.py[0], 0); touches++; }
+        if (steps === 0) sim.spawn(M.ENEMY.ITEM, s.px[0], s.py[0] + R.PLAYER_POINT[M.POSE.STAND], M.ITEM.RAPID);
+        if (s.attack !== 0) held = false;
+        sim.simulate(M.FIXED); steps++;
+        if (steps === 1) took = s.pRapid[0] === 1;
+        if (s.pState[0] !== PS.NORMAL) walked = false;
+      }
+      return { dropHeld, atLanding, steps, held, after: s.attack, touches, walked, took };
+    };
+    const first = land();
+    dieInPit(sim);
+    const again = land();
+    const sound = (r) => Math.abs(r.atLanding - R.RESPAWN_INVINCIBLE) <= M.FIXED && r.steps === Math.round(R.RESPAWN_INVINCIBLE / M.FIXED) &&
+      r.dropHeld && r.held && r.after === 1 && r.touches > 0 && r.walked && r.took;
+    record("raid lives: a fresh Ooga cannot be hurt for 128 frames, and enemies hold their fire until then", sound(first) && sound(again),
+      JSON.stringify({ first, again, want: Math.round(R.RESPAWN_INVINCIBLE / M.FIXED) }));
+  }
+  {
+    // One screen with the scroll locked on it and a pit under its left half, so the drop column is over the pit.
+    const PIT_ROWS = Array.from({ length: S.SCREEN_H }, (_, i) => i < S.SCREEN_H - 3 ? "................" : "........########");
+    const pit = S.parse({ id: "pit", name: "Pit", rows: PIT_ROWS, start: { col: 12, row: 3 }, lockScreen: 0, spawner: { base: 0 }, placed: [] });
+    const sim = M.create({ seed: 7, stage: pit }), s = sim.state;
+    settle(sim);
+    dieInPit(sim, M.IN.LEFT);
+    const dropCol = Math.floor((s.camX + M.TUNE.DROP_X) / S.CELL), overPit = S.cellAt(pit, dropCol, 2) === S.KIND.EMPTY;
+    settle(sim);
+    record("raid lives: with no ground under the drop point the Ooga lands on the nearest ground on that screen",
+      overPit && s.pState[0] === PS.NORMAL && s.py[0] === 3 * S.CELL && s.px[0] >= s.camX && s.px[0] <= s.camX + SCREEN,
+      JSON.stringify({ dropCol, overPit, state: s.pState[0], px: s.px[0], py: s.py[0], camX: s.camX }));
+  }
+  {
+    const sim = M.create({ seed: 7, stage: testStage }), s = sim.state;
+    const toOver = () => {
+      let deaths = 0;
+      while (s.phase === M.PHASE.PLAY && deaths < 9) { settle(sim); dieInPit(sim); deaths++; until(sim, () => s.pState[0] !== PS.DEAD, 3); }
+      return deaths;
+    };
+    settle(sim); sim.award(1000);
+    const deaths = toOver(), over = s.phase, camOver = s.camX;
+    s.pNextLife[0] = R.EXTRA_FIRST + R.EXTRA_STEP;   // as if a life had been earned, so the continue must put it back
+    sim.continueRun();
+    const first = { phase: s.phase, score: s.pScore[0], lives: s.pLives[0], next: s.pNextLife[0], camX: s.camX, continues: s.continues };
+    toOver(); sim.continueRun(); toOver(); sim.continueRun();
+    const left = s.continues;
+    const last = toOver(), before = sim.hash();
+    sim.continueRun();
+    const refused = sim.hash() === before && s.phase === M.PHASE.OVER;
+    sim.endRun();
+    record("raid lives: the third death ends the run, a continue restarts the stage with the score at zero, and the fourth game over has none left",
+      deaths === 3 && over === M.PHASE.OVER && camOver > 0 && first.phase === M.PHASE.PLAY && first.score === 0 && first.lives === R.LIVES &&
+        first.next === R.EXTRA_FIRST && first.camX === 0 && first.continues === R.CONTINUES - 1 && left === 0 && last === 3 && refused && s.phase === M.PHASE.END,
+      JSON.stringify({ deaths, over, camOver, first, left, last, refused, phase: s.phase }));
+  }
+  {
+    const sim = M.create({ seed: 7, stage: testStage }), s = sim.state;
+    sim.award(R.EXTRA_FIRST);
+    const one = { lives: s.pLives[0], next: s.pNextLife[0] };
+    sim.award(2 * R.EXTRA_STEP);                       // crosses 50,000 and 80,000 at once
+    const two = s.pLives[0];
+    s.pLives[0] = R.LIVES_MAX; sim.award(R.EXTRA_STEP);
+    const capped = s.pLives[0];
+    s.pLives[0] = R.LIVES; s.pNextLife[0] = R.EXTRA_CUTOFF; sim.award(R.EXTRA_CUTOFF);
+    const cut = s.pLives[0];
+    record("raid lives: an extra life comes at 20,000 points, then every 30,000, two at once when one award crosses two, never past 99 and none past the cut-off",
+      one.lives === R.LIVES + 1 && one.next === R.EXTRA_FIRST + R.EXTRA_STEP && two === R.LIVES + 3 && capped === R.LIVES_MAX && cut === R.LIVES,
+      JSON.stringify({ one, two, capped, cut }));
+  }
+
+  // Weapons and the player's bullets. The Ooga stands on the test stage's floor facing right; the weapon and rapid fire are
+  // set on the state, since pickups come later. Shots are counted as rises in the live count.
+  const W = M.WEAPON, WEAPONS = [W.RIFLE, W.AUTO, W.CORK, W.FAN, W.BEAM];
+  const live = (sim) => sim.state.bLive.reduce((n, v) => n + v, 0);
+  const armed = (weapon, rapid = 0) => {
+    const sim = M.create({ seed: 7, stage: testStage });
+    settle(sim);
+    sim.state.pWeapon[0] = weapon; sim.state.pRapid[0] = rapid;
+    return sim;
+  };
+  const press = (sim, bits) => { sim.setInput(bits); sim.simulate(M.FIXED); sim.setInput(bits & ~M.IN.FIRE); sim.simulate(M.FIXED); };
+  const angleOf = (s, b) => (Math.atan2(s.bvy[b], s.bvx[b]) * 180 / Math.PI + 360) % 360;
+  {
+    const seen = WEAPONS.map((w) => {
+      const sim = armed(w);
+      let most = 0;
+      for (let i = 0; i < 360; i++) { sim.setInput(i % 2 ? 0 : M.IN.FIRE); sim.simulate(M.FIXED); most = Math.max(most, live(sim)); }
+      return most;
+    });
+    record("raid weapons: each weapon holds its own number of shots on screen", seen.every((most, w) => most === R.CAPS[w]), JSON.stringify({ seen, caps: R.CAPS }));
+  }
+  {
+    const fan = armed(W.FAN), beam = armed(W.BEAM);
+    press(fan, M.IN.FIRE); press(beam, M.IN.FIRE);
+    const fs = fan.state, bs = beam.state;
+    const angles = [...fs.bLive.keys()].filter((b) => fs.bLive[b]).map((b) => angleOf(fs, b)).map((a) => a > 180 ? a - 360 : a).sort((a, b) => a - b);
+    const arc = M.TUNE.FAN_ARC * 180 / Math.PI;
+    const segments = [...bs.bLive.keys()].filter((b) => bs.bLive[b]);
+    const inLine = segments.every((b) => bs.by[b] === bs.by[segments[0]] && bs.bvx[b] === bs.bvx[segments[0]] && bs.bvy[b] === 0) &&
+      new Set(segments.map((b) => bs.bx[b])).size === segments.length;
+    record("raid weapons: the fan fires five at a time and the beam three segments",
+      live(fan) === R.FAN_PER_SHOT && Math.abs(angles[0] + arc / 2) < 1e-3 && Math.abs(angles.at(-1) - arc / 2) < 1e-3 &&
+      new Set(angles.map((a) => a.toFixed(3))).size === R.FAN_PER_SHOT && live(beam) === R.BEAM_SEGMENTS && inLine,
+      JSON.stringify({ fan: live(fan), angles, beam: live(beam), inLine }));
+  }
+  {
+    // The shots fired over a second of fire held: a step whose live bullets grew fired one (the fan's five and the beam's
+    // three segments go together).
+    const shots = (w) => {
+      const sim = armed(w);
+      let fired = 0, was = 0;
+      sim.setInput(M.IN.FIRE);
+      for (let t = 0; t < 1; t += M.FIXED) { sim.simulate(M.FIXED); const n = live(sim); if (n > was) fired++; was = n; }
+      return fired;
+    };
+    const fired = Object.fromEntries(Object.keys(W).map((name) => [name, shots(W[name])]));
+    record("raid weapons: only the auto rifle repeats while the button is held",
+      Object.keys(W).every((name) => name === "AUTO" ? fired[name] > 1 : fired[name] === 1), JSON.stringify(fired));
+  }
+  {
+    // Speed along each bullet's line of flight (the direction of its velocity), as the least-squares slope of its
+    // distance along that line over its life, since the corkscrew circles the line rather than riding it.
+    const speeds = (w, rapid) => {
+      const sim = armed(w, rapid), s = sim.state;
+      press(sim, M.IN.FIRE);
+      const tracks = [...s.bLive.keys()].filter((b) => s.bLive[b]).map((b) => ({ b, ux: s.bvx[b], uy: s.bvy[b], x0: s.bx[b], y0: s.by[b], ts: [], ds: [] }));
+      for (const k of tracks) { const n = Math.hypot(k.ux, k.uy); k.ux /= n; k.uy /= n; }
+      for (let i = 0; i < 240; i++) {
+        for (const k of tracks) if (s.bLive[k.b]) { k.ts.push(i * M.FIXED); k.ds.push((s.bx[k.b] - k.x0) * k.ux + (s.by[k.b] - k.y0) * k.uy); }
+        sim.simulate(M.FIXED);
+      }
+      return tracks.filter((k) => k.ts.length > 20).map((k) => {
+        const n = k.ts.length, mt = k.ts.reduce((a, v) => a + v, 0) / n, md = k.ds.reduce((a, v) => a + v, 0) / n;
+        let num = 0, den = 0;
+        for (let i = 0; i < n; i++) { num += (k.ts[i] - mt) * (k.ds[i] - md); den += (k.ts[i] - mt) ** 2; }
+        return num / den;
+      });
+    };
+    const near = (list, v) => list.length > 0 && list.every((x) => Math.abs(x - v) < 0.02 * v);
+    const slow = WEAPONS.slice(0, 4).map((w) => speeds(w, 0)), fast = WEAPONS.slice(0, 4).map((w) => speeds(w, 1));
+    const beam = speeds(W.BEAM, 0), beamRapid = speeds(W.BEAM, 1);
+    // The corkscrew (index W.CORK) flies at its own speeds, the reference's fire gun's.
+    const want = (w, rapid) => w === W.CORK ? (rapid ? M.TUNE.CORK_RAPID_V : M.TUNE.CORK_V) : rapid ? M.TUNE.RAPID_V : M.TUNE.SHOT_V;
+    record("raid weapons: rapid fire speeds every shot but the beam",
+      slow.every((l, w) => near(l, want(w, 0))) && fast.every((l, w) => near(l, want(w, 1))) && near(beam, M.TUNE.BEAM_V) && near(beamRapid, M.TUNE.BEAM_V),
+      JSON.stringify({ slow, fast, beam, beamRapid }));
+  }
+  {
+    // Each aim from the pose that reaches it: forward, up-forward and up standing, down-forward running, straight down in the air.
+    const HOW = [[0], [M.IN.UP | M.IN.RIGHT], [M.IN.UP], [M.IN.UP | M.IN.LEFT], [M.IN.LEFT], [M.IN.DOWN | M.IN.LEFT], [M.IN.DOWN, true], [M.IN.DOWN | M.IN.RIGHT]];
+    const first = (bits, jump) => {
+      const sim = armed(W.RIFLE), s = sim.state;
+      if (jump) { tap(sim, M.IN.JUMP); sim.setInput(bits); sim.simulate(0.1); }
+      sim.setInput(bits); sim.simulate(M.FIXED);
+      sim.setInput(bits | M.IN.FIRE); sim.simulate(M.FIXED);
+      const b = s.bLive.indexOf(1);
+      // Where it started: a step back along its flight from where the step it was fired in carried it, against the feet
+      // and the muzzle point TUNE.MUZZLE gives for the pose and the aim (k steps from forward, mirrored facing left).
+      const face = s.pFace[0], m = M.TUNE.MUZZLE[s.pPose[0]][face > 0 ? s.pAim[0] : (12 - s.pAim[0]) % 8];
+      const off = b < 0 ? null : [s.bx[b] - s.bvx[b] * M.FIXED - s.px[0] - face * m[0], s.by[b] - s.bvy[b] * M.FIXED - s.py[0] - m[1]];
+      return { b, aim: s.pAim[0], pose: s.pPose[0], angle: b < 0 ? null : angleOf(s, b), by: b < 0 ? null : s.by[b], bvy: b < 0 ? null : s.bvy[b], feet: s.py[0], off };
+    };
+    const aims = HOW.map(([bits, jump]) => first(bits, jump));
+    const prone = first(M.IN.DOWN), stand = aims[0];
+    const angled = aims.every((r, aim) => r.b >= 0 && r.aim === aim && Math.abs(r.angle - aim * 45) < 1e-3);
+    const muzzled = [...aims, prone].every((r) => r.off !== null && Math.abs(r.off[0]) < 1e-4 && Math.abs(r.off[1]) < 1e-4);
+    record("raid weapons: shots leave along the eight aims, each from its pose's muzzle point for that aim, and a prone Ooga fires level and low",
+      angled && muzzled && prone.pose === M.POSE.PRONE && prone.b >= 0 && prone.bvy === 0 && prone.feet === stand.feet && prone.by < stand.by,
+      JSON.stringify({ aims: aims.map((r) => [r.aim, r.angle, r.pose, r.off]), prone, stand: { by: stand.by, feet: stand.feet } }));
+  }
+
+  // Enemies, their shots and what kills, put down with the spawn verb. An Ooga that must neither be hurt nor shot at is
+  // held invincible by setting the state, which also holds the enemies' fire. A ledge stage with no solid anywhere, so a
+  // bullet ends only on an enemy or by leaving the screen.
+  const E = M.ENEMY, STAND_POINT = R.PLAYER_POINT[M.POSE.STAND];
+  const ready = (sim) => { settle(sim); until(sim, () => sim.state.pInvincible[0] === 0, 5); };
+  const LEDGE_ROWS = Array.from({ length: S.SCREEN_H }, (_, i) => i === S.SCREEN_H - 3 ? "================" : "................");
+  const ledgeStage = S.parse({ id: "ledge", name: "Ledge", rows: LEDGE_ROWS, start: { col: 2, row: 12 }, lockScreen: 0, spawner: { base: 0 }, placed: [] });
+  // Fire at an enemy 2 m ahead for 4 s, a press every other step (far enough that no beam segment, the last leaving 1.1 m
+  // ahead, is fired into its box and spent in the same step). A bullet that ends within 1.2 m of the enemy ended on it;
+  // each step the hit points lost must match those bullets, plus a beam segment that killed and went on.
+  const shootAt = (weapon, type, flags = 0) => {
+    const sim = M.create({ seed: 7, stage: ledgeStage }), s = sim.state;
+    settle(sim);
+    s.pWeapon[0] = weapon; s.pInvincible[0] = 1e9;
+    const slot = sim.spawn(type, s.px[0] + 2, s.py[0], 0), hp0 = s.eHp[slot];
+    if (!flags) until(sim, () => !(s.eFlags[slot] & M.FLAG.SHUT), 2);   // an emplacement opens as the screen brings it in
+    s.eFlags[slot] |= flags;
+    const was = new Uint8Array(M.BULLETS), wx = new Float32Array(M.BULLETS), wy = new Float32Array(M.BULLETS);
+    let ended = 0, used = 0, mismatched = 0, lowest = hp0, zeroAt = -1, score = s.pScore[0];
+    const scores = [], scoredAt = [];
+    for (let i = 0; i < 480; i++) {
+      for (let b = 0; b < M.BULLETS; b++) { was[b] = s.bLive[b]; wx[b] = s.bx[b]; wy[b] = s.by[b]; }
+      const ox = s.ex[slot], oy = s.ey[slot], alive = s.eType[slot] === type, hp = s.eHp[slot];
+      if (alive) s.eFlags[slot] |= flags;   // held each step, since a sensor opens on its own timer
+      sim.setInput(i % 2 ? 0 : M.IN.FIRE); sim.simulate(M.FIXED);
+      let near = 0;
+      for (let b = 0; b < M.BULLETS; b++) if (was[b] && !s.bLive[b] && Math.hypot(wx[b] - ox, wy[b] - oy) < 1.2) near++;
+      if (alive) {
+        const drop = hp - (s.eType[slot] === type ? s.eHp[slot] : 0), killed = hp > 0 && s.eHp[slot] === 0 && s.eType[slot] === type;
+        const went = killed && weapon === W.BEAM ? 1 : 0;
+        if (drop !== near + went) mismatched++;
+        ended += near; used += near + went;
+        lowest = Math.min(lowest, s.eHp[slot]);
+        if (killed) zeroAt = i;
+      }
+      if (s.pScore[0] !== score) { scores.push(s.pScore[0] - score); scoredAt.push(i); score = s.pScore[0]; }
+    }
+    return { hp0, ended, used, mismatched, lowest, zeroAt, scores, scoredAt };
+  };
+  {
+    const rifle = shootAt(W.RIFLE, E.PRINTER), fan = shootAt(W.FAN, E.PRINTER), beamed = shootAt(W.BEAM, E.PRINTER), runner = shootAt(W.RIFLE, E.RUNNER);
+    // A beam through a runner: the segment that kills it goes on past where it fell, and so do the other two.
+    const sim = M.create({ seed: 7, stage: ledgeStage }), s = sim.state;
+    settle(sim);
+    s.pWeapon[0] = W.BEAM; s.pInvincible[0] = 1e9;
+    const slot = sim.spawn(E.RUNNER, s.px[0] + 2.5, s.py[0], 0);
+    press(sim, M.IN.FIRE);
+    const segments = [...s.bLive.keys()].filter((b) => s.bLive[b]);
+    until(sim, () => s.eHp[slot] === 0, 3);
+    const atKill = segments.filter((b) => s.bLive[b]).length, fell = s.ex[slot], far = segments.map(() => -Infinity);
+    for (let i = 0; i < 60; i++) { sim.simulate(M.FIXED); segments.forEach((b, k) => { if (s.bLive[b]) far[k] = Math.max(far[k], s.bx[b]); }); }
+    const passed = far.filter((x) => x > fell + 0.5).length;
+    const took = (r, hp) => r.hp0 === hp && r.used === hp && r.mismatched === 0 && r.lowest === 0;
+    record("raid enemies: every shot does one damage, so a printer takes eight and a runner one",
+      took(rifle, R.HP.PRINTER) && rifle.ended === R.HP.PRINTER && took(fan, R.HP.PRINTER) && took(beamed, R.HP.PRINTER) && beamed.ended === R.HP.PRINTER - 1 &&
+        took(runner, R.HP.RUNNER) && segments.length === R.BEAM_SEGMENTS && atKill === R.BEAM_SEGMENTS && passed === R.BEAM_SEGMENTS,
+      JSON.stringify({ rifle, fan, beamed, runner, atKill, passed, far, fell }));
+  }
+  {
+    // rule: a stationary gun can be beaten. The Ooga stands on the test stage's floor with a gun 3 m ahead on the same
+    // ground (its box's origin at a printer's height over the feet, 0.35 m) and taps fire; for each emplaced or vault gun,
+    // once open (a lone vault gun is the last of its pair, which fires twice as often), on four seeds: standing and lying
+    // prone, tapping 7.5 a second (a press every other eight steps), the gun falls at least 0.3 s before the same Ooga,
+    // holding the same pose without firing, is killed; and standing, tapping 4 a second (every other fifteen), it falls first.
+    // rule: a printer warns of every shot. Each shot a printer fires (in the duels, and below at an Ooga hopping before it
+    // with the strongest weapon held, where its waits are short and its aim turns, beside a clerk) comes after the printer has
+    // stood wound up (routine PRINTER_WIND, read from the sim's state) for PRINTER_WINDUP, and is marked a dollar bill
+    // (attr AIM_STEPS or more), where no clerk's shot is.
+    const WIND = context.window.BL.raidEnemies.PRINTER_WIND, WOUND = M.TUNE.PRINTER_WINDUP, wound = [];
+    const watchWind = () => {
+      const had = new Uint8Array(M.ENEMY_SLOTS);
+      let steps = 0;
+      return {
+        before: (s) => { for (let j = 0; j < M.ENEMY_SLOTS; j++) had[j] = s.eType[j] !== E.FREE ? 1 : 0; },
+        after: (s, k, out) => {
+          const was = steps;
+          steps = s.eType[k] === E.PRINTER && s.eRoutine[k] === WIND ? steps + 1 : 0;
+          for (let j = 0; j < M.ENEMY_SLOTS; j++) {
+            if (had[j] || s.eType[j] !== E.SHOT) continue;
+            const printer = Math.hypot(s.ex[j] - s.ex[k], s.ey[j] - s.ey[k] - M.ORIGIN_OF[E.PRINTER]) < 0.2;
+            out.push({ printer, wound: +(was * M.FIXED).toFixed(4), bill: s.eAttr[j] >= R.AIM_STEPS });
+          }
+        }
+      };
+    };
+    const duel = (type, seed, hold, every, fire) => {
+      const sim = M.create({ seed, stage: testStage }), s = sim.state, watch = watchWind();
+      settle(sim);
+      s.pInvincible[0] = 0;
+      const k = sim.spawn(type, s.px[0] + 3, s.py[0] + 0.35 - M.ORIGIN_OF[type], 0);
+      for (let i = 0; i < 12 * 120; i++) {
+        watch.before(s);
+        sim.setInput(hold | (fire && i % (2 * every) < every ? M.IN.FIRE : 0)); sim.simulate(M.FIXED);
+        if (type === E.PRINTER) watch.after(s, k, wound);
+        if (s.eType[k] !== type || s.eRoutine[k] >= M.DESTROYED[type]) return { fell: +((i + 1) * M.FIXED).toFixed(3) };
+        if (s.pState[0] !== PS.NORMAL) return { died: +((i + 1) * M.FIXED).toFixed(3), hp: s.eHp[k] };
+      }
+      return { hp: s.eHp[k] };
+    };
+    const ROWS = [["stand", 0, 8, 0.3], ["prone", M.IN.DOWN, 8, 0.3], ["stand 4/s", 0, 15, 0]];
+    const guns = ["PRINTER", "VAULT_GUN", "ARC_PYLON", "BOND_MORTAR"].map((name) => ({
+      name, rows: ROWS.map(([how, hold, every, margin]) => ({ how, margin, runs: [1, 2, 3, 4].map((seed) => {
+        const won = duel(E[name], seed, hold, every, true), idle = duel(E[name], seed, hold, every, false);
+        return { fell: won.fell, died: won.died, killedIdle: idle.died, by: won.fell !== undefined && idle.died !== undefined ? +(idle.died - won.fell).toFixed(3) : null };
+      }) }))
+    }));
+    const hopped = [];
+    {
+      const sim = M.create({ seed: 5, stage: ledgeStage }), s = sim.state, watch = watchWind();
+      settle(sim);
+      s.pInvincible[0] = 0; s.pBarrier[0] = 1e9; s.pWeapon[0] = W.FAN;
+      const k = sim.spawn(E.PRINTER, s.px[0] + 3, s.py[0], 0);
+      sim.spawn(E.CLERK, s.px[0] + 4.5, s.py[0], 0);
+      for (let i = 0; i < 20 * 120; i++) {
+        const t = i % 240;
+        watch.before(s);
+        sim.setInput((t < 100 ? M.IN.RIGHT : t < 200 ? M.IN.LEFT : 0) | (i % 90 === 0 ? M.IN.JUMP : 0)); sim.simulate(M.FIXED);
+        watch.after(s, k, hopped);
+      }
+    }
+    const warned = (list) => list.every((r) => r.printer ? r.bill && r.wound >= WOUND - M.FIXED / 2 : !r.bill);
+    const winds = { duels: wound.length, hopped: hopped.filter((r) => r.printer).length, coins: hopped.filter((r) => !r.printer).length,
+      shortest: Math.min(...[...wound, ...hopped].filter((r) => r.printer).map((r) => r.wound)), unwarned: [...wound, ...hopped].filter((r) => !warned([r])) };
+    // And the emplaced gun's life, on a side stage and a climb (fixtures of nothing but ledges), for each emplaced type:
+    // spawned half a metre past the edge the screen brings it in from (the right on a side stage, the top on a climb)
+    // while the test writes the camera on at SCROLL a second, the Ooga kept on the screen under a barrier (so the gun
+    // may fire) and 2 m from it (on a climb under it with up held while it hangs higher), facing it, firing every other
+    // step only while the gun is shut. It stays shut until it stands TUNE.EMPLACE_IN inside that edge (on a climb its box
+    // origin EMPLACE_IN_CLIMB under the top), opens EMPLACE_OPEN after (within a step either way of the two readings),
+    // shuts for good on the first step it is within EMPLACE_OUT of the trailing edge (the left, or the bottom), and frees
+    // on the first step it is past ENEMY_MARGIN beyond it; bullets end on it while it opens and once it is shut for good,
+    // and it loses no hit point on a step it is shut through (those still in flight as it opens may hurt it); nothing
+    // appears within 1 m of it while it is shut (a shell's burst lands at the Ooga), and something does while open.
+    const SCROLL = 1.5, SX = S.SCREEN_W * S.CELL, SY = S.SCREEN_H * S.CELL, T = M.TUNE;
+    const lifeSide = S.parse({ id: "life", name: "Life", rows: Array.from({ length: S.SCREEN_H }, (_, i) => (i === S.SCREEN_H - 3 ? "=" : ".").repeat(3 * S.SCREEN_W)),
+      start: { col: 2, row: 12 }, lockScreen: 2, spawner: { base: 0 }, placed: [] });
+    const lifeClimb = S.parse({ kind: "climb", id: "life-climb", name: "Life", screens: Array.from({ length: 4 }, () => Array.from({ length: S.SCREEN_H }, () => "=".repeat(S.SCREEN_W))),
+      start: { col: 3, row: 2 }, lockScreen: 3, spawner: { base: 0 }, placed: [] });
+    const life = (stage, type) => {
+      const sim = M.create({ seed: 7, stage }), s = sim.state, climb = stage.kind === "climb", o = M.ORIGIN_OF[type], v = SCROLL * M.FIXED, shutRoutine = M.DESTROYED[type] - 1;
+      settle(sim);
+      s.pInvincible[0] = 0; s.pBarrier[0] = 1e9;
+      const k = climb ? sim.spawn(type, 5, s.camY + SY + 0.5 - o, 0) : sim.spawn(type, s.camX + SX + 0.5, s.py[0] + 0.35 - o, 0);
+      const r = { shutBeyond: true, inAt: -1, openAt: -1, shutAt: -1, shutFrom: null, freedFrom: null, hurt: 0, struck: [0, 0], firedShut: 0, firedOpen: 0, died: false };
+      const was = new Uint8Array(M.BULLETS), wx = new Float32Array(M.BULLETS), wy = new Float32Array(M.BULLETS), had = new Uint8Array(M.ENEMY_SLOTS);
+      for (let i = 0; i < 12 * 120 && r.freedFrom === null; i++) {
+        if (climb) s.camY += v; else s.camX += v;
+        const gx = s.ex[k], ey = s.ey[k], gy = ey + o, shut = (s.eFlags[k] & M.FLAG.SHUT) !== 0, routine = s.eRoutine[k], hp = s.eHp[k];
+        let bits = 0;
+        if (climb) {
+          s.py[0] = Math.floor(Math.min(s.camY + SY / 2 - 0.1, Math.max(s.camY + 0.6, gy - 0.35)) / S.CELL) * S.CELL; s.pvy[0] = 0;
+          const d = gy - s.py[0];
+          s.pFace[0] = 1; s.px[0] = d > 1.2 ? gx - M.TUNE.MUZZLE[M.POSE.STAND][2][0] : gx - 2;
+          bits = d > 1.2 ? M.IN.UP : d < 0.5 ? M.IN.DOWN : 0;
+        } else {
+          const right = gx > s.camX + SX / 2;
+          s.px[0] = Math.min(s.camX + SX / 2 - 0.1, right ? gx - 2 : gx + 2); s.pFace[0] = right ? 1 : -1;
+        }
+        if (shut && i % 2 === 0) bits |= M.IN.FIRE;
+        for (let b = 0; b < M.BULLETS; b++) { was[b] = s.bLive[b]; wx[b] = s.bx[b]; wy[b] = s.by[b]; }
+        for (let j = 0; j < M.ENEMY_SLOTS; j++) had[j] = s.eType[j] !== E.FREE ? 1 : 0;
+        sim.setInput(bits); sim.simulate(M.FIXED);
+        if (s.pState[0] !== PS.NORMAL) r.died = true;
+        if (s.eType[k] !== type) { r.freedFrom = climb ? ey - s.camY : gx - s.camX; break; }
+        const now = (s.eFlags[k] & M.FLAG.SHUT) !== 0, lead = climb ? s.camY + SY - gy : s.camX + SX - gx;
+        if (r.inAt < 0 && lead >= (climb ? T.EMPLACE_IN_CLIMB : T.EMPLACE_IN)) r.inAt = i;
+        if (r.inAt < 0 && !now) r.shutBeyond = false;
+        if (r.openAt < 0 && !now) r.openAt = i;
+        if (r.openAt >= 0 && r.shutAt < 0 && now) { r.shutAt = i; r.shutFrom = climb ? gy - s.camY : gx - s.camX; }
+        if (shut && now && s.eHp[k] !== hp) r.hurt++;
+        if (shut && now && (routine === 1 || routine === shutRoutine) && (climb ? gy >= s.camY : gx >= s.camX)) {
+          for (let b = 0; b < M.BULLETS; b++) if (was[b] && !s.bLive[b] && Math.hypot(wx[b] - gx, wy[b] - gy) < 1.2) r.struck[routine === 1 ? 0 : 1]++;
+        }
+        for (let j = 0; j < M.ENEMY_SLOTS; j++) if (j !== k && !had[j] && s.eType[j] !== E.FREE && Math.hypot(s.ex[j] - gx, s.ey[j] - gy) < 1) { if (shut) r.firedShut++; else r.firedOpen++; }
+      }
+      return r;
+    };
+    const lives = [lifeSide, lifeClimb].map((stage) => ({ stage: stage.id, guns: ["PRINTER", "ARC_PYLON", "BOND_MORTAR"].map((name) => ({ name, ...life(stage, E[name]) })) }));
+    const lived = (r) => r.shutBeyond && r.inAt >= 0 && Math.abs((r.openAt - r.inAt) * M.FIXED - T.EMPLACE_OPEN) <= 1.5 * M.FIXED &&
+      r.shutFrom !== null && r.shutFrom < T.EMPLACE_OUT && r.shutFrom >= T.EMPLACE_OUT - SCROLL * M.FIXED - 1e-6 &&
+      r.freedFrom !== null && r.freedFrom < -T.ENEMY_MARGIN && r.freedFrom >= -T.ENEMY_MARGIN - SCROLL * M.FIXED - 1e-6 &&
+      r.hurt === 0 && r.struck[0] > 0 && r.struck[1] > 0 && r.firedShut === 0 && r.firedOpen > 0 && !r.died;
+    record("raid enemies: an emplaced gun, on a side stage and a climb, stays shut, unhurt and silent until the screen brings it EMPLACE_IN in, opens EMPLACE_OPEN later, shuts again within EMPLACE_OUT of the trailing edge and frees off screen; and an Ooga 3 m from any emplaced or vault gun, once open, on the same ground destroys it tapping fire, at least 0.3 s before the gun would kill it standing or lying prone at 7.5 taps a second, and first standing at 4; and every printer shot, at the duels and at an Ooga hopping before it with the strongest weapon, comes after the printer has stood wound up PRINTER_WINDUP and is a dollar bill, where a clerk's shot is not",
+      lives.every((l) => l.guns.every(lived)) &&
+        guns.every((g) => g.rows.every((row) => row.runs.every((r) => r.fell !== undefined && r.died === undefined && r.by !== null && r.by >= row.margin - 1e-9))) &&
+        winds.duels >= 4 && winds.hopped >= 4 && winds.coins >= 2 && winds.unwarned.length === 0, JSON.stringify({ lives, guns, winds }));
+  }
+  {
+    // rule: every attack is told. Each stage on seed 3 under a standing barrier, steered by the autopilot to its clear (600 s
+    // at most), and then a lone one of each attacking type those runs never saw attack (the vault with its guns taken down as
+    // they mount, so it opens; a pylon; an icicle over the Ooga; the Mech, for its pods), 3 m from an Ooga under a barrier
+    // on the test stage for 8 s. Every attack a slot makes (a shot, lob, spark, crate or coin barrel its own routine spawns,
+    // the sim's `fired`; entering its def's `charge` routine; the Leviathan's lunge, its speed becoming LEV_LUNGE_V) is a
+    // `tells` type's and comes after the slot has held FLAG.WIND, read from its state each step, for 0.3 s at least (an
+    // `answersHits` type's attack on the step a hit landed it excepted: the balloon's ring); a lob's burst is its own end,
+    // told as it was thrown; and every `tells` type is seen attacking.
+    const RE = context.window.BL.raidEnemies, LUNGE = context.window.BL.raidLegionLake.TUNE.LEV_LUNGE_V, NAMES = [];
+    for (const name of Object.keys(E)) NAMES[E[name]] = name;
+    const TELLS = RE.TYPES.map((d, t) => d && d.tells ? t : -1).filter((t) => t >= 0);
+    const seen = new Set(), faults = [], shortest = {};
+    const watch = (sim) => {
+      const s = sim.state, N = M.ENEMY_SLOTS, age = new Float64Array(N), type = new Uint8Array(N), routine = new Uint8Array(N), hp = new Uint8Array(N), fired = new Float64Array(N), vx = new Float32Array(N);
+      return {
+        before: () => { for (let j = 0; j < N; j++) { type[j] = s.eType[j]; routine[j] = s.eRoutine[j]; hp[j] = s.eHp[j]; fired[j] = sim.fired[j]; vx[j] = s.evx[j]; } },
+        after: (where) => {
+          for (let j = 0; j < N; j++) {
+            const t = s.eType[j], def = RE.TYPES[t], same = t === type[j];
+            if (!same) age[j] = 0;
+            let attack = null;
+            if (same && sim.fired[j] > fired[j] && t !== E.LOB) attack = "fires";
+            else if (same && def && def.charge !== undefined && s.eRoutine[j] === def.charge && routine[j] !== def.charge) attack = "charges";
+            else if (same && t === E.LEVIATHAN && Math.abs(s.evx[j]) === LUNGE && Math.abs(vx[j]) !== LUNGE) attack = "lunges";
+            if (attack) {
+              const told = age[j] * M.FIXED, key = `${NAMES[t]} ${attack}`;
+              seen.add(t);
+              if (!(told >= shortest[key])) shortest[key] = +told.toFixed(4);
+              if (!(def && def.tells)) faults.push(`${where}: ${NAMES[t]} ${attack} but does not tell`);
+              else if (told < 0.3 - 1e-9 && !(def.answersHits && s.eHp[j] < hp[j])) faults.push(`${where}: ${key} told ${told.toFixed(3)} s`);
+            }
+            age[j] = s.eFlags[j] & M.FLAG.WIND ? age[j] + 1 : 0;
+          }
+        }
+      };
+    };
+    for (let k = 0; k < S.STAGES.length; k++) {
+      const sim = M.create({ seed: 3, stage: k }), s = sim.state, w = watch(sim);
+      for (let n = 0; n < 600 / M.FIXED && s.phase !== M.PHASE.CLEAR; n++) {
+        s.pBarrier[0] = 100;
+        w.before();
+        sim.setInput(M.autopilot(sim)); sim.simulate(M.FIXED);
+        w.after(S.STAGES[k].id);
+      }
+      if (s.phase !== M.PHASE.CLEAR) faults.push(`${S.STAGES[k].id} did not clear`);
+    }
+    const FIXTURES = { VAULT: { dy: 0, down: E.VAULT_GUN }, ARC_PYLON: { dy: 0 }, ICICLE: { dx: 0, dy: 2.2 }, MECH: { dy: 0 } };
+    for (const name of Object.keys(FIXTURES)) {
+      const f = FIXTURES[name], sim = M.create({ seed: 3, stage: testStage }), s = sim.state, w = watch(sim);
+      settle(sim);
+      s.pInvincible[0] = 0;
+      const k = sim.spawn(E[name], s.px[0] + (f.dx ?? 3), s.py[0] + f.dy, 0);
+      for (let n = 0; n < 8 * 120; n++) {
+        s.pBarrier[0] = 100;
+        if (f.down) for (let j = 0; j < M.ENEMY_SLOTS; j++) if (s.eType[j] === f.down && s.eLink[j] === k && s.eRoutine[j] < M.DESTROYED[f.down]) { s.eHp[j] = 0; s.eRoutine[j] = M.DESTROYED[f.down]; }
+        w.before();
+        sim.setInput(0); sim.simulate(M.FIXED);
+        w.after(`lone ${name}`);
+      }
+    }
+    const unseen = TELLS.filter((t) => !seen.has(t)).map((t) => NAMES[t]);
+    record("raid enemies: every attack in play, on every stage and from a lone one of each attacking type the stages leave out, is made by a type that tells and comes after it has held its wind-up (FLAG.WIND) 0.3 s, but for a ring that answers the hit landing it; and every type that tells is seen attacking",
+      faults.length === 0 && unseen.length === 0 && TELLS.length >= 29, JSON.stringify({ faults: faults.slice(0, 6), unseen, shortest }));
+  }
+  {
+    // rule: a printer is a block that never hurts by touch, only by its shots. On the ledge stage (player 1 alone, and
+    // player 2 of two) and on a climb's floor (player 1), a printer 1.5 m ahead on the Ooga's ground, open, every enemy
+    // shot cleared each step: walking into its side stops the Ooga at its bullet box's edge (its standing half width off
+    // it); lying prone there, its point inside the printer's prone touch box, it stays unhurt; a jump from there, steered
+    // over the printer once it is above its top, lands it on the top, where it stands unhurt and walks on to the far edge and
+    // off it; walking back into that side stops it there; it jumps back on, and when the printer is destroyed under it, it
+    // falls to its ground.
+    const floorClimb = S.parse({ kind: "climb", id: "block-climb", name: "Block", screens: [Array.from({ length: S.SCREEN_H }, (_, i) => (i >= S.SCREEN_H - 3 ? "#" : ".").repeat(S.SCREEN_W)), Array.from({ length: S.SCREEN_H }, () => ".".repeat(S.SCREEN_W))],
+      start: { col: 2, row: 3 }, lockScreen: 1, spawner: { base: 0 }, placed: [] });
+    const box = R.SHOT_BOX[M.TIER_OF[E.PRINTER]], top = M.ORIGIN_OF[E.PRINTER] + box[3], half = R.BOX[M.POSE.STAND][0], touch = R.BOXES[M.TIER_OF[E.PRINTER]][M.POSE.PRONE];
+    const block = (stage, players, p) => {
+      const sim = M.create({ seed: 7, stage, players }), s = sim.state;
+      until(sim, () => s.pState.every((v, q) => q >= players || v === PS.NORMAL), 5);
+      s.pInvincible.fill(0);
+      const feet = s.py[p], k = sim.spawn(E.PRINTER, s.px[p] + 1.5, feet, 0), ex = s.ex[k], r = { feet, died: false };
+      until(sim, () => !(s.eFlags[k] & M.FLAG.SHUT), 3);
+      r.open = !(s.eFlags[k] & M.FLAG.SHUT);
+      // `bits` held (a jump pressed on the first step only), or `bits(i)` each step.
+      const hold = (bits, seconds) => {
+        for (let i = 0; i < seconds * 120; i++) {
+          for (let j = 0; j < M.ENEMY_SLOTS; j++) if (s.eType[j] === E.SHOT) s.eType[j] = E.FREE;
+          sim.setInput(typeof bits === "function" ? bits(i) : i === 0 ? bits : bits & ~M.IN.JUMP, p); sim.simulate(M.FIXED);
+          if (s.pState[p] !== PS.NORMAL) r.died = true;
+        }
+        sim.setInput(0, p);
+        return { x: +(s.px[p] - ex).toFixed(4), y: +(s.py[p] - feet).toFixed(4), pose: s.pPose[p] };
+      };
+      // Straight up, then `way` on the way down within 0.4 m over the printer's top, which latches the drift until it lands.
+      const hop = (way) => (i) => i === 0 ? M.IN.JUMP : s.pPose[p] === M.POSE.JUMP && s.pvy[p] < 0 && s.py[p] - feet < top + 0.4 ? way : 0;
+      r.side = hold(M.IN.RIGHT, 1.5);
+      r.prone = hold(M.IN.DOWN, 1);
+      const dx = s.px[p] - ex, dy = s.py[p] + R.PLAYER_POINT[M.POSE.PRONE] - feet - M.ORIGIN_OF[E.PRINTER];
+      r.touched = dx >= touch[0] && dx < touch[1] && dy > touch[2] && dy <= touch[3];
+      hold(0, 0.1);
+      r.landed = hold(hop(M.IN.RIGHT), 1.5);
+      r.stood = hold(0, 1.5);
+      r.off = hold(M.IN.RIGHT, 1);
+      r.back = hold(M.IN.LEFT, 1);
+      r.again = hold(hop(M.IN.LEFT), 1.5);
+      s.eHp[k] = 0; s.eRoutine[k] = M.DESTROYED[E.PRINTER];
+      r.fell = hold(0, 1);
+      return r;
+    };
+    const runs = [block(ledgeStage, 1, 0), block(ledgeStage, 2, 1), block(floorClimb, 1, 0)];
+    const at = (v, want) => Math.abs(v - want) < 2e-3;
+    const blocked = (r) => r.open && !r.died && at(r.side.x, box[0] - half) && at(r.side.y, 0) && r.prone.pose === M.POSE.PRONE && at(r.prone.x, box[0] - half) && r.touched &&
+      at(r.landed.y, top) && r.stood.pose === M.POSE.STAND && at(r.stood.y, top) && r.stood.x > box[0] - half && r.stood.x < box[1] + half &&
+      at(r.off.y, 0) && r.off.x >= box[1] + half - 1e-3 && at(r.back.x, box[1] + half) && at(r.back.y, 0) && at(r.again.y, top) && at(r.fell.y, 0);
+    record("raid enemies: a printer is a block that never hurts by touch: an Ooga (either player, on a side stage and a climb) walking into it stops at its side, lies prone in its touch box unhurt, lands on its top from a jump and stands and walks there unhurt, walks off its far edge, is stopped by that side too, and falls to its ground when the printer is destroyed under it",
+      runs.every(blocked), JSON.stringify({ runs, box: [box[0] - half, box[1] + half, top] }));
+  }
+  {
+    // rule: the campaign's pressure never eases from one stage to the next. Each stage's edge spawner, read as the sim sets
+    // its timer at the stage's start at the rifle on the first loop (a rooms stage has none), comes no slower than the last
+    // stage's with one; and each stage's boss (its placed boss main, or a rooms stage's boss room's boss-tier target),
+    // spawned by the sim with the rifle and again with the fan held, has no fewer hit points than the boss before it.
+    const curve = S.STAGES.map((stage) => {
+      const sim = M.create({ seed: 7, stage }), s = sim.state;
+      let boss = -1;
+      if (stage.kind === "rooms") {
+        const T = stage.rooms[stage.rooms.length - 1].targets;
+        for (let k = 0; k < T.length; k += 4) if (M.TIER_OF[T[k + 2]] === R.TIER.BOSS) boss = T[k + 2];
+      } else for (let k = 0; k < stage.placed.length; k += 4) if (M.BOSS_MAIN[stage.placed[k + 2]]) boss = stage.placed[k + 2];
+      const hp = (weapon) => {
+        const b = M.create({ seed: 7, stage }), bs = b.state;
+        bs.pWeapon[0] = weapon;
+        const k = b.spawn(boss, 4, 3, 0);
+        return k < 0 ? null : bs.eHp[k];
+      };
+      return { id: stage.id, every: stage.kind === "rooms" ? null : +(s.spawnTimer / R.SPAWN_DRAIN).toFixed(4), boss, rifle: boss < 0 ? null : hp(W.RIFLE), fan: boss < 0 ? null : hp(W.FAN) };
+    });
+    const timed = curve.filter((c) => c.every !== null), steady = (key) => curve.every((c, k) => k === 0 || c[key] >= curve[k - 1][key]);
+    record("raid campaign: stage to stage the edge spawner never comes slower and the boss never has fewer hit points, with the rifle or the fan held",
+      curve.length === 8 && timed.every((c) => c.every > 0) && timed.every((c, k) => k === 0 || c.every <= timed[k - 1].every) &&
+        curve.every((c) => c.boss >= 0 && c.rifle > 0 && c.fan >= c.rifle) && steady("rifle") && steady("fan"),
+      JSON.stringify(curve));
+  }
+  {
+    const touch = M.create({ seed: 7, stage: testStage }), t = touch.state;
+    ready(touch);
+    touch.spawn(E.RUNNER, t.px[0] + 2, t.py[0], 0);
+    until(touch, () => t.pState[0] !== PS.NORMAL, 5);
+    const walked = t.pState[0];
+    const shot = M.create({ seed: 7, stage: testStage }), u = shot.state;
+    ready(shot);
+    const slot = shot.spawn(E.SHOT, u.px[0] + 2, u.py[0] + STAND_POINT, R.AIM_STEPS / 2);   // flying left at the body's middle
+    until(shot, () => u.pState[0] !== PS.NORMAL, 5);
+    const hit = { state: u.pState[0], freed: u.eType[slot] === E.FREE, x: u.ex[slot] };
+    const shut = shootAt(W.RIFLE, E.SENSOR, M.FLAG.SHUT);
+    record("raid enemies: a touch or an enemy shot kills, and a shut enemy cannot be hurt",
+      walked === PS.DEAD && hit.state === PS.DEAD && hit.freed && shut.ended > 0 && shut.lowest === R.HP.SENSOR && shut.scores.length === 0,
+      JSON.stringify({ walked, hit, shut }));
+  }
+  {
+    // One screen of water over solid ground, to wade in.
+    const WATER_ROWS = Array.from({ length: S.SCREEN_H }, (_, i) => i < S.SCREEN_H - 3 ? "................" : i === S.SCREEN_H - 3 ? "~~~~~~~~~~~~~~~~" : "################");
+    const water = S.parse({ id: "water", name: "Water", rows: WATER_ROWS, start: { col: 2, row: 12 }, lockScreen: 0, spawner: { base: 0 }, placed: [] });
+    // A shot flying left through the Ooga at `height` over its feet, with `bits` held: whether it lives, and whether the shot got past.
+    const through = (stage, bits, height) => {
+      const sim = M.create({ seed: 7, stage }), s = sim.state;
+      ready(sim);
+      sim.setInput(bits); sim.simulate(0.1);
+      const pose = s.pPose[0], x = s.px[0], slot = sim.spawn(E.SHOT, x + 2, s.py[0] + height, R.AIM_STEPS / 2);
+      let past = false;
+      for (let i = 0; i < 240 && s.pState[0] === PS.NORMAL; i++) { sim.simulate(M.FIXED); if (s.eType[slot] === E.SHOT && s.ex[slot] < x - 0.5) past = true; }
+      return { pose, state: s.pState[0], past };
+    };
+    const HEAD = 0.85;   // a standing Ooga's head, well over a prone one
+    const ducked = through(water, M.IN.DOWN, R.PLAYER_POINT[M.POSE.WATER]), wading = through(water, 0, R.PLAYER_POINT[M.POSE.WATER]);
+    const LOW = 0.3;     // a level shot at a prone Ooga's body, as the reference's ordinary bullet box still hits
+    const prone = through(testStage, M.IN.DOWN, HEAD), standing = through(testStage, 0, HEAD), low = through(testStage, M.IN.DOWN, LOW);
+    // In the water with `bits` held and a press every other step for a second: how far it went and the most shots out.
+    const wade = (bits) => {
+      const sim = M.create({ seed: 7, stage: water }), s = sim.state;
+      ready(sim);
+      const x = s.px[0];
+      let most = 0, b = -1;
+      for (let i = 0; i < 120; i++) {
+        sim.setInput(bits | (i % 2 ? 0 : M.IN.FIRE)); sim.simulate(M.FIXED);
+        most = Math.max(most, live(sim));
+        if (b < 0) b = s.bLive.indexOf(1);
+      }
+      return { pose: s.pPose[0], moved: s.px[0] - x, most, bvx: b < 0 ? null : s.bvx[b], bvy: b < 0 ? null : s.bvy[b] };
+    };
+    const still = wade(M.IN.DOWN), stillRunning = wade(M.IN.DOWN | M.IN.RIGHT), forward = wade(0);
+    const holds = (r) => r.pose === M.POSE.WATER && r.moved === 0 && r.most === 0;
+    record("raid enemies: ducking under water cannot be hit, and each pose has its own box",
+      ducked.pose === M.POSE.WATER && ducked.state === PS.NORMAL && ducked.past && wading.pose === M.POSE.WATER && wading.state === PS.DEAD &&
+        prone.pose === M.POSE.PRONE && prone.state === PS.NORMAL && prone.past && standing.pose === M.POSE.STAND && standing.state === PS.DEAD &&
+        low.pose === M.POSE.PRONE && low.state === PS.DEAD &&
+        holds(still) && holds(stillRunning) && forward.pose === M.POSE.WATER && forward.most > 0 && forward.bvx > 0 && forward.bvy === 0,
+      JSON.stringify({ ducked, wading, prone, standing, low, still, stillRunning, forward }));
+  }
+  {
+    // A clerk on the first ledge, above and ahead of an Ooga standing still on the floor, fires down and back at it.
+    const sim = M.create({ seed: 7, stage: testStage }), s = sim.state;
+    settle(sim);
+    sim.setInput(M.IN.RIGHT); until(sim, () => s.px[0] >= 5); sim.setInput(0);
+    const clerk = sim.spawn(E.CLERK, 7.5, 5 * S.CELL, 0);
+    until(sim, () => s.eType.includes(E.SHOT), 8);
+    const b = s.eType.indexOf(E.SHOT), angle = b < 0 ? null : (Math.atan2(s.evy[b], s.evx[b]) * 180 / Math.PI + 360) % 360;
+    const step = 360 / R.AIM_STEPS, snapped = angle !== null && Math.abs(angle / step - Math.round(angle / step)) < 1e-4;
+    const aimed = { clerk, angle, snapped, axis: angle !== null && Math.round(angle) % 90 === 0, down: b >= 0 && s.evx[b] < 0 && s.evy[b] < 0 };
+    // A clerk and a printer facing an invincible Ooga hold their fire, and open up once it is not.
+    const calm = M.create({ seed: 7, stage: testStage }), c = calm.state;
+    settle(calm);
+    c.pInvincible[0] = 1e9;
+    calm.spawn(E.CLERK, c.px[0] + 3, c.py[0], 0); calm.spawn(E.PRINTER, c.px[0] + 4, c.py[0], 0);
+    let quiet = true, fires = false;
+    for (let t = 0; t < 10; t += M.FIXED) { calm.simulate(M.FIXED); if (c.attack !== 0 || c.eType.includes(E.SHOT)) quiet = false; }
+    c.pInvincible[0] = 0;
+    for (let t = 0; t < 5 && !fires; t += M.FIXED) { calm.simulate(M.FIXED); if (c.eType.includes(E.SHOT)) fires = true; }
+    record("raid enemies: aimed shots snap to twelve directions, and nothing fires at a fresh Ooga",
+      aimed.snapped && !aimed.axis && aimed.down && quiet && fires, JSON.stringify({ aimed, quiet, fires }));
+  }
+  {
+    const r = shootAt(W.RIFLE, E.PRINTER);
+    record("raid enemies: the points for an enemy are paid once, when its last hit point goes",
+      r.scores.length === 1 && r.scores[0] === R.POINTS.PRINTER && r.zeroAt >= 0 && r.scoredAt[0] === r.zeroAt, JSON.stringify(r));
+  }
+
+  // Spawning and pickups. The placed list and the edge spawner run on their own; the slots are filled with the spawn verb.
+  {
+    // Stage 1's first record, watched from the first step while the Ooga runs right, hops now and then and fires. It is
+    // held invincible once it lands, so only the pits stop it, and those drop it back in on the same screen.
+    const sim = M.create({ seed: 7 }), s = sim.state, col = st.placed[0], type = st.placed[2];
+    const at = (k) => s.eType[k] === type && Math.abs(s.ex[k] - col * S.CELL) < 1;
+    const was = new Uint8Array(M.ENEMY_SLOTS);
+    let early = false, inViewAt = -1, seenAt = -1, spawns = 0, gone = false;
+    for (let i = 0; i < 120 * 30; i++) {
+      if (s.pState[0] === PS.NORMAL) s.pInvincible[0] = 1e9;
+      sim.setInput(M.IN.RIGHT | (i % 2 ? M.IN.FIRE : 0) | (i % 40 < 2 ? M.IN.JUMP : 0));
+      sim.simulate(M.FIXED);
+      const view = s.camX + SCREEN > col * S.CELL;
+      if (view && inViewAt < 0) inViewAt = i;
+      let held = false;
+      for (let k = 0; k < M.ENEMY_SLOTS; k++) {
+        const here = at(k) ? 1 : 0;
+        if (here && !was[k]) { spawns++; if (seenAt < 0) seenAt = i; }
+        if (here && !view) early = true;
+        if (here) held = true;
+        was[k] = here;
+      }
+      if (seenAt >= 0 && !held) gone = true;
+    }
+    record("raid spawning: a placed enemy appears as its column scrolls into view, once",
+      !early && inViewAt >= 0 && seenAt === inViewAt && spawns === 1 && gone && s.listCursor > 1,
+      JSON.stringify({ col, type, inViewAt, seenAt, early, spawns, gone, camX: s.camX, cursor: s.listCursor }));
+  }
+  {
+    // Three screens of flat floor with the scroll locked on the middle one, so both edges open onto floor, and stage 1's
+    // spawner. The Ooga walks to x and holds still, invincible, with the weapon given; each runner's arrival is noted with
+    // its step and side. A timer is set with the weapon held when it resets, so the time is from one arrival to the next.
+    const FIELD_ROWS = Array.from({ length: S.SCREEN_H }, (_, i) => (i < S.SCREEN_H - 3 ? "." : "#").repeat(3 * S.SCREEN_W));
+    const field = S.parse({ id: "field", name: "Field", rows: FIELD_ROWS, start: { col: 2, row: 12 }, lockScreen: 1, spawner: { base: st.spawner.base }, placed: [] });
+    const watch = (weapon, loops, x, seconds) => {
+      const sim = M.create({ seed: 7, stage: field, loops }), s = sim.state;
+      settle(sim); s.pInvincible[0] = 1e9;
+      sim.setInput(M.IN.RIGHT); until(sim, () => s.px[0] >= x, 20); sim.setInput(0);
+      s.pWeapon[0] = weapon;
+      const was = Uint8Array.from(s.eType, (t) => t === E.RUNNER ? 1 : 0), arrivals = [];
+      for (let i = 0; i < seconds * 120; i++) {
+        sim.simulate(M.FIXED);
+        for (let k = 0; k < M.ENEMY_SLOTS; k++) {
+          const r = s.eType[k] === E.RUNNER ? 1 : 0;
+          if (r && !was[k]) arrivals.push([i, s.ex[k] > s.camX + SCREEN / 2 ? 1 : -1]);
+          was[k] = r;
+        }
+      }
+      const gap = arrivals.length > 1 ? (arrivals[1][0] - arrivals[0][0]) * M.FIXED : Infinity;
+      return { gap, left: arrivals.filter((a) => a[1] < 0).length, right: arrivals.filter((a) => a[1] > 0).length, camX: s.camX, px: s.px[0] };
+    };
+    const mid = 1.5 * SCREEN, rifle = watch(W.RIFLE, 0, mid, 20), fan = watch(W.FAN, 0, mid, 8), later = watch(W.FAN, 1, mid, 8);
+    const edge = watch(W.RIFLE, 0, 2 * SCREEN - 0.1, 20);
+    record("raid spawning: the edge spawner sends runners sooner for a stronger weapon and a later loop, and never at the edge the Ooga stands on",
+      fan.gap < rifle.gap && later.gap < fan.gap && rifle.left > 0 && rifle.right > 0 && edge.camX === SCREEN && edge.px > 2 * SCREEN - 1 && edge.right === 0 && edge.left > 0,
+      JSON.stringify({ rifle, fan, later, edge }));
+  }
+  {
+    // Sixteen printers high over stage 1's beach, then the Ooga walks right until stage 1's first record is in view, and
+    // waits while the spawner fires.
+    const sim = M.create({ seed: 7 }), s = sim.state;
+    for (let k = 0; k < M.ENEMY_SLOTS; k++) sim.spawn(E.PRINTER, 2.2 + k * 0.4, 5, 0);   // on screen from camX 0 to 3
+    const types = Array.from(s.eType), hps = Array.from(s.eHp), refused = sim.spawn(E.RUNNER, 2, 2, 0);
+    let changed = 0, resets = 0, timer = s.spawnTimer;
+    for (let i = 0; i < 120 * 8; i++) {
+      sim.setInput(s.px[0] < 7 ? M.IN.RIGHT : 0);
+      sim.simulate(M.FIXED);
+      if (s.spawnTimer > timer) resets++;
+      timer = s.spawnTimer;
+      for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] !== types[k] || s.eHp[k] !== hps[k]) changed++;
+    }
+    record("raid spawning: with every slot full a newcomer is dropped and no live enemy is replaced",
+      refused === -1 && changed === 0 && resets > 0 && s.listCursor > 0 && s.camX + SCREEN > st.placed[0] * S.CELL,
+      JSON.stringify({ refused, changed, resets, cursor: s.listCursor, camX: s.camX, types: Array.from(s.eType), hps: Array.from(s.eHp) }));
+  }
+  {
+    // The enemy under test ahead of an invincible Ooga on the ledge stage and fifteen printers high over the ledge, out of
+    // the line of fire, so every slot is full. Fire until its slot holds an item, then walk into it.
+    const dropOf = (type, attr, dy) => {
+      const sim = M.create({ seed: 7, stage: ledgeStage }), s = sim.state;
+      settle(sim); s.pInvincible[0] = 1e9;
+      const slot = sim.spawn(type, s.px[0] + 1.5, s.py[0] + dy, attr);
+      for (let k = 0; k < M.ENEMY_SLOTS - 1; k++) sim.spawn(E.PRINTER, 2 + k * 0.4, 6, 0);
+      const score = s.pScore[0], hp0 = s.eHp[slot];
+      let firstHurt = -1;   // the step its hit point first went, or it turned into its item
+      for (let i = 0; i < 960 && s.eType[slot] !== E.ITEM; i++) {
+        sim.setInput(i % 2 ? 0 : M.IN.FIRE); sim.simulate(M.FIXED);
+        if (firstHurt < 0 && (s.eType[slot] !== type || s.eHp[slot] < hp0)) firstHurt = i;
+      }
+      sim.setInput(0);
+      const dropped = { type: s.eType[slot], attr: s.eAttr[slot], full: s.eType.every((t) => t !== E.FREE), paid: s.pScore[0] - score };
+      sim.simulate(1);
+      sim.setInput(M.IN.RIGHT); until(sim, () => s.eType[slot] !== E.ITEM, 5); sim.setInput(0);
+      return { dropped, firstHurt, picked: s.eType[slot] === E.FREE, weapon: s.pWeapon[0], rapid: s.pRapid[0] };
+    };
+    const carrier = dropOf(E.CARRIER, M.ITEM.FAN, STAND_POINT), sensor = dropOf(E.SENSOR, M.ITEM.RAPID, 0);
+    // A sensor put down on a bullet in flight is shut from the step it spawns, so that bullet does nothing to it.
+    const fresh = M.create({ seed: 7, stage: ledgeStage }), f = fresh.state;
+    settle(fresh); f.pInvincible[0] = 1e9;
+    press(fresh, M.IN.FIRE);
+    const bullet = f.bLive.indexOf(1), paidBefore = f.pScore[0];
+    const born = fresh.spawn(E.SENSOR, f.bx[bullet], f.by[bullet] - R.ORIGIN.SENSOR, M.ITEM.RAPID);
+    fresh.simulate(M.FIXED);
+    const onBullet = { type: f.eType[born], shut: (f.eFlags[born] & M.FLAG.SHUT) !== 0, hp: f.eHp[born], paid: f.pScore[0] - paidBefore };
+    const sim = M.create({ seed: 7, stage: ledgeStage }), s = sim.state;
+    settle(sim);
+    sim.spawn(E.ITEM, s.px[0], s.py[0] + STAND_POINT, M.ITEM.BARRIER);
+    sim.simulate(M.FIXED);
+    const barrier = s.pBarrier[0];
+    let lasted = 0;
+    while (s.pBarrier[0] > 0 && lasted < 4000) { sim.simulate(M.FIXED); lasted++; }
+    const dropped = (r, attr, points) => r.dropped.type === E.ITEM && r.dropped.attr === attr && r.dropped.full && r.dropped.paid === points && r.picked;
+    record("raid pickups: a carrier and an open sensor drop their item in their own slot, and each item does its job",
+      dropped(carrier, M.ITEM.FAN, R.POINTS.CARRIER) && carrier.weapon === W.FAN && dropped(sensor, M.ITEM.RAPID, R.POINTS.SENSOR) && sensor.rapid === 1 &&
+        sensor.firstHurt * M.FIXED >= M.TUNE.SENSOR_SHUT - M.FIXED / 2 &&
+        onBullet.type === E.SENSOR && onBullet.shut && onBullet.hp === R.HP.SENSOR && onBullet.paid === 0 &&
+        Math.abs(barrier - R.BARRIER) < 1e-4 && Math.abs(lasted * M.FIXED - R.BARRIER) < M.FIXED / 2,
+      JSON.stringify({ carrier, sensor, onBullet, barrier, lasted }));
+  }
+  {
+    // Under a held barrier: a runner walks into the Ooga, an arc pylon (a machine, and no block, so its touch reaches the
+    // barrier) stands on it, opened, and a printer fires at it from over the floor (a printer is a block, so one on the
+    // floor ahead would stand in the way to the pit); then it walks into the pit.
+    const sim = M.create({ seed: 7, stage: testStage }), s = sim.state;
+    ready(sim);
+    s.pBarrier[0] = 1e9;
+    const score = s.pScore[0], runner = sim.spawn(E.RUNNER, s.px[0] + 2, s.py[0], 0);
+    until(sim, () => s.eHp[runner] === 0 || s.pState[0] !== PS.NORMAL, 3);
+    const smashed = { hp: s.eHp[runner], state: s.pState[0], paid: s.pScore[0] - score };
+    const machines = [sim.spawn(E.ARC_PYLON, s.px[0], s.py[0], 0), sim.spawn(E.PRINTER, s.px[0] + 3, s.py[0] + 1.5, 0)];
+    until(sim, () => !(s.eFlags[machines[0]] & M.FLAG.SHUT), 2);
+    const pylonOpen = !(s.eFlags[machines[0]] & M.FLAG.SHUT) && (s.eFlags[machines[0]] & M.FLAG.MACHINE) !== 0;
+    let near = 0;
+    for (let i = 0; i < 600 && s.pState[0] === PS.NORMAL; i++) {
+      sim.simulate(M.FIXED);
+      for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.SHOT && Math.abs(s.ex[k] - s.px[0]) < 0.2 && Math.abs(s.ey[k] - s.py[0] - STAND_POINT) < 0.3) near++;
+    }
+    const stood = { state: s.pState[0], near, pylonOpen, hp: machines.map((k, n) => s.eType[k] === [E.ARC_PYLON, E.PRINTER][n] ? s.eHp[k] : -1) };
+    dieInPit(sim);
+    const fell = { state: s.pState[0], y: s.py[0] };
+    // The clear-screen item picked up beside two clerks, a printer and a carrier.
+    const clear = M.create({ seed: 7, stage: ledgeStage }), c = clear.state;
+    ready(clear); c.pInvincible[0] = 1e9;
+    const clerks = [clear.spawn(E.CLERK, c.px[0] + 2, c.py[0], 0), clear.spawn(E.CLERK, c.px[0] + 4, c.py[0], 0)];
+    const printer = clear.spawn(E.PRINTER, c.px[0] + 3, c.py[0], 0), carrier = clear.spawn(E.CARRIER, c.px[0] + 5, c.py[0] + 2, M.ITEM.FAN);
+    clear.simulate(M.FIXED);
+    until(clear, () => !(c.eFlags[printer] & M.FLAG.SHUT), 1);   // the printer opens as the screen brings it in
+    const before = c.pScore[0];
+    clear.spawn(E.ITEM, c.px[0], c.py[0] + STAND_POINT, M.ITEM.CLEAR);
+    clear.simulate(2 * M.FIXED);
+    const cleared = { clerks: clerks.map((k) => c.eHp[k]), printer: c.eType[printer] === E.PRINTER ? c.eHp[printer] : -1, carrier: c.eType[carrier], paid: c.pScore[0] - before };
+    record("raid pickups: the barrier destroys a runner on touch but not a machine, and does not save a fall; the clear-screen item barely hurts machines",
+      smashed.hp === 0 && smashed.state === PS.NORMAL && smashed.paid === R.POINTS.RUNNER && stood.state === PS.NORMAL && stood.near > 0 &&
+        stood.pylonOpen && stood.hp[0] === M.HP_OF[E.ARC_PYLON] && stood.hp[1] === R.HP.PRINTER && fell.state === PS.DEAD && fell.y < 0 &&
+        cleared.clerks.every((hp) => hp === 0) && cleared.printer === R.HP.PRINTER - R.DAMAGE && cleared.carrier === E.ITEM && cleared.paid === 2 * R.POINTS.CLERK + R.POINTS.CARRIER,
+      JSON.stringify({ smashed, stood, fell, cleared }));
+  }
+
+  // The boss. Stage 1 ends on a vault against the rock wall, shut while its two guns stand; the scroll locks on its screen.
+  {
+    // An invincible Ooga is set down on screen 10's floor and walks right until the scroll locks, then fires into the shut
+    // vault, still and then walking on to the wall, while printers high on screen fill every slot but one, which the
+    // spawner's runners fill. On the
+    // way, printers fill every slot as the vault's column comes into view, and leave them one by one behind the scroll.
+    const sim = M.create({ seed: 7 }), s = sim.state, lock = st.lockScreen * SCREEN, vaultCol = st.placed[st.placed.length - 4];
+    settle(sim); s.pInvincible[0] = 1e9;
+    s.px[0] = lock - SCREEN / 2; s.py[0] = 3 * S.CELL; s.camX = s.px[0] - SCREEN / 2;   // the step holds the Ooga on screen
+    sim.simulate(0.1);   // the records the jump brought into view, and freed at once off screen
+    let printers = 0, waited = false;
+    const fill = () => { while (s.eType.includes(E.FREE)) sim.spawn(E.PRINTER, lock - 2.9 + (printers++ % 16) * 0.12, 6.5, 0); };
+    sim.setInput(M.IN.RIGHT);
+    until(sim, () => {
+      if (s.camX + SCREEN <= vaultCol * S.CELL) fill();
+      else if (!s.eType.includes(E.VAULT)) waited = true;
+      return s.camX >= lock;
+    }, 10);
+    sim.setInput(0);
+    const reached = s.camX, vault = s.eType.indexOf(E.VAULT), guns = [...s.eType.keys()].filter((k) => s.eType[k] === E.VAULT_GUN);
+    const spare = s.eType.filter((t) => t === E.FREE).length;
+    for (let k = 0; k < spare - 1; k++) sim.spawn(E.PRINTER, lock + 0.5 + k * 0.4, 6.5, 0);
+    let maxCam = s.camX, held = vault >= 0 && guns.length === 2, boss = true, full = 0, absorbed = 0;
+    const hp0 = vault >= 0 ? s.eHp[vault] : -1, was = new Uint8Array(M.BULLETS), wx = new Float32Array(M.BULLETS);
+    for (let i = 0; i < 600; i++) {
+      for (let b = 0; b < M.BULLETS; b++) { was[b] = s.bLive[b]; wx[b] = s.bx[b]; }
+      // Still for the first half, then walking right into the wall, past where an unlocked camera would follow.
+      sim.setInput((i < 300 ? 0 : M.IN.RIGHT) | (i % 2 ? 0 : M.IN.FIRE)); sim.simulate(M.FIXED);
+      for (let b = 0; b < M.BULLETS; b++) if (was[b] && !s.bLive[b] && vault >= 0 && wx[b] < s.ex[vault]) absorbed++;
+      maxCam = Math.max(maxCam, s.camX);
+      if (s.phase !== M.PHASE.BOSS) boss = false;
+      if (s.eType.filter((t) => t === E.FREE).length <= M.TUNE.BOSS_RESERVE) full++;   // filled to the boss fight's reserve
+      if (vault < 0 || s.eType[vault] !== E.VAULT || !guns.every((k) => s.eType[k] === E.VAULT_GUN && s.eLink[k] === vault)) held = false;
+    }
+    const shut = vault >= 0 && (s.eFlags[vault] & M.FLAG.SHUT) !== 0, hp = vault >= 0 ? s.eHp[vault] : -1;
+    record("raid boss: the scroll locks at the boss screen, and the boss's guns keep their slots when the slots fill to the boss fight's reserve",
+      waited && reached === lock && maxCam === lock && boss && held && full > 0 && shut && absorbed > 0 && hp0 === R.HP.VAULT && hp === R.HP.VAULT,
+      JSON.stringify({ waited, lock, reached, maxCam, px: s.px[0], phase: s.phase, boss, vault, guns, links: guns.map((k) => s.eLink[k]), held, full, shut, absorbed, hp0, hp }));
+  }
+  {
+    // A vault on the ledge stage with its guns straight over an invincible Ooga: up shots take the guns, then forward
+    // shots, counted as bullets that end short of the vault's middle, take it to its last hit point or past it.
+    const fight = (toLast) => {
+      const sim = M.create({ seed: 7, stage: ledgeStage }), s = sim.state;
+      settle(sim); s.pInvincible[0] = 1e9;
+      const vault = sim.spawn(E.VAULT, s.px[0] - M.TUNE.VAULT_GUNS[0][0], s.py[0], 0);
+      sim.simulate(0.05);   // set up, then its guns mounted
+      const mounted = s.eType.filter((t) => t === E.VAULT_GUN).length;
+      for (let i = 0; i < 1200 && s.eType.includes(E.VAULT_GUN); i++) { sim.setInput(M.IN.UP | (i % 2 ? 0 : M.IN.FIRE)); sim.simulate(M.FIXED); }
+      sim.setInput(0); until(sim, () => live(sim) === 0, 3);   // the up shots gone
+      const opened = { guns: s.eType.filter((t) => t === E.VAULT_GUN).length, shut: (s.eFlags[vault] & M.FLAG.SHUT) !== 0, hp: s.eHp[vault] };
+      const was = new Uint8Array(M.BULLETS), wx = new Float32Array(M.BULLETS), scores = [], phases = [];
+      let hits = 0, score = s.pScore[0];
+      for (let i = 0; i < 2400 && s.eType[vault] === E.VAULT && s.eHp[vault] > (toLast ? 1 : 0); i++) {
+        for (let b = 0; b < M.BULLETS; b++) { was[b] = s.bLive[b]; wx[b] = s.bx[b]; }
+        // To stop at the last hit point, one bullet at a time, so none is left in flight there.
+        sim.setInput(i % 2 || (toLast && live(sim) > 0) ? 0 : M.IN.FIRE); sim.simulate(M.FIXED);
+        for (let b = 0; b < M.BULLETS; b++) if (was[b] && !s.bLive[b] && wx[b] < s.ex[vault]) hits++;
+        if (s.pScore[0] !== score) { scores.push(s.pScore[0] - score); score = s.pScore[0]; }
+        if (phases.at(-1) !== s.phase) phases.push(s.phase);
+      }
+      sim.setInput(0);
+      return { sim, s, vault, mounted, opened, hits, scores, phases, score };
+    };
+    const whole = fight(false);
+    whole.sim.simulate(1);   // and it stays clear, with nothing more paid
+    const cleared = { mounted: whole.mounted, opened: whole.opened, hits: whole.hits, scores: whole.scores, later: whole.s.pScore[0] - whole.score, phases: whole.phases, phase: whole.s.phase };
+    // Cleared, nothing kills: with no life in reserve and no invincibility, a shot on the Ooga and then a fall below
+    // the grid leave it standing (never dead, never out) and the stage clear, past the time a death holds.
+    {
+      const s = whole.s;
+      s.pInvincible[0] = 0; s.pBarrier[0] = 0; s.pLives[0] = 0;
+      whole.sim.spawn(E.SHOT, s.px[0], s.py[0] + STAND_POINT, R.AIM_STEPS / 2);
+      whole.sim.simulate(0.25);
+      const shot = s.pState[0];
+      s.py[0] = -0.01; s.pvy[0] = -1;
+      const states = new Set(), phases = new Set();
+      for (let i = 0; i < 2.5 * 120; i++) { whole.sim.simulate(M.FIXED); states.add(s.pState[0]); phases.add(s.phase); }
+      cleared.during = { shot, states: [...states], phases: [...phases] };
+      cleared.safe = shot === PS.NORMAL && !states.has(PS.DEAD) && !states.has(PS.OUT) && phases.size === 1 && phases.has(M.PHASE.CLEAR);
+    }
+    // The last hit point left, the Ooga fires once and is shot dead before the bullet lands: with a life in reserve the
+    // stage is still clear, with none it is game over.
+    const lastShot = (lives) => {
+      const { sim, s, vault } = fight(true);
+      s.pLives[0] = lives; s.pInvincible[0] = 0;
+      sim.setInput(M.IN.FIRE); sim.simulate(M.FIXED); sim.setInput(0);
+      sim.spawn(E.SHOT, s.px[0], s.py[0] + STAND_POINT, R.AIM_STEPS / 2);
+      let deadAtKill = null, sawClear = false;
+      for (let i = 0; i < 360; i++) {
+        const hp = s.eHp[vault];
+        sim.simulate(M.FIXED);
+        if (hp > 0 && s.eHp[vault] === 0 && deadAtKill === null) deadAtKill = s.pState[0] === PS.DEAD;
+        if (s.phase === M.PHASE.CLEAR) sawClear = true;
+      }
+      return { deadAtKill, sawClear, phase: s.phase };
+    };
+    const reserve = lastShot(1), none = lastShot(0);
+    record("raid boss: the vault takes 32 hits, pays its points once and clears the stage; with no life left it is game over",
+      cleared.mounted === 2 && cleared.opened.guns === 0 && !cleared.opened.shut && cleared.opened.hp === R.HP.VAULT && cleared.hits === R.HP.VAULT &&
+        cleared.scores.length === 1 && cleared.scores[0] === R.POINTS.VAULT && cleared.later === 0 && cleared.phase === M.PHASE.CLEAR && cleared.safe &&
+        reserve.deadAtKill === true && reserve.phase === M.PHASE.CLEAR && none.deadAtKill === true && !none.sawClear && none.phase === M.PHASE.OVER,
+      JSON.stringify({ cleared, reserve, none }));
+  }
+
+  // Climb stages, on S.TEST.climb: three screens of ledges a metre apart stepping from side to side, and a deck on the
+  // top screen, where the scroll locks. `climber` steers player 0 up it a step at a time: with the next ledge up over its
+  // own column it jumps straight up through it; otherwise it walks toward that ledge's nearest cell and jumps, still
+  // walking, as the ground ahead of its feet runs out; in the air it holds its way. It returns false with no ledge left
+  // above. It holds the Ooga invincible while it stands, so only a fall can kill it.
+  const C = S.TEST.climb, SCREEN_Y = S.SCREEN_H * S.CELL, LOOK = 0.25;
+  const climber = (sim) => {
+    const s = sim.state;
+    let dir = 0;
+    return () => {
+      if (s.pState[0] !== PS.NORMAL) { sim.setInput(0); return true; }
+      s.pInvincible[0] = 1e9;
+      const jump = s.prevInput & M.IN.JUMP ? 0 : M.IN.JUMP;
+      if (s.pPose[0] === M.POSE.JUMP) { sim.setInput(dir > 0 ? M.IN.RIGHT : dir < 0 ? M.IN.LEFT : 0); return true; }
+      const x = s.px[0], col = Math.floor(x / S.CELL), under = Math.round(s.py[0] / S.CELL) - 1, row = under + 2;
+      let best = -1;
+      for (let c = 0; c < C.cols; c++) if (S.cellAt(C, c, row) !== S.KIND.EMPTY && (best < 0 || Math.abs(c - col) < Math.abs(best - col))) best = c;
+      if (best < 0) { sim.setInput(0); return false; }
+      if (best === col) { dir = 0; sim.setInput(jump); return true; }
+      dir = best > col ? 1 : -1;
+      const edge = S.cellAt(C, Math.floor((x + dir * LOOK) / S.CELL), under) === S.KIND.EMPTY;
+      sim.setInput((dir > 0 ? M.IN.RIGHT : M.IN.LEFT) | (edge ? jump : 0));
+      return true;
+    };
+  };
+  // Something other than empty in a column from row `from` up to, not including, row `to`.
+  const columnHolds = (col, from, to) => { for (let r = from; r < to; r++) if (S.cellAt(C, col, r) !== S.KIND.EMPTY) return true; return false; };
+  // From a death, the drop-in to its landing: the states it passes through, where it drops from against the top of the
+  // screen it died on, whether the screen moved before it landed, and where it stands.
+  const respawn = (sim) => {
+    const s = sim.state, cam = s.camY, seen = [s.pState[0]];
+    let dropY = NaN, moved = false;
+    sim.setInput(0);
+    for (let t = 0; t < 5 && s.pState[0] !== PS.NORMAL; t += M.FIXED) {
+      sim.simulate(M.FIXED);
+      if (s.pState[0] !== PS.NORMAL && s.camY !== cam) moved = true;
+      if (seen.at(-1) !== s.pState[0]) { seen.push(s.pState[0]); if (s.pState[0] === PS.DROP) dropY = s.py[0]; }
+    }
+    const col = Math.floor(s.px[0] / S.CELL), under = Math.round(s.py[0] / S.CELL) - 1;
+    return {
+      seen, dropY, top: cam + SCREEN_Y, moved, cam, px: s.px[0], py: s.py[0], col,
+      sound: seen.join() === [PS.DEAD, PS.DROP, PS.NORMAL].join() && Math.abs(dropY - (cam + SCREEN_Y)) < 1e-3 && !moved &&
+        s.py[0] >= cam && s.py[0] <= cam + SCREEN_Y && s.py[0] === (under + 1) * S.CELL && S.cellAt(C, col, under) !== S.KIND.EMPTY
+    };
+  };
+  let atLock = null;
+  {
+    // Up the whole scaffold to the deck and twice straight up off it, watching the camera and the placed list; then off
+    // the deck's left end, where the drop column holds ground only below the locked screen, and back in.
+    const sim = M.create({ seed: 7, stage: C }), s = sim.state, steer = climber(sim), n = C.placed.length / 4;
+    const viewAt = new Array(n).fill(-1), seenAt = new Array(n).fill(-1), spawns = new Array(n).fill(0), was = new Uint8Array(n * M.ENEMY_SLOTS);
+    let step = 0, cam = s.camY, back = false, wide = false, below = false, died = false, early = false, maxCam = 0, apex = 0;
+    const watch = () => {
+      sim.simulate(M.FIXED);
+      if (s.camY < cam) back = true;
+      if (s.camX !== 0) wide = true;
+      if (s.pState[0] === PS.NORMAL && s.py[0] < s.camY) below = true;
+      if (s.pState[0] === PS.DEAD) died = true;
+      cam = s.camY; maxCam = Math.max(maxCam, s.camY); apex = Math.max(apex, s.py[0]);
+      for (let r = 0; r < n; r++) {
+        const col = C.placed[r * 4], row = C.placed[r * 4 + 1], type = C.placed[r * 4 + 2], view = row * S.CELL < s.camY + SCREEN_Y;
+        if (view && viewAt[r] < 0) viewAt[r] = step;
+        for (let k = 0; k < M.ENEMY_SLOTS; k++) {
+          const here = s.eType[k] === type && Math.abs(s.ex[k] - (col + 0.5) * S.CELL) < 0.01 ? 1 : 0;
+          if (here && !was[r * M.ENEMY_SLOTS + k]) { spawns[r]++; if (seenAt[r] < 0) seenAt[r] = step; if (!view) early = true; }
+          was[r * M.ENEMY_SLOTS + k] = here;
+        }
+      }
+      step++;
+    };
+    for (let i = 0; i < 120 * 90 && steer(); i++) watch();
+    const under = Math.round(s.py[0] / S.CELL) - 1;
+    const deck = { state: s.pState[0], px: s.px[0], py: s.py[0], camY: s.camY, on: S.cellAt(C, Math.floor(s.px[0] / S.CELL), under), steps: step };
+    for (let k = 0; k < 2; k++) { sim.setInput(M.IN.JUMP); watch(); sim.setInput(0); for (let i = 0; i < 120; i++) watch(); }
+    const side = M.create({ seed: 7, stage: testStage });
+    side.setInput(M.IN.RIGHT); side.simulate(4);
+    record("raid climb: the screen scrolls up as the Ooga climbs and never back down, the camera keeps to the one screen's width, and a side stage never scrolls up",
+      deck.state === PS.NORMAL && deck.on === S.KIND.SOLID && deck.py > 2 * SCREEN_Y && !died && !back && !wide && !below && deck.camY > SCREEN_Y &&
+        side.state.camX > 0 && side.state.camY === 0 && side.state.lockY === 0,
+      JSON.stringify({ deck, died, back, wide, below, side: { camX: side.state.camX, camY: side.state.camY, lockY: side.state.lockY } }));
+    record("raid climb: the scroll locks at the boss screen, with the Ooga jumping above its middle",
+      s.lockY === C.lockScreen * SCREEN_Y && maxCam === s.lockY && s.camY === s.lockY && apex - SCREEN_Y / 2 > s.lockY && s.camX === 0,
+      JSON.stringify({ lockY: s.lockY, want: C.lockScreen * SCREEN_Y, maxCam, camY: s.camY, apex, camX: s.camX }));
+    record("raid climb: placed enemies appear as their row scrolls into view from the top, once each",
+      viewAt.every((v, r) => v >= 0 && seenAt[r] === v) && spawns.every((c) => c === 1) && !early && s.listCursor === n && viewAt[1] > 0 && viewAt[2] > viewAt[1],
+      JSON.stringify({ viewAt, seenAt, spawns, early, cursor: s.listCursor }));
+    // Off the deck's left end, hopping the printer that stands on it (a block now) on the way.
+    for (let i = 0; i < 10 * 120 && s.pState[0] !== PS.DEAD; i++) { sim.setInput(M.IN.LEFT | (i % 40 === 0 ? M.IN.JUMP : 0)); sim.simulate(M.FIXED); }
+    sim.setInput(M.IN.LEFT);
+    const dropCol = Math.floor((s.camX + M.TUNE.DROP_X) / S.CELL), lockRow = Math.round(s.lockY / S.CELL);
+    atLock = { dead: s.pState[0] === PS.DEAD, dropCol, onScreen: columnHolds(dropCol, lockRow, lockRow + S.SCREEN_H), below: columnHolds(dropCol, 0, lockRow), ...respawn(sim) };
+  }
+  {
+    // Up to the ledge on row 18, then off its left end in a jump over the columns by the wall, which hold nothing down to
+    // the bottom screen's floor: the jump scrolls the screen up, the fall kills at the screen's bottom, and the Ooga drops
+    // back in at the top of that screen.
+    const sim = M.create({ seed: 7, stage: C }), s = sim.state, steer = climber(sim), LEDGE = 18;
+    const standingOn = () => s.pState[0] === PS.NORMAL && s.pPose[0] === M.POSE.STAND ? Math.round(s.py[0] / S.CELL) - 1 : -1;
+    for (let i = 0; i < 120 * 60 && standingOn() !== LEDGE; i++) { steer(); sim.simulate(M.FIXED); }
+    const ledge = { py: s.py[0], camY: s.camY, on: standingOn() };
+    let camJump = -1, landed = false;
+    for (let i = 0; i < 120 * 10 && s.pState[0] === PS.NORMAL; i++) {
+      const edge = camJump < 0 && S.cellAt(C, Math.floor((s.px[0] - LOOK) / S.CELL), LEDGE) === S.KIND.EMPTY;
+      if (edge) camJump = s.camY;
+      sim.setInput(M.IN.LEFT | (edge ? M.IN.JUMP : 0));
+      sim.simulate(M.FIXED);
+      if (camJump >= 0 && s.pState[0] === PS.NORMAL && s.pPose[0] !== M.POSE.JUMP) landed = true;
+    }
+    const col = Math.floor(s.px[0] / S.CELL);
+    let ground = -1;
+    for (let r = Math.floor(s.py[0] / S.CELL); r >= 0 && ground < 0; r--) if (S.cellAt(C, col, r) !== S.KIND.EMPTY) ground = (r + 1) * S.CELL;
+    const fall = { ledge, camJump, landed, state: s.pState[0], px: s.px[0], py: s.py[0], camY: s.camY, ground };
+    record("raid climb: falling below the screen's bottom kills even while the screen scrolls up, with ground further down",
+      ledge.on === LEDGE && fall.state === PS.DEAD && !landed && camJump >= 0 && fall.camY > camJump && fall.py < fall.camY && fall.py > fall.camY - 0.25 &&
+        ground > 0 && ground < fall.camY,
+      JSON.stringify(fall));
+    const mid = respawn(sim);
+    record("raid climb: a respawn drops in at the top of the current screen and lands on ground in it, at the lock too, where the drop column's only ground is below the screen",
+      mid.sound && mid.cam === fall.camY && atLock.dead && atLock.sound && atLock.cam === C.lockScreen * SCREEN_Y && !atLock.onScreen && atLock.below && atLock.col !== atLock.dropCol,
+      JSON.stringify({ mid, atLock }));
+  }
+  {
+    // One climb screen with the scroll locked on it, a floor and ledges out from both walls, and stage 1's spawner. The
+    // Ooga stands invincible on the floor in the middle, then against the left wall; each runner's arrival is noted as
+    // coming in at a top corner (at the screen's top) or a side, left or right, and by the column it comes in at.
+    const sky = "................", shelf = "====........====", rock = "################";
+    const shaft = S.parse({
+      kind: "climb", id: "shaft", name: "Shaft", start: { col: 7, row: 3 }, lockScreen: 0, spawner: { base: st.spawner.base }, placed: [],
+      screens: [[sky, shelf, sky, sky, sky, shelf, sky, sky, sky, sky, sky, rock, rock, rock]]
+    });
+    const watch = (bits, seconds) => {
+      const sim = M.create({ seed: 7, stage: shaft }), s = sim.state;
+      settle(sim); s.pInvincible[0] = 1e9;
+      sim.setInput(bits); sim.simulate(3); sim.setInput(0);
+      const was = Uint8Array.from(s.eType, (t) => t === E.RUNNER ? 1 : 0), seen = { topLeft: 0, topRight: 0, left: 0, right: 0, edges: true, camX: 0, px: s.px[0] };
+      for (let i = 0; i < seconds * 120; i++) {
+        sim.simulate(M.FIXED);
+        for (let k = 0; k < M.ENEMY_SLOTS; k++) {
+          const r = s.eType[k] === E.RUNNER ? 1 : 0;
+          if (r && !was[k]) {
+            const left = s.ex[k] < SCREEN / 2, top = Math.abs(s.ey[k] - (s.camY + SCREEN_Y)) < 1e-3, col = Math.floor(s.ex[k] / S.CELL);
+            seen[top ? left ? "topLeft" : "topRight" : left ? "left" : "right"]++;
+            if (col !== 0 && col !== S.SCREEN_W - 1) seen.edges = false;
+          }
+          was[k] = r;
+        }
+        seen.camX = Math.max(seen.camX, s.camX);
+      }
+      return seen;
+    };
+    const middle = watch(0, 15), wall = watch(M.IN.LEFT, 15);
+    record("raid climb: the edge spawner sends runners in at the top corners and the sides, never at the side the Ooga stands by",
+      middle.topLeft > 0 && middle.topRight > 0 && middle.left > 0 && middle.right > 0 && middle.edges && middle.camX === 0 &&
+        wall.px < M.TUNE.SPAWN_CLEAR && wall.left === 0 && wall.topLeft > 0 && wall.topRight > 0 && wall.right > 0 && wall.edges && wall.camX === 0,
+      JSON.stringify({ middle, wall }));
+  }
+  {
+    // One climb screen whose top row is solid over the drop column, with a floor: a drop-in that took that column would
+    // land on the top row with its whole body above the screen, so it takes the next column with ground on the screen.
+    const sky = "................", rock = "################";
+    const lid = S.parse({
+      kind: "climb", id: "lid", name: "Lid", start: { col: 7, row: 3 }, lockScreen: 0, spawner: { base: 0 }, placed: [],
+      screens: [["...#............", sky, sky, sky, sky, sky, sky, sky, sky, sky, sky, rock, rock, rock]]
+    });
+    const sim = M.create({ seed: 7, stage: lid }), s = sim.state, dropCol = Math.floor(M.TUNE.DROP_X / S.CELL);
+    ready(sim);
+    sim.spawn(E.RUNNER, s.px[0], s.py[0], 0);
+    until(sim, () => s.pState[0] === PS.DEAD, 2);
+    const died = s.pState[0] === PS.DEAD;
+    sim.setInput(0);
+    until(sim, () => s.pState[0] === PS.NORMAL, 5);
+    const landed = { died, state: s.pState[0], px: s.px[0], py: s.py[0], col: Math.floor(s.px[0] / S.CELL), dropCol, top: s.camY + SCREEN_Y, lid: S.cellAt(lid, dropCol, S.SCREEN_H - 1) };
+    record("raid climb: regression: a drop-in refuses a column whose top cell on the screen is solid, so the Ooga never lands with its body above the screen",
+      died && landed.lid === S.KIND.SOLID && landed.state === PS.NORMAL && landed.col !== dropCol && landed.py + R.BOX[M.POSE.STAND][1] <= landed.top,
+      JSON.stringify(landed));
+  }
+  {
+    // An enemy shot fired straight up from just under a climb's screen top, in a column open to the grid's top: it leaves
+    // by the screen's top, where it would once have flown on to the grid's.
+    const sim = M.create({ seed: 7, stage: C }), s = sim.state;
+    ready(sim); s.pInvincible[0] = 1e9;
+    const top = s.camY + SCREEN_Y, slot = sim.spawn(E.SHOT, S.CELL / 2, top - 0.2, R.AIM_STEPS / 4);
+    let highest = -Infinity, steps = 0;
+    for (; steps < 240 && s.eType[slot] === E.SHOT; steps++) { sim.simulate(M.FIXED); if (s.eType[slot] === E.SHOT) highest = Math.max(highest, s.ey[slot]); }
+    record("raid climb: regression: an enemy shot leaves by the screen's top, not the grid's",
+      s.eType[slot] !== E.SHOT && highest < top && steps < 30 && s.camY === 0, JSON.stringify({ alive: s.eType[slot] === E.SHOT, highest, top, steps }));
+  }
+
+  // Rooms stages, on S.TEST.rooms: the Ooga walks the front line (depth 0) and shoots into the room, whose cores, tellers,
+  // barrels and guards stand at a depth from the front (0) to the back wall (1). The Ooga is held invincible, which also
+  // holds the enemies' fire. `walkTo` stands it at an x, `shootUp` fires straight up a press every other step.
+  const RM = S.TEST.rooms, RP = M.ROOM_PHASE, V = M.ROOM, TY = context.window.BL.raidEnemies.TYPES;
+  const roomSim = () => { const sim = M.create({ seed: 7, stage: RM }); settle(sim); sim.state.pInvincible[0] = 1e9; return sim; };
+  const walkTo = (sim, x) => {
+    const s = sim.state;
+    for (let i = 0; i < 1200 && Math.abs(s.px[0] - x) > 0.02; i++) { sim.setInput(s.px[0] < x ? M.IN.RIGHT : M.IN.LEFT); sim.simulate(M.FIXED); }
+    sim.setInput(0); sim.simulate(M.FIXED);
+  };
+  const shootUp = (sim, slot, seconds = 8) => {
+    const s = sim.state;
+    for (let i = 0; i < seconds * 120 && s.eHp[slot] > 0; i++) { sim.setInput(M.IN.UP | (i % 2 ? 0 : M.IN.FIRE)); sim.simulate(M.FIXED); }
+    sim.setInput(0);
+  };
+  const coresOf = (s) => { const out = []; for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.LEDGER_CORE && s.eHp[k] > 0) out.push(k); return out; };
+  const clearRoom = (sim) => { for (const k of coresOf(sim.state)) { walkTo(sim, sim.state.ex[k]); shootUp(sim, k); } };
+  // Hold up alone, walking forward, until `done` holds (the advance starts) or 240 steps pass: the steps that took.
+  const holdUp = (sim, done) => { let n = 0; sim.setInput(M.IN.UP); while (n < 240 && !done()) { sim.simulate(M.FIXED); n++; } sim.setInput(0); return n; };
+  // Forward through the open barrier: the steps up was held, the steps the advance takes, whether the room stood empty
+  // through it, and where the Ooga stood before and after.
+  const advanceRoom = (sim) => {
+    const s = sim.state, from = s.room, x = s.px[0];
+    const held = holdUp(sim, () => s.roomPhase === RP.ADVANCE);
+    let steps = 0, empty = true;
+    while (steps < 600 && s.room === from) { sim.simulate(M.FIXED); steps++; if (s.room === from && s.eType.some((t) => t !== E.FREE)) empty = false; }
+    return { held, steps, empty, room: s.room, x, px: s.px[0] };
+  };
+  const projected = (x, y, z) => ({ x: M.projectX(x, z), y: M.projectY(y, z) });
+  {
+    const sim = roomSim(), s = sim.state, core = coresOf(s)[0];
+    walkTo(sim, s.ex[core]);
+    const score = s.pScore[0], x = s.px[0];
+    let deepest = 0, straight = true, fired = 0;
+    for (let i = 0; i < 8 * 120 && s.eHp[core] > 0; i++) {
+      sim.setInput(M.IN.UP | (i % 2 ? 0 : M.IN.FIRE)); sim.simulate(M.FIXED);
+      for (let b = 0; b < M.BULLETS; b++) if (s.bLive[b]) { fired++; deepest = Math.max(deepest, s.bz[b]); if (s.bx[b] !== x) straight = false; }
+    }
+    record("raid rooms: up fires straight into the room at the Ooga's x and destroys a core on the back wall",
+      s.ez[core] === 1 && s.eHp[core] === 0 && s.pScore[0] - score === TY[E.LEDGER_CORE].points && fired > 0 && straight && deepest > 0.5 && s.pAim[0] === 2,
+      JSON.stringify({ ez: s.ez[core], hp: s.eHp[core], scored: s.pScore[0] - score, straight, deepest, aim: s.pAim[0] }));
+  }
+  {
+    // The first guard comes in at door 0 and runs to the front line; the Ooga stands between it and the core over that
+    // door's side, facing it, and fires forward: the shot passes under the core on screen and hits the guard.
+    const sim = roomSim(), s = sim.state, door = RM.rooms[0].doors[RM.rooms[0].waves[2]];
+    const core = coresOf(s).reduce((a, k) => Math.abs(s.ex[k] - door) < Math.abs(s.ex[a] - door) ? k : a);
+    walkTo(sim, 3.5);
+    let guard = -1;
+    until(sim, () => { for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.GUARD && s.ez[k] === 0) guard = k; return guard >= 0; }, 10);
+    const coreHp = s.eHp[core], under = projected(s.ex[core], s.ey[core] + TY[E.LEDGER_CORE].origin, s.ez[core]), score = s.pScore[0];
+    let crossed = null;
+    for (let i = 0; i < 4 * 120 && s.eHp[guard] > 0; i++) {
+      sim.setInput(i % 2 ? 0 : M.IN.FIRE); sim.simulate(M.FIXED);
+      for (let b = 0; b < M.BULLETS; b++) if (s.bLive[b] && !crossed && Math.abs(M.projectX(s.bx[b], s.bz[b]) - under.x) < 0.05) crossed = { ...projected(s.bx[b], s.by[b], s.bz[b]), bz: s.bz[b] };
+    }
+    record("raid rooms: forward fire flies along the front line under a core on screen and hits a guard standing at the front line",
+      guard >= 0 && s.eHp[guard] === 0 && s.pScore[0] - score === TY[E.GUARD].points && s.eHp[core] === coreHp && crossed !== null && crossed.bz === 0 && crossed.y < under.y,
+      JSON.stringify({ guard, hp: s.eHp[guard], coreHp, now: s.eHp[core], crossed, under }));
+  }
+  {
+    // Review focus 3. The Ooga stands at the front line facing a lane barrels and guards come down, and fires forward for
+    // eight seconds. While an enemy is deeper in the room its box, as projected, covers the shots' path along the front line
+    // (`behind` counts those moments); nothing deeper than the hit depth may lose a hit point, while those reaching the
+    // front line are hit.
+    const sim = roomSim(), s = sim.state;
+    walkTo(sim, 3); sim.setInput(M.IN.RIGHT); sim.simulate(M.FIXED);
+    const hp = new Uint8Array(M.ENEMY_SLOTS), type = new Uint8Array(M.ENEMY_SLOTS), depth = new Float32Array(M.ENEMY_SLOTS);
+    let behind = 0, wrong = 0, front = 0;
+    for (let i = 0; i < 8 * 120; i++) {
+      for (let k = 0; k < M.ENEMY_SLOTS; k++) {
+        hp[k] = s.eHp[k]; type[k] = s.eType[k]; depth[k] = s.ez[k];
+        const t = s.eType[k];
+        if (t === E.FREE || t === E.SHOT || s.eHp[k] === 0 || s.ez[k] < V.HIT_DEPTH) continue;
+        const scale = 1 - V.SHRINK * s.ez[k], b = R.SHOT_BOX[TY[t].tier], o = projected(s.ex[k], s.ey[k] + TY[t].origin, s.ez[k]);
+        for (let j = 0; j < M.BULLETS; j++) {
+          if (!s.bLive[j]) continue;
+          const dx = M.projectX(s.bx[j], s.bz[j]) - o.x, dy = M.projectY(s.by[j], s.bz[j]) - o.y;
+          if (dx >= b[0] * scale && dx < b[1] * scale && dy > b[2] * scale && dy <= b[3] * scale) behind++;
+        }
+      }
+      sim.setInput(i % 2 ? 0 : M.IN.FIRE); sim.simulate(M.FIXED);
+      for (let k = 0; k < M.ENEMY_SLOTS; k++) {
+        if (type[k] === E.FREE || type[k] === E.SHOT || s.eType[k] !== type[k] || s.eHp[k] >= hp[k]) continue;
+        if (depth[k] >= V.HIT_DEPTH) wrong++; else front++;
+      }
+    }
+    record("raid rooms: a shot never hits a target behind the Ooga's line, however its projection covers the shot",
+      behind > 0 && wrong === 0 && front > 0 && s.pFace[0] === 1, JSON.stringify({ behind, wrong, front }));
+  }
+  let roomRun = null;
+  {
+    // The right end of the front line is a plain edge. Up held alone for a second while the room's cores stand only aims:
+    // the closed barrier blocks the way forward, with no stun and no advance, and the Ooga answers its buttons straight
+    // after. Then the cores go down one at a time and the barrier opens; then a tap-shot up and up held with the trigger
+    // going stay put, and up held alone goes through the open barrier into the next room, whose targets stand on its back
+    // wall and whose waves come in at their doors on time.
+    const sim = roomSim(), s = sim.state, lives = s.pLives[0];
+    sim.setInput(M.IN.RIGHT); sim.simulate(3); sim.setInput(0); sim.simulate(M.FIXED);
+    const edge = { px: s.px[0], state: s.pState[0], room: s.room, phase: s.roomPhase };
+    walkTo(sim, 4);
+    const x0 = s.px[0];
+    let aimed = true, still = true, phases = new Set();
+    sim.setInput(M.IN.UP);
+    for (let i = 0; i < 120; i++) {
+      sim.simulate(M.FIXED);
+      if (s.pAim[0] !== 2) aimed = false;
+      if (s.px[0] !== x0) still = false;
+      phases.add(s.roomPhase);
+    }
+    const live = s.bLive.filter((b) => b).length;
+    sim.setInput(M.IN.UP | M.IN.FIRE); sim.simulate(M.FIXED);
+    const firedAfter = s.bLive.filter((b) => b).length > live;
+    sim.setInput(M.IN.LEFT); sim.simulate(M.FIXED);
+    const movedAfter = s.px[0] < x0;
+    sim.setInput(0); sim.simulate(M.FIXED);
+    const closed = { aimed, still, phases: [...phases], room: s.room, barrier: s.barrier, state: s.pState[0], lives: s.pLives[0], firedAfter, movedAfter };
+    const cores = coresOf(s), steps = [];
+    for (const k of cores) { walkTo(sim, s.ex[k]); shootUp(sim, k); steps.push({ hp: s.eHp[k], barrier: s.barrier, phase: s.roomPhase }); }
+    const tellers = s.eType.filter((t) => t === E.WALL_TELLER).length, STEP_IN = M.TUNE.ROOM_STEP_IN / M.FIXED;
+    record("raid rooms: up held for a second against the closed barrier only aims, neither stunning nor advancing, until every core in the room is gone and it opens; the front line's right end is a plain edge",
+      edge.px === V.FRONT_R && edge.state === PS.NORMAL && edge.room === 0 && edge.phase === RP.FIGHT &&
+        aimed && still && closed.phases.join() === String(RP.FIGHT) && closed.room === 0 && closed.barrier === 1 && closed.state === PS.NORMAL && closed.lives === lives && firedAfter && movedAfter &&
+        cores.length === 2 && steps[0].hp === 0 && steps[0].barrier === 1 && steps[0].phase === RP.FIGHT && steps[1].hp === 0 && steps[1].barrier === 0 && steps[1].phase === RP.OPEN && tellers > 0,
+      JSON.stringify({ edge, closed, steps, tellers }));
+    // A tap-shot up (up and the trigger, up held a little under ROOM_STEP_IN, let go), then up held a second with the
+    // trigger every other step: neither walks forward.
+    sim.setInput(M.IN.UP | M.IN.FIRE); sim.simulate(M.FIXED);
+    sim.setInput(M.IN.UP); sim.simulate(M.TUNE.ROOM_STEP_IN - 3 * M.FIXED);
+    sim.setInput(0); sim.simulate(M.FIXED);
+    for (let i = 0; i < 120; i++) { sim.setInput(M.IN.UP | (i % 2 ? 0 : M.IN.FIRE)); sim.simulate(M.FIXED); }
+    sim.setInput(0); sim.simulate(M.FIXED);
+    const tapped = { phase: s.roomPhase, room: s.room };
+    const advanced = advanceRoom(sim), room = RM.rooms[1], stood = [];
+    for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] !== E.FREE) stood.push([s.ex[k], s.ey[k], s.eType[k], s.eAttr[k], s.ez[k]]);
+    const wanted = [];
+    for (let i = 0; i < room.targets.length; i += 4) wanted.push([room.targets[i], room.targets[i + 1], room.targets[i + 2], room.targets[i + 3], 1]);
+    const key = (r) => r.join(), standing = stood.map(key).sort().join("|") === wanted.map(key).sort().join("|");
+    const fresh = { room: s.room, phase: s.roomPhase, barrier: s.barrier, time: s.roomTime };
+    // Each wave's first appearance: its type at its door's x on the back wall, and the room's time, those spawned on one step
+    // in the order they took their slots (15 down); and before each step, the enemies with hit points off the back wall alive.
+    // The Ooga stands in the first wave's door's lane (no target's) firing up, so what comes in there is shot down and a wave
+    // falling due after the grace finds the room under its cap.
+    walkTo(sim, room.doors[room.waves[2]]);
+    const seen = [], was = Uint8Array.from(s.eType), held = [], wall = new Set(Object.keys(S.ROOM_REACH).map((n) => E[n]));
+    for (let i = 0; i < 7 * 120; i++) {
+      let alive = 0;
+      for (let k = 0; k < M.ENEMY_SLOTS; k++) { const t = s.eType[k]; if (M.HP_OF[t] > 0 && !wall.has(t) && s.eRoutine[k] < TY[t].destroyed) alive++; }
+      held.push({ at: s.roomTime + M.FIXED, alive });
+      sim.setInput(M.IN.UP | (i % 2 ? 0 : M.IN.FIRE)); sim.simulate(M.FIXED);
+      const fresh = [];
+      for (let k = M.ENEMY_SLOTS - 1; k >= 0; k--) {
+        if (s.eType[k] !== was[k] && (s.eType[k] === E.GUARD || s.eType[k] === E.COIN_BARREL)) fresh.push({ type: s.eType[k], x: s.ex[k], ez: s.ez[k], at: s.roomTime });
+        was[k] = s.eType[k];
+      }
+      seen.push(...fresh);
+    }
+    sim.setInput(0);
+    // Waves come in order, none before its time or in the room's grace (one due then comes as the grace runs out), and on
+    // time unless, on every step it waited, the room held ROOM_WAVE_MAX of the waves' enemies alive or an earlier wave waited.
+    const waves = [], tol = 1.5 * M.FIXED, cap = M.TUNE.ROOM_WAVE_MAX, end = held[held.length - 1].at;
+    for (let i = 0; i < room.waves.length; i += 3) waves.push({ type: room.waves[i + 1], x: room.doors[room.waves[i + 2]], due: Math.max(room.waves[i], M.TUNE.ROOM_GRACE) });
+    const waited = (j, from, to) => held.every((h) => h.at < from - tol || h.at > to - tol || h.alive >= cap || (j > 0 && (!seen[j - 1] || seen[j - 1].at > h.at - tol)));
+    // and at least one wave falling due after the grace comes on time.
+    const prompt = waves.filter((w, j) => w.due > M.TUNE.ROOM_GRACE + tol && seen[j] && Math.abs(seen[j].at - w.due) < tol).length;
+    const onTime = seen.length >= 2 && seen.length <= waves.length && prompt > 0 && waves.every((w, j) => {
+      const c = seen[j];
+      if (!c) return waited(j, w.due, end + 1);
+      return c.type === w.type && c.x === w.x && c.ez <= 1 && c.ez > 1 - V.HIT_DEPTH && c.at >= w.due - tol && (Math.abs(c.at - w.due) < tol || waited(j, w.due, c.at));
+    });
+    record("raid rooms: a tap-shot up never walks forward; up held alone through the open barrier advances for a second through an emptied room, then the next room starts with the Ooga where it stood, its targets and its waves on time, but none in its grace and none past the waves' cap of enemies alive",
+      tapped.phase === RP.OPEN && tapped.room === 0 && Math.abs(advanced.held - STEP_IN) <= 1 && Math.abs(advanced.steps - M.TUNE.ROOM_ADVANCE / M.FIXED) <= 1 && advanced.empty &&
+        advanced.px === advanced.x && fresh.room === 1 && fresh.phase === RP.FIGHT && fresh.barrier === 1 && fresh.time < 2 * M.FIXED && standing && onTime,
+      JSON.stringify({ tapped, advanced, fresh, standing, stood, wanted, seen, waves, prompt }));
+    roomRun = sim;
+  }
+  {
+    // Down on the floor lies prone in a room, but not in the boss room, reached by clearing rooms 0 and 1.
+    const proneIn = (sim) => { sim.setInput(M.IN.DOWN); sim.simulate(0.25); const pose = sim.state.pPose[0], aim = sim.state.pAim[0]; sim.setInput(0); sim.simulate(M.FIXED); return { pose, aim }; };
+    const first = proneIn(roomSim()), sim = roomRun, s = sim.state;
+    clearRoom(sim); advanceRoom(sim);
+    const boss = { room: s.room, isBoss: RM.rooms[s.room].boss, phase: s.phase, ...proneIn(sim) };
+    record("raid rooms: down lies prone in a room but is refused in the boss room, where the Ooga stands aiming forward",
+      first.pose === M.POSE.PRONE && boss.room === RM.rooms.length - 1 && boss.isBoss && boss.phase === M.PHASE.BOSS && boss.pose === M.POSE.STAND && (boss.aim === 0 || boss.aim === 4),
+      JSON.stringify({ first, boss }));
+    // The boss room's two cores down one at a time: the stage clears on the second, and every slot but theirs empties.
+    const cores = coresOf(s), phases = [];
+    for (const k of cores) { walkTo(sim, s.ex[k]); shootUp(sim, k); phases.push(s.phase); }
+    const others = s.eType.filter((t, k) => t !== E.FREE && !cores.includes(k)).length;
+    record("raid rooms: destroying every core in the boss room clears the stage and empties every other slot",
+      cores.length === 2 && phases[0] === M.PHASE.BOSS && phases[1] === M.PHASE.CLEAR && others === 0 && cores.every((k) => s.eHp[k] === 0),
+      JSON.stringify({ cores: cores.length, phases, others }));
+  }
+  {
+    // Registration. A fresh context loading the stages and the enemies but not the sim: register refuses a type that is
+    // not an ENEMY value, and after close() any registration throws the named error, as it does once the sim has loaded.
+    // The sim refuses to load with an ENEMY value no def covers, and with a def that gives a number RULES already names.
+    const src = {};
+    for (const name of RAID_SOURCES) src[name] = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
+    const fresh = (names, before = () => {}) => { const ctx = { window: { BL: {} } }; for (const name of names) { if (name === "raid-sim") before(ctx.window.BL); runInNewContext(src[name], ctx); } return ctx.window.BL; };
+    const thrown = (f) => { try { f(); return ""; } catch (e) { return String(e.message); } };
+    const def = { routines: [() => {}], destroyed: 0 }, CLOSED = "raid-enemies: register after close; load enemy files before raid-sim.js";
+    const B = fresh(["math", "raid-stages", "raid-enemies"]);
+    const refused = [99, B.raidStages.ENEMY.FREE, 2.5, Object.keys(B.raidStages.ENEMY).length].map((t) => thrown(() => B.raidEnemies.register(t, def)));
+    record("raid enemies: register refuses a type that is not an ENEMY value", refused.every((m) => /is no enemy/.test(m)), JSON.stringify(refused));
+    B.raidEnemies.close();
+    const closed = [thrown(() => B.raidEnemies.register(99, def)), thrown(() => fresh(RAID_SOURCES).raidEnemies.register(99, def))];
+    record("raid enemies: register after close throws the named error, and the sim closes the registry when it loads", closed.every((m) => m === CLOSED), JSON.stringify(closed));
+    const missing = thrown(() => {
+      const ctx = { window: { BL: {} } };
+      runInNewContext(src.math, ctx); runInNewContext(src["raid-stages"], ctx);
+      const RS = ctx.window.BL.raidStages;
+      ctx.window.BL.raidStages = { ...RS, ENEMY: Object.freeze({ ...RS.ENEMY, SPARE: Object.keys(RS.ENEMY).length }) };
+      runInNewContext(src["raid-enemies"], ctx); for (const name of RAID_LEGIONS) runInNewContext(src[name], ctx); runInNewContext(src["raid-terrain"], ctx); runInNewContext(src["raid-sim"], ctx);
+    });
+    record("raid sim: loading throws when an ENEMY value has no def", /SPARE/.test(missing) && /no def/.test(missing), missing);
+    const FIELDS = ["hp", "tier", "points", "origin"];
+    const given = FIELDS.map((field) => thrown(() => fresh(RAID_SOURCES, (BL) => {
+      const runner = BL.raidStages.ENEMY.RUNNER;
+      BL.raidEnemies.TYPES[runner] = Object.freeze({ ...BL.raidEnemies.TYPES[runner], [field]: 1 });
+    })));
+    record("raid sim: loading throws when a def gives hit points, tier, points or origin for a type RULES already names",
+      given.every((m, k) => m.includes("RUNNER") && m.includes(FIELDS[k])), JSON.stringify(given));
+    const left = FIELDS.map((field) => thrown(() => fresh(RAID_SOURCES, (BL) => {
+      const core = BL.raidStages.ENEMY.LEDGER_CORE, def = { ...BL.raidEnemies.TYPES[core] };
+      delete def[field];
+      BL.raidEnemies.TYPES[core] = Object.freeze(def);
+    })));
+    record("raid sim: loading throws when a type RULES names nowhere leaves out its hit points, tier, points or origin",
+      left.every((m, k) => m.includes("LEDGER_CORE") && m.includes(`leaves out ${FIELDS[k]}`)), JSON.stringify(left));
+    // Rooms targets: validate names a core above its type's reach and a guard on the back wall (guards come in by waves, so
+    // no back wall holds one), and the sim refuses to load with a core's reach above what a jump's shot meets it at (4 m:
+    // the 2.25 m jump's shot into a room, 0.5 m over its feet at its top, meets a core's box up to 3.09 m).
+    const high = S.parse({ kind: "rooms", id: "high", name: "High", rooms: [{ targets: [[4, 3, E.LEDGER_CORE, 0], [6, 1, E.GUARD, 0]], doors: [1], waves: [], boss: true }] });
+    const highFaults = S.validate(high), raised = thrown(() => {
+      const ctx = { window: { BL: {} } };
+      runInNewContext(src.math, ctx); runInNewContext(src["raid-stages"], ctx);
+      const RS = ctx.window.BL.raidStages;
+      ctx.window.BL.raidStages = { ...RS, ROOM_REACH: Object.freeze({ ...RS.ROOM_REACH, LEDGER_CORE: 4 }) };
+      runInNewContext(src["raid-enemies"], ctx); for (const name of RAID_LEGIONS) runInNewContext(src[name], ctx); runInNewContext(src["raid-terrain"], ctx); runInNewContext(src["raid-sim"], ctx);
+    });
+    record("raid stages: validation names a rooms target above its type's reach and one of a type no back wall holds, and the sim refuses a type's reach no jump's shot meets",
+      highFaults.length === 2 && /room 0: target 0, a LEDGER_CORE, at 3 m up is above the 2 m/.test(highFaults[0]) && /room 0: target 1 is a GUARD, which no back wall holds/.test(highFaults[1]) &&
+        S.validate(RM).length === 0 && /ROOM_REACH\.LEDGER_CORE 4 m passes the .* LEDGER_CORE at/.test(raised),
+      JSON.stringify({ highFaults, raised }));
+  }
+
+  {
+    // The engine's features for rooms and bosses, numbered as the stage specs number them. A feature a stage has no type
+    // for yet is driven through test types: `withTypes` loads the raid sources into a fresh context with extra ENEMY values,
+    // which `define` registers before raid-sim.js closes the registry. A check that throws records its failure.
+    const src = {};
+    for (const name of RAID_SOURCES) src[name] = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
+    const withTypes = (names, define) => {
+      const ctx = { window: { BL: {} } };
+      runInNewContext(src.math, ctx); runInNewContext(src["raid-stages"], ctx);
+      const RS = ctx.window.BL.raidStages, extra = {};
+      names.forEach((name, k) => { extra[name] = Object.keys(RS.ENEMY).length + k; });
+      ctx.window.BL.raidStages = { ...RS, ENEMY: Object.freeze({ ...RS.ENEMY, ...extra }) };
+      runInNewContext(src["raid-enemies"], ctx); for (const name of RAID_LEGIONS) runInNewContext(src[name], ctx);
+      define(ctx.window.BL, extra);
+      runInNewContext(src["raid-terrain"], ctx); runInNewContext(src["raid-sim"], ctx); runInNewContext(src["raid-autopilot"], ctx);
+      return ctx.window.BL;
+    };
+    const feature = (name, f) => {
+      let r;
+      try { r = f(); } catch (e) { r = { ok: false, detail: String(e && e.stack || e) }; }
+      record(name, r.ok, r.detail);
+    };
+    const thrown = (f) => { try { f(); return ""; } catch (e) { return String(e.message); } };
+    const hold = () => {}, begin = (ctx, i) => { ctx.state.eRoutine[i]++; }, gone = (ctx, i) => { ctx.free(i); };
+    const invincible = (sim) => { settle(sim); sim.state.pInvincible[0] = 1e9; return sim; };
+    const others = (s, keep) => s.eType.filter((t, k) => t !== E.FREE && !keep.includes(k)).length;
+
+    feature("raid features: F2: a core is any slot flagged CORE, LEDGER_CORE among them; a room's barrier holds while one stands, the boss room's last one clears the stage and empties every slot but the cores, and a boss room with no core never clears on its own", () => {
+      const B = withTypes(["TEST_CORE"], (BL, X) => {
+        const { register, FLAG } = BL.raidEnemies;
+        register(X.TEST_CORE, { routines: [begin, hold, begin, gone], destroyed: 2, flags: FLAG.MACHINE | FLAG.CORE, hp: 6, tier: 1, points: 1000, origin: 0 });
+      });
+      const XM = B.raidSim, XE = B.raidStages.ENEMY, F = B.raidEnemies.FLAG;
+      const stage = B.raidStages.parse({ kind: "rooms", id: "f2", name: "F2", rooms: [
+        { targets: [[4, 0.75, XE.TEST_CORE, 0]], doors: [1], waves: [], boss: false },
+        { targets: [[3, 0.75, XE.TEST_CORE, 0], [5.5, 0.75, XE.WALL_TELLER, 0]], doors: [1], waves: [[0.5, XE.GUARD, 0]], boss: true }
+      ] });
+      const sim = invincible(XM.create({ seed: 7, stage })), s = sim.state;
+      sim.simulate(1);
+      const held = { barrier: s.barrier, phase: s.roomPhase };
+      const first = s.eType.indexOf(XE.TEST_CORE);
+      walkTo(sim, s.ex[first]); shootUp(sim, first);
+      const opened = { hp: s.eHp[first], barrier: s.barrier, phase: s.roomPhase };
+      advanceRoom(sim); sim.simulate(1);
+      const core = s.eType.indexOf(XE.TEST_CORE), before = { room: s.room, phase: s.phase, others: others(s, [core]) };
+      walkTo(sim, s.ex[core]); shootUp(sim, core);
+      const after = { phase: s.phase, others: others(s, [core]), flagged: (s.eFlags[core] & F.CORE) !== 0, barrier: s.barrier };
+      const lone = B.raidStages.parse({ kind: "rooms", id: "lone", name: "Lone", rooms: [{ targets: [[5, 0.75, XE.WALL_TELLER, 0]], doors: [1], waves: [], boss: true }] });
+      const bare = invincible(XM.create({ seed: 7, stage: lone }));
+      bare.simulate(3);
+      // Validation names such a boss room, which nothing could ever clear.
+      const coreless = { phase: bare.state.phase, teller: bare.state.eType.includes(XE.WALL_TELLER), faults: B.raidStages.validate(lone) };
+      const ledger = (B.raidEnemies.TYPES[XE.LEDGER_CORE].flags & F.CORE) !== 0;
+      return {
+        ok: F.CORE === 4 && ledger && held.barrier === 1 && held.phase === RP.FIGHT && opened.hp === 0 && opened.barrier === 0 && opened.phase === RP.OPEN &&
+          before.room === 1 && before.phase === XM.PHASE.BOSS && before.others > 0 && after.phase === XM.PHASE.CLEAR && after.others === 0 && after.flagged &&
+          coreless.phase === XM.PHASE.BOSS && coreless.teller && coreless.faults.length === 1 && /room 0 is the boss room, but no target is a core and no target or wave a boss main/.test(coreless.faults[0]),
+        detail: JSON.stringify({ core: F.CORE, ledger, held, opened, before, after, coreless })
+      };
+    });
+
+    feature("raid features: F3: a SENSOR stands on a room's back wall at its ROOM_REACH entry, passes validation there and falls to a jump's shot up, and the sim holds each entry to its own type's box at load", () => {
+      const reach = S.ROOM_REACH.SENSOR;
+      const stage = S.parse({ kind: "rooms", id: "f3", name: "F3", rooms: [{ targets: [[4, reach, E.SENSOR, S.ITEM.FAN], [7.5, 0.75, E.LEDGER_CORE, 0]], doors: [1], waves: [], boss: true }] });
+      const faults = S.validate(stage), sim = invincible(M.create({ seed: 7, stage })), s = sim.state, slot = s.eType.indexOf(E.SENSOR);
+      let vy = 0, jumps = 0;
+      for (let i = 0; i < 20 * 120 && s.eType[slot] === E.SENSOR; i++) {
+        let bits = M.IN.UP;
+        if (s.pPose[0] !== M.POSE.JUMP && !(s.prevInput & M.IN.JUMP)) { bits |= M.IN.JUMP; jumps++; }
+        if (s.pPose[0] === M.POSE.JUMP && s.pvy[0] <= 0 && vy > 0) bits |= M.IN.FIRE;
+        vy = s.pvy[0];
+        sim.setInput(bits); sim.simulate(M.FIXED);
+      }
+      // Loading with SENSOR's entry over its own reach (3.06 m) throws, at a height that a LEDGER_CORE's box (an
+      // emplacement's, origin 0, met to 3.09 m) would still meet.
+      const raised = thrown(() => {
+        const ctx = { window: { BL: {} } };
+        runInNewContext(src.math, ctx); runInNewContext(src["raid-stages"], ctx);
+        const RS = ctx.window.BL.raidStages;
+        ctx.window.BL.raidStages = { ...RS, ROOM_REACH: Object.freeze({ ...RS.ROOM_REACH, SENSOR: 3.08 }) };
+        runInNewContext(src["raid-enemies"], ctx); for (const name of RAID_LEGIONS) runInNewContext(src[name], ctx); runInNewContext(src["raid-terrain"], ctx); runInNewContext(src["raid-sim"], ctx);
+      });
+      return {
+        ok: reach === 2 && faults.length === 0 && s.eType[slot] === E.ITEM && jumps > 0 && /ROOM_REACH\.SENSOR 3\.08 m passes the .* SENSOR at/.test(raised),
+        detail: JSON.stringify({ reach, faults, now: s.eType[slot], jumps, raised })
+      };
+    });
+
+    feature("raid features: F4: an item dropped on a room's back wall comes forward to the front line at ITEM_DRIFT as it falls, rests on the floor at depth 0, and is taken only once it reaches the front line", () => {
+      const stage = S.parse({ kind: "rooms", id: "f4", name: "F4", rooms: [
+        { targets: [[4, 0.75, E.SENSOR, S.ITEM.FAN], [7.5, 0.75, E.LEDGER_CORE, 0]], doors: [1], waves: [], boss: false },
+        { targets: [[4, 0.75, E.LEDGER_CORE, 0]], doors: [1], waves: [], boss: true }
+      ] });
+      const drop = (x) => {
+        const sim = invincible(M.create({ seed: 7, stage })), s = sim.state, slot = s.eType.indexOf(E.SENSOR);
+        walkTo(sim, 4); shootUp(sim, slot, 12);
+        walkTo(sim, x);
+        return { sim, s, slot };
+      };
+      const T = M.TUNE, rate = T.ITEM_DRIFT / T.ROOM_DEPTH;
+      // Standing under it: its depth after each step it is still there (the least of them, `untaken`), and the depth it was
+      // taken at, on the step it went (it comes forward in that step before the Ooga touches it).
+      const a = drop(4);
+      const z0 = a.s.ez[a.slot], made = a.s.eType[a.slot] === E.ITEM;
+      a.sim.simulate(1);
+      const z1 = a.s.ez[a.slot];
+      let untaken = z1, last = z1;
+      for (let i = 0; i < 5 * 120 && a.s.eType[a.slot] === E.ITEM; i++) {
+        last = a.s.ez[a.slot]; a.sim.simulate(M.FIXED);
+        if (a.s.eType[a.slot] === E.ITEM) untaken = Math.min(untaken, a.s.ez[a.slot]);
+      }
+      const taken = { gone: a.s.eType[a.slot] !== E.ITEM, untaken, at: last - rate * M.FIXED, weapon: a.s.pWeapon[0] };
+      // Standing away from it: it comes to rest on the floor at depth 0, and walking to it takes it.
+      const b = drop(1);
+      b.sim.simulate(4);
+      const rest = { type: b.s.eType[b.slot], ez: b.s.ez[b.slot], ey: b.s.ey[b.slot], weapon: b.s.pWeapon[0] };
+      walkTo(b.sim, b.s.ex[b.slot]); b.sim.simulate(M.FIXED);
+      const walked = { gone: b.s.eType[b.slot] !== E.ITEM, weapon: b.s.pWeapon[0] };
+      return {
+        ok: made && z0 > 0.9 && Math.abs((z0 - z1) - rate) < 0.02 && taken.gone && taken.untaken >= V.HIT_DEPTH && taken.at < V.HIT_DEPTH && taken.weapon === M.WEAPON.FAN &&
+          rest.type === E.ITEM && rest.ez === 0 && Math.abs(rest.ey - T.ITEM_HALF) < 1e-6 && rest.weapon === M.WEAPON.RIFLE && walked.gone && walked.weapon === M.WEAPON.FAN,
+        detail: JSON.stringify({ made, z0, z1, rate, taken, rest, walked })
+      };
+    });
+
+    feature("raid features: F6: aimShotAt flies a shot from a slot's origin straight at a point in the room at the enemy shot speed, and lobAt throws a lob that lands on its point after its flight, bursting by its kind, from a thrower in the screen's side margin, high over a climb's screen top, and onto a lift", () => {
+      const B = withTypes(["TEST_AIMER", "TEST_LOBBER"], (BL, X) => {
+        const { register } = BL.raidEnemies;
+        const aim = (ctx, i) => { if (ctx.state.eTimer[i] === 0) { BL.raidEnemies.aimShotAt(ctx, i, 2, 0.5, 0); ctx.state.eTimer[i] = 1; } };
+        // By attr: [kind, x, y, flight]: the three kinds to the floor, a shell far out of range, and a shell thrown high.
+        const THROWS = [[0, 6.25, 1.5, 1], [1, 6.25, 1.5, 1], [2, 6.25, 1.5, 1], [1, 103, 1.5, 1], [1, 6.25, 1.5, 2.5]];
+        const lob = (ctx, i) => {
+          if (ctx.state.eTimer[i] !== 0) return;
+          const [kind, x, y, flight] = THROWS[ctx.state.eAttr[i]];
+          BL.raidEnemies.lobAt(ctx, i, kind, x, y, flight); ctx.state.eTimer[i] = 1;
+        };
+        register(X.TEST_AIMER, { routines: [begin, aim, gone], destroyed: 2, hp: 4, tier: 1, points: 0, origin: 0 });
+        register(X.TEST_LOBBER, { routines: [begin, lob, gone], destroyed: 2, hp: 4, tier: 1, points: 0, origin: 0.5 });
+      });
+      const XM = B.raidSim, XE = B.raidStages.ENEMY, T = XM.TUNE;
+      // aimShotAt: from the back wall at x 6, 1 m up, at the front line's point x 2, 0.5 m up. Each step the shot stands on
+      // the line between them (depth in metres), at the enemy shot speed, and it crosses the front line on the point.
+      const room = B.raidStages.parse({ kind: "rooms", id: "f6", name: "F6", rooms: [{ targets: [[6, 1, XE.TEST_AIMER, 0]], doors: [1], waves: [], boss: true }] });
+      const sim = XM.create({ seed: 7, stage: room }), s = sim.state;
+      s.pInvincible[0] = 1e9;
+      for (let i = 0; i < 3 && !s.eType.includes(XE.SHOT); i++) sim.simulate(XM.FIXED);
+      const shot = s.eType.indexOf(XE.SHOT), off = [];
+      let crossed = null, speed = 0;
+      for (let i = 0; i < 600 && shot >= 0 && s.eType[shot] === XE.SHOT && !crossed; i++) {
+        const px = s.ex[shot], py = s.ey[shot], pz = s.ez[shot];
+        sim.simulate(XM.FIXED);
+        if (s.eType[shot] !== XE.SHOT) break;
+        speed = Math.hypot(s.ex[shot] - px, s.ey[shot] - py, (s.ez[shot] - pz) * T.ROOM_DEPTH) / XM.FIXED;
+        // Distance off the line from (6, 1, depth 5 m) to (2, 0.5, 0).
+        const ux = -4, uy = -0.5, uz = -5, n = Math.hypot(ux, uy, uz), wx = s.ex[shot] - 6, wy = s.ey[shot] - 1, wz = s.ez[shot] * T.ROOM_DEPTH - 5;
+        off.push(Math.hypot(wy * uz - wz * uy, wz * ux - wx * uz, wx * uy - wy * ux) / n);
+        if (s.ez[shot] <= 0) crossed = { x: s.ex[shot], y: s.ey[shot] };
+      }
+      const aimed = { shot, crossed, speed, off: Math.max(...off) };
+      // lobAt from a lobber standing on a floor 1.5 m up: where the lob was on the step before it landed, its flight time
+      // and highest point, and the shots born as it landed.
+      const throwOn = (stage, from, attr) => {
+        const sim = invincible(XM.create({ seed: 7, stage })), s = sim.state;
+        sim.spawn(XE.TEST_LOBBER, from, 1.5, attr);
+        for (let i = 0; i < 3 && !s.eType.includes(XE.LOB); i++) sim.simulate(XM.FIXED);
+        const lob = s.eType.indexOf(XE.LOB), vx = lob >= 0 ? s.evx[lob] : NaN, was = Uint8Array.from(s.eType);
+        let t = 0, at = null, born = [], top = 0;
+        for (let i = 0; i < 480 && lob >= 0 && s.eType[lob] === XE.LOB; i++) {
+          const x = s.ex[lob], y = s.ey[lob];
+          top = Math.max(top, y);
+          sim.simulate(XM.FIXED); t += XM.FIXED;
+          if (s.eType[lob] !== XE.LOB) {
+            at = { x, y, t };
+            for (let k = 0; k < XM.ENEMY_SLOTS; k++) if (s.eType[k] === XE.SHOT && was[k] !== XE.SHOT) born.push({ aim: s.eAttr[k], x: s.ex[k], y: s.ey[k] });
+          }
+          for (let k = 0; k < XM.ENEMY_SLOTS; k++) was[k] = s.eType[k];
+        }
+        return { attr, lob, vx, at, top, born, screenTop: s.camY + S.SCREEN_H * S.CELL };
+      };
+      // On the two-screen stage from x 3: kinds 0 (nothing), 1 (two shots along aims 1 and 5) and 2 (three along 0, 6 and
+      // 3), at x 6.25 on the floor after one second; kind 1 at a point far out of range, which throws at the fastest lob;
+      // and kind 1 from x 8.5, in the margin past the screen's right edge, back to the same point.
+      const [none, shell, shard, far] = [0, 1, 2, 3].map((attr) => throwOn(testStage, 3, attr)), margin = throwOn(testStage, 8.5, 1);
+      // On a one-screen climb (a floor, open air): a lob thrown high over the screen's top comes down after its 2.5 s onto
+      // the floor; with a lift waiting over columns 10 to 13 (its top 2.5 m), a shell lands on the lift and bursts there.
+      const sky = Array(S.SCREEN_H - 3).fill("................"), floor = Array(3).fill("################");
+      const climbing = (lifts) => B.raidStages.parse({ kind: "climb", id: "lobs", name: "Lobs", screens: [[...sky, ...floor]], start: { col: 2, row: 3 }, lockScreen: 0, spawner: { base: 0 }, placed: [], lifts });
+      const high = throwOn(climbing([]), 3, 4), lifted = throwOn(climbing([[10, 4, 4, 6, 1, 100]]), 3, 1);
+      const lobbed = [none, shell, shard, far, margin, high, lifted], aims = (r) => r.born.map((b) => b.aim).sort((p, q) => p - q).join();
+      const landed = (r, flight = 1) => r.at && Math.abs(r.at.t - flight) <= 2 * XM.FIXED && Math.abs(r.at.x - 6.25) < 0.05 && Math.abs(r.at.y - 1.5) < 0.05;
+      const burstAt = (r, x = 6.25, y = 1.6) => r.born.length > 0 && r.born.every((b) => Math.abs(b.x - x) < 0.05 && Math.abs(b.y - y) < 0.06);
+      const onLift = lifted.born.length === 2 && lifted.born[0].x >= 5 && lifted.born[0].x < 7 && burstAt(lifted, lifted.born[0].x, 2.6) && lifted.at && lifted.at.t < 0.9;
+      return {
+        ok: shot >= 0 && crossed && Math.abs(crossed.x - 2) < 0.05 && Math.abs(crossed.y - 0.5) < 0.05 && Math.abs(speed - T.ENEMY_SHOT_V) < 0.01 && aimed.off < 0.005 &&
+          [none, shell, shard, margin].every((r) => landed(r)) && none.born.length === 0 && aims(shell) === "1,5" && aims(shard) === "0,3,6" && burstAt(shell) && burstAt(shard) &&
+          aims(margin) === "1,5" && burstAt(margin) && landed(high, 2.5) && high.top > high.screenTop + 1 && aims(high) === "1,5" && onLift &&
+          Math.abs(far.vx - T.LOB_VX_MAX) < 1e-5 && T.LOB_G === 9,
+        detail: JSON.stringify({ aimed, lobbed, LOB_G: T.LOB_G, LOB_VX_MAX: T.LOB_VX_MAX })
+      };
+    });
+
+    feature("raid features: F7: a room's tripwire, live and dark on the room's clock and warning before it goes live, kills an Ooga at the front line in its span whose body spans its height, and neither a slot nor a shot; in a room's first ROOM_GRACE none is live, one due warning from the start, so an Ooga that walked in at a wide span's middle walks out", () => {
+      const wired = (wires) => S.parse({ kind: "rooms", id: "f7", name: "F7", rooms: [
+        { targets: [[7.5, 0.75, E.LEDGER_CORE, 0]], doors: [1], waves: [], boss: false, wires },
+        { targets: [[4, 0.75, E.LEDGER_CORE, 0]], doors: [1], waves: [], boss: true }
+      ] });
+      // Stand (or lie, or run and jump) at x until the room's clock reaches `from`, held invincible, then go on unprotected.
+      const at = (wires, x, from) => {
+        const sim = invincible(M.create({ seed: 7, stage: wired(wires) })), s = sim.state;
+        walkTo(sim, x);
+        while (s.roomTime < from - M.FIXED / 2) sim.simulate(M.FIXED);
+        s.pInvincible[0] = 0;
+        return { sim, s };
+      };
+      // Steps for `seconds` one at a time: true when the Ooga never died on any of them and kept its lives, so a death and a
+      // drop-in back before the end cannot pass for staying alive.
+      const lived = (sim, seconds) => {
+        const s = sim.state, lives = s.pLives[0];
+        let ok = true;
+        for (let i = Math.round(seconds / M.FIXED); i > 0; i--) { sim.simulate(M.FIXED); if (s.pState[0] !== PS.NORMAL) ok = false; }
+        return ok && s.pLives[0] === lives;
+      };
+      // A low wire over 2 to 5, live 1 s and dark 1 s, half a second into its cycle: live from 1.5 s, 3.5 s and on, but held
+      // through the room's grace (out by 2.6 s), warning while its cycle has it live; first live after it at 3.5 s.
+      const G = M.TUNE.ROOM_GRACE, low = [[2, 5, 0.15, 1, 1, 0.5]];
+      const a = at(low, 4, 2.6);
+      let died = -1;
+      for (let i = 0; i < 4 * 120 && died < 0; i++) { a.sim.simulate(M.FIXED); if (a.s.pState[0] === PS.DEAD) died = a.s.roomTime; }
+      const b = at(low, 6, 0.6), outside = lived(b.sim, 3);
+      const room = wired(low).rooms[0], states = [0.2, 0.8, 1.2, 1.6, 4.2, 4.8, 5.2, 5.6].map((t) => M.wireState(room, 0, t));
+      // A high wire over the whole front line, always live: standing dies, lying prone lives.
+      const high = [[0.5, 7.5, 0.6, 10, 0, 0]];
+      const c = at(high, 4, G + 0.1);
+      c.sim.simulate(M.FIXED);
+      const d = at(high, 4, 0);
+      d.s.pInvincible[0] = 1e9; d.sim.setInput(M.IN.DOWN);
+      while (d.s.roomTime < G + 0.1) d.sim.simulate(M.FIXED);
+      d.s.pInvincible[0] = 0;
+      const prone = { lived: lived(d.sim, 2), pose: d.s.pPose[0] };
+      // A narrow low wire, always live: running through it dies, a running jump over it lives.
+      const narrow = [[3, 3.5, 0.15, 10, 0, 0]];
+      const e = at(narrow, 2.4, G + 0.1);
+      e.sim.setInput(M.IN.RIGHT); e.sim.simulate(1);
+      const ran = { state: e.s.pState[0], x: e.s.px[0] };
+      const f = at(narrow, 2.4, G + 0.1);
+      f.sim.setInput(M.IN.RIGHT | M.IN.JUMP); f.sim.simulate(M.FIXED); f.sim.setInput(M.IN.RIGHT);
+      const jumped = { lived: lived(f.sim, 1), x: f.s.px[0] };
+      // The grace: an Ooga walks forward out of a room standing at 3.95 m, the middle of the next room's always-live high wire
+      // over 0.5 to 7.4 m. Seeing it warn, it waits WIRE_WARN and runs right, out of its span, and lives; standing still it
+      // dies once, as the grace runs out.
+      const W = M.WIRE, wide = S.parse({ kind: "rooms", id: "grace", name: "Grace", rooms: [
+        { targets: [[4, 0.75, E.LEDGER_CORE, 0]], doors: [1], waves: [], boss: false },
+        { targets: [[7.5, 0.75, E.LEDGER_CORE, 0]], doors: [1], waves: [], boss: false, wires: [[0.5, 7.4, 0.6, 10, 0, 0]] },
+        { targets: [[4, 0.75, E.LEDGER_CORE, 0]], doors: [1], waves: [], boss: true }
+      ] });
+      const arrive = () => {
+        const sim = invincible(M.create({ seed: 7, stage: wide })), s = sim.state;
+        walkTo(sim, 4); shootUp(sim, s.eType.indexOf(E.LEDGER_CORE)); walkTo(sim, 3.95);
+        s.pInvincible[0] = 0; advanceRoom(sim);
+        return { sim, s, x: s.px[0], time: s.roomTime, warned: M.wireState(wide.rooms[1], 0, s.roomTime) };
+      };
+      const out = arrive();
+      out.sim.simulate(M.TUNE.WIRE_WARN); out.sim.setInput(M.IN.RIGHT);
+      const ranOut = { x: out.x, warned: out.warned, lived: lived(out.sim, G + 1 - M.TUNE.WIRE_WARN), at: out.s.px[0] };
+      const stay = arrive(), lives = stay.s.pLives[0];
+      let fell = -1, deaths = 0;
+      for (let i = 0; i < (G + 1) * 120; i++) {
+        const was = stay.s.pState[0];
+        stay.sim.simulate(M.FIXED);
+        if (stay.s.pState[0] === PS.DEAD && was !== PS.DEAD) { deaths++; if (fell < 0) fell = stay.s.roomTime; }
+      }
+      const stayed = { x: stay.x, fell, deaths, lives: lives - stay.s.pLives[0] };
+      const slots = a.s.eType.filter((t) => t !== E.FREE && t !== E.LEDGER_CORE && t !== E.SHOT).length;
+      return {
+        ok: Math.abs(died - 3.5) <= 1.5 * M.FIXED && outside && states.join() === [W.WARN, W.DARK, W.WARN, W.WARN, W.LIVE, W.DARK, W.WARN, W.LIVE].join() &&
+          Math.abs(ranOut.x - 3.95) < 0.03 && ranOut.warned === W.WARN && ranOut.lived && ranOut.at > 7.4 &&
+          Math.abs(stayed.x - 3.95) < 0.03 && stayed.deaths === 1 && Math.abs(stayed.fell - G) <= 1.5 * M.FIXED &&
+          c.s.pState[0] === PS.DEAD && prone.pose === M.POSE.PRONE && prone.lived && ran.state === PS.DEAD && ran.x < 3.5 &&
+          jumped.lived && jumped.x > 3.5 && slots === 0 && S.validate(wired(low)).length === 0 &&
+          S.validate(wired([[5, 2, 0, 0, -1, -1], [1, 2, 0.15]])).length === 2 &&
+          S.validate(wired([[0, 0.3, 0.15, 1, 1, 0]])).join().includes("wire 0: its span 0 to 0.3 m misses the front line, 0.5 to 7.5"),
+        detail: JSON.stringify({ died, outside, states, ranOut, stayed, high: c.s.pState[0], prone, ran, jumped, slots, faults: S.validate(wired([[5, 2, 0, 0, -1, -1], [1, 2, 0.15]])), off: S.validate(wired([[0, 0.3, 0.15, 1, 1, 0]])) })
+      };
+    });
+
+    feature("raid features: F13: a part mounted on its main stands at the main's position plus its mount offset every step as the main moves, and dies with its main, for no points", () => {
+      const B = withTypes(["TEST_MAIN", "TEST_PART"], (BL, X) => {
+        const { register, mount } = BL.raidEnemies;
+        const init = (ctx, i) => { mount(ctx, i, X.TEST_PART, 0); mount(ctx, i, X.TEST_PART, 1); ctx.state.eRoutine[i]++; };
+        const fly = (ctx, i, dt) => {
+          const s = ctx.state;
+          s.ex[i] += 0.5 * dt; s.ey[i] += 0.25 * dt; s.eTimer[i] += dt;
+          if (s.eTimer[i] >= 2) { s.eHp[i] = 0; s.eRoutine[i] = 2; }
+        };
+        register(X.TEST_MAIN, { routines: [init, fly, hold], destroyed: 2, hp: 10, tier: 3, points: 0, origin: 0 });
+        register(X.TEST_PART, { routines: [begin, hold, hold], destroyed: 2, mounts: [[-1, 2], [1, 3]], hp: 4, tier: 1, points: 700, origin: 0 });
+      });
+      const XM = B.raidSim, XE = B.raidStages.ENEMY, sim = invincible(XM.create({ seed: 7, stage: testStage })), s = sim.state;
+      const main = sim.spawn(XE.TEST_MAIN, 5, 3, 0), score = s.pScore[0];
+      sim.simulate(XM.FIXED);
+      const parts = [...s.eType.keys()].filter((k) => s.eType[k] === XE.TEST_PART), offs = [[-1, 2], [1, 3]];
+      let worst = 0, steps = 0, lived = true;
+      while (s.eRoutine[main] < 2 && steps < 600) {
+        for (const k of parts) worst = Math.max(worst, Math.abs(s.ex[k] - s.ex[main] - offs[s.eAttr[k]][0]), Math.abs(s.ey[k] - s.ey[main] - offs[s.eAttr[k]][1]));
+        if (!parts.every((k) => s.eType[k] === XE.TEST_PART && s.eRoutine[k] < 2 && s.eLink[k] === main)) lived = false;
+        sim.simulate(XM.FIXED); steps++;
+      }
+      const moved = s.ex[main] - 5;
+      return {
+        ok: parts.length === 2 && parts.map((k) => s.eAttr[k]).sort().join() === "0,1" && worst < 1e-5 && lived && moved > 0.9 &&
+          parts.every((k) => s.eRoutine[k] >= 2 && s.eHp[k] === 0) && s.pScore[0] === score,
+        detail: JSON.stringify({ parts, worst, lived, moved, steps, routines: parts.map((k) => s.eRoutine[k]), hp: parts.map((k) => s.eHp[k]), score: s.pScore[0] - score })
+      };
+    });
+
+    feature("raid features: F14: a scaled boss spawns with its base hit points plus 8 a point of the strongest weapon the joined players hold, plus the loops completed up to three, and the vault keeps its 32", () => {
+      const B = withTypes(["TEST_SCALED"], (BL, X) => {
+        BL.raidEnemies.register(X.TEST_SCALED, { routines: [begin, hold, gone], destroyed: 2, scaled: true, hp: 40, tier: 3, points: 0, origin: 0 });
+      });
+      const XM = B.raidSim, XE = B.raidStages.ENEMY, W = XM.WEAPON, RR = XM.RULES;
+      const spawned = [[0, [W.RIFLE]], [1, [W.FAN]], [3, [W.CORK]], [5, [W.AUTO]], [2, [W.RIFLE, W.FAN]], [7, [W.CORK, W.BEAM]]].map(([loops, weapons]) => {
+        const sim = XM.create({ seed: 7, stage: testStage, loops, players: weapons.length }), s = sim.state;
+        weapons.forEach((w, p) => { s.pWeapon[p] = w; });
+        const k = sim.spawn(XE.TEST_SCALED, 4, 3, 0), hp = s.eHp[k];
+        s.pWeapon[0] = W.FAN;
+        sim.simulate(XM.FIXED);
+        return { loops, weapons, hp, kept: s.eHp[k], want: 40 + RR.BOSS_HP_STRENGTH * Math.max(...weapons.map((w) => RR.STRENGTH[w])) + Math.min(loops, RR.BOSS_HP_LOOPS) };
+      });
+      const vault = XM.create({ seed: 7, stage: testStage, loops: 3 });
+      vault.state.pWeapon[0] = W.FAN;
+      const v = vault.state.eHp[vault.spawn(XE.VAULT, 4, 1.5, 0)];
+      return {
+        ok: RR.BOSS_HP_STRENGTH === 8 && RR.BOSS_HP_LOOPS === 3 && spawned.every((r) => r.hp === r.want && r.kept === r.hp) && v === RR.HP.VAULT,
+        detail: JSON.stringify({ spawned, vault: v })
+      };
+    });
+
+    feature("raid features: F15: destroying a boss main clears the stage and empties every other slot on a side stage, a climb and in a rooms boss room with no core, its placed record waits for a free slot, and a boss main whose destroyed routine is not bossBreak is refused", () => {
+      const B = withTypes(["TEST_BOSS"], (BL, X) => {
+        const { register, bossBreak, FLAG } = BL.raidEnemies;
+        const fight = (ctx, i) => { if (ctx.state.phase === ctx.PHASE.PLAY) ctx.state.phase = ctx.PHASE.BOSS; };
+        register(X.TEST_BOSS, { routines: [begin, fight, bossBreak, hold, gone], destroyed: 2, boss: true, flags: FLAG.MACHINE, hp: 1, tier: 3, points: 5000, origin: 0 });
+      });
+      const XM = B.raidSim, XE = B.raidStages.ENEMY;
+      // Side and climb: the boss hangs ahead of the Ooga in its forward shot's line, with a clerk and a sensor beyond it.
+      const plane = (stage) => {
+        const sim = invincible(XM.create({ seed: 7, stage })), s = sim.state, x = s.px[0];
+        const boss = sim.spawn(XE.TEST_BOSS, x + 2.5, s.py[0] + 0.4, 0);
+        sim.spawn(XE.CLERK, x + 6, s.py[0] + 3, 0); sim.spawn(XE.SENSOR, x + 5, s.py[0] + 2, S.ITEM.AUTO);
+        sim.simulate(0.2);
+        const before = { phase: s.phase, others: others(s, [boss]) };
+        for (let i = 0; i < 4 * 120 && s.eRoutine[boss] < 2; i++) { sim.setInput(i % 2 ? 0 : XM.IN.FIRE); sim.simulate(XM.FIXED); }
+        sim.setInput(0);
+        return { before, phase: s.phase, others: others(s, [boss]), routine: s.eRoutine[boss] };
+      };
+      const side = plane(testStage), climb = plane(B.raidStages.TEST.climb);
+      // Rooms: a boss room whose only targets are the boss and a teller, and a guard coming in.
+      const stage = B.raidStages.parse({ kind: "rooms", id: "f15", name: "F15", rooms: [{ targets: [[4, 0.75, XE.TEST_BOSS, 0], [6.5, 0.75, XE.WALL_TELLER, 0]], doors: [1], waves: [[0.5, XE.GUARD, 0]], boss: true }] });
+      const sim = invincible(XM.create({ seed: 7, stage })), s = sim.state, boss = s.eType.indexOf(XE.TEST_BOSS);
+      sim.simulate(1.5);
+      const before = { phase: s.phase, others: others(s, [boss]) };
+      walkTo(sim, s.ex[boss]); shootUp(sim, boss);
+      const rooms = { before, phase: s.phase, others: others(s, [boss]), barrier: s.barrier };
+      // A full set of slots holds the boss's record back until one frees; a clerk's record is dropped.
+      const listed = B.raidStages.parse({ id: "wait", name: "Wait", rows: TEST_ROWS, start: { col: 2, row: 12 }, lockScreen: 1, spawner: { base: 0 }, placed: [[8, 3, XE.CLERK, 0], [10, 3, XE.TEST_BOSS, 0]] });
+      const full = XM.create({ seed: 7, stage: listed }), fs = full.state;
+      for (let k = 0; k < XM.ENEMY_SLOTS; k++) full.spawn(XE.RUNNER, 1, 9, 0);
+      full.simulate(XM.FIXED);
+      const held = { cursor: fs.listCursor, boss: fs.eType.includes(XE.TEST_BOSS) };
+      fs.eType[0] = XE.FREE;
+      full.simulate(XM.FIXED);
+      const waited = { cursor: fs.listCursor, boss: fs.eType.includes(XE.TEST_BOSS) };
+      const refused = thrown(() => withTypes(["TEST_BAD"], (BL, X) => {
+        BL.raidEnemies.register(X.TEST_BAD, { routines: [begin, hold, begin, gone], destroyed: 2, boss: true, hp: 1, tier: 3, points: 0, origin: 0 });
+      }));
+      const cleared = (r) => r.before.phase === XM.PHASE.BOSS && r.before.others > 0 && r.phase === XM.PHASE.CLEAR && r.others === 0;
+      return {
+        ok: cleared(side) && cleared(climb) && side.routine > 2 && cleared(rooms) && rooms.barrier === 0 &&
+          held.cursor === 1 && !held.boss && waited.cursor === 2 && waited.boss && /TEST_BAD/.test(refused) && /bossBreak/.test(refused),
+        detail: JSON.stringify({ side, climb, rooms, held, waited, refused })
+      };
+    });
+
+    // Stages 5 to 8's engine: the front shield (F5), shot-tier contacts, the shot helpers, boss parts' links, their types'
+    // table rows, belts (F8) and the tide (F12). `sided` parses a side stage from its rows (top row first) and terrain;
+    // `runTo` steps a sim until its clock reaches t.
+    const sided = (P, id, rows, start, extra = {}) => P.parse({ id, name: id, rows, start, lockScreen: Math.ceil(rows[0].length / P.SCREEN_W) - 1, spawner: { base: 0 }, placed: [], ...extra });
+    const runTo = (sim, t) => { while (sim.state.time < t - M.FIXED / 2) sim.simulate(M.FIXED); };
+    const near = (a, b, within = 1e-4) => Math.abs(a - b) < within;
+
+    feature("raid features: F5: a front shield spends a player's bullet flying against its facing flatter than 45 degrees, either way it faces, and every beam segment, for no hit point; diagonal, behind, up and down shots hit it, and the barrier's touch and the clear-screen destroy it", () => {
+      const B = withTypes(["TEST_SHIELD"], (BL, X) => {
+        const { register, FLAG, dieStart, dieFade, release } = BL.raidEnemies;
+        register(X.TEST_SHIELD, { routines: [begin, hold, dieStart, dieFade, release], destroyed: 2, flags: FLAG.SHIELD, hp: 9, tier: 0, points: 300, origin: 0.5 });
+      });
+      const XM = B.raidSim, XE = B.raidStages.ENEMY, IN = XM.IN, LEFT = XM.RULES.AIM_STEPS / 2;
+      // An Ooga at x, y facing `face` fires once (FIRE pressed with `bits`, then nothing held) at a shield at sx, sy facing
+      // `aim`: the hit points it lost, the bullets still flying after that first step, and whether any bullet flew on past
+      // it (more than a metre beyond its x on the far side from the Ooga).
+      const shoot = (sx, sy, aim, x, y, face, bits, { weapon = XM.WEAPON.RIFLE, air = false } = {}) => {
+        const sim = XM.create({ seed: 7, stage: testStage }), s = sim.state;
+        settle(sim);
+        const k = sim.spawn(XE.TEST_SHIELD, sx, sy, 0);
+        s.eAim[k] = aim; s.pWeapon[0] = weapon; s.pInvincible[0] = 1e9; s.pFace[0] = face;
+        s.px[0] = x; s.py[0] = y; s.pvy[0] = 0; s.pPose[0] = air ? XM.POSE.JUMP : XM.POSE.STAND;
+        sim.setInput(bits | IN.FIRE); sim.simulate(XM.FIXED); sim.setInput(0);
+        const fired = s.bLive.reduce((n, v) => n + v, 0), far = Math.sign(sx - x);
+        let past = false;
+        for (let n = 0; n < 120; n++) {
+          sim.simulate(XM.FIXED);
+          for (let b = 0; b < XM.BULLETS; b++) if (s.bLive[b] && far !== 0 && (s.bx[b] - sx) * far > 1) past = true;
+        }
+        return { lost: 9 - s.eHp[k], fired, past };
+      };
+      const front = shoot(4, 1.5, LEFT, 2, 1.5, 1, 0), back = shoot(2, 1.5, 0, 4, 1.5, -1, 0);
+      const beam = shoot(4, 1.5, LEFT, 2, 1.5, 1, 0, { weapon: XM.WEAPON.BEAM }), fan = shoot(4, 1.5, LEFT, 3, 1.5, 1, 0, { weapon: XM.WEAPON.FAN });
+      const behind = shoot(4, 1.5, 0, 2, 1.5, 1, 0), diagonal = shoot(7.75, 2.5, LEFT, 6.9, 1.5, 1, IN.UP | IN.RIGHT);
+      const up = shoot(7.75, 2.5, LEFT, 7.75, 1.5, 1, IN.UP), down = shoot(4, 1.5, LEFT, 4, 3.4, 1, IN.DOWN, { air: true });
+      // The barrier's touch and the clear-screen destroy a shield that faces the Ooga.
+      const touched = XM.create({ seed: 7, stage: testStage }), t = touched.state;
+      settle(touched); t.pBarrier[0] = 10;
+      const tk = touched.spawn(XE.TEST_SHIELD, t.px[0] + 1, t.py[0], 0);
+      t.eAim[tk] = LEFT; touched.setInput(IN.RIGHT); until(touched, () => t.pScore[0] > 0, 1);
+      const cleared = XM.create({ seed: 7, stage: testStage }), c = cleared.state;
+      settle(cleared); c.pInvincible[0] = 1e9;
+      const ck = cleared.spawn(XE.TEST_SHIELD, c.px[0] + 2, c.py[0], 0);
+      c.eAim[ck] = LEFT; cleared.spawn(XE.ITEM, c.px[0], c.py[0] + 0.3, XM.ITEM.CLEAR); cleared.simulate(XM.FIXED);
+      const barrier = { routine: t.eRoutine[tk], score: t.pScore[0] }, screen = { routine: c.eRoutine[ck], score: c.pScore[0] };
+      const askew = thrown(() => shoot(4, 1.5, 3, 2, 1.5, 1, 0));
+      return {
+        ok: [front, back].every((r) => r.fired === 1 && r.lost === 0 && !r.past) && beam.fired === 3 && beam.lost === 0 && !beam.past &&
+          fan.fired === 5 && fan.lost === 0 && !fan.past && [behind, diagonal, up, down].every((r) => r.lost === 1) &&
+          barrier.routine >= 2 && barrier.score === 300 && screen.routine >= 2 && screen.score === 300 && /faces aim 3, wants 0 or 6/.test(askew),
+        detail: JSON.stringify({ front, back, beam, fan, behind, diagonal, up, down, barrier, screen, askew })
+      };
+    });
+
+    feature("raid features: shot tier: a type of the shot tier that is no machine is a shot to an Ooga's touch, as SHOT and LOB are: one that kills is spent, and the barrier leaves it alone", () => {
+      const B = withTypes(["TEST_CRAWL"], (BL, X) => {
+        const crawl = (ctx, i, dt) => { ctx.state.ex[i] -= dt; };   // creeps left a metre a second
+        BL.raidEnemies.register(X.TEST_CRAWL, { routines: [begin, crawl, gone], destroyed: 2, hp: 0, tier: 4, points: 0, origin: 0.15 });
+      });
+      const XM = B.raidSim, XE = B.raidStages.ENEMY;
+      const meet = (barrier) => {
+        const sim = XM.create({ seed: 7, stage: testStage }), s = sim.state;
+        settle(sim); s.pInvincible[0] = 0; s.pBarrier[0] = barrier;
+        const k = sim.spawn(XE.TEST_CRAWL, s.px[0] + 0.75, s.py[0], 0);
+        until(sim, () => s.pState[0] !== PS.NORMAL || s.ex[k] < s.px[0] - 0.5, 2);
+        return { state: s.pState[0], type: s.eType[k], routine: s.eRoutine[k], beyond: +(s.px[0] - s.ex[k]).toFixed(3) };
+      };
+      const killed = meet(0), shielded = meet(10);
+      return {
+        ok: XM.TIER_OF[XE.TEST_CRAWL] === XM.RULES.TIER.SHOT && killed.state === PS.DEAD && killed.type === XE.FREE &&
+          shielded.state === PS.NORMAL && shielded.type === XE.TEST_CRAWL && shielded.routine === 1 && shielded.beyond > 0.5,
+        detail: JSON.stringify({ killed, shielded })
+      };
+    });
+
+    feature("raid features: aimShotOff fires a SHOT from a slot's x and feet plus an offset along the aim step nearest an Ooga's point, and shotAlong one from there along any aim step, taken round the twelve", () => {
+      const B = withTypes(["TEST_GUNNER"], (BL, X) => {
+        const { register, aimShotOff, shotAlong } = BL.raidEnemies;
+        // Fires once, keeping each shot's slot: the aimed one in eTimer, then along aims -1 and 13 in evx and evy.
+        const fire = (ctx, i) => {
+          const s = ctx.state;
+          s.eTimer[i] = aimShotOff(ctx, i, -0.5, 2, ctx.nearest(i)); s.evx[i] = shotAlong(ctx, i, 0.25, 1, -1); s.evy[i] = shotAlong(ctx, i, 0, 1, 13);
+          s.eRoutine[i]++;
+        };
+        register(X.TEST_GUNNER, { routines: [fire, hold, gone], destroyed: 2, hp: 5, tier: 1, points: 0, origin: 0 });
+      });
+      const XM = B.raidSim, XE = B.raidStages.ENEMY, sim = XM.create({ seed: 7, stage: testStage }), s = sim.state;
+      settle(sim); s.pInvincible[0] = 1e9;
+      // The gunner's offset point stands level with the Ooga's point (its feet 1.5 m, its point 0.5 m over them), 3 m right.
+      const g = sim.spawn(XE.TEST_GUNNER, s.px[0] + 3.5, s.py[0] + XM.RULES.PLAYER_POINT[XM.POSE.STAND] - 2, 0);
+      sim.simulate(XM.FIXED);
+      const shot = (k) => ({ type: s.eType[k], attr: s.eAttr[k], x: +(s.ex[k] - s.ex[g]).toFixed(4), y: +(s.ey[k] - s.ey[g]).toFixed(4), heading: +Math.atan2(s.evy[k], s.evx[k]).toFixed(4) });
+      const aimed = shot(s.eTimer[g]), low = shot(s.evx[g]), high = shot(s.evy[g]);
+      return {
+        ok: aimed.type === XE.SHOT && aimed.attr === 6 && aimed.x === -0.5 && aimed.y === 2 && near(aimed.heading, Math.PI) &&
+          low.type === XE.SHOT && low.attr === 11 && low.x === 0.25 && low.y === 1 && near(low.heading, -Math.PI / 6) &&
+          high.type === XE.SHOT && high.attr === 1 && high.x === 0 && high.y === 1 && near(high.heading, Math.PI / 6),
+        detail: JSON.stringify({ aimed, low, high })
+      };
+    });
+
+    feature("raid features: a boss part's def names its main, a boss main, and the part always carries eLink to a slot of it: a main that spawns its parts steps on with each linked to it, a part with or without mounts dies with its main for no points, a part stepped with no eLink or linked to a slot of another type throws, and a def naming a main that is no boss main is refused", () => {
+      const B = withTypes(["TEST_HEAD", "TEST_LIMB", "TEST_ARM"], (BL, X) => {
+        const { register, mount, bossBreak, dieStart, dieFade, release } = BL.raidEnemies;
+        // The head mounts two limbs and spawns an arm, which has no mounts and holds its own place, linked by hand.
+        const init = (ctx, i) => {
+          mount(ctx, i, X.TEST_LIMB, 0); mount(ctx, i, X.TEST_LIMB, 1);
+          const a = ctx.spawn(X.TEST_ARM, ctx.state.ex[i] + 2, ctx.state.ey[i], 0);
+          if (a >= 0) ctx.state.eLink[a] = i;
+          ctx.state.eRoutine[i]++;
+        };
+        register(X.TEST_HEAD, { routines: [init, hold, bossBreak, dieFade, release], destroyed: 2, hp: 10, tier: 3, points: 0, origin: 0, boss: true });
+        register(X.TEST_LIMB, { routines: [begin, hold, dieStart, dieFade, release], destroyed: 2, mounts: [[-1, 2], [1, 2]], main: X.TEST_HEAD, hp: 4, tier: 1, points: 0, origin: 0 });
+        register(X.TEST_ARM, { routines: [begin, hold, dieStart, dieFade, release], destroyed: 2, main: X.TEST_HEAD, hp: 4, tier: 1, points: 700, origin: 0 });
+      });
+      const XM = B.raidSim, XE = B.raidStages.ENEMY;
+      const sim = XM.create({ seed: 7, stage: testStage }), s = sim.state;
+      settle(sim); s.pInvincible[0] = 1e9;
+      const head = sim.spawn(XE.TEST_HEAD, 5, 1.5, 0);
+      sim.simulate(1);
+      const parts = [...s.eType.keys()].filter((k) => s.eType[k] === XE.TEST_LIMB || s.eType[k] === XE.TEST_ARM), limbs = parts.map((k) => s.eLink[k]);
+      const arm = parts.find((k) => s.eType[k] === XE.TEST_ARM), armAt = [s.ex[arm], s.ey[arm]];
+      // The head destroyed with nobody in play (so its break frees no slot): every part goes to its destroyed routine.
+      s.pState[0] = PS.OUT; s.eHp[head] = 0; s.eRoutine[head] = 2;
+      sim.simulate(XM.FIXED);
+      const died = parts.map((k) => [s.eRoutine[k], s.eHp[k]]), score = s.pScore[0];
+      const bare = XM.create({ seed: 7, stage: testStage });
+      settle(bare); bare.state.pInvincible[0] = 1e9; bare.spawn(XE.TEST_LIMB, 5, 3, 0);
+      const unlinked = thrown(() => bare.simulate(XM.FIXED));
+      const wrong = XM.create({ seed: 7, stage: testStage }), w = wrong.state;
+      settle(wrong); w.pInvincible[0] = 1e9;
+      const loose = wrong.spawn(XE.TEST_ARM, 5, 3, 0);
+      w.eLink[loose] = wrong.spawn(XE.CLERK, 6, 1.5, 0);
+      const mislinked = thrown(() => wrong.simulate(XM.FIXED));
+      const refused = thrown(() => withTypes(["TEST_FOOT", "TEST_TOE"], (BL, X) => {
+        BL.raidEnemies.register(X.TEST_FOOT, { routines: [begin, hold, gone], destroyed: 2, hp: 1, tier: 0, points: 0, origin: 0 });
+        BL.raidEnemies.register(X.TEST_TOE, { routines: [begin, hold, gone], destroyed: 2, main: X.TEST_FOOT, hp: 1, tier: 0, points: 0, origin: 0 });
+      }));
+      return {
+        ok: limbs.length === 3 && limbs.every((m) => m === head) && armAt[0] === 7 && armAt[1] === 1.5 && died.every(([r, hp]) => r >= 2 && hp === 0) && score === 0 &&
+          /steps with no eLink to a slot of its main/.test(unlinked) && /steps with no eLink to a slot of its main/.test(mislinked) && /TEST_TOE's main \d+ is no boss main/.test(refused),
+        detail: JSON.stringify({ head, limbs, armAt, died, score, unlinked, mislinked, refused })
+      };
+    });
+
+    feature("raid features: stages 5 to 8's types are registered, each file exporting TUNE and LOOK, the boss parts naming their mains and AUDITOR, TAX_COLLECTOR and RUNNER riding belts, and the sim's per-type tables give each the stage specs' tier, hit points, points and box origin, and its def their flags, boss and boss formula", () => {
+      const BL = context.window.BL, F = BL.raidEnemies.FLAG, wrong = [];
+      const files = { field: BL.raidLegionField, factory: BL.raidLegionFactory, lake: BL.raidLegionLake, pass: BL.raidLegionPass, reserve: BL.raidLegionReserve };
+      const MAINS = { CAPACITOR: "GRID_WARDEN", MECH_POD: "MECH", ENGINE_PRESS: "CHAIRMAN_ENGINE", ENGINE_POD: "CHAIRMAN_ENGINE" };
+      for (const table of ["HP_OF", "TIER_OF", "POINTS_OF", "ORIGIN_OF"]) if (!M[table] || M[table].length !== Object.keys(E).length) wrong.push(`${table} is not one entry an ENEMY value`);
+      for (const file of Object.keys(files)) if (!files[file] || !files[file].TUNE || !files[file].LOOK) wrong.push(`the ${file} file exports no TUNE and LOOK`);
+      for (const name of Object.keys(MAINS)) if (TY[E[name]].main !== E[MAINS[name]]) wrong.push(`${name}'s main is not ${MAINS[name]}`);
+      for (const name of ["AUDITOR", "TAX_COLLECTOR", "RUNNER"]) if (TY[E[name]].belted !== true) wrong.push(`${name} unbelted`);
+      for (const name of Object.keys(RAID_W6)) {
+        const t = E[name], def = TY[t];
+        if (t === undefined || !def) { wrong.push(`${name} unregistered`); continue; }
+        const [tier, hp, points, origin, flags, boss, scaled] = RAID_W6[name], want = flags.reduce((f, flag) => f | F[flag], 0);
+        if (M.TIER_OF[t] !== tier || M.HP_OF[t] !== hp || M.POINTS_OF[t] !== points || M.ORIGIN_OF[t] !== origin || def.flags !== want || !!def.boss !== boss || !!def.scaled !== scaled) {
+          wrong.push(`${name}: ${JSON.stringify([M.TIER_OF[t], M.HP_OF[t], M.POINTS_OF[t], M.ORIGIN_OF[t], def.flags, !!def.boss, !!def.scaled])}`);
+        }
+      }
+      return { ok: wrong.length === 0, detail: JSON.stringify(wrong) };
+    });
+
+    feature("raid terrain: F8: a belt carries an Ooga standing on its cells with its own run, through the wall test and the screen's edge: running against one nets RUN less its speed, and an idle Ooga rides one into a hatch or up to a wall and stops there; it carries a belted walker (a RUNNER) and not a CLERK, and stops one at a wall; and validation names a broken belt", () => {
+      // Two screens of floor at 1.5 m with a hatch at columns 2 and 3 and a wall from column 27; a belt left toward the
+      // hatch over columns 4 to 15 and one right toward the wall over 17 to 26, column 16 still floor between them.
+      const rows = [...Array(11).fill(".".repeat(27) + "#####"), ...Array(3).fill("##.." + "#".repeat(28))], belts = [[4, 15, 2, -0.9], [17, 26, 2, 0.9]];
+      const stage = (col, list = belts) => sided(S, "belts", rows, { col, row: 3 }, { belts: list }), T = M.TUNE;
+      const from = (col, bits, seconds) => {
+        const sim = M.create({ seed: 7, stage: stage(col) }), s = sim.state;
+        sim.simulate(M.FIXED); s.pInvincible[0] = 1e9;
+        const x0 = s.px[0];
+        sim.setInput(bits);
+        for (let n = Math.round(seconds / M.FIXED); n > 0 && s.pState[0] === PS.NORMAL; n--) sim.simulate(M.FIXED);
+        return { sim, s, moved: s.px[0] - x0, x: s.px[0], state: s.pState[0] };
+      };
+      const against = from(12, M.IN.RIGHT, 1), along = from(12, M.IN.LEFT, 1), idle = from(5, 0, 3), wall = from(20, 0, 5);
+      // Walkers on the right-hand belt, watched from the floor between the belts: a runner set off left against it, and a
+      // clerk standing on it; and by the wall, a runner standing still (its own speed 0) beside it.
+      const walk = M.create({ seed: 7, stage: stage(16) }), w = walk.state;
+      walk.simulate(M.FIXED); w.pInvincible[0] = 1e9;
+      const runner = walk.spawn(E.RUNNER, 10.75, 1.5, 0), clerk = walk.spawn(E.CLERK, 11.75, 1.5, 0);
+      walk.simulate(M.FIXED);
+      const rx = w.ex[runner], cx = w.ex[clerk];
+      walk.simulate(1);
+      const walkers = { runner: w.ex[runner] - rx, clerk: w.ex[clerk] - cx, types: [w.eType[runner], w.eType[clerk]] };
+      const still = wall.sim.spawn(E.RUNNER, 12.9, 1.5, 0);
+      wall.sim.simulate(M.FIXED); wall.s.evx[still] = 0; wall.sim.simulate(2);
+      const stopped = { x: wall.s.ex[still], type: wall.s.eType[still] }, flush = 27 * S.CELL - R.BOX[M.POSE.STAND][0];
+      const bad = S.validate(stage(12, [belts[0], [5, 8, 2, 0.5], [4, 15, 2], [16, 40, 2, 0.9], [10, 5, 2, 0.9], [0, 3, 2, 0.5], [17, 20, 2, 0], [17, 20, 2, -2]]));
+      const sound = stage(12);
+      return {
+        ok: S.validate(sound).length === 0 && Object.isFrozen(sound.belts) && sound.belts[1].join() === "17,26,2,0.9" &&
+          near(against.moved, T.RUN - 0.9, 1e-3) && near(along.moved, -(T.RUN + 0.9), 1e-3) && idle.state === PS.DEAD && idle.x < 2 &&
+          near(wall.x, flush) && wall.state === PS.NORMAL && near(walkers.runner, -(T.RUNNER_V - 0.9), 1e-3) && walkers.clerk === 0 &&
+          walkers.types.join() === [E.RUNNER, E.CLERK].join() && stopped.type === E.RUNNER && stopped.x <= flush + 1e-6 && stopped.x > flush - 0.01 &&
+          bad.length === 7 && [/belt 1: it overlaps belt 0, columns 5 to 8/, /belt 2 is not four numbers/, /belt 3: its cells, columns 16 to 40/, /belt 4: its cells, columns 10 to 5/,
+            /belt 5: column 2 in row 2 is empty/, /belt 6: it moves at 0 m\/s/, /belt 7: it moves at -2 m\/s/].every((re) => bad.some((e) => re.test(e))),
+        detail: JSON.stringify({ against: against.moved, along: along.moved, idle: { x: idle.x, state: idle.state }, wall: { x: wall.x, state: wall.state }, flush, walkers, stopped, bad })
+      };
+    });
+
+    feature("raid terrain: F12: a tide basin's level steps a row each 1.5 s through its rise and fall on the 14 s cycle, its water and its raft written into the run's cells; a wading Ooga is set on the rising water and walks out at the bank's height within a cycle, a walker rides it up and down, a raft is a ledge a jump leaves at low tide where water is not, a stage ledge over a basin's low row is refused, a lob lands on the water's top, tideTops and basinAt follow it, a continue keeps the clock's level, the hash folds the water, and validation names a broken basin or float", () => {
+      // One screen: banks to 2 m either side of a basin over columns 5 to 10, its water in row 1 rising to row 3 (the banks'
+      // height at high water), a raft over columns 9 and 10, and a crumbling ledge over the right bank. A gauge copies the
+      // tide its routine reads, ctx.tideTops[0] into evx and ctx.basinAt of its column into eTimer.
+      const B = withTypes(["TEST_GAUGE"], (BL, X) => {
+        const gauge = (ctx, i) => { const s = ctx.state; s.evx[i] = ctx.tideTops[0]; s.eTimer[i] = ctx.basinAt(ctx.colOf(s.ex[i])); };
+        BL.raidEnemies.register(X.TEST_GAUGE, { routines: [begin, gauge, gone], destroyed: 2, hp: 0, tier: 4, points: 0, origin: 0, flags: BL.raidEnemies.FLAG.GHOST });
+      });
+      const XM = B.raidSim, XS = B.raidStages, XE = XS.ENEMY, K = XS.KIND, IN = XM.IN;
+      const pool = (row3 = "#####......#####", tide = { basins: [[5, 10, 1, 3]], floats: [[9, 10]] }, extra = {}) => sided(XS, "pool", [
+        ...Array(7).fill("................"), "............===.", "................", "................",
+        row3, "#####......#####", "#####~~~~~~#####", "################"
+      ], { col: 2, row: 4 }, { tide, crumble: [[12, 14, 6]], ...extra });
+      const stage = pool(), basin = stage.tide.basins[0];
+      const kinds = (s) => [1, 2, 3].map((row) => `${s.cells[row * stage.cols + 6]}${s.cells[row * stage.cols + 9]}`).join(" ");
+      // The clock: the pure level and phase, and the run's cells, each change of level timed.
+      const levels = [0, 4.5, 5.49, 5.51, 6.9, 7.1, 12.4, 12.6, 13.9, 14.1].map((t) => XM.tideLevel(basin, t));
+      const phases = [1, 5, 8, 13, 15].map((t) => XM.tidePhase(t));
+      const sim = XM.create({ seed: 7, stage }), s = sim.state;
+      sim.simulate(XM.FIXED); s.pInvincible[0] = 1e9;
+      const g = sim.spawn(XE.TEST_GAUGE, 3.25, 3, 0), dry = sim.spawn(XE.TEST_GAUGE, 1.25, 3, 0), clerk = sim.spawn(XE.CLERK, 4.25, 1, 0);
+      sim.simulate(2 * XM.FIXED);
+      const gauged = [s.eTimer[g], s.eTimer[dry]], low = kinds(s), steps = [], tops = [], rode = [];
+      let last = low, high = "";
+      while (s.time < 14.5) {
+        sim.simulate(XM.FIXED);
+        const now = kinds(s);
+        if (now !== last) { steps.push(s.time); last = now; }
+        if ([3, 6, 9, 13].some((t) => Math.abs(s.time - t) < XM.FIXED / 2)) { tops.push(s.evx[g]); rode.push(+s.ey[clerk].toFixed(4)); }
+        if (Math.abs(s.time - 9) < XM.FIXED / 2) high = now;
+      }
+      // Wading at low water, held right against the bank, and jumping: the tide sets it on the bank's height.
+      const wade = XM.create({ seed: 7, stage }), d = wade.state;
+      wade.simulate(XM.FIXED); d.pInvincible[0] = 1e9; d.px[0] = 3.25; d.py[0] = 1; d.pPose[0] = XM.POSE.WATER;
+      wade.simulate(0.5); tap(wade, IN.JUMP); wade.simulate(0.2);
+      const waded = { y: d.py[0], pose: d.pPose[0] };
+      wade.setInput(IN.RIGHT);
+      let out = -1;
+      while (d.time < 14 && out < 0) { wade.simulate(XM.FIXED); if (d.px[0] > 5.5 + R.BOX[XM.POSE.STAND][0] && d.py[0] === 2 && d.pPose[0] === XM.POSE.STAND) out = +d.time.toFixed(3); }
+      // From the raft at low water a jump right reaches the bank.
+      const raft = XM.create({ seed: 7, stage }), r = raft.state;
+      raft.simulate(XM.FIXED); r.pInvincible[0] = 1e9; r.px[0] = 5.25; r.py[0] = 1; raft.simulate(0.5);
+      const onRaft = { y: r.py[0], pose: r.pPose[0] };
+      raft.setInput(IN.RIGHT | IN.JUMP); raft.simulate(XM.FIXED); raft.setInput(IN.RIGHT); raft.simulate(1); raft.setInput(0);
+      const leapt = { x: r.px[0], y: r.py[0], pose: r.pPose[0], t: +r.time.toFixed(3) };
+      // A stage ledge in a basin's rows over its low row is refused: the tide lifts a body only out of its own water, so a
+      // ledge there would hold one under it while the water rose past.
+      const shelf = sided(XS, "shelf", [...Array(8).fill("................"), ...Array(2).fill("#####......#####"), "#####.===..#####", "#####......#####",
+        "#####~~~~~~#####", "################"], { col: 2, row: 6 }, { tide: { basins: [[5, 10, 1, 5]], floats: [] } });
+      const shelved = XS.validate(shelf);
+      // A shell dropped into the basin bursts on the water's top, at low and at high water.
+      const shell = (t) => {
+        const l = XM.create({ seed: 7, stage }), q = l.state;
+        l.simulate(XM.FIXED); q.pInvincible[0] = 1e9; runTo(l, t);
+        l.spawn(XE.LOB, 3.25, 4, 1);
+        for (let n = 0; n < 240 && !q.eType.includes(XE.SHOT); n++) l.simulate(XM.FIXED);
+        return q.ey[q.eType.indexOf(XE.SHOT)];
+      };
+      const bursts = [shell(1), shell(9)];
+      // At high water, the run's cells against the stage's: the hash differs. Then the ledge crumbled under the Ooga and a
+      // continue: the ledge comes back whole and the basin stays at the clock's level.
+      runTo(sim, 22); s.px[0] = 6.75; s.py[0] = 3.5; s.pPose[0] = XM.POSE.STAND;
+      until(sim, () => s.crumblePhase[0] === XM.CRUMBLE.GONE, 2);
+      const watered = sim.hash(), kept = s.cells.slice();
+      s.cells.set(stage.cells); const plain = sim.hash(); s.cells.set(kept);
+      const before = { basin: kinds(s), ledge: s.cells[6 * stage.cols + 13], level: XM.tideLevel(basin, s.time) };
+      s.phase = XM.PHASE.OVER; sim.continueRun();
+      const continued = { basin: kinds(s), ledge: s.cells[6 * stage.cols + 13], level: XM.tideLevel(basin, s.time) };
+      const bad = XS.validate(pool(undefined, {
+        basins: [[5, 7, 1, 3], [7, 10, 1, 3], [1, 2, 3], [10, 20, 1, 3], [8, 10, 3, 3], [0, 2, 1, 3], [8, 10, 1, 3], [12, 13, 1, 3]], floats: [[5], [14, 15]]
+      }, { lifts: [[9, 2, 4, 8, 1, 1]] }));
+      const solid = XS.validate(pool("#####..#...#####"));
+      const W = `${K.WATER}`, L = `${K.LEDGE}`, O = `${K.EMPTY}`;
+      return {
+        ok: XS.validate(stage).length === 0 && Object.isFrozen(stage.tide) && Object.isFrozen(stage.tide.basins) && basin.join() === "5,10,1,3" && stage.tide.floats[0].join() === "9,10" &&
+          levels.join() === "1,1,1,2,2,3,3,2,2,1" && phases.join() === [XM.TIDE.LOW, XM.TIDE.RISE, XM.TIDE.HIGH, XM.TIDE.FALL, XM.TIDE.LOW].join() &&
+          low === `${W}${L} ${O}${O} ${O}${O}` && high === `${W}${W} ${W}${W} ${W}${L}` && steps.length === 4 &&
+          [5.5, 7, 12.5, 14].every((t, k) => Math.abs(steps[k] - t) <= 2 * XM.FIXED + 1e-6) && tops.join() === "1,1.5,2,1.5" && rode.join() === "1,1.5,2,1.5" &&
+          gauged.join() === "0,-1" && waded.y === 1 && waded.pose === XM.POSE.WATER && out > 7 && out < 7.6 &&
+          shelved.length === 1 && /shelf: basin 0: column 6 in row 3 is a ledge/.test(shelved[0]) &&
+          onRaft.y === 1 && onRaft.pose === XM.POSE.STAND && leapt.y === 2 && leapt.x > 5.5 + R.BOX[XM.POSE.STAND][0] && leapt.pose === XM.POSE.STAND &&
+          near(bursts[0], 1.1, 1e-5) && near(bursts[1], 2.1, 1e-5) && watered !== plain &&
+          before.basin === high && before.ledge === K.EMPTY && before.level === 3 && continued.basin === high && continued.ledge === K.LEDGE && continued.level === 3 &&
+          bad.length === 9 && [/basin 1: it shares columns 7 to 7 with basin 0/, /basin 2 is not four numbers/, /basin 3: its columns 10 to 20/, /basin 4: its low row 3 is not under its high row 3/,
+            /basin 5: column 0 in its low row 1 is no water/, /basin 6: it shares columns 9 to 10 with the lift at column 9/, /basin 7: .*with the crumbling span over columns 12 to 14/,
+            /float 0 is not two numbers/, /float 1: its columns 14 to 15 lie in no basin's columns/].every((re) => bad.some((e) => re.test(e))) &&
+          solid.length === 1 && /basin 0: column 7 in row 3 is solid/.test(solid[0]),
+        detail: JSON.stringify({ levels, phases, low, high, steps, tops, rode, gauged, waded, out, onRaft, leapt, shelved, bursts, hashes: [watered, plain], before, continued, bad, solid })
+      };
+    });
+
+    feature("raid features: boss reserve: rule: on every side and climb stage, a boss fought for 65 s under a barrier, passively and then again driven through its later phases (its parts destroyed, its main worn down) with runners put in every half second, never has a shot it asks for dropped: in PHASE.BOSS nothing with hit points but a boss main and its parts takes a slot TUNE.BOSS_RESERVE keeps", () => {
+      // Each stage's boss record alone (the rest of its placed list left out), the camera at the lock and the Ooga dropped in
+      // on that screen with a barrier renewed every second; the sim's own count of shot-like spawns asked for and given, and
+      // the fewest free slots in PHASE.BOSS. Passively, as play has it: the edge spawner pauses at the lock, so only the boss's
+      // own releases press on the slots. Driven: from 3 s on, every 1.5 s, each part still standing is destroyed and an open
+      // boss main loses 3 hit points while it has over 9, so the volleys the reserve is sized for come (the balloon's ring,
+      // the Engine's spread, the Warden's overload); and the slots are pressed by hand, a RUNNER (which fires nothing) put in
+      // over the boss's screen every half second in PHASE.BOSS, so a reserve-less sim would crowd the shots out, and the
+      // reserve must bind (the fewest free slots at most BOSS_RESERVE).
+      const PART = (t) => TY[t] && TY[t].main !== undefined || t === E.VAULT_GUN || t === E.TETHER, fought = [];
+      for (const stage of S.STAGES) {
+        if (stage.kind === "rooms") continue;
+        let at = -1;
+        for (let k = 0; k < stage.placed.length; k += 4) if (M.BOSS_MAIN[stage.placed[k + 2]]) at = k;
+        if (at < 0) continue;
+        for (const driven of [false, true]) {
+          const sim = M.create({ seed: 3, stage: Object.assign({}, stage, { placed: stage.placed.slice(at, at + 4) }) }), s = sim.state;
+          if (stage.kind === "climb") { s.camY = s.lockY; s.py[0] = s.camY + S.SCREEN_H * S.CELL; s.px[0] = 2.25; }
+          else { s.camX = s.lockX; s.px[0] = s.camX + 1.5; s.py[0] = stage.rows * S.CELL; }
+          s.pState[0] = PS.DROP; s.pLives[0] = 99;
+          let boss = 0, least = M.ENEMY_SLOTS;
+          for (let n = 0; n < 65 * 120; n++) {
+            if (n % 120 === 0) s.pBarrier[0] = 1e9;
+            if (driven && n >= 360 && n % 180 === 0) for (let i = 0; i < M.ENEMY_SLOTS; i++) {
+              const t = s.eType[i];
+              if (t === E.FREE || s.eRoutine[i] >= M.DESTROYED[t]) continue;
+              if (PART(t)) { s.eHp[i] = 0; s.eRoutine[i] = M.DESTROYED[t]; }
+              else if (M.BOSS_MAIN[t] && !(s.eFlags[i] & M.FLAG.SHUT) && s.eHp[i] > 9) s.eHp[i] -= 3;
+            }
+            if (driven && n % 60 === 0 && s.phase === M.PHASE.BOSS) sim.spawn(E.RUNNER, (stage.kind === "climb" ? 0 : s.camX) + 0.75 + n % 7, stage.kind === "climb" ? s.camY + 6.5 : 6.5, 0);
+            sim.simulate(M.FIXED);
+            if (s.phase !== M.PHASE.BOSS) continue;
+            boss++;
+            least = Math.min(least, s.eType.filter((t) => t === E.FREE).length);
+          }
+          fought.push({ id: stage.id, driven, boss: +(boss * M.FIXED).toFixed(1), asked: sim.shots[0], given: sim.shots[1], least });
+        }
+      }
+      // Fought passively the Chairman's Engine alone fires nothing: its presses only slam until they are destroyed.
+      return {
+        ok: fought.length >= 4 && fought.every((f) => f.boss >= 60 && f.asked === f.given && (!f.driven || f.least <= M.TUNE.BOSS_RESERVE) && (f.asked > 0 || f.id === "reserve" && !f.driven)),
+        detail: JSON.stringify(fought)
+      };
+    });
+
+    feature("raid features: standTouch: rule: a type whose def is standTouch meets an Ooga with the standing touch box in every pose, so a prone Ooga under it is killed where an ordinary one passes it by, while a barrier and invincibility still spare it", () => {
+      const B = withTypes(["TEST_STOMP", "TEST_HOVER"], (BL, X) => {
+        BL.raidEnemies.register(X.TEST_STOMP, { routines: [begin, hold, gone], destroyed: 2, standTouch: true, hp: 1, tier: 0, points: 0, origin: 0.5 });
+        BL.raidEnemies.register(X.TEST_HOVER, { routines: [begin, hold, gone], destroyed: 2, hp: 1, tier: 0, points: 0, origin: 0.5 });
+      });
+      const XM = B.raidSim, XE = B.raidStages.ENEMY;
+      // The type 0.3 m over a prone Ooga's feet: inside the standing touch box, above the prone one.
+      const under = (type, guard) => {
+        const sim = XM.create({ seed: 7, stage: testStage }), s = sim.state;
+        settle(sim); s.pInvincible[0] = 0; s.pBarrier[0] = 0;
+        sim.setInput(XM.IN.DOWN); sim.simulate(0.1);
+        if (guard === "barrier") s.pBarrier[0] = 10;
+        if (guard === "invincible") s.pInvincible[0] = 10;
+        const pose = s.pPose[0];
+        sim.spawn(type, s.px[0], s.py[0] + 0.3, 0); sim.simulate(0.2);
+        return { pose, state: s.pState[0] };
+      };
+      const stomped = under(XE.TEST_STOMP), passed = under(XE.TEST_HOVER), barred = under(XE.TEST_STOMP, "barrier"), spared = under(XE.TEST_STOMP, "invincible");
+      const refused = thrown(() => withTypes(["TEST_SOFT"], (BL, X) => {
+        BL.raidEnemies.register(X.TEST_SOFT, { routines: [begin, hold, gone], destroyed: 2, standTouch: 1, hp: 1, tier: 0, points: 0, origin: 0.5 });
+      }));
+      return {
+        ok: [stomped, passed, barred, spared].every((r) => r.pose === XM.POSE.PRONE) && stomped.state === PS.DEAD && passed.state === PS.NORMAL &&
+          barred.state === PS.NORMAL && spared.state === PS.NORMAL && /standTouch 1 is not true or false/.test(refused),
+        detail: JSON.stringify({ stomped, passed, barred, spared, refused })
+      };
+    });
+
+    feature("raid features: side boss scroll: rule: once a side stage's boss is in play the camera goes on to the lock by itself at BOSS_SCROLL_V, as a climb's does, but never past TRAIL inside the trailing Ooga, alone or with a second Ooga standing behind, which is never pushed", () => {
+      const B = withTypes(["TEST_LORD"], (BL, X) => {
+        const { register, bossBreak, dieFade, release } = BL.raidEnemies;
+        const rule = (ctx, i) => { if (ctx.state.phase === ctx.PHASE.PLAY) ctx.state.phase = ctx.PHASE.BOSS; ctx.state.eRoutine[i]++; };
+        register(X.TEST_LORD, { routines: [rule, hold, bossBreak, dieFade, release], destroyed: 2, boss: true, hp: 10, tier: 3, points: 0, origin: 0 });
+      });
+      const XM = B.raidSim, XE = B.raidStages.ENEMY;
+      // An Ooga standing still at x with the camera following it (put there with it); then the boss comes, and 3 s pass.
+      const fight = (x) => {
+        const sim = XM.create({ seed: 7, stage: testStage }), s = sim.state;
+        settle(sim); s.pInvincible[0] = 1e9; s.camX = Math.max(0, x - 4); s.px[0] = x; sim.simulate(0.5);
+        const before = s.camX;
+        sim.spawn(XE.TEST_LORD, 14, 1.5, 0);
+        let fastest = 0, last = s.camX;
+        for (let n = 0; n < 360; n++) { sim.simulate(XM.FIXED); fastest = Math.max(fastest, s.camX - last); last = s.camX; }
+        return { before: +before.toFixed(4), after: +s.camX.toFixed(4), lock: s.lockX, px: +s.px[0].toFixed(4), fastest: +(fastest / XM.FIXED).toFixed(4), phase: s.phase };
+      };
+      const near = fight(9.5), far = fight(6);
+      // Two players: the leader past the lock, the other standing well behind; the camera stops TRAIL inside the trailing
+      // Ooga, which is never pushed.
+      const pair = XM.create({ seed: 7, stage: testStage, players: 2 }), q = pair.state;
+      for (let n = 0; n < 240; n++) pair.simulate(XM.FIXED);
+      q.camX = 2; q.px[0] = 9.5; q.px[1] = 4.4; q.py[0] = q.py[1] = 1.5; q.pvy.fill(0); q.pState.fill(PS.NORMAL); q.pInvincible.fill(1e9);
+      pair.spawn(XE.TEST_LORD, 14, 1.5, 0);
+      for (let n = 0; n < 360; n++) pair.simulate(XM.FIXED);
+      const two = { camX: +q.camX.toFixed(4), trail: +q.px[1].toFixed(4), lead: +q.px[0].toFixed(4), phase: q.phase };
+      return {
+        ok: near.phase === XM.PHASE.BOSS && near.before < near.lock && near.after === near.lock && Math.abs(near.fastest - XM.TUNE.BOSS_SCROLL_V) < 1e-3 &&
+          far.phase === XM.PHASE.BOSS && far.before < far.px - XM.TUNE.TRAIL - 1 && Math.abs(far.after - (far.px - XM.TUNE.TRAIL)) < 1e-3 && far.fastest <= XM.TUNE.BOSS_SCROLL_V + 1e-3 &&
+          two.phase === XM.PHASE.BOSS && two.trail === 4.4 && Math.abs(two.camX - (two.trail - XM.TUNE.TRAIL)) < 1e-3,
+        detail: JSON.stringify({ near, far, two })
+      };
+    });
+
+    feature("raid features: boss lock pauses the spawner: rule: the edge spawner sends runners while a side stage is played and while its boss's screen scrolls in, and none once the lock holds, through 60 s on a perch under a barrier", () => {
+      const B = withTypes(["TEST_LORD2"], (BL, X) => {
+        const { register, bossBreak, dieFade, release } = BL.raidEnemies;
+        const rule = (ctx, i) => { if (ctx.state.phase === ctx.PHASE.PLAY) ctx.state.phase = ctx.PHASE.BOSS; ctx.state.eRoutine[i]++; };
+        register(X.TEST_LORD2, { routines: [rule, hold, bossBreak, dieFade, release], destroyed: 2, boss: true, hp: 10, tier: 3, points: 0, origin: 0 });
+      });
+      const XM = B.raidSim, XS = B.raidStages, XE = XS.ENEMY;
+      // The test stage with an edge spawner every half second; the Ooga on the ledge at 10.25 m (row 4, its top 2.5 m).
+      const stage = XS.parse({ id: "test-spawn", name: "Test", rows: TEST_ROWS, start: { col: 2, row: 12 }, lockScreen: 1, spawner: { base: 60 }, placed: [] });
+      const sim = XM.create({ seed: 7, stage }), s = sim.state, seen = new Uint8Array(XM.ENEMY_SLOTS);
+      settle(sim); s.camX = 6.25; s.px[0] = 10.25; s.py[0] = 2.5; s.pvy[0] = 0;
+      const count = { play: 0, scroll: 0, locked: 0 };
+      let lockedAt = -1;
+      const run = (seconds, phase) => {
+        for (let n = 0; n < seconds / XM.FIXED; n++) {
+          if (n % 120 === 0) { s.pBarrier[0] = 1e9; s.pLives[0] = 9; }
+          sim.simulate(XM.FIXED);
+          for (let k = 0; k < XM.ENEMY_SLOTS; k++) {
+            const runner = s.eType[k] === XE.RUNNER && s.eRoutine[k] <= 1;
+            if (runner && !seen[k]) count[phase === "play" ? "play" : s.camX >= s.lockX ? "locked" : "scroll"]++;
+            seen[k] = runner ? 1 : 0;
+          }
+          if (lockedAt < 0 && s.phase === XM.PHASE.BOSS && s.camX >= s.lockX) lockedAt = +s.time.toFixed(3);
+        }
+      };
+      run(3, "play");
+      sim.spawn(XE.TEST_LORD2, 14, 1.5, 0);
+      run(61.5, "boss");
+      return {
+        ok: count.play > 0 && count.scroll > 0 && lockedAt > 0 && count.locked === 0 && s.phase === XM.PHASE.BOSS && s.camX === s.lockX && s.pState[0] === PS.NORMAL,
+        detail: JSON.stringify({ count, lockedAt, camX: s.camX, phase: s.phase, px: s.px[0], py: s.py[0], state: s.pState[0] })
+      };
+    });
+  }
+
+  // Two players (`players: 2`): each has its own buttons through setInput(bits, p), its own lives, score, weapon, rapid
+  // fire and invincibility, and the continues are shared. `landAll` steps until every joined Ooga has landed or is out.
+  const landAll = (sim) => until(sim, () => [0, 1].every((p) => sim.state.pState[p] === PS.NORMAL || sim.state.pState[p] === PS.OUT), 5);
+  {
+    const one = M.create({ seed: 7, stage: testStage }), sim = M.create({ seed: 7, stage: testStage, players: 2 }), s = sim.state;
+    const joined = { one: [one.state.pState[0], one.state.pState[1]], two: [s.pState[0], s.pState[1]], players: s.players };
+    landAll(sim);
+    const landed = { states: [s.pState[0], s.pState[1]], invincible: [s.pInvincible[0], s.pInvincible[1]] };
+    // Player 0 runs right while player 1 jumps where it stands.
+    const x0 = [s.px[0], s.px[1]], floor = s.py[1];
+    let top = floor;
+    sim.setInput(M.IN.RIGHT, 0); sim.setInput(M.IN.JUMP, 1);
+    for (let i = 0; i < 60; i++) { sim.simulate(M.FIXED); top = Math.max(top, s.py[1]); }
+    const moved = { ran: s.px[0] - x0[0], still: s.px[1] - x0[1], rose: top - floor, stood: s.py[0] - floor };
+    sim.setInput(0, 0); sim.setInput(0, 1); sim.simulate(1);
+    // One press each on the same step: player 0's rifle forward, player 1's fan back the other way.
+    s.pWeapon[1] = M.WEAPON.FAN;
+    sim.setInput(M.IN.FIRE, 0); sim.setInput(M.IN.LEFT | M.IN.FIRE, 1); sim.simulate(M.FIXED);
+    const shots = [0, 1].map((p) => { let n = 0, way = 0; for (let b = 0; b < M.BULLETS; b++) if (s.bLive[b] && s.bOwner[b] === p) { n++; way += Math.sign(s.bvx[b]); } return { n, way }; });
+    sim.setInput(0, 0); sim.setInput(0, 1);
+    sim.award(500, 1);
+    // Both on the fan, from no shots up, two presses each: each holds its weapon's own cap, the rule sheet's per player.
+    const field = Uint8Array.from(s.bLive);
+    s.bLive.fill(0); s.pWeapon[0] = s.pWeapon[1] = M.WEAPON.FAN;
+    for (const bits of [0, M.IN.FIRE, 0, M.IN.FIRE]) { sim.setInput(bits, 0); sim.setInput(bits, 1); sim.simulate(M.FIXED); }
+    const fans = [0, 1].map((p) => { let n = 0; for (let b = 0; b < M.BULLETS; b++) if (s.bLive[b] && s.bOwner[b] === p) n++; return n; });
+    sim.setInput(0, 0); sim.setInput(0, 1); s.bLive.set(field); s.pWeapon[0] = M.WEAPON.RIFLE;
+    const want = M.TUNE.JUMP_V * M.TUNE.JUMP_V / (2 * M.TUNE.GRAVITY);
+    record("raid players: two players drop in and act independently, each on its own buttons, with its own weapon, shots and score, and each on the fan holds its own cap of shots",
+      joined.one[0] === PS.DROP && joined.one[1] === PS.OUT && joined.two.every((v) => v === PS.DROP) && joined.players === 2 &&
+        landed.states.every((v) => v === PS.NORMAL) && landed.invincible.every((v) => v > 0) &&
+        Math.abs(moved.ran - 0.5 * M.TUNE.RUN) < 0.05 && moved.still === 0 && Math.abs(moved.rose - want) < 0.05 && moved.stood === 0 &&
+        shots[0].n === 1 && shots[0].way === 1 && shots[1].n === R.FAN_PER_SHOT && shots[1].way === -R.FAN_PER_SHOT &&
+        s.pWeapon[0] === M.WEAPON.RIFLE && s.pScore[0] === 0 && s.pScore[1] === 500 && fans[0] === R.CAPS[M.WEAPON.FAN] && fans[1] === R.CAPS[M.WEAPON.FAN],
+      JSON.stringify({ joined, landed, moved, shots, fans, weapons: [s.pWeapon[0], s.pWeapon[1]], scores: [s.pScore[0], s.pScore[1]] }));
+  }
+  {
+    // Review focus 1. Side: player 1 stands at the start, playing (it holds up, aiming, so it is no idle player: see the
+    // next check), while player 0 runs right; the screen scrolls only as far as leaves player 1 TRAIL inside its left
+    // edge, and player 0 waits at the right edge. Player 1 walks back to the left edge: nothing scrolls. Both run: the
+    // screen goes on.
+    const sim = M.create({ seed: 7, stage: testStage, players: 2 }), s = sim.state, TRAIL = M.TUNE.TRAIL;
+    landAll(sim);
+    let closest = Infinity, down = false, past = false;
+    const watch = (b0, b1, steps) => {
+      sim.setInput(b0, 0); sim.setInput(b1, 1);
+      for (let i = 0; i < steps; i++) {
+        const cam = s.camX;
+        sim.simulate(M.FIXED);
+        if (s.camX > cam) closest = Math.min(closest, s.px[1] - s.camX);
+        if (s.pState[0] !== PS.NORMAL || s.pState[1] !== PS.NORMAL || s.px[1] < s.camX - 1e-5) down = true;   // x is stored as Float32
+        if (s.px[0] > s.camX + SCREEN + 1e-5) past = true;
+      }
+    };
+    watch(M.IN.RIGHT, M.IN.UP, 600);
+    const held = { camX: s.camX, px0: s.px[0], px1: s.px[1], edge: s.camX + SCREEN };
+    watch(M.IN.RIGHT, M.IN.LEFT, 120);
+    const atEdge = { camX: s.camX, px1: s.px[1] };
+    watch(M.IN.RIGHT, M.IN.RIGHT, 60);
+    const after = { camX: s.camX, px1: s.px[1] };
+    const side = { held, atEdge, after, closest, down, past };
+    const sideOk = !down && !past && closest >= TRAIL - 1e-5 && held.camX > 0 && Math.abs(held.camX - (held.px1 - TRAIL)) < 1e-5 && Math.abs(held.px0 - held.edge) < 1e-5 &&
+      atEdge.camX === held.camX && atEdge.px1 - atEdge.camX < TRAIL && after.camX > atEdge.camX && Math.abs(after.camX - (after.px1 - TRAIL)) < 1e-5;
+    // Climb: player 1 stands on the floor, playing (holding up), while `climber` takes player 0 up the scaffold. The screen
+    // rises only as far as leaves player 1 TRAIL over its bottom (the kill line), and player 0's head never passes the
+    // screen's top.
+    const up = M.create({ seed: 7, stage: C, players: 2 }), u = up.state, steer = climber(up), head = R.BOX[M.POSE.JUMP][1];
+    landAll(up);
+    up.setInput(M.IN.UP, 1);
+    let lowest = Infinity, above = false, fell = false, maxCam = 0, highest = 0;
+    for (let i = 0; i < 120 * 20; i++) {
+      u.pInvincible[1] = 1e9;
+      steer();
+      const cam = u.camY;
+      up.simulate(M.FIXED);
+      if (u.camY > cam) lowest = Math.min(lowest, u.py[1] - u.camY);
+      if (u.pState[0] === PS.NORMAL && u.py[0] + head > u.camY + SCREEN_Y + 1e-5) above = true;
+      if (u.pState[0] !== PS.NORMAL || u.pState[1] !== PS.NORMAL) fell = true;
+      maxCam = Math.max(maxCam, u.camY); highest = Math.max(highest, u.py[0]);
+    }
+    const climb = { lowest, above, fell, maxCam, highest, floor: u.py[1] };
+    const climbOk = !fell && !above && lowest >= TRAIL - 1e-5 && maxCam > 0 && Math.abs(maxCam - (u.py[1] - TRAIL)) < 1e-5 && highest > u.py[1] + SCREEN_Y / 2;
+    record("raid players: the leading Ooga waits at the screen's edge rather than scroll the trailing one off it, on a side stage and up a climb",
+      sideOk && climbOk, JSON.stringify({ side, climb }));
+  }
+  {
+    // An idle player never holds the screen (TUNE.IDLE: one who has pressed nothing for that long, or nothing since the run
+    // began). Side: player 1 never presses while player 0 runs right: the screen scrolls on past where player 1 would hold
+    // it, and as it nears player 1 that Ooga drops in as a respawn does, a cell to four behind player 0, and lands with the
+    // respawn blink; it is never left off the screen, and while it drops the Legion still fires (attack 1). One who pressed
+    // up and then nothing holds the screen for TUNE.IDLE s, then the screen goes on. Climb: player 1 never presses while
+    // `climber` takes player 0 up: the screen rises past player 1's floor and player 1 is carried, never under the kill
+    // line. The idle timer is hashed with two players, never with one, and a campaign's hand-over keeps it.
+    const IDLE = M.TUNE.IDLE, TRAIL = M.TUNE.TRAIL;
+    const side = M.create({ seed: 7, stage: testStage, players: 2 }), s = side.state;
+    landAll(side);
+    side.simulate(2.2);   // player 0's landing blink runs out
+    const from1 = s.px[1];
+    let carries = 0, behind = true, firing = true, lost = false, blink = true, was = s.pState[1];
+    side.setInput(M.IN.RIGHT, 0);
+    for (let i = 0; i < 1200 && s.px[0] < 10; i++) {
+      side.simulate(M.FIXED);
+      const now = s.pState[1];
+      if (now === PS.DROP && was !== PS.DROP) { carries++; const d = s.px[0] - s.px[1]; if (d < S.CELL - 1e-5 || d > 4 * S.CELL + 1e-5) behind = false; }
+      if (now === PS.NORMAL && was === PS.DROP && Math.abs(s.pInvincible[1] - R.RESPAWN_INVINCIBLE) > 2 * M.FIXED) blink = false;
+      if (now === PS.DROP && s.pInvincible[0] === 0 && s.attack !== 1) firing = false;
+      if (now === PS.NORMAL && s.px[1] < s.camX - 1e-5 || now === PS.DEAD || now === PS.OUT) lost = true;
+      was = now;
+    }
+    const ran = { camX: s.camX, px: [s.px[0], s.px[1]], from1, carries, behind, blink, firing, lost };
+    // Up held a moment, then nothing: the screen waits TUNE.IDLE s from the release before it goes on.
+    const late = M.create({ seed: 7, stage: testStage, players: 2 }), l = late.state;
+    landAll(late);
+    late.setInput(M.IN.UP, 1); late.simulate(0.1); late.setInput(0, 1);
+    const limit = l.px[1] - TRAIL;
+    late.setInput(M.IN.RIGHT, 0);
+    let steps = 0;
+    while (steps < 8 / M.FIXED && l.camX <= limit + 1e-5) { late.simulate(M.FIXED); steps++; }
+    const waited = { seconds: steps * M.FIXED, camX: l.camX, limit };
+    // Climb.
+    const up = M.create({ seed: 7, stage: C, players: 2 }), u = up.state, steer = climber(up);
+    landAll(up);
+    const floor1 = u.py[1];
+    let climbCarries = 0, fell = false, maxCam = 0, before = u.pState[1];
+    for (let i = 0; i < 120 * 20; i++) {
+      u.pBarrier[1] = 1e9;
+      steer();
+      up.simulate(M.FIXED);
+      const now = u.pState[1];
+      if (now === PS.DROP && before !== PS.DROP) climbCarries++;
+      if (now === PS.DEAD || now === PS.OUT) fell = true;
+      before = now; maxCam = Math.max(maxCam, u.camY);
+    }
+    const climbed = { maxCam, floor1, carries: climbCarries, fell };
+    // The hash, and the hand-over: player 0 holds up through a cleared stage, player 1 never presses.
+    const h0 = side.hash(); s.pIdle[1] = 1; const h1 = side.hash(); s.pIdle[1] = IDLE;
+    const solo = M.create({ seed: 7, stage: testStage }), g0 = solo.hash(); solo.state.pIdle[0] = 1;
+    const hashed = { pair: h0 !== h1, solo: g0 === solo.hash() };
+    const camp = context.window.BL.raidCampaign.create({ seed: 7, players: 2, stages: [testStage, C] }), old = camp.sim;
+    camp.setInput(M.IN.UP, 0); camp.simulate(0.5); camp.setInput(0, 0);
+    old.state.phase = M.PHASE.CLEAR; camp.simulate(M.FIXED);
+    const kept = Array.from(old.state.pIdle);
+    while (camp.sim === old && camp.state.phase !== "end") camp.simulate(M.FIXED);
+    const handed = { kept, next: Array.from(camp.sim.state.pIdle) };
+    record("raid players: an idle player (nothing pressed for TUNE.IDLE s, or since the run began) never holds the screen: on a side stage and up a climb it is carried along, dropping in a cell to four behind the leader with the respawn blink and the Legion still firing; one who pressed holds the screen for TUNE.IDLE s; the idle timer is hashed with two players only and kept across a hand-over",
+      ran.camX > from1 + 2 && carries >= 1 && behind && blink && firing && !lost &&
+        Math.abs(waited.seconds - IDLE) <= 2 * M.FIXED && waited.camX > limit &&
+        maxCam > floor1 + 1 && climbCarries >= 1 && !fell && hashed.pair && hashed.solo &&
+        handed.kept[0] < IDLE && handed.kept[1] === IDLE && handed.next.join() === handed.kept.join(),
+      JSON.stringify({ ran, waited, climbed, hashed, handed }));
+  }
+  let outRun = null;
+  {
+    // Review focus 2, on one screen over a pit (the drop column over the pit, ground on the right). Player 1 walks into the
+    // pit until it is out; player 0 plays on through that, and through a death of its own, with player 1 still out; the
+    // run is over only when player 0 is out too.
+    const PIT_ROWS = Array.from({ length: S.SCREEN_H }, (_, i) => i < S.SCREEN_H - 3 ? "................" : "........########");
+    const pit = S.parse({ id: "pit2", name: "Pit", rows: PIT_ROWS, start: { col: 12, row: 3 }, lockScreen: 0, spawner: { base: 0 }, placed: [] });
+    const sim = M.create({ seed: 7, stage: pit, players: 2 }), s = sim.state;
+    const land = (p) => until(sim, () => s.pState[p] === PS.NORMAL || s.pState[p] === PS.OUT, 5);
+    const fall = (p) => { sim.setInput(M.IN.LEFT, p); until(sim, () => s.pState[p] === PS.DEAD, 30); sim.setInput(0, p); until(sim, () => s.pState[p] !== PS.DEAD, 3); };
+    const outOf = (p) => { let deaths = 0; while (s.pState[p] !== PS.OUT && deaths < 9) { land(p); fall(p); deaths++; } return deaths; };
+    landAll(sim);
+    sim.award(1000, 0); sim.award(2000, 1);
+    let rejoined = false;
+    const deaths1 = outOf(1);
+    const first = { deaths: deaths1, phase: s.phase, states: [s.pState[0], s.pState[1]], lives: [s.pLives[0], s.pLives[1]], continues: s.continues };
+    const x0 = s.px[0];
+    sim.setInput(M.IN.RIGHT, 0);
+    for (let i = 0; i < 120; i++) { sim.simulate(M.FIXED); if (s.pState[1] !== PS.OUT) rejoined = true; }
+    const played = { moved: s.px[0] - x0, phase: s.phase };
+    sim.setInput(0, 0);
+    fall(0);
+    land(0);
+    const second = { phase: s.phase, states: [s.pState[0], s.pState[1]], lives0: s.pLives[0] };
+    for (let i = 0; i < 240; i++) { sim.simulate(M.FIXED); if (s.pState[1] !== PS.OUT) rejoined = true; }
+    const deaths0 = 1 + outOf(0);
+    const over = { deaths: deaths0, phase: s.phase, states: [s.pState[0], s.pState[1]], continues: s.continues };
+    record("raid players: a player out of lives stays out while the other plays on and dies and drops back in; the run is over only when both are out",
+      first.deaths === R.LIVES + 1 && first.phase === M.PHASE.PLAY && first.states[0] === PS.NORMAL && first.states[1] === PS.OUT && first.lives[0] === R.LIVES && first.continues === R.CONTINUES &&
+        played.moved > 0.5 && played.phase === M.PHASE.PLAY && second.phase === M.PHASE.PLAY && second.states[0] === PS.NORMAL && second.states[1] === PS.OUT && second.lives0 === R.LIVES - 1 &&
+        !rejoined && over.deaths === R.LIVES + 1 && over.phase === M.PHASE.OVER && over.states.every((v) => v === PS.OUT) && over.continues === R.CONTINUES,
+      JSON.stringify({ first, played, second, rejoined, over }));
+    outRun = sim;
+  }
+  {
+    // From that game over, a continue: both Oogas drop back in with their lives, next extra life and score back at their
+    // start, and one continue is spent between them.
+    const sim = outRun, s = sim.state;
+    s.pNextLife[0] = R.EXTRA_FIRST + R.EXTRA_STEP; s.pNextLife[1] = R.EXTRA_FIRST + 2 * R.EXTRA_STEP;
+    sim.continueRun();
+    const restarted = { phase: s.phase, states: [s.pState[0], s.pState[1]], continues: s.continues };
+    landAll(sim);
+    const restored = [0, 1].map((p) => ({ state: s.pState[p], lives: s.pLives[p], next: s.pNextLife[p], score: s.pScore[p], weapon: s.pWeapon[p], invincible: s.pInvincible[p] > 0 }));
+    record("raid players: with both out a continue restores both, each with its lives, next extra life and score at their start, dropping back in, for one shared continue",
+      restarted.phase === M.PHASE.PLAY && restarted.states.every((v) => v === PS.DROP) && restarted.continues === R.CONTINUES - 1 &&
+        restored.every((r) => r.state === PS.NORMAL && r.lives === R.LIVES && r.next === R.EXTRA_FIRST && r.score === 0 && r.weapon === M.WEAPON.RIFLE && r.invincible),
+      JSON.stringify({ restarted, restored }));
+  }
+  {
+    // Rooms: both walk the front line. Player 0 clears the room's cores while player 1 waits at the right end; then up
+    // held alone by player 1 alone walks it forward through the open barrier, and both go on into the next room where they
+    // stood.
+    const sim = M.create({ seed: 7, stage: RM, players: 2 }), s = sim.state;
+    landAll(sim);
+    s.pInvincible[0] = s.pInvincible[1] = 1e9;
+    sim.setInput(M.IN.RIGHT, 1); sim.setInput(M.IN.LEFT, 0); sim.simulate(4); sim.setInput(0, 1); sim.setInput(0, 0); sim.simulate(M.FIXED);
+    const line = { px: [s.px[0], s.px[1]], py: [s.py[0], s.py[1]] };
+    clearRoom(sim);
+    const opened = s.roomPhase;
+    const stood = [s.px[0], s.px[1]];
+    let held = 0;
+    sim.setInput(M.IN.UP, 1);
+    while (held < 240 && s.roomPhase !== RP.ADVANCE) { sim.simulate(M.FIXED); held++; }
+    sim.setInput(0, 1);
+    until(sim, () => s.room === 1, 3);
+    const next = { room: s.room, phase: s.roomPhase, px: [s.px[0], s.px[1]], states: [s.pState[0], s.pState[1]] };
+    record("raid players: in a room both Oogas walk the front line, and either one walking forward through the open barrier takes both into the next room where they stood",
+      line.px[0] === V.FRONT_L && line.px[1] === V.FRONT_R && line.py.every((y) => y === 0) && opened === RP.OPEN &&
+        Math.abs(held - M.TUNE.ROOM_STEP_IN / M.FIXED) <= 1 && next.room === 1 && next.phase === RP.FIGHT && next.px[0] === stood[0] && next.px[1] === stood[1] && next.states.every((v) => v === PS.NORMAL),
+      JSON.stringify({ line, opened, stood, held, next }));
+  }
+  {
+    // Carry: what a sim hands on (`carry()`) seeds a new stage's sim exactly: score, lives, next extra life, weapon, rapid
+    // fire and continues, each Ooga dropping in fresh at the new stage's start, an Ooga that was out staying out, and the
+    // carried weapons shortening the spawner as weapons held do. A one-player sim hands on one player's.
+    const a = M.create({ seed: 7, stage: testStage, players: 2 }), sa = a.state;
+    landAll(a);
+    a.award(R.EXTRA_FIRST + R.EXTRA_STEP + 1234, 0); a.award(5100, 1);
+    sa.pWeapon[0] = M.WEAPON.FAN; sa.pRapid[0] = 1; sa.pWeapon[1] = M.WEAPON.BEAM; sa.continues = 1;
+    const carry = a.carry();
+    const b = M.create({ seed: 9, stage: 0, players: 2, carry }), sb = b.state, fresh = M.create({ seed: 9, stage: 0 }).state;
+    const back = b.carry(), cut = fresh.spawnTimer - sb.spawnTimer;
+    const start = { states: [sb.pState[0], sb.pState[1]], invincible: [sb.pInvincible[0], sb.pInvincible[1]], py: [sb.py[0], sb.py[1]] };
+    landAll(b);
+    const landed = { states: [sb.pState[0], sb.pState[1]], invincible: [sb.pInvincible[0], sb.pInvincible[1]], weapons: [sb.pWeapon[0], sb.pWeapon[1]], rapid: [sb.pRapid[0], sb.pRapid[1]] };
+    const wantCut = R.SPAWN_STRENGTH_CUT * Math.max(R.STRENGTH[M.WEAPON.FAN], R.STRENGTH[M.WEAPON.BEAM]);
+    const exact = JSON.stringify(back) === JSON.stringify(carry) &&
+      [0, 1].every((p) => carry.score[p] === sa.pScore[p] && carry.lives[p] === sa.pLives[p] && carry.nextLife[p] === sa.pNextLife[p] && carry.weapon[p] === sa.pWeapon[p] && carry.rapid[p] === sa.pRapid[p]) &&
+      carry.continues === 1 && sb.continues === 1 && carry.lives[0] === R.LIVES + 2;
+    // Player 1 out of lives at the hand-over stays out on the new stage, and hands on as out again.
+    sa.pState[1] = PS.OUT; sa.pLives[1] = 0;
+    const outCarry = a.carry(), c = M.create({ seed: 9, stage: testStage, players: 2, carry: outCarry }), sc = c.state;
+    landAll(c); c.simulate(2);
+    const kept = { carried: outCarry.out, states: [sc.pState[0], sc.pState[1]], phase: sc.phase, again: JSON.stringify(c.carry()) === JSON.stringify(outCarry) };
+    const solo = M.create({ seed: 7, stage: testStage }), soloCarry = solo.carry(), soloBack = M.create({ seed: 7, stage: testStage, carry: soloCarry }).carry();
+    record("raid players: carry hands score, lives, next extra life, weapon, rapid fire and continues on exactly, every carried Ooga dropping in fresh and one out staying out",
+      exact && start.states.every((v) => v === PS.DROP) && start.invincible.every((v) => v === 0) && start.py[0] === S.STAGES[0].start.row * S.CELL &&
+        landed.states.every((v) => v === PS.NORMAL) && landed.invincible.every((v) => Math.abs(v - R.RESPAWN_INVINCIBLE) <= 2 * M.FIXED) &&
+        landed.weapons[0] === M.WEAPON.FAN && landed.weapons[1] === M.WEAPON.BEAM && landed.rapid[0] === 1 && landed.rapid[1] === 0 && Math.abs(cut - wantCut) < 1e-9 &&
+        kept.carried.join() === "0,1" && kept.states[0] === PS.NORMAL && kept.states[1] === PS.OUT && kept.phase === M.PHASE.PLAY && kept.again &&
+        soloCarry.score.length === 1 && JSON.stringify(soloBack) === JSON.stringify(soloCarry),
+      JSON.stringify({ carry, back, start, landed, cut, wantCut, kept, soloCarry }));
+  }
+  {
+    // Pause: a paused sim's frames run nothing and bank nothing, whatever their length, and the run picks up where it was.
+    const sim = M.create({ seed: 7, stage: testStage, players: 2 }), s = sim.state;
+    landAll(sim);
+    sim.setInput(M.IN.RIGHT, 0); sim.setInput(M.IN.LEFT, 1);
+    sim.tick(1.5 * M.FIXED);
+    sim.pause(true);
+    const before = { hash: sim.hash(), time: s.time, acc: s.acc, px: [s.px[0], s.px[1]] };
+    const ticks = [sim.tick(1 / 60), sim.tick(1), sim.tick(M.FIXED)];
+    sim.simulate(1);
+    const during = { hash: sim.hash(), time: s.time, acc: s.acc, px: [s.px[0], s.px[1]], paused: s.paused };
+    sim.pause(false);
+    const ran = sim.tick(M.FIXED);
+    record("raid players: a paused sim's tick does nothing and returns 0, simulate does nothing, and unpaused it runs on from where it stood",
+      ticks.every((n) => n === 0) && during.hash === before.hash && during.time === before.time && during.acc === before.acc && during.px.join() === before.px.join() && during.paused === 1 &&
+        ran > 0 && s.time > before.time && s.px[0] > before.px[0] && s.px[1] < before.px[1] && s.paused === 0,
+      JSON.stringify({ before, ticks, during, ran, time: s.time }));
+  }
+  {
+    // Player 2 drops in beside player 1, never on the same x: at the start, where there is ground under it; in a room; and
+    // on a respawn, both walked into the pit on a one-screen pit stage. Each lands on ground.
+    const sim = M.create({ seed: 7, stage: testStage, players: 2 }), s = sim.state, start = [s.px[0], s.px[1]];
+    landAll(sim);
+    const landed = { py: [s.py[0], s.py[1]], states: [s.pState[0], s.pState[1]] };
+    const room = M.create({ seed: 7, stage: RM, players: 2 }).state, roomX = [room.px[0], room.px[1]];
+    const PIT_ROWS = Array.from({ length: S.SCREEN_H }, (_, i) => i < S.SCREEN_H - 3 ? "................" : "........########");
+    const pit = S.parse({ id: "pit3", name: "Pit", rows: PIT_ROWS, start: { col: 12, row: 3 }, lockScreen: 0, spawner: { base: 0 }, placed: [] });
+    const twin = M.create({ seed: 7, stage: pit, players: 2 }), w = twin.state, dropX = [NaN, NaN];
+    landAll(twin);
+    twin.setInput(M.IN.LEFT, 0); twin.setInput(M.IN.LEFT, 1);
+    for (let i = 0; i < 1200 && !(dropX.every((x) => !Number.isNaN(x)) && w.pState[0] === PS.NORMAL && w.pState[1] === PS.NORMAL); i++) {
+      twin.simulate(M.FIXED);
+      for (const q of [0, 1]) {
+        if (w.pState[q] === PS.DEAD) twin.setInput(0, q);
+        if (w.pState[q] === PS.DROP && Number.isNaN(dropX[q])) dropX[q] = w.px[q];
+      }
+    }
+    const respawn = { dropX, py: [w.py[0], w.py[1]], states: [w.pState[0], w.pState[1]], lives: [w.pLives[0], w.pLives[1]], camX: w.camX };
+    const apart = (a, b) => [S.CELL, 2 * S.CELL].some((d) => Math.abs(Math.abs(a - b) - d) < 1e-6);
+    record("raid players: player 2 drops in a cell or two beside player 1, at the start, in a room and on a respawn, landing on ground and never on the same x",
+      apart(start[0], start[1]) && landed.states.every((v) => v === PS.NORMAL) && landed.py[0] === landed.py[1] && apart(roomX[0], roomX[1]) &&
+        apart(dropX[0], dropX[1]) && respawn.states.every((v) => v === PS.NORMAL) && respawn.py.every((y) => y === 3 * S.CELL) && respawn.lives.every((n) => n === R.LIVES - 1) &&
+        dropX.every((x) => x >= respawn.camX && x <= respawn.camX + SCREEN),
+      JSON.stringify({ start, landed, roomX, respawn }));
+  }
+  {
+    // On a climb a clerk on the upper Ooga's ledge aims level at it, though the lower Ooga stands right under the clerk,
+    // nearer along the screen.
+    const sim = M.create({ seed: 7, stage: C, players: 2 }), s = sim.state;
+    landAll(sim);
+    s.pInvincible[0] = s.pInvincible[1] = 1e9;
+    s.px[0] = 5; s.py[0] = 1.5; s.px[1] = 6; s.py[1] = 6.5;
+    const k = sim.spawn(E.CLERK, 5, 6.5, 0);
+    sim.simulate(2 * M.FIXED);
+    const seen = { type: s.eType[k], aim: s.eAim[k], states: [s.pState[0], s.pState[1]], py: [s.py[0], s.py[1]] };
+    record("raid players: on a climb an enemy beside the upper Ooga takes it for its target, not the lower one nearer along the screen",
+      seen.type === E.CLERK && seen.aim === 0 && seen.states.every((v) => v === PS.NORMAL) && seen.py[0] === 1.5 && seen.py[1] === 6.5, JSON.stringify(seen));
+  }
+  {
+    // A hand-over spends the next life of an Ooga that is down with lives in reserve, so it never refunds a death; create
+    // refuses a carry whose continues are no finite number or whose `out` does not name every player.
+    const a = M.create({ seed: 7, stage: testStage, players: 2 }), sa = a.state;
+    landAll(a);
+    sa.pState[0] = PS.DEAD; sa.pTimer[0] = M.TUNE.DEAD; sa.pLives[0] = 2;
+    const handed = a.carry(), b = M.create({ seed: 7, stage: testStage, players: 2, carry: handed }).state;
+    const thrown = (f) => { try { f(); return ""; } catch (e) { return String(e.message); } };
+    const bad = [{ ...handed, continues: NaN }, { ...handed, continues: "3" }, { ...handed, out: undefined }, { ...handed, out: [0] }]
+      .map((carry) => thrown(() => M.create({ seed: 7, stage: testStage, players: 2, carry })));
+    record("raid players: a hand-over spends the next life of an Ooga that is down, and create refuses a carry whose continues are no number or whose out misses a player",
+      handed.lives[0] === 1 && handed.out[0] === 0 && b.pLives[0] === 1 && b.pState[0] === PS.DROP &&
+        /carry\.continues/.test(bad[0]) && /carry\.continues/.test(bad[1]) && /carry\.out/.test(bad[2]) && /carry\.out/.test(bad[3]),
+      JSON.stringify({ handed, lives: b.pLives[0], bad }));
+  }
+  {
+    // A lone Ooga at a climb's lock jumps its full height: the screen's top caps a head only while the screen can still
+    // scroll up. One screen locked at once, a ledge at 5.5 m and, past a one-cell gap, another at 6.5 m, which it reaches.
+    const sky = "................", floor = "################";
+    const rows = [sky, ".........====...", sky, "....====........", sky, sky, sky, sky, sky, sky, sky, floor, floor, floor];
+    const lockClimb = S.parse({ kind: "climb", id: "lock", name: "Lock", screens: [rows], start: { col: 5, row: 11 }, lockScreen: 0, spawner: { base: 0 }, placed: [] });
+    const sim = M.create({ seed: 7, stage: lockClimb }), s = sim.state;
+    settle(sim);
+    sim.setInput(M.IN.RIGHT); until(sim, () => s.px[0] >= 3.8, 3);
+    const from = s.py[0];
+    let peak = from;
+    sim.setInput(M.IN.RIGHT | M.IN.JUMP); sim.simulate(M.FIXED);
+    sim.setInput(M.IN.RIGHT);
+    for (let i = 0; i < 180 && (i < 3 || s.pPose[0] === M.POSE.JUMP); i++) { sim.simulate(M.FIXED); peak = Math.max(peak, s.py[0]); }
+    sim.setInput(0); sim.simulate(0.2);
+    const want = M.TUNE.JUMP_V * M.TUNE.JUMP_V / (2 * M.TUNE.GRAVITY);
+    record("raid players: a lone Ooga's jump at a climb's lock is not capped by the screen's top, so it reaches a ledge it would otherwise fall short of",
+      S.validate(lockClimb).length === 0 && from === 11 * S.CELL && Math.abs(peak - from - want) < 0.05 && s.py[0] === 13 * S.CELL && s.pState[0] === PS.NORMAL && s.camY === s.lockY,
+      JSON.stringify({ faults: S.validate(lockClimb), from, peak, rise: peak - from, want, py: s.py[0], state: s.pState[0], camY: s.camY, lockY: s.lockY }));
+  }
+  // The campaign (raid-campaign.js): the stages in order, one sim at a time, the run handed on as the finished sim's carry.
+  // A stage is cleared here by setting its sim's phase to CLEAR (the sim's own clears are checked above), except the test
+  // rooms, cleared by their cores. `clearStage` marks the clear and takes the step the campaign sees it on; `throughCard`
+  // steps until the next stage's sim takes over and returns the finished one and the steps that took.
+  const K = context.window.BL.raidCampaign, KP = K.PHASE, CAMP = [testStage, S.TEST.climb, RM];
+  const CARD_STEPS = Math.round(K.TUNE.TRANSITION / M.FIXED), ENDING_STEPS = Math.round(K.TUNE.ENDING / M.FIXED);
+  const runOf = (sim) => {
+    const s = sim.state, pick = (a) => Array.from(a.subarray(0, s.players));
+    return { score: pick(s.pScore), lives: pick(s.pLives), nextLife: pick(s.pNextLife), weapon: pick(s.pWeapon), rapid: pick(s.pRapid), continues: s.continues };
+  };
+  const landCamp = (camp) => until(camp, () => [0, 1].every((p) => camp.sim.state.pState[p] === PS.NORMAL || camp.sim.state.pState[p] === PS.OUT), 5);
+  const clearStage = (camp) => { camp.sim.state.phase = M.PHASE.CLEAR; camp.simulate(M.FIXED); };
+  const throughCard = (camp) => { const old = camp.sim; let steps = 0; while (camp.sim === old && steps < 5000) { camp.simulate(M.FIXED); steps++; } return { old, steps }; };
+  {
+    // A scripted two-player run through the three test stages and round into the second loop. Each hand-over passes score,
+    // lives, next extra life, weapon, rapid fire and the continues on exactly, the next sim's carry is the finished one's,
+    // and every Ooga drops in fresh on the next stage, its sim seeded with the finished one's dice.
+    const camp = K.create({ seed: 7, players: 2, stages: CAMP }), cs = camp.state, legs = [];
+    const handOver = (clear) => {
+      const stage = cs.stageIndex;
+      clear();
+      const phase = cs.phase, { old, steps } = throughCard(camp), ns = camp.sim.state, handed = runOf(old);
+      legs.push({
+        stage, phase, steps, next: cs.stageIndex, loops: cs.loops, simLoops: ns.loops, now: cs.phase, stageOk: camp.sim.stage === CAMP[cs.stageIndex],
+        same: JSON.stringify(runOf(camp.sim)) === JSON.stringify(handed), carried: JSON.stringify(camp.sim.carry()) === JSON.stringify(old.carry()),
+        states: [ns.pState[0], ns.pState[1]], invincible: [ns.pInvincible[0], ns.pInvincible[1]], handed, seeded: ns.randState === old.state.randState
+      });
+    };
+    const start = { phase: cs.phase, stage: cs.stageIndex, loops: cs.loops, stageOk: camp.sim.stage === CAMP[0], players: camp.sim.state.players };
+    landCamp(camp);
+    let s = camp.sim.state;
+    camp.sim.award(R.EXTRA_FIRST + 1234, 0); camp.sim.award(4200, 1);
+    s.pWeapon[0] = M.WEAPON.FAN; s.pRapid[0] = 1; s.pWeapon[1] = M.WEAPON.CORK; s.continues = R.CONTINUES - 1;
+    handOver(() => clearStage(camp));
+    landCamp(camp);
+    s = camp.sim.state;
+    camp.sim.award(R.EXTRA_STEP, 1);
+    s.pWeapon[0] = M.WEAPON.BEAM; s.pRapid[0] = 0; s.pWeapon[1] = M.WEAPON.AUTO; s.pRapid[1] = 1;
+    handOver(() => clearStage(camp));
+    landCamp(camp);
+    s = camp.sim.state;
+    s.pInvincible[0] = s.pInvincible[1] = 1e9;
+    s.continues = 1;
+    // The rooms by their cores: two rooms cleared and walked out of, then the boss room's cores, which clear the stage.
+    handOver(() => {
+      const sim = camp.sim;
+      for (let room = 0; room < RM.rooms.length - 1; room++) { clearRoom(sim); advanceRoom(sim); }
+      clearRoom(sim);
+      camp.simulate(M.FIXED);
+    });
+    const kinds = legs.map((l) => l.phase), fresh = legs.every((l) => l.states.every((v) => v === PS.DROP) && l.invincible.every((v) => v === 0));
+    record("raid campaign: a scripted run through three stages carries score, lives, weapon, rapid fire and continues exactly, and each stage starts with a fresh drop-in",
+      start.phase === KP.PLAY && start.stage === 0 && start.loops === 0 && start.stageOk && start.players === 2 && legs.length === 3 &&
+        kinds.join() === [KP.TRANSITION, KP.TRANSITION, KP.ENDING].join() && legs[0].steps === CARD_STEPS && legs[1].steps === CARD_STEPS && legs[2].steps === ENDING_STEPS &&
+        legs.map((l) => l.next).join() === "1,2,0" && legs.map((l) => l.loops).join() === "0,0,1" && legs.every((l) => l.simLoops === l.loops && l.now === KP.PLAY && l.stageOk && l.same && l.carried && l.seeded) && fresh &&
+        legs[0].handed.weapon.join() === [M.WEAPON.FAN, M.WEAPON.CORK].join() && legs[0].handed.continues === R.CONTINUES - 1 && legs[1].handed.weapon.join() === [M.WEAPON.BEAM, M.WEAPON.AUTO].join() &&
+        legs[1].handed.rapid.join() === "0,1" && legs[1].handed.lives[1] === legs[0].handed.lives[1] + 1 && legs[2].handed.continues === 1 && legs[2].handed.score[0] > legs[1].handed.score[0],
+      JSON.stringify({ start, legs }));
+  }
+  {
+    // Review focus 5. Player 1 dies in the pit and lands back in, still invincible, with a weapon picked up; then player 0
+    // dies there too, and the stage clears while it drops back in, holding a weapon picked up on the way down. The carry
+    // is taken on the step the stage clears and the cleared sim is paused under the card: nothing moves, and a point the
+    // cleared sim is given then never reaches the next stage. The run goes on exactly, and the next stage drops both in
+    // fresh: not invincible until they land, then the full time.
+    const camp = K.create({ seed: 7, players: 2, stages: CAMP }), cs = camp.state;
+    landCamp(camp);
+    const s = camp.sim.state;
+    camp.sim.award(7000, 0); camp.sim.award(3000, 1);
+    camp.setInput(M.IN.RIGHT, 0); camp.setInput(M.IN.RIGHT, 1);
+    until(camp, () => s.px[0] >= 9, 10); camp.setInput(0, 0);
+    until(camp, () => s.pState[1] === PS.DEAD, 10); camp.setInput(0, 1);
+    camp.setInput(M.IN.RIGHT, 0);
+    until(camp, () => s.pState[0] === PS.DEAD, 10); camp.setInput(0, 0);
+    until(camp, () => s.pState[1] === PS.NORMAL, 3);
+    s.pWeapon[1] = M.WEAPON.FAN; s.pRapid[1] = 1;
+    until(camp, () => s.pState[0] === PS.DROP, 3);
+    s.pWeapon[0] = M.WEAPON.AUTO; s.pRapid[0] = 1;
+    s.phase = M.PHASE.CLEAR;
+    const old = camp.sim;
+    camp.simulate(M.FIXED);
+    const cleared = { phase: cs.phase, paused: s.paused, states: [s.pState[0], s.pState[1]], invincible: s.pInvincible[1], hash: old.hash() };
+    camp.simulate(K.TUNE.TRANSITION / 2);
+    camp.pause(true); camp.pause(false);
+    const card = { phase: cs.phase, still: old.hash() === cleared.hash, paused: s.paused, wait: cs.wait };
+    old.award(500, 0);
+    until(camp, () => camp.sim !== old, 3);
+    const ns = camp.sim.state, given = camp.sim.carry(), late = old.carry().score;
+    const want = { score: [7000, 3000], lives: [R.LIVES - 1, R.LIVES - 1], nextLife: [R.EXTRA_FIRST, R.EXTRA_FIRST], weapon: [M.WEAPON.AUTO, M.WEAPON.FAN], rapid: [1, 1], out: [0, 0], continues: R.CONTINUES };
+    const next = { stage: cs.stageIndex, phase: cs.phase, states: [ns.pState[0], ns.pState[1]], invincible: [ns.pInvincible[0], ns.pInvincible[1]], py: [ns.py[0], ns.py[1]], paused: ns.paused };
+    landCamp(camp);
+    const landed = { states: [ns.pState[0], ns.pState[1]], invincible: [ns.pInvincible[0], ns.pInvincible[1]], run: runOf(camp.sim) };
+    record("raid campaign: a stage cleared mid-respawn carries lives, score, weapon, rapid fire and continues exactly as it cleared, still under the card, and the next stage starts with a fresh drop-in",
+      cleared.phase === KP.TRANSITION && cleared.paused === 1 && cleared.states[0] === PS.DROP && cleared.states[1] === PS.NORMAL && cleared.invincible > 0 &&
+        card.phase === KP.TRANSITION && card.still && card.paused === 1 && card.wait > 0 && late[0] === 7500 && JSON.stringify(given) === JSON.stringify(want) &&
+        next.stage === 1 && next.phase === KP.PLAY && next.paused === 0 && next.states.every((v) => v === PS.DROP) && next.invincible.every((v) => v === 0) && next.py.every((y) => y === S.TEST.climb.start.row * S.CELL) &&
+        landed.states.every((v) => v === PS.NORMAL) && landed.invincible.every((v) => Math.abs(v - R.RESPAWN_INVINCIBLE) <= 2 * M.FIXED) &&
+        JSON.stringify(landed.run) === JSON.stringify({ score: want.score, lives: want.lives, nextLife: want.nextLife, weapon: want.weapon, rapid: want.rapid, continues: want.continues }),
+      JSON.stringify({ cleared, card, late, given, next, landed }));
+  }
+  {
+    // The second loop. After the last stage's ending the campaign starts again at the first stage with loops 1, and the
+    // first stage's edge spawner starts shorter by the rule sheet's cut. A one-stage list goes from every clear straight to
+    // the ending and round again: loops count on past SPAWN_LOOPS_MAX while the cut stops there.
+    const spawnSide = S.parse({ id: "camp-spawn", name: "Camp Spawn", rows: TEST_ROWS, start: { col: 2, row: 12 }, lockScreen: 1, spawner: { base: 200 }, placed: [] });
+    const camp = K.create({ seed: 7, stages: [spawnSide, S.TEST.climb, RM] }), cs = camp.state, seen = [];
+    for (let i = 0; i < 3; i++) { clearStage(camp); seen.push(cs.phase, cs.stageIndex, throughCard(camp).steps); }
+    const ns = camp.sim.state, carry = camp.sim.carry();
+    const loop = {
+      stage: cs.stageIndex, loops: cs.loops, simLoops: ns.loops, phase: cs.phase, stageOk: camp.sim.stage === spawnSide, timer: ns.spawnTimer,
+      first: M.create({ seed: 1, stage: spawnSide, carry }).state.spawnTimer, second: M.create({ seed: 1, stage: spawnSide, loops: 1, carry }).state.spawnTimer
+    };
+    const one = K.create({ seed: 7, stages: [spawnSide] }), os = one.state, rounds = [];
+    for (let i = 0; i <= R.SPAWN_LOOPS_MAX; i++) { clearStage(one); const phase = os.phase, steps = throughCard(one).steps; rounds.push({ phase, steps, loops: os.loops, timer: one.sim.state.spawnTimer }); }
+    const cuts = rounds.slice(1).map((r, i) => rounds[i].timer - r.timer);
+    record("raid campaign: after the last stage's ending the loop restarts at the first stage with loops 1 and a shorter spawner, and loops count on past the cut's cap",
+      seen.join() === [KP.TRANSITION, 0, CARD_STEPS, KP.TRANSITION, 1, CARD_STEPS, KP.ENDING, 2, ENDING_STEPS].join() &&
+        loop.stage === 0 && loop.loops === 1 && loop.simLoops === 1 && loop.phase === KP.PLAY && loop.stageOk && loop.timer === loop.second && loop.first - loop.second === R.SPAWN_LOOP_CUT &&
+        rounds.every((r, i) => r.phase === KP.ENDING && r.steps === ENDING_STEPS && r.loops === i + 1) &&
+        cuts.every((c, i) => c === (i + 2 <= R.SPAWN_LOOPS_MAX ? R.SPAWN_LOOP_CUT : 0)),
+      JSON.stringify({ seen, loop, rounds, cuts }));
+  }
+  {
+    // Game over and continues across a stage boundary. A continue spent on the first stage leaves one fewer to carry; game
+    // over on the second starts that stage again, not the first, at zero score, and its continue is carried on in turn.
+    // With none left a continue does nothing, and the run ends.
+    const PIT_ROWS = Array.from({ length: S.SCREEN_H }, (_, i) => i < S.SCREEN_H - 3 ? "................" : "........########");
+    const pitSide = S.parse({ id: "camp-pit", name: "Camp Pit", rows: PIT_ROWS, start: { col: 12, row: 3 }, lockScreen: 0, spawner: { base: 0 }, placed: [] });
+    const gameOver = (camp, bits) => {
+      for (let d = 0; d < 9 && camp.state.phase !== KP.OVER; d++) {
+        landCamp(camp); camp.setInput(bits);
+        until(camp, () => camp.sim.state.pState[0] === PS.DEAD, 30); camp.setInput(0);
+        until(camp, () => camp.sim.state.pState[0] !== PS.DEAD, 3);
+      }
+      return camp.state.phase;
+    };
+    const camp = K.create({ seed: 7, stages: [testStage, pitSide, RM] }), cs = camp.state;
+    const first = { phase: gameOver(camp, M.IN.RIGHT), stage: cs.stageIndex, continues: camp.sim.state.continues };
+    camp.continueRun();
+    const resumed = { phase: cs.phase, stage: cs.stageIndex, continues: camp.sim.state.continues, score: camp.sim.state.pScore[0] };
+    landCamp(camp); camp.sim.award(2500, 0);
+    clearStage(camp); throughCard(camp);
+    const second = { stage: cs.stageIndex, run: runOf(camp.sim) };
+    const pitSim = camp.sim;
+    const over = { phase: gameOver(camp, M.IN.LEFT), stage: cs.stageIndex };
+    camp.continueRun();
+    const again = { phase: cs.phase, stage: cs.stageIndex, same: camp.sim === pitSim, stageOk: camp.sim.stage === pitSide, run: runOf(camp.sim), state: camp.sim.state.pState[0] };
+    landCamp(camp); camp.sim.award(800, 0);
+    clearStage(camp); throughCard(camp);
+    const third = { stage: cs.stageIndex, run: runOf(camp.sim) };
+    const solo = K.create({ seed: 7, stages: [pitSide] }), ss = solo.state;
+    solo.endRun();
+    const playing = ss.phase;
+    for (let i = 0; i < R.CONTINUES; i++) { gameOver(solo, M.IN.LEFT); solo.continueRun(); }
+    const lastOver = gameOver(solo, M.IN.LEFT);
+    solo.continueRun();
+    const refused = { phase: ss.phase, continues: solo.sim.state.continues };
+    solo.endRun();
+    const ended = ss.phase;
+    solo.simulate(1);
+    record("raid campaign: game over and continues work across a stage boundary: a continue restarts the current stage and the continues left are carried on",
+      first.phase === KP.OVER && first.stage === 0 && first.continues === R.CONTINUES &&
+        resumed.phase === KP.PLAY && resumed.stage === 0 && resumed.continues === R.CONTINUES - 1 && resumed.score === 0 &&
+        second.stage === 1 && second.run.continues === R.CONTINUES - 1 && second.run.score[0] === 2500 &&
+        over.phase === KP.OVER && over.stage === 1 &&
+        again.phase === KP.PLAY && again.stage === 1 && again.same && again.stageOk && again.state === PS.DROP && again.run.continues === R.CONTINUES - 2 && again.run.score[0] === 0 && again.run.lives[0] === R.LIVES &&
+        third.stage === 2 && third.run.continues === R.CONTINUES - 2 && third.run.score[0] === 800 &&
+        playing === KP.PLAY && lastOver === KP.OVER && refused.phase === KP.OVER && refused.continues === 0 && ended === KP.END && ss.phase === KP.END,
+      JSON.stringify({ first, resumed, second, over, again, third, playing, lastOver, refused, ended }));
+  }
+  {
+    // Allocation. Over the real sim, the campaign makes a sim and takes a carry only at a hand-over, and its state keeps
+    // its shape. Then windows of WINDOW frames (two steps a frame), each after a warm-up of 100,000 frames (20,000 for the
+    // two that run little code; a shorter one leaves the sim's code unoptimized and boxing), grow the heap by no more than
+    // noise and run no collection: the real sim on stage 1 in play, the autopilot driving it and a game over continued at
+    // once (a death, a drop-in, an item: everything a run does but leave the stage), and the real sim over; and, round the
+    // ending, a stand-in sim that allocates nothing, since there every hand-over makes a sim (the one allocation allowed,
+    // once a stage) and a real one's arrays would be most of the window. The budgets were set for windows of 100,000 frames
+    // and are scaled to WINDOW (SCALE). The real sim's play window may hold what its once-an-event code allocates before
+    // the engine optimizes it (about 0.45 bytes a step averaged, some 45 KB a window of 50,000 frames); one object a step
+    // would be 1.6 MB and several collections. Each window starts on an emptied young generation, so its own kilobytes
+    // never trigger a collection. A last window is the climb: The Hashrate Tower's sim, steered a step at a time by the
+    // autopilot under a standing barrier and started again whenever it clears, so the climb pilot (its plan, lifts, planks
+    // and gale, the boss fight) runs through the window with no collection either. Its driver passes the step's length
+    // from a constant (STEP), for the reason FRAME gives below. The climb window is read in chunks of 10,000 steps: on some
+    // seeds V8 throws the sim's optimized code away once late in a run (an `entryOpen` height that is no int32, a keyed
+    // load gone generic), and the step runs unoptimized, boxing its numbers, for one burst of tens to a few hundred
+    // kilobytes before it is optimized again; that is the engine re-tiering, not a leak. A burst is told by its signature,
+    // a chunk over 32 KB (the tower's event code, vent puffs, mortar lobs and the spawner, boxes some 0.4 to 1.4 bytes a
+    // step, 4 to 14 KB a chunk): no chunk may run a collection, at most BURSTS are bursts, and every other chunk counts
+    // toward a total under the scaled budget, against the 197 bytes a step the pilot once made.
+    // The no-collection rule assumes a young generation already grown by the checks before this one.
+    const src = {};
+    for (const name of RAID_SOURCES) src[name] = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
+    const load = (swap) => { const ctx = { window: { BL: {} } }; for (const name of RAID_SOURCES) { if (name === "raid-campaign") swap(ctx.window.BL); runInNewContext(src[name], ctx); } return ctx.window.BL; };
+    let made = 0, carried = 0;
+    const B = load((BL) => {
+      const real = BL.raidSim.create;
+      BL.raidSim = { ...BL.raidSim, create: (opts) => { made++; const sim = real(opts), carry = sim.carry; sim.carry = () => { carried++; return carry(); }; return sim; } };
+    });
+    const camp = B.raidCampaign.create({ seed: 7, stages: [testStage, B.raidStages.TEST.climb] }), shape = Object.keys(camp.state).join(), cstate = camp.state;
+    camp.setInput(M.IN.RIGHT | M.IN.FIRE);
+    for (let i = 0; i < 20 * 60; i++) camp.tick(1 / 60);
+    const played = { made, carried, phase: camp.state.phase };
+    if (camp.state.phase === B.raidCampaign.PHASE.OVER) camp.continueRun();
+    clearStage(camp); throughCard(camp);
+    for (let i = 0; i < 20 * 60; i++) camp.tick(1 / 60);
+    const real = { played, after: { made, carried }, shape: Object.keys(camp.state).join() === shape, same: camp.state === cstate };
+    const BM = B.raidSim, live = B.raidCampaign.create({ seed: 7, stages: [0] }), idle = B.raidCampaign.create({ seed: 7, stages: [0] });
+    idle.sim.state.pState.fill(BM.PSTATE.OUT); idle.simulate(BM.FIXED);
+    const stubState = { phase: M.PHASE.CLEAR, input: 0, randState: 1, pIdle: new Float32Array(2) }, stubCarry = {};
+    const stub = { state: stubState, simulate() {}, setInput() {}, pause() {}, carry: () => stubCarry, continueRun() {}, endRun() {} };
+    let stubbed = 0;
+    const T = load((BL) => { BL.raidSim = { ...BL.raidSim, create: () => { stubbed++; return stub; } }; });
+    const tower = BM.create({ seed: 7, stage: 2 }), towerState = tower.state, STEP = BM.FIXED;
+    const loop = T.raidCampaign.create({ seed: 7, stages: [0] });
+    let gcs = 0;
+    const watch = new PerformanceObserver((list) => { gcs += list.getEntries().length; });
+    watch.observe({ entryTypes: ["gc"] });
+    // The frame's length is worked out once: the drivers may run unoptimized (which tier V8 has them in depends on what ran
+    // before this check), and there `1 / 60` written in the loop makes a new heap number every frame, 16 bytes the window
+    // would count as the sim's.
+    const FRAME = 1 / 60;
+    const drive = {
+      PLAY: (n) => {
+        for (let i = 0; i < n; i++) {
+          if (live.state.phase === KP.OVER) { live.sim.state.continues = BM.RULES.CONTINUES; live.continueRun(); }
+          live.setInput(BM.autopilot(live.sim)); live.tick(FRAME);
+        }
+      },
+      OVER: (n) => { for (let i = 0; i < n; i++) { idle.setInput(i & 63); idle.tick(FRAME); } },
+      CLEAR: (n) => { for (let i = 0; i < n; i++) { loop.setInput(i & 63); loop.tick(FRAME); } },
+      CLIMB: (n) => {
+        for (let i = 0; i < 2 * n; i++) {
+          if (i % 120 === 0) towerState.pBarrier[0] = 1e9;
+          if (towerState.phase !== BM.PHASE.PLAY && towerState.phase !== BM.PHASE.BOSS) { towerState.phase = BM.PHASE.OVER; towerState.continues = BM.RULES.CONTINUES; tower.continueRun(); }
+          tower.setInput(BM.autopilot(tower)); tower.simulate(STEP);
+        }
+      }
+    };
+    const camps = { PLAY: live, OVER: idle, CLEAR: loop, CLIMB: { sim: tower, state: towerState } };
+    // Allocates until a collection has run (the heap in use drops), so the young generation starts empty. The garbage
+    // goes through a small ring, so the compiler cannot drop it and a collection frees it.
+    const ring = new Array(64);
+    const flush = () => {
+      let before = getHeapStatistics().used_heap_size;
+      for (let k = 0; k < 100000; k++) {
+        for (let i = 0; i < 256; i++) ring[i & 63] = [k, i];
+        const now = getHeapStatistics().used_heap_size;
+        if (now < before) return;
+        before = now;
+      }
+    };
+    // A forced full collection, from the flag set at run time (the suite runs without --expose-gc).
+    setFlagsFromString("--expose-gc");
+    const fullGc = runInNewContext("gc");
+    // A window's frames, and its budgets scaled from those set for 100,000 frames (the bursts allowed rounded up).
+    const WINDOW = 50000, SCALE = WINDOW / 100000, BURSTS = Math.ceil(2 * SCALE);
+    const windows = {};
+    for (const phase of ["PLAY", "OVER", "CLEAR", "CLIMB"]) {
+      // A full collection first, so the warm-up's optimized code embeds only what is alive: code V8 specialized on an object
+      // from earlier checks is thrown away when that object is collected ("embedded weak objects cleared"), and if that
+      // happened in the window's own collection the sim's code would run unoptimized, boxing every number, until it was
+      // optimized again, hundreds of kilobytes that depend on what ran before this check.
+      fullGc();
+      drive[phase](phase === "PLAY" || phase === "CLIMB" ? 100000 : 20000);   // the warm-up: shorter, the code is not yet optimized
+      flush();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const g0 = gcs, m0 = made, s0 = stubbed, t0 = camps[phase].sim.state.time, h0 = getHeapStatistics().used_heap_size, chunks = [];
+      if (phase === "CLIMB") {
+        // Chunks of 5,000 frames (10,000 steps), each one's growth kept.
+        let at = h0;
+        for (let c = 0; c < WINDOW / 5000; c++) { drive[phase](5000); const now = getHeapStatistics().used_heap_size; chunks.push(now - at); at = now; }
+      } else drive[phase](WINDOW);
+      const grew = getHeapStatistics().used_heap_size - h0;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      windows[phase] = { grew, gcs: gcs - g0, made: made - m0 + stubbed - s0, phase: camps[phase].state.phase, stepped: phase === "CLEAR" ? null : +(camps[phase].sim.state.time - t0).toFixed(3) };
+      if (phase === "CLIMB") {
+        const calm = chunks.filter((c) => c <= 32 * 1024);
+        Object.assign(windows[phase], { chunks, bursts: chunks.length - calm.length, calmGrew: calm.reduce((a, c) => a + c, 0) });
+      }
+    }
+    watch.disconnect();
+    const span = WINDOW / 60;   // the seconds of steps in a window
+    record("raid campaign: the controller allocates nothing per step: a sim is made and a carry taken only at a hand-over, and long stretches of steps grow no heap",
+      real.played.made === 1 && real.played.carried === 0 && real.after.made === 2 && real.after.carried === 1 && real.shape && real.same &&
+        Object.values(windows).every((w) => w.gcs === 0) && windows.PLAY.grew < 192 * 1024 * SCALE && windows.OVER.grew < 64 * 1024 * SCALE && windows.CLEAR.grew < 64 * 1024 * SCALE &&
+        windows.PLAY.made === 0 && windows.OVER.made === 0 && windows.CLEAR.made > 0 && Math.abs(windows.PLAY.stepped - span) < 0.01 && Math.abs(windows.OVER.stepped - span) < 0.01 &&
+        windows.PLAY.phase !== KP.TRANSITION && windows.PLAY.phase !== KP.ENDING && windows.OVER.phase === KP.OVER && windows.CLEAR.phase === KP.ENDING &&
+        windows.CLIMB.bursts <= BURSTS && windows.CLIMB.calmGrew < 192 * 1024 * SCALE && windows.CLIMB.made === 0 && Math.abs(windows.CLIMB.stepped - span) < 0.01,
+      JSON.stringify({ real, windows }));
+  }
+  {
+    // Terrain for the tower (the stage specs' F9 gusts, F10 lifts and F11 crumbling ledges), on small stages made here:
+    // `block` is one screen, top row first, from the rows it names (the rest open air), and `runTo` steps the sim until
+    // its clock reaches t. These run after the campaign's allocation check, which measures the shared sim code warmed by
+    // stage 1 alone; a check that throws records its failure.
+    const feature = (name, f) => {
+      let r;
+      try { r = f(); } catch (e) { r = { ok: false, detail: String(e && e.stack || e) }; }
+      record(name, r.ok, r.detail);
+    };
+    const SKY = "................", FLOOR = "################", T = M.TUNE;
+    const block = (lines) => { const out = Array(S.SCREEN_H).fill(SKY); for (const row of Object.keys(lines)) out[S.SCREEN_H - 1 - row] = lines[row]; return out; };
+    const climbOf = (id, screens, start, extra = {}) => S.parse({ kind: "climb", id, name: id, screens, start, lockScreen: screens.length - 1, spawner: { base: 0 }, placed: [], ...extra });
+    const runTo = (sim, t) => { while (sim.state.time < t - M.FIXED / 2) sim.simulate(M.FIXED); };
+    const near = (a, b, within = 0.02) => Math.abs(a - b) < within;
+
+    feature("raid terrain: F9: a gust zone pushes each Ooga in it, standing or in the air, at GUST_V along x through the wall test while the stage clock's cycle blows (calm, then a warning that pushes nothing, then the blow), dir 0 blowing left then right each cycle; by columns on a side stage and rows on a climb, enemies unpushed, and validation names a broken zone", () => {
+      const period = T.GUST_CALM + T.GUST_WARN + T.GUST_BLOW, calm = T.GUST_CALM + T.GUST_WARN, push = T.GUST_V * T.GUST_BLOW;
+      const ground = block({ 0: FLOOR, 1: FLOOR, 2: FLOOR });
+      const sided = (gusts) => S.parse({ id: "gale", name: "Gale", rows: ground, start: { col: 4, row: 3 }, lockScreen: 0, spawner: { base: 0 }, placed: [], gusts });
+      const side = sided([[0, 5, 0], [6, 12, -1], [14, 15, 1]]), shaft = (gusts) => climbOf("gale-up", [ground], { col: 8, row: 3 }, { gusts });
+      // Standing still at column col through two cycles: how far it moved by the end of the warning, over the first blow
+      // and over the second, and where it stood after the first.
+      const stand = (stage, col) => {
+        const sim = M.create({ seed: 7, stage }), s = sim.state;
+        sim.simulate(M.FIXED); s.px[0] = (col + 0.5) * S.CELL; s.pInvincible[0] = 1e9;
+        const x0 = s.px[0]; runTo(sim, calm - 0.05); const quiet = s.px[0] - x0;
+        runTo(sim, period + 0.05); const x1 = s.px[0]; runTo(sim, 2 * period + 0.05);
+        return { quiet, first: x1 - x0, second: s.px[0] - x1, x1 };
+      };
+      const alt = stand(side, 4), left = stand(side, 12), wall = stand(side, 14), still = stand(side, 13);
+      const low = stand(shaft([[3, 3, -1]]), 8), high = stand(shaft([[4, 13, -1]]), 8);
+      // In the air: a jump taken in the first blow drifts with it every step it is up.
+      const hop = M.create({ seed: 7, stage: side }), h = hop.state;
+      hop.simulate(M.FIXED); h.pInvincible[0] = 1e9; runTo(hop, calm + 0.1);
+      const hx = h.px[0];
+      hop.setInput(M.IN.JUMP); hop.simulate(M.FIXED); hop.setInput(0);
+      let up = 1;
+      while (h.pPose[0] === M.POSE.JUMP && up < 240) { hop.simulate(M.FIXED); up++; }
+      const air = { steps: up, drift: h.px[0] - hx, want: -up * M.FIXED * T.GUST_V };
+      // An enemy in a zone stands where it was put.
+      const foe = M.create({ seed: 7, stage: side }), f = foe.state;
+      foe.simulate(M.FIXED); f.pInvincible[0] = 1e9;
+      const clerk = foe.spawn(E.CLERK, 2.75, 1.5), cx = f.ex[clerk];
+      runTo(foe, period + 0.05);
+      const enemy = { moved: f.ex[clerk] - cx, type: f.eType[clerk] };
+      const phases = [1, T.GUST_CALM + T.GUST_WARN / 2, calm + 1, period + 1].map((t) => M.gustPhase(t));
+      const dirs = [M.gustDir(0, 1), M.gustDir(0, period + 1), M.gustDir(0, 2 * period + 1), M.gustDir(-1, period + 1), M.gustDir(1, 1)];
+      const bad = S.validate(sided([[0, 3], [5, 2, 0], [0, 16, 0], [1, 2, 2]])), badUp = S.validate(shaft([[0, 14, 0]]));
+      const crossed = S.validate(sided([[0, 5, 0], [5, 8, -1], [10, 12, 1]]));   // the first two share column 5
+      const wallX = S.SCREEN_W * S.CELL - R.BOX[M.POSE.STAND][0];
+      return {
+        ok: alt.quiet === 0 && near(alt.first, -push) && near(alt.second, push) && left.quiet === 0 && near(left.first, -push) && near(left.second, -push) &&
+          near(wall.x1, wallX, 1e-5) && still.first === 0 && still.second === 0 && near(low.first, -push) && near(low.second, -push) && high.first === 0 && high.second === 0 &&
+          air.steps > 60 && near(air.drift, air.want, 0.005) && enemy.moved === 0 && enemy.type === E.CLERK &&
+          phases.join() === [M.GUST.CALM, M.GUST.WARN, M.GUST.BLOW, M.GUST.CALM].join() && dirs.join() === "-1,1,-1,-1,1" &&
+          S.validate(side).length === 0 && S.validate(shaft([[3, 3, -1]])).length === 0 && side.gusts.length === 3 && Object.isFrozen(side.gusts) && side.gusts[1].join() === "6,12,-1" &&
+          bad.length === 4 && [/gust 0 is not three numbers/, /gust 1: its columns 5 to 2/, /gust 2: its columns 0 to 16/, /gust 3: it blows 2/].every((re) => bad.some((e) => re.test(e))) &&
+          badUp.length === 1 && /gust 0: its rows 0 to 14/.test(badUp[0]) && crossed.length === 1 && /gust 1 overlaps gust 0/.test(crossed[0]),
+        detail: JSON.stringify({ alt, left, wall, wallX, still, low, high, air, enemy, phases, dirs, bad, badUp, crossed })
+      };
+    });
+
+    feature("raid terrain: F10: a lift's top runs from its low row to its high row at its speed and back, waiting `hold` at each end from the low end at time 0; an Ooga or a walker on it rides it both ways, it is landed on from above and passed through from below, never blocks, is dropped through with down and jump onto ground whether it waits, rises or goes down, counts as ground for a drop-in, and validation names a broken lift and one whose path crosses a solid cell", () => {
+      const lift = [5, 3, 4, 10, 1, 1];
+      const screen = block({ 0: FLOOR, 1: FLOOR, 2: FLOOR, 4: "=====...........", 10: "........========" });
+      const onto = (start) => climbOf("lift", [screen], start, { lifts: [lift] });
+      const stage = onto({ col: 4, row: 5 }), L = stage.lifts[0], top = (t) => M.liftTop(L, t);
+      const spots = [0, 0.99, 2.5, 4.5, 6.5, 8].map(top);
+      // Onto the lift while it waits at the bottom, a whole cycle up and down on it, then off onto the high ledge at the top.
+      const sim = M.create({ seed: 7, stage }), s = sim.state;
+      sim.simulate(M.FIXED);
+      sim.setInput(M.IN.RIGHT); until(sim, () => s.px[0] >= 3.25, 2); sim.setInput(0);
+      const boarded = { t: s.time, top: top(s.time), y: s.py[0] };
+      let err = 0, lowest = 99, highest = 0, air = 0;
+      while (s.time < 9) {
+        sim.simulate(M.FIXED);
+        err = Math.max(err, Math.abs(s.py[0] - top(s.time))); lowest = Math.min(lowest, s.py[0]); highest = Math.max(highest, s.py[0]);
+        if (s.pPose[0] !== M.POSE.STAND) air++;
+      }
+      runTo(sim, 12.05);
+      sim.setInput(M.IN.RIGHT); until(sim, () => s.px[0] >= 4.25, 2); sim.setInput(0);
+      runTo(sim, 15);
+      const off = { y: s.py[0], pose: s.pPose[0], lift: top(s.time), state: s.pState[0] };
+      // From the floor: a walk under the waiting lift is not blocked; a jump from under it goes up through it and lands on
+      // it; down and jump drops back through it onto the floor.
+      const under = M.create({ seed: 7, stage: onto({ col: 2, row: 3 }) }), u = under.state;
+      under.simulate(M.FIXED); u.pInvincible[0] = 1e9;
+      under.setInput(M.IN.RIGHT); until(under, () => u.px[0] >= 3.25, 2); under.setInput(0);
+      const walked = { x: u.px[0], y: u.py[0], t: u.time };
+      // (Taken as the lift comes down to its wait, so the 0.98 s jump lands on it before it rises again at 9 s.)
+      runTo(under, 7.95); tap(under, M.IN.JUMP); runTo(under, 8.98);
+      const below = { y: u.py[0], top: top(u.time), pose: u.pPose[0] };
+      tap(under, M.IN.DOWN | M.IN.JUMP); runTo(under, 10);
+      const dropped = { y: u.py[0], pose: u.pPose[0] };
+      // Down and jump off a rising lift, at the end of its wait at the top (it starts down a moment later) and off it going
+      // down: each time onto the floor, never back on the lift, which a body falling from rest cannot outrun at first.
+      const offAt = (t) => {
+        const o = M.create({ seed: 7, stage }), q = o.state;
+        o.simulate(M.FIXED); o.setInput(M.IN.RIGHT); until(o, () => q.px[0] >= 3.25, 2); o.setInput(0);
+        runTo(o, t); const from = q.py[0];
+        tap(o, M.IN.DOWN | M.IN.JUMP); runTo(o, t + 1.2);
+        return { t, from, y: q.py[0], pose: q.pPose[0], top: top(q.time) };
+      };
+      const offs = [2.5, 4.95, 6.5].map(offAt);
+      // A walker on it rides it too.
+      const ride = M.create({ seed: 7, stage: onto({ col: 12, row: 3 }) }), r = ride.state;
+      ride.simulate(M.FIXED); r.pInvincible[0] = 1e9;
+      const clerk = ride.spawn(E.CLERK, 3.25, top(r.time));
+      let walker = 0;
+      while (r.time < 9) { ride.simulate(M.FIXED); walker = Math.max(walker, Math.abs(r.ey[clerk] - top(r.time))); }
+      // A drop-in whose only ground on the screen, in the first column it tries, is a lift lands on the lift.
+      const shaft = climbOf("lift-drop", [block({ 2: "..........######" })], { col: 12, row: 3 }, { lifts: [[2, 3, 4, 6, 1, 1]] });
+      const drop = M.create({ seed: 7, stage: shaft }), d = drop.state;
+      settle(drop); drop.setInput(M.IN.LEFT); until(drop, () => d.pState[0] === PS.DEAD, 5); drop.setInput(0);
+      until(drop, () => d.pState[0] === PS.NORMAL, 5);
+      const respawned = { x: d.px[0], y: d.py[0], top: M.liftTop(shaft.lifts[0], d.time), state: d.pState[0] };
+      const bad = S.validate(climbOf("lift-bad", [screen], { col: 4, row: 5 }, { lifts: [[5, 3, 4], [14, 3, 4, 10, 1, 1], [5, 3, 10, 4, 1, 1], [5, 3, 4, 10, 0, -1], [0, 2, 1, 6, 1, 1]] }));
+      return {
+        ok: [2.5, 2.5, 4, 5.5, 4, 2.5].every((v, k) => near(spots[k], v, 1e-9)) && S.validate(stage).length === 0 && S.validate(shaft).length === 0 &&
+          Object.isFrozen(stage.lifts) && Object.isFrozen(L) && L.join() === lift.join() &&
+          boarded.t < 1 && boarded.top === 2.5 && boarded.y === 2.5 && err < 1e-4 && air === 0 && near(lowest, 2.5, 1e-4) && near(highest, 5.5, 1e-4) &&
+          off.y === 5.5 && off.pose === M.POSE.STAND && off.lift < 5.5 && off.state === PS.NORMAL &&
+          walked.x >= 3.25 && walked.y === 1.5 && near(below.y, below.top, 1e-4) && below.y === 2.5 && below.pose === M.POSE.STAND &&
+          dropped.y === 1.5 && dropped.pose === M.POSE.STAND && offs.every((o) => o.from > 2.5 && o.y === 1.5 && o.pose === M.POSE.STAND) && walker < 1e-4 && r.eType[clerk] === E.CLERK &&
+          respawned.x === T.DROP_X && near(respawned.y, respawned.top, 1e-4) && respawned.state === PS.NORMAL &&
+          bad.length === 5 && [/lift 0 is not six numbers/, /lift 1: its columns 14 to 16/, /lift 2: its rows 10 to 4/, /lift 3: it moves at 0 m\/s.*it waits -1 s/, /lift 4: its path crosses a solid cell at column 0, row 1/].every((re) => bad.some((e) => re.test(e))),
+        detail: JSON.stringify({ spots, boarded, err, lowest, highest, air, off, walked, below, dropped, offs, walker, respawned, bad })
+      };
+    });
+
+    feature("raid terrain: F11: an Ooga standing on a crumbling span starts its fuse; CRUMBLE_FUSE later every cell of the span reads empty in the run's own cells and the Ooga falls, and CRUMBLE_GONE after that it comes back, as it does at once on a continue; the frozen stage's cells never change, the hash folds the run's cells, and validation names a broken span", () => {
+      const screen = block({ 0: FLOOR, 1: FLOOR, 2: FLOOR, 4: "....======......" });
+      const stage = climbOf("plank", [screen], { col: 6, row: 3 }, { crumble: [[4, 9, 4]] }), K = S.KIND;
+      const span = (cells) => [4, 5, 6, 7, 8, 9].map((c) => cells[4 * stage.cols + c]);
+      const all = (list, kind) => list.length === 6 && list.every((v) => v === kind);
+      const sim = M.create({ seed: 7, stage }), s = sim.state;
+      sim.simulate(M.FIXED); tap(sim, M.IN.JUMP);
+      until(sim, () => s.pPose[0] !== M.POSE.JUMP, 2);
+      const landed = { t: s.time, y: s.py[0], phase: s.crumblePhase[0], span: span(s.cells) };
+      until(sim, () => s.pPose[0] === M.POSE.JUMP, 2);
+      const fell = { t: s.time, span: span(s.cells), phase: s.crumblePhase[0], stage: span(stage.cells), fresh: span(M.create({ seed: 7, stage }).state.cells) };
+      const gone = sim.hash(), kept = s.cells.slice();
+      s.cells.set(stage.cells); const whole = sim.hash(); s.cells.set(kept);
+      until(sim, () => s.crumblePhase[0] === M.CRUMBLE.WHOLE, 5);
+      const back = { t: s.time, span: span(s.cells), y: s.py[0] };
+      // A continue from game over while the span is gone brings it back whole.
+      const cont = M.create({ seed: 7, stage }), c = cont.state;
+      cont.simulate(M.FIXED); tap(cont, M.IN.JUMP);
+      until(cont, () => c.crumblePhase[0] === M.CRUMBLE.GONE, 3);
+      const before = span(c.cells);
+      c.phase = M.PHASE.OVER; cont.continueRun();
+      const continued = { before, after: span(c.cells), phase: c.crumblePhase[0], timer: c.crumbleTimer[0] };
+      const bad = S.validate(climbOf("plank-bad", [screen], { col: 6, row: 3 }, { crumble: [[4, 9], [4, 16, 4], [2, 5, 4]] }));
+      const fuse = fell.t - landed.t, out = back.t - (fell.t - M.FIXED);
+      return {
+        ok: S.validate(stage).length === 0 && Object.isFrozen(stage.crumble) && stage.crumble[0].join() === "4,9,4" &&
+          landed.y === 2.5 && landed.phase === M.CRUMBLE.FUSE && all(landed.span, K.LEDGE) &&
+          Math.abs(fuse - T.CRUMBLE_FUSE) <= 2 * M.FIXED + 1e-9 && all(fell.span, K.EMPTY) && fell.phase === M.CRUMBLE.GONE && all(fell.stage, K.LEDGE) && all(fell.fresh, K.LEDGE) &&
+          gone !== whole && Math.abs(out - T.CRUMBLE_GONE) <= 2 * M.FIXED + 1e-9 && all(back.span, K.LEDGE) && back.y === 1.5 &&
+          all(continued.before, K.EMPTY) && all(continued.after, K.LEDGE) && continued.phase === M.CRUMBLE.WHOLE && continued.timer === 0 &&
+          bad.length === 3 && [/crumbling span 0 is not three numbers/, /crumbling span 1: its cells, columns 4 to 16/, /crumbling span 2: column 2 in row 4 is no ledge/].every((re) => bad.some((e) => re.test(e))),
+        detail: JSON.stringify({ landed, fell, fuse, out, back, continued, hashes: [gone, whole], bad })
+      };
+    });
+
+    feature("raid terrain: playthrough: a lone Ooga climbs a small test tower, jumping on and off a crumbling plank before it goes, riding a lift up its shaft, standing out a whole gust in the gale band, and reaching the top deck alive", () => {
+      // The plank (row 4) under the start, a ledge (row 6) beside the lift's foot, the lift (columns 13 to 15, rows 6 to
+      // 12) up to a ledge (row 12), and in the gale band (feet rows 13 up) ledges stepping side to side to the deck (row 20).
+      const tower = climbOf("tower-test", [
+        block({ 0: FLOOR, 1: FLOOR, 2: FLOOR, 4: "...====.........", 6: ".......======...", 12: ".......======..." }),
+        block({ 0: "..=====.........", 2: ".......======...", 4: "..=====.........", 6: "================" })
+      ], { col: 6, row: 3 }, { lifts: [[13, 3, 6, 12, 1, 1.2]], crumble: [[3, 6, 4]], gusts: [[13, 27, 0]] });
+      const sim = M.create({ seed: 7, stage: tower }), s = sim.state, L = tower.lifts[0], K = S.KIND, LOOK = 0.25;
+      let phase = "land", deaths = 0, plank = false, crumbled = false, rode = 0, blown = 0, calmFirst = false, blowFrom = NaN, pushed = NaN, dir = 0;
+      for (let n = 0; n < 120 * 90 && phase !== "top"; n++) {
+        const x = s.px[0], y = s.py[0], col = Math.floor(x / S.CELL), standing = s.pState[0] === PS.NORMAL && s.pPose[0] !== M.POSE.JUMP;
+        const blowing = M.gustPhase(s.time) === M.GUST.BLOW, jump = s.prevInput & M.IN.JUMP ? 0 : M.IN.JUMP;
+        let bits = 0;
+        if (phase === "land") { if (standing) phase = "plank"; }
+        if (phase === "plank") {
+          if (standing && y === 1.5) bits = jump;                       // straight up through the plank
+          else if (standing && y === 2.5) phase = "ledge";
+        }
+        if (phase === "ledge") {
+          if (standing && y === 3.5) phase = "wait";
+          else bits = M.IN.RIGHT | (standing && S.cellAt(tower, Math.floor((x + LOOK) / S.CELL), 4) === K.EMPTY ? jump : 0);
+        }
+        if (phase === "wait") {
+          if (x < 6.1) bits = M.IN.RIGHT;
+          else if (M.liftTop(L, s.time) === 3.5 && M.liftTop(L, s.time + 0.6) === 3.5) phase = "board";
+        }
+        if (phase === "board") { if (x < 7) bits = M.IN.RIGHT; else phase = "ride"; }
+        if (phase === "ride" && standing && y === 6.5) phase = "alight";
+        if (phase === "alight") { if (x > 5) bits = M.IN.LEFT; else phase = "gust"; }
+        if (phase === "gust") {
+          if (!blowing && !calmFirst) calmFirst = true;
+          else if (blowing && calmFirst && Number.isNaN(blowFrom)) blowFrom = x;
+          else if (!blowing && !Number.isNaN(blowFrom)) { pushed = x - blowFrom; phase = "climb"; }
+        }
+        if (phase === "climb") {
+          // As `climber` does: the next ledge two rows up, straight up when over it, else walk to it and jump at the edge.
+          const under = Math.round(y / S.CELL) - 1, row = under + 2;
+          if (standing && y === 10.5) phase = "top";
+          else if (!standing) bits = dir > 0 ? M.IN.RIGHT : dir < 0 ? M.IN.LEFT : 0;
+          else {
+            let best = -1;
+            for (let c = 0; c < tower.cols; c++) if (S.cellAt(tower, c, row) !== K.EMPTY && (best < 0 || Math.abs(c - col) < Math.abs(best - col))) best = c;
+            if (best === col) { dir = 0; bits = jump; }
+            else if (best >= 0) {
+              dir = best > col ? 1 : -1;
+              bits = (dir > 0 ? M.IN.RIGHT : M.IN.LEFT) | (S.cellAt(tower, Math.floor((x + dir * LOOK) / S.CELL), under) === K.EMPTY ? jump : 0);
+            }
+          }
+        }
+        if (phase === "top") break;
+        sim.setInput(bits); sim.simulate(M.FIXED);
+        if (s.pState[0] === PS.DEAD) { deaths++; break; }
+        const on = s.pState[0] === PS.NORMAL && s.pPose[0] !== M.POSE.JUMP, c = Math.floor(s.px[0] / S.CELL);
+        if (on && s.py[0] === 2.5 && c >= 3 && c <= 6) plank = true;
+        if (plank && s.crumblePhase[0] === M.CRUMBLE.GONE && s.py[0] > 2.5) crumbled = true;
+        if (on && c >= 13) rode = Math.max(rode, s.py[0]);
+        if (blowing && s.pState[0] === PS.NORMAL && Math.round(s.py[0] / S.CELL) >= 13) blown++;
+      }
+      const push = T.GUST_V * T.GUST_BLOW;
+      return {
+        ok: S.validate(tower).length === 0 && phase === "top" && deaths === 0 && s.py[0] === 10.5 && s.pState[0] === PS.NORMAL &&
+          plank && crumbled && rode === 6.5 && blown >= T.GUST_BLOW / M.FIXED - 2 && near(Math.abs(pushed), push),
+        detail: JSON.stringify({ validate: S.validate(tower), phase, deaths, y: s.py[0], x: s.px[0], t: s.time, plank, crumbled, rode, blown, pushed })
+      };
+    });
+  }
+  {
+    // The tide allocates nothing per step. A fresh load of the raid sources; one screen with a tide basin and a
+    // raft between banks, the Ooga running both ways, jumping and firing, clerks and runners spawned in turn and the edge
+    // spawner on, so the Ooga and the walkers are lifted by the rising water and fall with it, cross on the raft, die and
+    // drop in again. A forced full collection first, then 400,000 steps of warm-up, by which every path the window takes has
+    // run (V8 re-tiers stepPlayer once on the tide's first lifts, some 40 bytes a step for a few tens of thousands of steps,
+    // and never again: untracked/ooga-raid-sdd-w6/t31/tide-ab2.mjs), then a full collection and an emptied young generation
+    // before a 100,000-step window, which must run no collection and grow less than a byte a step. The driver passes the
+    // step's length from a constant captured once and keeps no number of its own per step.
+    const src = {};
+    for (const name of RAID_SOURCES) src[name] = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
+    const tctx = { window: { BL: {} } };
+    for (const name of RAID_SOURCES) runInNewContext(src[name], tctx);
+    const { raidStages: TS, raidSim: TM } = tctx.window.BL;
+    const pool = TS.parse({ id: "tide-heap", name: "tide-heap", start: { col: 2, row: 4 }, lockScreen: 0, spawner: { base: 200 }, placed: [],
+      rows: [...Array(10).fill("................"), "####........####", "####........####", "####~~~~~~~~####", "################"],
+      tide: { basins: [[4, 11, 1, 3]], floats: [[10, 11]] } });
+    const sim = TM.create({ seed: 5, stage: pool }), ts = sim.state, STEP = TM.FIXED, IN = TM.IN, PLAY = TM.PHASE.PLAY, BOSS = TM.PHASE.BOSS, OVER = TM.PHASE.OVER;
+    const CLERK = TM.ENEMY.CLERK, RUNNER = TM.ENEMY.RUNNER;
+    let k = 0, continued = 0, lifted = 0;
+    const drive = (n) => {
+      for (let j = 0; j < n; j++, k++) {
+        if (ts.phase !== PLAY && ts.phase !== BOSS) { ts.phase = OVER; ts.continues = 3; sim.continueRun(); continued++; }
+        if ((k & 1023) === 0) { sim.spawn(CLERK, 3.25, 1); sim.spawn(RUNNER, 1.25, 2); }
+        sim.setInput(((k >> 9) & 1 ? IN.LEFT : IN.RIGHT) | ((k & 127) === 0 ? IN.JUMP : 0) | ((k & 31) === 0 ? IN.FIRE : 0));
+        sim.simulate(STEP);
+      }
+    };
+    setFlagsFromString("--expose-gc");
+    const fullGc = runInNewContext("gc");
+    let gcs = 0;
+    const watch = new PerformanceObserver((list) => { gcs += list.getEntries().length; });
+    watch.observe({ entryTypes: ["gc"] });
+    fullGc();
+    // The warm-up, sampling once a 1,024 steps that a body really stood on the raised water (a clerk over the low water).
+    for (let n = 0; n < 400; n++) { drive(1000); for (let i = 0; i < TM.ENEMY_SLOTS; i++) if (ts.eType[i] === CLERK && ts.ey[i] > 1.25) { lifted++; break; } }
+    fullGc();
+    const ring = new Array(64);
+    for (let before = getHeapStatistics().used_heap_size, n = 0; n < 100000; n++) {
+      for (let i = 0; i < 256; i++) ring[i & 63] = [n, i];
+      const now = getHeapStatistics().used_heap_size;
+      if (now < before) break;
+      before = now;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const g0 = gcs, t0 = ts.time, h0 = getHeapStatistics().used_heap_size;
+    drive(100000);
+    const grew = getHeapStatistics().used_heap_size - h0;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    watch.disconnect();
+    const measured = { grew, perStep: +(grew / 100000).toFixed(3), gcs: gcs - g0, stepped: +(ts.time - t0).toFixed(3), continued, lifted };
+    record("raid terrain: the tide allocates nothing per step: with walkers and the Ooga riding a basin's water up and down, crossing its raft, dying and dropping in, a 100,000-step window after the warm-up runs no collection and grows less than a byte a step",
+      measured.gcs === 0 && grew < 100000 && Math.abs(measured.stepped - 100000 * STEP) < 0.01 && lifted > 20 && continued > 0, JSON.stringify(measured));
+  }
+  {
+    // Stage 2, The Counting House: six rooms of the Legion's bank (cores, tellers, sensors, barrel lanes and guard doors),
+    // the last the Mint Press. `alone(r)` is a stage of room r by itself, so each room plays from its start. `destroy` takes
+    // a slot down from the front line by the controls alone: it walks under it, then fires up a press every other step,
+    // standing still or jumping again and again, for at most `seconds`, and says whether it fell. A check that throws
+    // records its failure.
+    const counting = (name, f) => {
+      let r;
+      try { r = f(); } catch (e) { r = { ok: false, detail: String(e && e.stack || e) }; }
+      record(name, r.ok, r.detail);
+    };
+    const C = S.STAGES[1], F = context.window.BL.raidEnemies.FLAG, LC = context.window.BL.raidLegionCounting;
+    const alone = (r) => Object.freeze({ ...C, rooms: Object.freeze([C.rooms[r]]) });
+    const typesOf = (room) => { const out = []; for (let k = 2; k < room.targets.length; k += 4) out.push(room.targets[k]); return out; };
+    const up = (s, k, t) => s.eType[k] === t && s.eRoutine[k] < TY[t].destroyed;
+    const destroy = (sim, k, jump, seconds = 20) => {
+      const s = sim.state, t = s.eType[k];
+      walkTo(sim, s.ex[k]);
+      for (let i = 0; i < seconds * 120 && up(s, k, t); i++) {
+        let bits = M.IN.UP | (i % 2 ? 0 : M.IN.FIRE);
+        if (jump && s.pPose[0] !== M.POSE.JUMP && !(s.prevInput & M.IN.JUMP)) bits |= M.IN.JUMP;
+        sim.setInput(bits); sim.simulate(M.FIXED);
+      }
+      sim.setInput(0);
+      until(sim, () => s.pPose[0] !== M.POSE.JUMP, 2);
+      return !up(s, k, t);
+    };
+
+    counting("raid counting: The Counting House is the campaign's second stage, six rooms each holding a core, two with tripwires none of which is live as its room starts (an Ooga walks in where it stood), the last the Mint Press's boss room with two dies and a counter, and passes its own validation", () => {
+      const faults = S.validate(C), last = C.rooms[C.rooms.length - 1], boss = typesOf(last);
+      const cored = C.rooms.slice(0, -1).map((room) => typesOf(room).filter((t) => TY[t].flags & F.CORE).length);
+      const wired = C.rooms.map((room) => room.wires.length / 6);
+      const starts = C.rooms.flatMap((room) => Array.from({ length: room.wires.length / 6 }, (_, k) => M.wireState(room, k, 0)));
+      return {
+        ok: C.kind === "rooms" && C.id === "counting" && C.name === "The Counting House" && C.rooms.length === 6 && last.boss && faults.length === 0 &&
+          cored.every((n) => n > 0) && wired.filter((n) => n > 0).length === 2 && starts.length > 0 && starts.every((w) => w !== M.WIRE.LIVE) &&
+          C.rooms.every((room) => room.waves.length > 0) &&
+          boss.length === 3 && boss.filter((t) => t === E.PRESS_DIE).length === 2 && boss.filter((t) => t === E.MINT_COUNTER).length === 1,
+        detail: JSON.stringify({ id: C.id, kind: C.kind, rooms: C.rooms.length, faults, cored, wired, starts, boss })
+      };
+    });
+
+    counting("raid counting: validation names two back-wall targets whose boxes overlap and a target standing in front of a door, as the specs' first draft of the Counting Floor stood them, and a room holding more targets than its slots less the shot reserve", () => {
+      const draft = S.parse({ kind: "rooms", id: "draft", name: "Draft", rooms: [
+        { targets: [[1.5, 0.75, E.LEDGER_CORE, 0], [4, 1.75, E.LEDGER_CORE, 0], [6.5, 0.75, E.LEDGER_CORE, 0], [2.75, 1.5, E.WALL_TELLER, 0], [5.25, 1.5, E.WALL_TELLER, 0], [4, 1, E.SENSOR, S.ITEM.FAN]],
+          doors: [1, 4, 7], waves: [], boss: false },
+        { targets: [[4, 0.75, E.LEDGER_CORE, 0]], doors: [1], waves: [], boss: true }
+      ] });
+      const faults = S.validate(draft);
+      // And a room of fourteen cores in two rows, none overlapping and no door: more than a room's slots less its reserve.
+      const row = (y) => [0.5, 1.6, 2.7, 3.8, 4.9, 6, 7.1].map((x) => [x, y, E.LEDGER_CORE, 0]);
+      const crowded = S.validate(S.parse({ kind: "rooms", id: "crowded", name: "Crowded", rooms: [{ targets: [...row(0.75), ...row(1.8)], doors: [], waves: [], boss: true }] }));
+      return {
+        ok: crowded.length === 1 && new RegExp(`room 0 holds 14 targets, more than the ${M.ENEMY_SLOTS - M.TUNE.ROOM_RESERVE} slots`).test(crowded[0]) &&
+          faults.length === 4 && /room 0: targets 1 and 5, a LEDGER_CORE and a SENSOR, overlap/.test(faults.join("\n")) &&
+          [/room 0: target 0, a LEDGER_CORE, stands in front of door 0 at 1 m/, /room 0: target 2, a LEDGER_CORE, stands in front of door 2 at 7 m/,
+            /room 0: target 5, a SENSOR, stands in front of door 1 at 4 m/].every((re) => faults.some((f) => re.test(f))),
+        detail: JSON.stringify({ faults, crowded })
+      };
+    });
+
+    counting("raid counting: in every room the cores hold the barrier shut, and the last of them to fall opens it", () => {
+      const rows = [];
+      for (let r = 0; r < C.rooms.length - 1; r++) {
+        const sim = M.create({ seed: 11, stage: alone(r) }), s = sim.state;
+        settle(sim); s.pInvincible[0] = 1e9; sim.simulate(0.5);
+        const cores = [];
+        for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eFlags[k] & F.CORE) cores.push(k);
+        const steps = [];
+        cores.forEach((k, n) => {
+          const shut = s.barrier === 1 && s.roomPhase === RP.FIGHT, fell = destroy(sim, k, true);
+          sim.simulate(M.FIXED);
+          const open = s.barrier === 0 && s.roomPhase === RP.OPEN;
+          steps.push({ shut, fell, open, last: n === cores.length - 1 });
+        });
+        rows.push({ room: r, cores: cores.length, ok: cores.length > 0 && steps.every((x) => x.shut && x.fell && x.open === x.last), steps });
+      }
+      return { ok: rows.length === C.rooms.length - 1 && rows.every((x) => x.ok), detail: JSON.stringify(rows) };
+    });
+
+    // The boss room from its start under a barrier, so the Mint Press fires and nothing kills: a die's slam first, watched
+    // through to where its coin shots cross the front line; then the counter shot at while the dies stand, each die shot
+    // down standing in its lane, and the counter shot down jumping in its lane.
+    let press;
+    try {
+      const sim = M.create({ seed: 11, stage: alone(C.rooms.length - 1) }), s = sim.state;
+      settle(sim); s.pBarrier[0] = 1e9;
+      until(sim, () => s.pInvincible[0] === 0, 5);
+      const dies = [], counter = s.eType.indexOf(E.MINT_COUNTER);
+      for (let k = M.ENEMY_SLOTS - 1; k >= 0; k--) if (s.eType[k] === E.PRESS_DIE) dies.push(k);
+      const linked = dies.map((k) => s.eLink[k] === counter);
+      // A slam: the first step shots leave the first die's face, and where each crosses the front line.
+      const die = dies[0];
+      let stamped = null;
+      for (let i = 0; i < 10 * 120 && !stamped; i++) {
+        sim.simulate(M.FIXED);
+        const thrown = [];
+        for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.SHOT && s.ez[k] > 0.95 && Math.abs(s.ex[k] - s.ex[die]) < 0.1) thrown.push(k);
+        if (!thrown.length) continue;
+        const lanes = new Map();
+        for (let j = 0; j < 4 * 120 && lanes.size < thrown.length; j++) {
+          sim.simulate(M.FIXED);
+          for (const k of thrown) if (!lanes.has(k) && s.eType[k] === E.SHOT && s.ez[k] <= 0) lanes.set(k, { x: s.ex[k], y: s.ey[k] });
+        }
+        stamped = { x: s.ex[die], thrown: thrown.length, lanes: [...lanes.values()].map((l) => ({ x: +l.x.toFixed(2), y: +l.y.toFixed(2) })).sort((a, b) => a.x - b.x) };
+      }
+      const hp = s.eHp[counter], shutOf = (k) => (s.eFlags[k] & F.SHUT) !== 0;
+      destroy(sim, counter, true, 6);
+      const before = { hp: s.eHp[counter], shut: shutOf(counter), dies: dies.map((k) => up(s, k, E.PRESS_DIE)) };
+      const first = destroy(sim, dies[0], false);
+      destroy(sim, counter, true, 4);
+      const between = { hp: s.eHp[counter], shut: shutOf(counter), dies: dies.map((k) => up(s, k, E.PRESS_DIE)) };
+      const second = destroy(sim, dies[1], false);
+      sim.simulate(M.FIXED);
+      const opened = { shut: shutOf(counter), hp: s.eHp[counter] };
+      const fell = destroy(sim, counter, true, 40);
+      const cleared = { phase: s.phase, barrier: s.barrier, others: s.eType.filter((t, k) => t !== E.FREE && k !== counter).length };
+      // Without a barrier, in the boss room with no waves: an Ooga standing in the first die's lane, once its fresh Ooga's
+      // invincibility is out, dies to a coin shot crossing the front line there.
+      const quiet = (r) => Object.freeze({ ...C, rooms: Object.freeze([Object.freeze({ ...C.rooms[r], waves: new Float64Array(0) })]) });
+      const bare = M.create({ seed: 11, stage: quiet(C.rooms.length - 1) }), b = bare.state;
+      settle(bare); walkTo(bare, b.ex[b.eType.indexOf(E.PRESS_DIE)]);
+      until(bare, () => b.pInvincible[0] === 0, 5);
+      let coined = null;
+      for (let i = 0; i < 6 * 120 && !coined; i++) {
+        let near = false;
+        for (let k = 0; k < M.ENEMY_SLOTS; k++) if (b.eType[k] === E.SHOT && b.ez[k] < 0.2 && Math.abs(b.ex[k] - b.px[0]) < 0.4) near = true;
+        bare.simulate(M.FIXED);
+        if (b.pState[0] === PS.DEAD) coined = { near, x: b.px[0], t: +b.roomTime.toFixed(2) };
+      }
+      press = { hp, linked, stamped, before, first, between, second, opened, fell, cleared, coined };
+    } catch (e) { press = { error: String(e && e.stack || e) }; }
+
+    counting("raid counting: the Mint Press's dies, linked to its counter, stamp coin shots onto the front line across the lanes that kill a standing Ooga in a die's lane, its counter stays shut and unharmed while either die stands, and the counter's fall clears the stage", () => {
+      const { hp, linked, stamped, before, between, opened, cleared, coined } = press, spread = LC.TUNE.DIE_SPREAD, lanes = stamped ? stamped.lanes : [];
+      return {
+        ok: !press.error && linked.length === 2 && linked.every(Boolean) && coined && coined.near &&
+          stamped && stamped.thrown === 3 && lanes.length === 3 && lanes.some((l) => Math.abs(l.x - stamped.x) < 0.05) &&
+          lanes.every((l, k) => k === 0 || l.x - lanes[k - 1].x > spread - 0.05) &&
+          before.hp === hp && before.shut && before.dies.every(Boolean) && between.hp === hp && between.shut && between.dies.filter(Boolean).length === 1 &&
+          !opened.shut && opened.hp === hp && press.fell && cleared.phase === M.PHASE.CLEAR && cleared.barrier === 0 && cleared.others === 0,
+        detail: JSON.stringify(press)
+      };
+    });
+
+    counting("raid counting: every part of the Mint Press that must fall can be hit from the front line: each die by standing shots up its lane, the counter by jumping shots up its lane, each within its type's ROOM_REACH, which the sim holds to that type's own box", () => {
+      const boss = C.rooms[C.rooms.length - 1], heights = [];
+      for (let k = 0; k < boss.targets.length; k += 4) {
+        const type = Object.keys(E).find((n) => E[n] === boss.targets[k + 2]);
+        heights.push({ type, y: boss.targets[k + 1], reach: S.ROOM_REACH[type] });
+      }
+      return {
+        ok: !press.error && press.first && press.second && press.fell && heights.length === 3 && heights.every((h) => h.reach !== undefined && h.y <= h.reach) && S.validate(C).length === 0,
+        detail: JSON.stringify({ first: press.first, second: press.second, counter: press.fell, heights, error: press.error })
+      };
+    });
+
+    counting("raid counting: a room's waves keep at most ROOM_WAVE_MAX enemies alive (here its guards) and hold the rest back, so the Mint Press left alone for 60 s still finds slots for its coin shots", () => {
+      const room = C.rooms[C.rooms.length - 1], sim = M.create({ seed: 11, stage: alone(C.rooms.length - 1) }), s = sim.state;
+      settle(sim); walkTo(sim, 4);
+      let most = 0;
+      for (let i = 0; i < 60 * 120; i++) {
+        if (i % 120 === 0) s.pBarrier[0] = 1e9;
+        sim.simulate(M.FIXED);
+        most = Math.max(most, s.eType.filter((t, k) => t === E.GUARD && s.eRoutine[k] < TY[E.GUARD].destroyed).length);
+      }
+      const held = { most, cursor: s.waveCursor, waves: room.waves.length / 3, free: s.eType.filter((t) => t === E.FREE).length };
+      const dies = [];
+      for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.PRESS_DIE) dies.push(k);
+      let thrown = 0;
+      for (let i = 0; i < 4 * 120 && thrown === 0; i++) {
+        s.pBarrier[0] = 1e9;
+        sim.simulate(M.FIXED);
+        for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.SHOT && s.ez[k] > 0.95 && dies.some((d) => Math.abs(s.ex[k] - s.ex[d]) < 0.1)) thrown++;
+      }
+      return {
+        ok: held.most === M.TUNE.ROOM_WAVE_MAX && held.cursor === M.TUNE.ROOM_WAVE_MAX && held.cursor < held.waves && thrown === 3,
+        detail: JSON.stringify({ held, thrown, time: +s.roomTime.toFixed(2) })
+      };
+    });
+
+    // The slot reserve, through the real helpers: a fresh load whose aimShotAt is counted (asked, and dropped for want of a
+    // slot), so each boss room, its gating parts shot down and then left alone under a barrier for 60 s with its real
+    // waves, shows every volley its main asks for spawned whole.
+    let reserved;
+    try {
+      const text = {}, ctx = { window: { BL: {} } }, tally = new Map();
+      for (const name of RAID_SOURCES) text[name] = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
+      for (const name of RAID_SOURCES) {
+        if (name === RAID_LEGIONS[0]) {
+          const RE = ctx.window.BL.raidEnemies;
+          ctx.window.BL.raidEnemies = { ...RE, aimShotAt: (c, i, x, y, z) => {
+            const k = RE.aimShotAt(c, i, x, y, z), n = tally.get(c.state.eType[i]) || { asked: 0, dropped: 0 };
+            n.asked++; if (k < 0) n.dropped++;
+            tally.set(c.state.eType[i], n);
+            return k;
+          } };
+        }
+        runInNewContext(text[name], ctx);
+      }
+      const RM2 = ctx.window.BL.raidSim, RS2 = ctx.window.BL.raidStages;
+      reserved = ["counting", "treasury"].map((id) => {
+        const stage = RS2.STAGES.find((g) => g.id === id), boss = Object.freeze({ ...stage, rooms: Object.freeze([stage.rooms[stage.rooms.length - 1]]) });
+        const sim = RM2.create({ seed: 11, stage: boss }), s = sim.state;
+        settle(sim); s.pInvincible[0] = 1e9;
+        const parts = [], cores = [];
+        for (let k = M.ENEMY_SLOTS - 1; k >= 0; k--) if (s.eType[k] !== E.FREE && s.ez[k] === 1) (s.eFlags[k] & F.CORE ? cores : parts).push(k);
+        const down = parts.map((k) => destroy(sim, k, true, 30));
+        walkTo(sim, 4); s.pInvincible[0] = 0;
+        const main = s.eType[cores[0]];
+        tally.clear();
+        let least = M.ENEMY_SLOTS;
+        for (let i = 0; i < 60 * 120; i++) {
+          if (i % 120 === 0) s.pBarrier[0] = 1e9;
+          sim.simulate(M.FIXED);
+          least = Math.min(least, s.eType.filter((t) => t === E.FREE).length);
+        }
+        const fired = tally.get(main) || { asked: 0, dropped: 0 };
+        return { id, main, down, asked: fired.asked, dropped: fired.dropped, least, cursor: s.waveCursor, open: !(s.eFlags[cores[0]] & F.SHUT) };
+      });
+    } catch (e) { reserved = { error: String(e && e.stack || e) }; }
+    counting("raid rooms: nothing with hit points takes a room's last ROOM_RESERVE slots, so each boss room (the Mint Press's counter, the Printer King) left alone for 60 s with its real waves, nothing spent on an Ooga, spawns every shot of every volley it fires", () => ({
+      ok: Array.isArray(reserved) && reserved.length === 2 && reserved.every((r) => r.down.every(Boolean) && r.open && r.asked >= 3 * 20 && r.dropped === 0),
+      detail: JSON.stringify(reserved)
+    }));
+
+    counting("raid rooms: a room keeps ROOM_RESERVE slots from anything with hit points, and a wave that finds no slot it may take waits for one and then comes, never dropped", () => {
+      // The Lobby after its grace: back-wall cores put down by the spawn verb (outside the waves' cap) until one is refused,
+      // the waves due meanwhile held; then the cores destroyed, and the held waves come.
+      const sim = M.create({ seed: 11, stage: alone(0) }), s = sim.state, room = C.rooms[0];
+      settle(sim); s.pInvincible[0] = 1e9;
+      while (s.roomTime < M.TUNE.ROOM_GRACE + 0.1) sim.simulate(M.FIXED);
+      const fill = [];
+      for (let k = sim.spawn(E.LEDGER_CORE, 4, 3); k >= 0; k = sim.spawn(E.LEDGER_CORE, 4, 3)) fill.push(k);
+      const free = s.eType.filter((t) => t === E.FREE).length, from = s.waveCursor, due = () => { let n = 0; for (let i = 0; i < room.waves.length; i += 3) if (room.waves[i] <= s.roomTime) n++; return n; };
+      while (s.roomTime < 8) sim.simulate(M.FIXED);
+      const waiting = { cursor: s.waveCursor, due: due() };
+      for (const k of fill) { s.eHp[k] = 0; s.eRoutine[k] = TY[E.LEDGER_CORE].destroyed; }
+      sim.simulate(1.5);
+      const came = { cursor: s.waveCursor, due: due() };
+      return {
+        ok: fill.length > 0 && free === M.TUNE.ROOM_RESERVE && waiting.cursor === from && waiting.due > from && came.cursor > from,
+        detail: JSON.stringify({ filled: fill.length, free, from, waiting, came })
+      };
+    });
+
+    counting("raid counting: without a barrier, an Ooga crosses the Tripwire Gallery in the wire's dark time, jumping as it warns, and takes the Counting Floor's outer cores in the wires' dark windows lying prone while they warn or burn, and lives; standing in a live wire then kills it once", () => {
+      // Each room with only its cores and wires (no waves, tellers or sensors), so only a wire can kill.
+      const wiresOnly = (r) => {
+        const room = C.rooms[r], keep = [];
+        for (let k = 0; k < room.targets.length; k += 4) if (TY[room.targets[k + 2]].flags & F.CORE) keep.push(...room.targets.subarray(k, k + 4));
+        return Object.freeze({ ...C, rooms: Object.freeze([Object.freeze({ ...room, targets: Float64Array.from(keep), waves: new Float64Array(0) })]) });
+      };
+      const deathsOf = (sim, steps, input, done = () => false) => {
+        const s = sim.state;
+        let deaths = 0;
+        for (let i = 0; i < steps && !done(); i++) {
+          const was = s.pState[0];
+          sim.setInput(input(i)); sim.simulate(M.FIXED);
+          if (s.pState[0] === PS.DEAD && was !== PS.DEAD) deaths++;
+        }
+        return deaths;
+      };
+      // The Gallery: from just left of the wire, wait for a dark window to begin, then run right, jumping when it warns.
+      const g = M.create({ seed: 11, stage: wiresOnly(2) }), gs = g.state, gRoom = g.stage.rooms[0], gWire = (k) => M.wireState(gRoom, k, gs.roomTime);
+      settle(g); walkTo(g, gRoom.wires[0] - 0.2); until(g, () => gs.pInvincible[0] === 0, 5);
+      let lit = false, crossing = false;
+      const gLives = gs.pLives[0], gDeaths = deathsOf(g, 12 * 120, () => {
+        if (!crossing) { if (gWire(0) === M.WIRE.LIVE) lit = true; else if (lit && gWire(0) === M.WIRE.DARK) crossing = true; }
+        if (!crossing || gs.px[0] >= 6.5) return 0;
+        return M.IN.RIGHT | (gWire(0) === M.WIRE.WARN && gs.pPose[0] !== M.POSE.JUMP && !(gs.prevInput & M.IN.JUMP) ? M.IN.JUMP : 0);
+      });
+      const gallery = { crossing, x: +gs.px[0].toFixed(2), deaths: gDeaths, lives: gLives - gs.pLives[0], state: gs.pState[0] };
+      // The Floor: walk and shoot standing only while no wire near the Ooga warns or is live; lie prone while one does.
+      const f = M.create({ seed: 11, stage: wiresOnly(4) }), fs = f.state, fRoom = f.stage.rooms[0], w = fRoom.wires;
+      settle(f); until(f, () => fs.pInvincible[0] === 0, 5);
+      const danger = () => {
+        for (let k = 0; k < w.length / 6; k++) if (fs.px[0] >= w[k * 6] - 0.3 && fs.px[0] <= w[k * 6 + 1] + 0.3 && M.wireState(fRoom, k, fs.roomTime) !== M.WIRE.DARK) return true;
+        return false;
+      };
+      const outer = [];
+      for (let k = M.ENEMY_SLOTS - 1; k >= 0; k--) if (fs.eType[k] === E.LEDGER_CORE && fs.ey[k] < 1) outer.push(k);
+      const fLives = fs.pLives[0];
+      let fDeaths = 0;
+      for (const core of outer) {
+        let i = 0;
+        fDeaths += deathsOf(f, 30 * 120, () => {
+          if (danger()) return M.IN.DOWN;
+          const dx = fs.ex[core] - fs.px[0];
+          if (Math.abs(dx) > 0.02) return dx > 0 ? M.IN.RIGHT : M.IN.LEFT;
+          return M.IN.UP | (i++ % 2 ? 0 : M.IN.FIRE);
+        }, () => !up(fs, core, E.LEDGER_CORE));
+      }
+      const floor = { cores: outer.length, taken: outer.map((k) => !up(fs, k, E.LEDGER_CORE)), deaths: fDeaths, lives: fLives - fs.pLives[0] };
+      // Standing up in the right wire's span until it burns: one death, its drop-in landing alive.
+      const before = fs.pLives[0];
+      let landed = false, killed = 0;
+      for (let i = 0; i < 8 * 120 && !landed; i++) {
+        const was = fs.pState[0];
+        f.setInput(0); f.simulate(M.FIXED);
+        if (fs.pState[0] === PS.DEAD && was !== PS.DEAD) killed++;
+        if (killed && was === PS.DROP && fs.pState[0] === PS.NORMAL) landed = true;
+      }
+      const burnt = { killed, landed, lives: before - fs.pLives[0], x: +fs.px[0].toFixed(2), stood: [w[6], w[7]] };
+      return {
+        ok: gallery.crossing && gallery.x >= 6.5 && gallery.deaths === 0 && gallery.lives === 0 && gallery.state === PS.NORMAL &&
+          floor.cores === 2 && floor.taken.every(Boolean) && floor.deaths === 0 && floor.lives === 0 && burnt.killed === 1 && burnt.landed && burnt.lives === 1,
+        detail: JSON.stringify({ gallery, floor, burnt })
+      };
+    });
+
+    counting("raid counting: an Ooga under a standing barrier, steered by the autopilot, clears The Counting House within 600 s", () => {
+      const runs = [3, 11].map((seed) => {
+        const sim = M.create({ seed, stage: C }), s = sim.state, limit = 600 * 120;
+        let i = 0;
+        for (; i < limit && s.phase !== M.PHASE.CLEAR && s.phase !== M.PHASE.OVER; i++) {
+          if (i % 120 === 0) s.pBarrier[0] = 1e9;
+          sim.setInput(M.autopilot(sim)); sim.simulate(M.FIXED);
+        }
+        return { seed, phase: s.phase, room: s.room, time: +s.time.toFixed(2), done: s.phase === M.PHASE.CLEAR && i < limit, score: s.pScore[0], weapon: s.pWeapon[0] };
+      });
+      return { ok: runs.every((r) => r.done && r.room === C.rooms.length - 1), detail: JSON.stringify(runs) };
+    });
+  }
+  {
+    // Stage 3, The Hashrate Tower: a ten-screen climb up the Legion's rig tower to the Inflation Balloon. `tower` records a
+    // check, a throw recording its failure. The autopilot's runs under a standing barrier are made once and read by two
+    // checks: each landing's rise over where the feet last stood (on a lift, as it rode), and each fall before the boss.
+    const tower = (name, f) => {
+      let r;
+      try { r = f(); } catch (e) { r = { ok: false, detail: String(e && e.stack || e) }; }
+      record(name, r.ok, r.detail);
+    };
+    const W = S.STAGES[2], F = context.window.BL.raidEnemies.FLAG, IN = M.IN;
+    const grounded = (s) => s.pState[0] === PS.NORMAL && s.pPose[0] !== M.POSE.JUMP;
+    let climbs;
+    try {
+      climbs = [1, 2, 3, 4].map((seed) => {
+        const sim = M.create({ seed, stage: W }), s = sim.state, limit = 900 * 120;
+        let i = 0, stood = NaN, air = false, rise = 0, falls = 0, deaths = 0, landings = 0, dead = false;
+        for (; i < limit && s.phase !== M.PHASE.CLEAR && s.phase !== M.PHASE.OVER; i++) {
+          if (i % 120 === 0) s.pBarrier[0] = 1e9;
+          sim.setInput(M.autopilot(sim)); sim.simulate(M.FIXED);
+          if (s.pState[0] === PS.DEAD && !dead) deaths++;
+          dead = s.pState[0] === PS.DEAD;
+          const on = grounded(s);
+          if (on && air && !Number.isNaN(stood)) {
+            const d = s.py[0] - stood;
+            landings++;
+            if (d > rise) rise = d;
+            if (d < -0.01 && s.phase === M.PHASE.PLAY) falls++;
+          }
+          if (on) stood = s.py[0];
+          else if (s.pState[0] !== PS.NORMAL) stood = NaN;
+          air = s.pState[0] === PS.NORMAL && !on;
+        }
+        return { seed, stage: sim.stage.id, done: s.phase === M.PHASE.CLEAR && i < limit, time: +s.time.toFixed(1), rise: +rise.toFixed(4), falls, deaths, landings, locked: s.camY === s.lockY };
+      });
+    } catch (e) { climbs = { error: String(e && e.stack || e) }; }
+
+    tower("raid tower: The Hashrate Tower is the campaign's third stage, a climb ten screens up with two lifts, five crumbling planks and a gale over its top, coin drones, snipers, a mortar and vents along it and the Inflation Balloon on its lock screen, and passes its own validation", () => {
+      const types = new Set();
+      for (let k = 2; k < W.placed.length; k += 4) types.add(W.placed[k]);
+      const last = W.placed.length - 4, need = ["COIN_DRONE", "LOBBYIST", "BOND_MORTAR", "VENT", "BALLOON"];
+      return {
+        ok: W.kind === "climb" && W.id === "tower" && W.name === "The Hashrate Tower" && W.screens === 10 && W.lockScreen === 9 && S.validate(W).length === 0 &&
+          W.lifts.length === 2 && W.crumble.length === 5 && W.gusts.length === 1 && need.every((n) => types.has(E[n])) &&
+          W.placed[last + 2] === E.BALLOON && Math.floor(W.placed[last + 1] / S.SCREEN_H) === W.lockScreen && TY[E.BALLOON].boss && TY[E.TETHER] !== undefined,
+        detail: JSON.stringify({ kind: W.kind, id: W.id, screens: W.screens, lock: W.lockScreen, faults: S.validate(W), lifts: W.lifts.length, crumble: W.crumble.length, gusts: W.gusts, types: [...types] })
+      };
+    });
+
+    // RISE is the most a landing climbs: the jump's top less a fifth of a metre, in whole cells (1 m under the 1.5 m jump,
+    // 2 m under the 2.25 m one, which passes up through a ledge 2 m over its feet and lands on it); the climb's 50 m and
+    // more take over 50 / RISE landings.
+    const RISE = Math.floor((M.TUNE.JUMP_V * M.TUNE.JUMP_V / (2 * M.TUNE.GRAVITY) - 0.2) / S.CELL) * S.CELL;
+    tower("raid tower: on the autopilot's way up, under a standing barrier on four seeds, every landing rises at most the jump's planned rise over where its feet last stood (lifts boarded and left level or a metre up), and it never falls back, so every crumbling plank is left before its fuse runs out", () => ({
+      ok: Array.isArray(climbs) && climbs.length === 4 && climbs.every((c) => c.stage === "tower" && c.done && c.landings > 50 / RISE && c.rise <= RISE + 1e-4 && c.rise > RISE - 0.01 && c.falls === 0),
+      detail: JSON.stringify({ RISE, climbs })
+    }));
+
+    // The deck, played by the controls: the autopilot climbs until the balloon has mounted its three tethers, then the Ooga
+    // drops to the deck the tethers stand on. Shots up at the balloon while every tether stands; each tether shot from a
+    // metre off it on the deck, standing, facing it; the balloon's box measured by a still bullet beside it, at full health
+    // and once it has taken three quarters of its hit points; then it is shot down.
+    let deck;
+    try {
+      // `step` also keeps the largest change in the open balloon's height from one step to the next (the step it opens on
+      // included), once `watched` names it.
+      let watched = -1, lastY = NaN, freeDy = 0;
+      const sim = M.create({ seed: 7, stage: W }), s = sim.state, step = (bits) => {
+        sim.setInput(bits); sim.simulate(M.FIXED);
+        if (watched < 0) return;
+        const open = s.eType[watched] === E.BALLOON && s.eRoutine[watched] < TY[E.BALLOON].destroyed && !(s.eFlags[watched] & F.SHUT);
+        if (open && !Number.isNaN(lastY)) freeDy = Math.max(freeDy, Math.abs(s.ey[watched] - lastY));
+        lastY = s.eType[watched] === E.BALLOON ? s.ey[watched] : NaN;
+      };
+      const tethers = () => { const out = []; for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.TETHER) out.push(k); return out; };
+      const up = (k, t) => s.eType[k] === t && s.eRoutine[k] < TY[t].destroyed;
+      for (let i = 0; i < 400 * 120 && tethers().length < 3; i++) { if (i % 120 === 0) s.pBarrier[0] = 1e9; step(M.autopilot(sim)); }
+      s.pBarrier[0] = 1e9;
+      const balloon = s.eType.indexOf(E.BALLOON), ts = tethers().sort((a, b) => s.ex[a] - s.ex[b]), feet = s.ey[ts[0]];
+      watched = balloon;
+      for (let i = 0; i < 10 * 120 && !(grounded(s) && Math.abs(s.py[0] - feet) < 1e-3); i++) step(grounded(s) && s.py[0] > feet && i % 2 === 0 ? IN.DOWN | IN.JUMP : 0);
+      const onDeck = grounded(s) && Math.abs(s.py[0] - feet) < 1e-3 && ts.every((k) => S.cellAt(W, Math.floor(s.ex[k] / S.CELL), Math.round(s.ey[k] / S.CELL) - 1) !== S.KIND.EMPTY);
+      const walk = (x) => { for (let i = 0; i < 10 * 120 && Math.abs(s.px[0] - x) > 0.05; i++) step(s.px[0] < x ? IN.RIGHT : IN.LEFT); step(0); };
+      // Down and jump over every column of the locked deck: where it drops through, the Ooga lands alive over the screen's
+      // bottom, and jumps back up.
+      for (let i = 0; i < 3 * 120 && s.camY < s.lockY; i++) step(0);
+      const drops = [];
+      for (let c = 0; c < S.SCREEN_W; c++) {
+        walk((c + 0.5) * S.CELL);
+        const lives = s.pLives[0];
+        step(IN.DOWN | IN.JUMP); step(0);
+        for (let i = 0; i < 1.5 * 120; i++) step(0);
+        const y = s.py[0], alive = s.pState[0] === PS.NORMAL && s.pLives[0] === lives;
+        drops.push({ c, y, alive, locked: s.camY === s.lockY });
+        if (!alive) break;
+        if (Math.abs(y - feet) > 1e-3) { step(IN.JUMP); step(0); for (let i = 0; i < 1.5 * 120; i++) step(0); }
+      }
+      const hp = s.eHp[balloon];
+      let shutAll = true;
+      for (let i = 0; i < 4 * 120; i++) { step((s.px[0] < s.ex[balloon] ? IN.RIGHT : IN.LEFT) | IN.UP | (i % 2 ? 0 : IN.FIRE)); shutAll = shutAll && (s.eFlags[balloon] & F.SHUT) !== 0; }
+      const shotAt = { hp: s.eHp[balloon], shut: shutAll };
+      const cuts = ts.map((k) => {
+        const mid = s.camX + S.SCREEN_W * S.CELL / 2, x = s.ex[k] < mid ? s.ex[k] + 1 : s.ex[k] - 1, face = s.ex[k] > x ? 1 : -1;
+        walk(x);
+        if (s.pFace[0] !== face) step(face > 0 ? IN.RIGHT : IN.LEFT);
+        const others = ts.filter((j) => j !== k && up(j, E.TETHER)), was = others.map((j) => s.eHp[j]);
+        const standing = grounded(s) && Math.abs(s.py[0] - feet) < 1e-3 && s.pPose[0] === M.POSE.STAND;
+        let i = 0;
+        for (; i < 8 * 120 && up(k, E.TETHER); i++) step(i % 2 ? 0 : IN.FIRE);
+        step(0);
+        return { x: +s.ex[k].toFixed(2), standing, fell: !up(k, E.TETHER), seconds: +(i / 120).toFixed(2), others: others.every((j, m) => up(j, E.TETHER) && s.eHp[j] === was[m]), shut: (s.eFlags[balloon] & F.SHUT) !== 0, hp: s.eHp[balloon] };
+      });
+      step(0);
+      // The still bullet: a player's rifle shot with no speed, SWELL_AT beside the balloon's middle at its height, struck
+      // on the next step before the balloon moves, once the balloon's bob has it inside the screen.
+      const SWELL_AT = 0.6, still = () => {
+        for (let i = 0; i < 6 * 120 && s.ey[balloon] > s.camY + S.SCREEN_H * S.CELL - 0.2; i++) step(0);
+        const b = s.bLive.indexOf(0);
+        s.bLive[b] = 1; s.bOwner[b] = 0; s.bKind[b] = M.WEAPON.RIFLE; s.bAge[b] = 0; s.bvx[b] = 0; s.bvy[b] = 0; s.bz[b] = 0; s.bvz[b] = 0;
+        s.blx[b] = s.bx[b] = s.ex[balloon] + SWELL_AT; s.bly[b] = s.by[b] = s.ey[balloon];
+        const before = s.eHp[balloon], inside = s.by[b] < s.camY + S.SCREEN_H * S.CELL;
+        step(0);
+        const hit = inside && s.bLive[b] === 0 && s.eHp[balloon] === before - 1;
+        if (!inside) throw new Error(`the still bullet at ${s.by[b]} m is over the screen's top`);
+        s.bLive[b] = 0;
+        return hit;
+      };
+      const quiet = () => { for (let i = 0; i < 3 * 120 && s.bLive.some((v) => v); i++) step(0); };
+      quiet();
+      const full = s.eHp[balloon], fresh = still();
+      // Shot up at from under it, the open balloon's shots counted at its middle each step: the most before its sixth hit
+      // and those as that hit lands.
+      const RING = 6, near = () => { let n = 0; for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.SHOT && Math.abs(s.ex[k] - s.ex[balloon]) < 0.2 && Math.abs(s.ey[k] - s.ey[balloon]) < 0.2) n++; return n; };
+      const chase = (until, watch = () => {}) => { for (let i = 0; i < 120 * 120 && up(balloon, E.BALLOON) && !until(); i++) { step((Math.abs(s.px[0] - s.ex[balloon]) > 0.1 ? (s.px[0] < s.ex[balloon] ? IN.RIGHT : IN.LEFT) : 0) | IN.UP | (i % 2 ? 0 : IN.FIRE)); watch(); } step(0); };
+      let before = 0, ring = 0;
+      chase(() => full - s.eHp[balloon] >= RING, () => { if (full - s.eHp[balloon] >= RING) ring = near(); else before = Math.max(before, near()); });
+      chase(() => s.eHp[balloon] <= full / 4 + 1);
+      quiet();
+      const worn = s.eHp[balloon], swollen = still();
+      chase(() => false);
+      for (let i = 0; i < 120; i++) step(0);
+      const LT = context.window.BL.raidLegionTower.TUNE, bob = 2 * LT.BALLOON_BOB * 2 * Math.PI / LT.BALLOON_BOB_T * M.FIXED + 1e-3;
+      deck = { onDeck, feet, drops, hp, shotAt, cuts, full, fresh, before, ring, freeDy: +freeDy.toFixed(5), bob: +bob.toFixed(5), worn, swollen, fell: !up(balloon, E.BALLOON), phase: s.phase, others: s.eType.filter((t, k) => t !== E.FREE && k !== balloon).length };
+    } catch (e) { deck = { error: String(e && e.stack || e) }; }
+
+    tower("raid tower: each of the Inflation Balloon's three tethers can be shot down from the deck the boss screen gives: the winches stand on the deck, which no drop through falls past the locked screen's bottom, and each falls to an Ooga standing on it a metre off, facing it, firing level, its shots meeting no other tether", () => ({
+      ok: !deck.error && deck.onDeck && deck.drops.length === S.SCREEN_W && deck.drops.every((d) => d.alive && d.locked && d.y >= W.lockScreen * S.SCREEN_H * S.CELL) &&
+        deck.drops.some((d) => d.y < deck.feet) && deck.cuts.length === 3 && deck.cuts.every((c) => c.standing && c.fell && c.others),
+      detail: JSON.stringify(deck)
+    }));
+
+    tower("raid tower: the Inflation Balloon stays shut and unharmed while any tether stands, opens when the last falls and drifts off from there without a jump in its height, fires a ring of six as its sixth hit lands, swells as it is hit (a shot just beside its box misses it whole and meets it worn), and its fall clears the stage", () => ({
+      ok: !deck.error && deck.shotAt.shut && deck.shotAt.hp === deck.hp && deck.cuts[0].shut && deck.cuts[1].shut && !deck.cuts[2].shut &&
+        deck.cuts.every((c) => c.hp === deck.hp) && deck.full === deck.hp && !deck.fresh && deck.before <= 1 && deck.ring >= 6 && deck.freeDy > 0 && deck.freeDy < deck.bob && deck.worn < deck.full && deck.swollen &&
+        deck.fell && deck.phase === M.PHASE.CLEAR && deck.others === 0,
+      detail: JSON.stringify(deck)
+    }));
+
+    tower("raid tower: an Ooga under a standing barrier, steered by the autopilot, clears The Hashrate Tower within 900 s on four seeds", () => ({
+      ok: Array.isArray(climbs) && climbs.length === 4 && climbs.every((c) => c.stage === "tower" && c.done && c.locked && c.deaths === 0),
+      detail: JSON.stringify(climbs)
+    }));
+
+    // rule: a vent's mouth kills to stand on, and a hop clears it. The row-102 vent on the real stage, with no barrier: the
+    // autopilot climbs (under a barrier) until the vent is in play, then the barrier goes, everything else on the screen and
+    // the spawner are cleared away, and the Ooga stands on the vent's ledge left of it (holding its spot against the gale)
+    // until a gust calm and the vent's wait leave room. One walks into the mouth; the other hops it, holding right until it
+    // lands.
+    const ventRun = (hop) => {
+      const sim = M.create({ seed: 5, stage: W }), s = sim.state, step = (bits) => { sim.setInput(bits); sim.simulate(M.FIXED); };
+      let rec = -1;
+      for (let k = 0; k < W.placed.length; k += 4) if (W.placed[k + 2] === E.VENT && W.placed[k + 1] === 103) rec = k;
+      const vx = (W.placed[rec] + 0.5) * S.CELL, vy = W.placed[rec + 1] * S.CELL;
+      let v = -1;
+      for (let i = 0; i < 300 * 120 && v < 0; i++) {
+        if (i % 120 === 0) s.pBarrier[0] = 1e9;
+        step(M.autopilot(sim));
+        for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.VENT && Math.abs(s.ex[k] - vx) < 1e-3 && Math.abs(s.ey[k] - vy) < 1e-3) v = k;
+      }
+      s.pBarrier[0] = 0; s.pInvincible[0] = 0; s.bLive.fill(0); s.spawnTimer = 1e9; s.listCursor = W.placed.length / 4;
+      for (let k = 0; k < M.ENEMY_SLOTS; k++) if (k !== v) s.eType[k] = E.FREE;
+      const spot = vx - 0.55;
+      s.px[0] = spot; s.py[0] = vy; s.pvx[0] = 0; s.pvy[0] = 0; s.pState[0] = PS.NORMAL; s.pPose[0] = M.POSE.STAND;
+      const lives = s.pLives[0], calm = (t) => M.gustPhase(t) === M.GUST.CALM;
+      for (let i = 0; i < 20 * 120 && !(calm(s.time) && calm(s.time + 1.5) && Math.abs(s.px[0] - spot) < 0.03 && s.eRoutine[v] === 1 && s.eTimer[v] > 1.5 && !s.eType.includes(E.SHOT)); i++) {
+        step(s.px[0] < spot - 0.02 ? IN.RIGHT : s.px[0] > spot + 0.02 ? IN.LEFT : 0);
+      }
+      const ready = { x: +s.px[0].toFixed(3), y: s.py[0], standing: grounded(s), camY: +s.camY.toFixed(2) };
+      let died = null, air = false, landed = null;
+      for (let i = 0; i < 3 * 120 && !died && !landed; i++) {
+        step(IN.RIGHT | (hop && i === 0 ? IN.JUMP : 0));
+        if (s.pState[0] === PS.DEAD) died = { x: +s.px[0].toFixed(3), y: s.py[0] };
+        if (!grounded(s)) air = true;
+        else if (hop && air) landed = { x: +s.px[0].toFixed(3), y: s.py[0] };
+      }
+      for (let i = 0; i < 120 && !died; i++) { step(0); if (s.pState[0] === PS.DEAD) died = { x: s.px[0], y: s.py[0] }; }
+      return { vent: v, vx, vy, ready, died, landed, lives: s.pLives[0] === lives, state: s.pState[0] };
+    };
+    let vents;
+    try { vents = { walk: ventRun(false), hop: ventRun(true) }; } catch (e) { vents = { error: String(e && e.stack || e) }; }
+    tower("raid tower: a vent's mouth kills an Ooga walking into it, and one hopping it between its puffs lands alive beyond it (the row-102 vent on the real stage, no barrier)", () => {
+      const { walk, hop } = vents, set = (r) => r.vent >= 0 && r.ready.standing && r.ready.y === r.vy && r.ready.x < r.vx - 0.45;
+      return {
+        ok: !vents.error && set(walk) && set(hop) && walk.died !== null && Math.abs(walk.died.x - walk.vx) < 0.25 && walk.died.y === walk.vy &&
+          // On the vent's ledge, or the ledge 2 m over it, which every jump over the vent now rises through and lands on.
+          hop.died === null && hop.landed !== null && (hop.landed.y === hop.vy || hop.landed.y === hop.vy + 2) && hop.landed.x > hop.vx + 0.25 && hop.lives && hop.state === PS.NORMAL,
+        detail: JSON.stringify(vents)
+      };
+    });
+  }
+  {
+    // Stage 4, The Treasury Vaults: eight rooms deeper in the Legion's bank (shutters, twins, searchlights and drop-in
+    // guards), the last the Printer King. `alone(r)` is a stage of room r by itself, `quiet(r)` the same with no waves.
+    // `down` takes a slot down from the front line by the controls alone, as a player times it: it walks under it, then
+    // fires up a press every other step while the target is open (and, jumping, while the muzzle is in its box), standing
+    // still or jumping again and again, for at most `seconds`, and says whether it fell. A check that throws records its
+    // failure.
+    const treasury = (name, f) => {
+      let r;
+      try { r = f(); } catch (e) { r = { ok: false, detail: String(e && e.stack || e) }; }
+      record(name, r.ok, r.detail);
+    };
+    const V4 = S.STAGES.find((g) => g.id === "treasury"), F = context.window.BL.raidEnemies.FLAG, LT = context.window.BL.raidLegionTreasury;
+    const alone = (r) => Object.freeze({ ...V4, rooms: Object.freeze([V4.rooms[r]]) });
+    const quiet = (r) => Object.freeze({ ...V4, rooms: Object.freeze([Object.freeze({ ...V4.rooms[r], waves: new Float64Array(0) })]) });
+    const typesOf = (room) => { const out = []; for (let k = 2; k < room.targets.length; k += 4) out.push(room.targets[k]); return out; };
+    const up = (s, k, t) => s.eType[k] === t && s.eRoutine[k] < TY[t].destroyed;
+    const shutOf = (s, k) => (s.eFlags[k] & F.SHUT) !== 0;
+    // `onStep`, when set, runs after every step `down` takes; `fellAt` is the room's clock at the last fall `down` saw.
+    let onStep = null, fellAt = -1;
+    const down = (sim, k, jump, seconds = 20) => {
+      const s = sim.state, t = s.eType[k], b = M.RULES.SHOT_BOX[M.TIER_OF[t]], o = s.ey[k] + M.ORIGIN_OF[t];
+      const step = (bits) => { sim.setInput(bits); sim.simulate(M.FIXED); if (onStep) onStep(); };
+      walkTo(sim, s.ex[k]);
+      for (let i = 0; i < seconds * 120 && up(s, k, t); i++) {
+        const muzzle = s.py[0] + M.TUNE.MUZZLE[s.pPose[0]][0][1], aimed = !jump || (muzzle > o + b[2] + 0.02 && muzzle < o + b[3] - 0.02);
+        let bits = M.IN.UP | (i % 2 || shutOf(s, k) || !aimed ? 0 : M.IN.FIRE);
+        if (jump && s.pPose[0] !== M.POSE.JUMP && !(s.prevInput & M.IN.JUMP)) bits |= M.IN.JUMP;
+        step(bits);
+        if (!up(s, k, t)) fellAt = s.roomTime;
+      }
+      for (let i = 0; i < 240 && s.pPose[0] === M.POSE.JUMP; i++) step(0);
+      sim.setInput(0);
+      return !up(s, k, t);
+    };
+
+    treasury("raid treasury: The Treasury Vaults is the campaign's fourth stage, eight rooms each holding a core (shutters in three, a pair of twins in two), searchlights in two, a tripwire that starts dark (an Ooga walks in where it stood), the last the Printer King's boss room with three heads and the King, and passes its own validation", () => {
+      const faults = S.validate(V4), last = V4.rooms[V4.rooms.length - 1], boss = typesOf(last), count = (room, t) => typesOf(room).filter((x) => x === t).length;
+      const cored = V4.rooms.slice(0, -1).map((room) => typesOf(room).filter((t) => TY[t].flags & F.CORE).length);
+      const shutters = V4.rooms.map((room) => count(room, E.SHUTTER_CORE)), twins = V4.rooms.map((room) => count(room, E.TWIN_CORE));
+      const lights = V4.rooms.map((room) => count(room, E.SEARCHLIGHT)), drops = V4.rooms.map((room) => { let n = 0; for (let k = 1; k < room.waves.length; k += 3) if (room.waves[k] === E.DROP_GUARD) n++; return n; });
+      const starts = V4.rooms.flatMap((room) => Array.from({ length: room.wires.length / 6 }, (_, k) => M.wireState(room, k, 0)));
+      return {
+        ok: S.STAGES[3] === V4 && V4.kind === "rooms" && V4.name === "The Treasury Vaults" && V4.rooms.length === 8 && last.boss && faults.length === 0 &&
+          cored.every((n) => n > 0) && shutters.filter((n) => n > 0).length === 3 && twins.filter((n) => n === 2).length === 2 && twins.every((n) => n === 0 || n === 2) &&
+          lights.filter((n) => n > 0).length === 2 && drops.filter((n) => n > 0).length >= 3 && starts.length === 1 && starts.every((w) => w === M.WIRE.DARK) &&
+          V4.rooms.every((room) => room.waves.length > 0) &&
+          boss.length === 4 && boss.filter((t) => t === E.PRINT_HEAD).length === 3 && boss.filter((t) => t === E.PRINTER_KING).length === 1,
+        detail: JSON.stringify({ index: S.STAGES.indexOf(V4), rooms: V4 && V4.rooms.length, faults, cored, shutters, twins, lights, drops, starts, boss })
+      };
+    });
+
+    treasury("raid treasury: shuttered cores open in turn and cycle shut and open, twins keep one of the pair open and swap together (the last standing opening for good), and a shut core takes no damage from shots that hurt it open", () => {
+      const T = LT.TUNE, tol = 3 * M.FIXED;   // a timer runs out on the step after it reaches 0, and Float32 may take one more
+      // The Shutter Bank's three shutters, phases 0 to 2, watched from the room's start: each change of SHUT and when.
+      const bank = M.create({ seed: 11, stage: alone(3) }), b = bank.state, shutters = [];
+      for (let k = 0; k < M.ENEMY_SLOTS; k++) if (b.eType[k] === E.SHUTTER_CORE) shutters.push(k);
+      const seen = new Map(shutters.map((k) => [k, []])), was = new Map();
+      for (let i = 0; i < 11 * 120; i++) {
+        bank.simulate(M.FIXED);
+        for (const k of shutters) { const shut = shutOf(b, k); if (i > 0 && shut !== was.get(k)) seen.get(k).push({ t: b.roomTime, shut }); was.set(k, shut); }
+      }
+      const cycled = shutters.map((k) => {
+        const want = [], changes = seen.get(k);
+        for (let t = T.SHUTTER_SHUT - b.eAttr[k] * T.SHUTTER_STEP, shut = false; t < 11 - tol; t += shut ? T.SHUTTER_SHUT : T.SHUTTER_OPEN, shut = !shut) want.push({ t, shut });
+        return { attr: b.eAttr[k], ok: changes.length === want.length && changes.every((c, n) => c.shut === want[n].shut && Math.abs(c.t - want[n].t) <= tol), changes: changes.slice(0, 4).map((c) => +c.t.toFixed(3)) };
+      });
+      // The phase-0 shutter, low enough for a standing shot: fired at while it stays shut, then while it stays open.
+      const sim = M.create({ seed: 11, stage: alone(3) }), s = sim.state;
+      settle(sim); s.pInvincible[0] = 1e9;
+      const low = shutters.find((k) => s.eAttr[k] === 0), hp = s.eHp[low];
+      walkTo(sim, s.ex[low]);
+      const volley = (open) => {
+        until(sim, () => shutOf(s, low) === !open && s.eTimer[low] > (open ? T.SHUTTER_OPEN : T.SHUTTER_SHUT) - 0.05, 8);
+        let fired = 0;
+        for (let i = 0; s.eTimer[low] > 1; i++) { const before = s.bLive.reduce((n, x) => n + x, 0); sim.setInput(M.IN.UP | (i % 2 ? 0 : M.IN.FIRE)); sim.simulate(M.FIXED); if (s.bLive.reduce((n, x) => n + x, 0) > before) fired++; }
+        sim.setInput(0);
+        until(sim, () => s.bLive.every((x) => !x), 2);
+        return { fired, shut: shutOf(s, low), hp: s.eHp[low] };
+      };
+      const whileShut = volley(false), whileOpen = volley(true);
+      // The Twin Hall's pair from the room's start, then its open twin shot down: the other opens and stays open.
+      const hall = M.create({ seed: 11, stage: alone(1) }), h = hall.state, pair = [];
+      for (let k = 0; k < M.ENEMY_SLOTS; k++) if (h.eType[k] === E.TWIN_CORE) pair.push(k);
+      pair.sort((p, q) => h.ex[p] - h.ex[q]);
+      const swaps = [];
+      let opposite = true, lowerFirst = null;
+      for (let i = 0; i < 9 * 120; i++) {
+        const before = shutOf(h, pair[0]);
+        hall.simulate(M.FIXED);
+        if (i === 0) lowerFirst = !shutOf(h, pair[0]);
+        else if (shutOf(h, pair[0]) !== before) swaps.push(+h.roomTime.toFixed(3));
+        if (shutOf(h, pair[0]) === shutOf(h, pair[1])) opposite = false;
+      }
+      const swapped = swaps.length === 4 && swaps.every((t, n) => Math.abs(t - (n + 1) * T.TWIN_SWAP) <= tol);
+      settle(hall); h.pInvincible[0] = 1e9;
+      const open = shutOf(h, pair[0]) ? pair[1] : pair[0], other = open === pair[0] ? pair[1] : pair[0];
+      const fell = down(hall, open, true, 20);
+      hall.simulate(M.FIXED);
+      let stayed = true;
+      for (let i = 0; i < 5 * 120; i++) { hall.simulate(M.FIXED); if (shutOf(h, other)) stayed = false; }
+      return {
+        ok: shutters.length === 3 && cycled.every((c) => c.ok) && whileShut.fired >= 3 && whileShut.shut && whileShut.hp === hp &&
+          whileOpen.fired >= 3 && !whileOpen.shut && whileOpen.hp < hp && pair.length === 2 && lowerFirst && opposite && swapped && fell && stayed && up(h, other, E.TWIN_CORE),
+        detail: JSON.stringify({ cycled, hp, whileShut, whileOpen, lowerFirst, opposite, swaps, fell, stayed })
+      };
+    });
+
+    treasury("raid treasury: a searchlight locks only on an Ooga that has stood in its pool for LIGHT_LOCK and calls a guard in at the door nearest it, once a lock, and none once shot down, while one running through the pool against its sweep is never locked; a drop guard waits in its hatch for DROP_WARN, a ghost, perhaps after its table time, then falls at the front line, stands and fires", () => {
+      const T = LT.TUNE, L = LT.LIGHT, D = LT.DROP;
+      // The Searchlight Gallery with no waves, so every guard is one a light called, under a barrier (which leaves the room
+      // attacking). Every step: the pool's x, the time the Ooga has been in it without a break, each lock with that time,
+      // each call, and every guard that came in. `steer` gives the Ooga's buttons each step.
+      const gallery = () => {
+        const sim = M.create({ seed: 11, stage: quiet(2) }), s = sim.state;
+        settle(sim); s.pBarrier[0] = 1e9;
+        return { sim, s, light: s.eType.indexOf(E.SEARCHLIGHT), locks: [], calls: [], stray: [], inPool: 0, most: 0, entries: 0 };
+      };
+      const watch = (g, seconds, steer) => {
+        const { sim, s, light } = g;
+        for (let i = 0; i < seconds * 120; i++) {
+          const routine = s.eRoutine[light], guards = new Set();
+          for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.GUARD) guards.add(k);
+          sim.setInput(steer ? steer() : 0); sim.simulate(M.FIXED);
+          const on = s.eType[light] === E.SEARCHLIGHT, locked = on && routine === L.SWEEP && s.eRoutine[light] === L.LOCKED;
+          const inside = on && (s.eRoutine[light] === L.SWEEP || locked) && Math.abs(s.evy[light] - s.px[0]) < T.LIGHT_HALF;
+          if (inside && g.inPool === 0) g.entries++;
+          g.inPool = inside ? g.inPool + M.FIXED : 0;
+          if (g.inPool > g.most) g.most = g.inPool;
+          if (locked) g.locks.push({ t: +s.roomTime.toFixed(3), beam: +s.evy[light].toFixed(3), x: +s.px[0].toFixed(3), inPool: +g.inPool.toFixed(4) });
+          for (let k = 0; k < M.ENEMY_SLOTS; k++) {
+            if (s.eType[k] !== E.GUARD || guards.has(k)) continue;
+            (routine === L.LOCKED && s.eRoutine[light] === L.DARK ? g.calls : g.stray).push({ t: +s.roomTime.toFixed(3), x: s.ex[k], z: s.ez[k] });
+          }
+        }
+        sim.setInput(0);
+      };
+      // Standing still at x 2 for 15 s, then the light shot down and 8 s more.
+      const still = gallery(), doors = V4.rooms[2].doors;
+      walkTo(still.sim, 2);
+      const nearest = Array.from(doors).reduce((d, x, k) => Math.abs(x - 2) < Math.abs(doors[d] - 2) ? k : d, 0);
+      watch(still, 15);
+      const shot = down(still.sim, still.light, true, 20), before = still.calls.length + still.stray.length;
+      watch(still, 8);
+      const after = still.calls.length + still.stray.length - before;
+      // Running for 10 s against the pool's sweep (left while it heads right, right while it heads left), so each crossing
+      // takes about 2 LIGHT_HALF / (RUN + LIGHT_V) s.
+      const run = gallery();
+      watch(run, 10, () => run.s.eRoutine[run.light] === L.SWEEP ? (run.s.eAim[run.light] ? M.IN.RIGHT : M.IN.LEFT) : 0);
+      // Room 4, the Drop Room, with its waves: its first drop guard (due at its table time, perhaps held), the Ooga standing
+      // clear of both hatches. Each step of its wait in the hatch, then its fall, landing, standing and first shot.
+      const room4 = V4.rooms[4], hatches = [], tableAt = [];
+      for (let k = 0; k < room4.waves.length; k += 3) if (room4.waves[k + 1] === E.DROP_GUARD && !hatches.includes(room4.doors[room4.waves[k + 2]])) { hatches.push(room4.doors[room4.waves[k + 2]]); tableAt.push(room4.waves[k]); }
+      const room = M.create({ seed: 11, stage: alone(4) }), r = room.state;
+      settle(room); r.pBarrier[0] = 1e9;
+      let drop = -1;
+      until(room, () => (drop = r.eType.findIndex((t) => t === E.DROP_GUARD)) >= 0, 10);
+      const at = { x: r.ex[drop], y: r.ey[drop], z: r.ez[drop], t: r.roomTime, routine: r.eRoutine[drop] }, due = tableAt[hatches.indexOf(at.x)];
+      let held = true, front = true, fellAt = -1;
+      for (let i = 0; i < 2 * 120 && r.eRoutine[drop] === D.WARN; i++) {
+        if (r.ey[drop] !== T.DROP_START || r.ez[drop] !== 0 || !(r.eFlags[drop] & F.GHOST)) held = false;
+        room.simulate(M.FIXED);
+      }
+      fellAt = r.roomTime;
+      const warned = fellAt - at.t, openFalling = r.eRoutine[drop] === D.FALL && !(r.eFlags[drop] & F.GHOST);
+      until(room, () => { if (r.ez[drop] !== 0) front = false; return r.ey[drop] === 0; }, 3);
+      const landed = r.roomTime - fellAt, standing = r.eType[drop] === E.DROP_GUARD && r.eRoutine[drop] === D.FALL + 1;
+      // Its first shot: a SHOT new this step at its x, at the front line.
+      let fired = false, shots = new Set();
+      for (let i = 0; i < 4 * 120 && !fired; i++) {
+        room.simulate(M.FIXED);
+        const now = new Set();
+        for (let k = 0; k < M.ENEMY_SLOTS; k++) if (r.eType[k] === E.SHOT) { now.add(k); if (!shots.has(k) && Math.abs(r.ex[k] - at.x) < 0.05 && r.ez[k] === 0) fired = true; }
+        shots = now;
+      }
+      const fallTime = Math.sqrt(2 * T.DROP_START / M.TUNE.GRAVITY);
+      return {
+        ok: still.light >= 0 && still.locks.length >= 2 && still.calls.length === still.locks.length && still.stray.length === 0 &&
+          still.locks.every((l) => Math.abs(l.beam - l.x) < 0.02 && l.inPool >= T.LIGHT_LOCK - M.FIXED) &&
+          still.calls.every((c) => c.x === doors[nearest] && c.z === 1) && shot && after === 0 &&
+          run.entries >= 2 && run.most < T.LIGHT_LOCK && run.locks.length === 0 && run.calls.length + run.stray.length === 0 &&
+          drop >= 0 && at.routine === D.WARN && due !== undefined && at.t >= due - 1e-6 && Math.abs(at.y - T.DROP_START) < 1e-6 && at.z === 0 && held &&
+          Math.abs(warned - T.DROP_WARN) <= 3 * M.FIXED && openFalling && front && Math.abs(landed - fallTime) < 0.05 && standing && fired,
+        detail: JSON.stringify({ still: { locks: still.locks, calls: still.calls, stray: still.stray, nearest, shot, after },
+          run: { entries: run.entries, most: +run.most.toFixed(3), locks: run.locks, calls: run.calls, stray: run.stray },
+          drop: { at, due, held, warned: +warned.toFixed(4), openFalling, front, landed: +landed.toFixed(3), standing, fired } })
+      };
+    });
+
+    // The Printer King's room from its start under a barrier, so it attacks and nothing kills, with no guards coming in to
+    // fill its slots (a player shoots them; this Ooga only stands in the King's lanes): its heads' bats watched,
+    // the King shot at while the heads stand, each head shot down from its lane (the outer two standing, the top one
+    // jumping over the shut King), the King's opening and first volley timed, and the King shot down standing.
+    let king;
+    try {
+      const sim = M.create({ seed: 11, stage: quiet(V4.rooms.length - 1) }), s = sim.state, T = LT.TUNE;
+      const looped = M.create({ seed: 11, stage: alone(V4.rooms.length - 1), loops: 2 }).state;
+      settle(sim); s.pBarrier[0] = 1e9;
+      const k0 = s.eType.indexOf(E.PRINTER_KING), heads = [];
+      for (let k = M.ENEMY_SLOTS - 1; k >= 0; k--) if (s.eType[k] === E.PRINT_HEAD) heads.push(k);
+      heads.sort((p, q) => s.ey[p] - s.ey[q] || s.ex[p] - s.ex[q]);
+      const hp = s.eHp[k0], hpLooped = looped.eHp[looped.eType.indexOf(E.PRINTER_KING)];
+      sim.simulate(M.FIXED);
+      const linked = heads.every((k) => s.eLink[k] === k0), heights = [];
+      for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.PRINT_HEAD || s.eType[k] === E.PRINTER_KING) {
+        const type = Object.keys(E).find((n) => E[n] === s.eType[k]);
+        heights.push({ type, y: s.ey[k], reach: S.ROOM_REACH[type] });
+      }
+      // Bats: one followed from the back wall to the front line, where it hunts the Ooga, standing at the far left so the
+      // bats live long enough to pile up; then the most flying at once over 12 s.
+      walkTo(sim, M.ROOM.FRONT_L);
+      let most = 0, bat = -1;
+      const count = () => { let n = 0; for (let k = 0; k < M.ENEMY_SLOTS; k++) if (up(s, k, E.BILL_BAT)) n++; if (n > most) most = n; return n; };
+      until(sim, () => count() > 0 && (bat = s.eType.indexOf(E.BILL_BAT)) >= 0, 5);
+      const printed = { z: s.ez[bat], y: s.ey[bat] };
+      until(sim, () => { count(); return s.eType[bat] !== E.BILL_BAT || s.ez[bat] === 0; }, 4);
+      const reached = { z: s.ez[bat], y: +s.ey[bat].toFixed(3), x0: s.ex[bat] };
+      sim.simulate(0.5);
+      const hunting = { toward: Math.abs(s.ex[bat] - s.px[0]) < Math.abs(reached.x0 - s.px[0]) || Math.abs(s.ex[bat] - s.px[0]) < 0.05, y: +s.ey[bat].toFixed(3) };
+      for (let i = 0; i < 12 * 120; i++) { sim.simulate(M.FIXED); count(); }
+      // The King shot at standing in its lane while every head stands: shut and unharmed.
+      walkTo(sim, s.ex[k0]);
+      for (let i = 0; i < 4 * 120; i++) { count(); sim.setInput(M.IN.UP | (i % 2 ? 0 : M.IN.FIRE)); sim.simulate(M.FIXED); }
+      sim.setInput(0);
+      const shutAt = { hp: s.eHp[k0], shut: shutOf(s, k0) };
+      // Each head shot down, the King watched every step from then on: when it opens after the last head's fall.
+      let openedAt = -1;
+      onStep = () => { count(); if (openedAt < 0 && !shutOf(s, k0)) openedAt = s.roomTime; };
+      const cuts = heads.map((k) => {
+        const jump = s.ey[k] > 1, fell = down(sim, k, jump, 30);
+        return { x: s.ex[k], y: s.ey[k], jump, fell, shut: openedAt < 0 || openedAt > fellAt, hp: s.eHp[k0] };
+      });
+      const lastFell = fellAt;
+      for (let i = 0; i < 3 * 120 && openedAt < 0; i++) { sim.simulate(M.FIXED); onStep(); }
+      onStep = null;
+      walkTo(sim, s.ex[k0]);
+      let volley = null;
+      for (let i = 0; i < 4 * 120 && !volley; i++) {
+        sim.simulate(M.FIXED); count();
+        const thrown = [];
+        for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.SHOT && s.ez[k] > 0.95 && Math.abs(s.ex[k] - s.ex[k0]) < 0.6) thrown.push(k);
+        if (!thrown.length) continue;
+        const lanes = new Map();
+        for (let j = 0; j < 4 * 120 && lanes.size < thrown.length; j++) {
+          sim.simulate(M.FIXED);
+          for (const k of thrown) if (!lanes.has(k) && s.eType[k] === E.SHOT && s.ez[k] <= 0) lanes.set(k, +s.ex[k].toFixed(2));
+        }
+        volley = { at: s.px[0], thrown: thrown.length, lanes: [...lanes.values()].sort((a, c) => a - c) };
+      }
+      const fell = down(sim, k0, false, 60);
+      const cleared = { phase: s.phase, barrier: s.barrier, others: s.eType.filter((t, k) => t !== E.FREE && k !== k0).length };
+      king = { hp, hpLooped, linked, heights, printed, reached, hunting, most, shutAt, cuts, opened: openedAt >= 0 ? +(openedAt - lastFell).toFixed(4) : null, volley, fell, cleared, spread: T.KING_SPREAD };
+    } catch (e) { king = { error: String(e && e.stack || e) }; }
+
+    treasury("raid treasury: the Printer King's heads (each linked to the King) print bill-bats (up to four flying at once) that fly to the front line and hunt the Ooga; its core stays shut and unharmed while any head stands and opens after the last falls; every part that must fall is hit from the front line, the outer heads by standing shots up their lanes, the top head by jumping shots over the shut King and the King by standing shots, each within its type's ROOM_REACH (which the sim holds to that type's own box); the King fires three shots across the front line, its hit points are the boss tier's by the formula, and its fall clears the stage", () => {
+      const T = LT.TUNE, k = king;
+      const ok = !k.error && k.hp === 40 && k.hpLooped === 42 && M.TIER_OF[E.PRINTER_KING] === M.RULES.TIER.BOSS &&
+        Math.abs(k.printed.z - 1) < 0.05 && k.reached.z === 0 && Math.abs(k.reached.y - T.BAT_Y) < 0.01 && k.hunting.toward && Math.abs(k.hunting.y - T.BAT_Y) <= T.BAT_BOB + 1e-3 &&
+        k.most === T.BAT_CAP && k.shutAt.hp === k.hp && k.shutAt.shut &&
+        k.linked && k.heights.length === 4 && k.heights.every((h) => h.reach !== undefined && h.y <= h.reach) &&
+        k.cuts.length === 3 && k.cuts.every((c) => c.fell && c.hp === k.hp && c.shut) && k.cuts.filter((c) => c.jump).length === 1 && k.cuts[2].jump && k.opened !== null && Math.abs(k.opened - T.KING_OPEN) <= 3 * M.FIXED &&
+        k.volley && k.volley.thrown === 3 && k.volley.lanes.length === 3 && k.volley.lanes.every((x, n) => n === 0 || Math.abs(x - k.volley.lanes[n - 1] - T.KING_SPREAD) < 0.1) &&
+        k.fell && k.cleared.phase === M.PHASE.CLEAR && k.cleared.barrier === 0 && k.cleared.others === 0;
+      return { ok, detail: JSON.stringify(k) };
+    });
+
+    // rule: the rooms autopilot clears the stage whenever it arrives in a room, as a player arrives at any time (it once
+    // chased whichever of the Shutter Bank's shutters opened, its shots reaching the back wall after it shut, and looped
+    // there when arrival times shifted). Each seed stands still for its own wait as each room starts, so no two
+    // runs enter the rooms on the same timetable: the seeds are independent runs.
+    treasury("raid treasury: an Ooga under a standing barrier, steered by the autopilot, clears The Treasury Vaults within 600 s on four seeds, each waiting its own time as each room starts so no two enter the rooms on the same timetable", () => {
+      const runs = [1, 2, 3, 4].map((seed) => {
+        const sim = M.create({ seed, stage: V4 }), s = sim.state, limit = 600 * 120, wait = Math.round((seed - 1) * 0.45 / M.FIXED), entered = [];
+        let i = 0, room = -1, since = 0;
+        for (; i < limit && s.phase !== M.PHASE.CLEAR && s.phase !== M.PHASE.OVER; i++) {
+          if (i % 120 === 0) s.pBarrier[0] = 1e9;
+          if (s.room !== room) { room = s.room; since = i; entered.push(+s.time.toFixed(2)); }
+          sim.setInput(i - since < wait ? 0 : M.autopilot(sim)); sim.simulate(M.FIXED);
+        }
+        return { seed, phase: s.phase, room: s.room, time: +s.time.toFixed(2), done: s.phase === M.PHASE.CLEAR && i < limit, score: s.pScore[0], weapon: s.pWeapon[0], entered };
+      });
+      const apart = new Set(runs.map((run) => run.entered.join())).size === runs.length;
+      return { ok: runs.every((r) => r.done && r.room === V4.rooms.length - 1) && apart, detail: JSON.stringify({ apart, runs }) };
+    });
+
+    treasury("raid treasury: with no barrier, an Ooga driven by its buttons crosses the Bullion Store's tripwire while it is dark and takes the shuttered core in its open windows with shots fired standing over the wire, stepping off its span while it warns or is live, and lives throughout", () => {
+      // Room 6 with no waves and its tellers taken down, so only the wire can kill and only the shutter stands in the way.
+      const r6 = V4.rooms[6], keep = [];
+      for (let k = 0; k < r6.targets.length; k += 4) if (r6.targets[k + 2] !== E.WALL_TELLER) keep.push(...r6.targets.subarray(k, k + 4));
+      const stage = Object.freeze({ ...V4, rooms: Object.freeze([Object.freeze({ ...r6, targets: Float64Array.from(keep), waves: new Float64Array(0) })]) });
+      const sim = M.create({ seed: 11, stage }), s = sim.state, room = stage.rooms[0], x0 = room.wires[0], x1 = room.wires[1];
+      settle(sim);
+      const lives = s.pLives[0], wire = () => M.wireState(room, 0, s.roomTime), shutter = s.eType.indexOf(E.SHUTTER_CORE);
+      // `fromSpan[b]`: bullet b was fired with the Ooga over the wire's span; a hit on the shutter is counted to the bullets
+      // spent on the step its hit points fell.
+      let alive = true, live = 0, crossed = false, inSpanHits = 0, fell = false;
+      const fromSpan = new Uint8Array(M.BULLETS), was = new Uint8Array(M.BULLETS);
+      const step = (bits) => {
+        const hp = s.eHp[shutter], over = s.px[0] >= x0 && s.px[0] <= x1;
+        was.set(s.bLive);
+        sim.setInput(bits); sim.simulate(M.FIXED);
+        for (let b = 0; b < M.BULLETS; b++) {
+          if (!was[b] && s.bLive[b]) fromSpan[b] = over ? 1 : 0;
+          else if (was[b] && !s.bLive[b] && s.eHp[shutter] < hp && fromSpan[b]) inSpanHits++;
+        }
+        if (s.pState[0] !== M.PSTATE.NORMAL || s.pLives[0] !== lives) alive = false;
+        if (wire() === M.WIRE.LIVE) live++;
+      };
+      const walk = (x) => { for (let i = 0; i < 600 && Math.abs(s.px[0] - x) > 0.02; i++) step(s.px[0] < x ? M.IN.RIGHT : M.IN.LEFT); };
+      walk(x0 - 0.6);                                                                    // out of the span, left of it
+      for (let i = 0; i < 1200 && wire() !== M.WIRE.LIVE; i++) step(0);                 // the wire goes live
+      for (let i = 0; i < 1200 && wire() === M.WIRE.LIVE; i++) step(0);                 // and dark again: cross now
+      const from = s.px[0];
+      walk(x1 + 0.15);
+      crossed = alive && from < x0 && s.px[0] > x1;
+      // Over the span (x 4.9, under the shutter's box) while the wire is dark, off it (x 5.15) otherwise; jumping, firing up
+      // a press every other step while still, the shutter open and the muzzle in its box.
+      const t = s.eType[shutter], b = M.RULES.SHOT_BOX[M.TIER_OF[t]], o = s.ey[shutter] + M.ORIGIN_OF[t];
+      for (let i = 0; i < 30 * 120 && alive && up(s, shutter, t); i++) {
+        const want = wire() === M.WIRE.DARK ? x1 - 0.1 : x1 + 0.15, dx = want - s.px[0];
+        if (Math.abs(dx) > 0.02) { step(dx > 0 ? M.IN.RIGHT : M.IN.LEFT); continue; }
+        const muzzle = s.py[0] + M.TUNE.MUZZLE[s.pPose[0]][0][1], aimed = muzzle > o + b[2] + 0.02 && muzzle < o + b[3] - 0.02;
+        let bits = M.IN.UP | (i % 2 || shutOf(s, shutter) || !aimed ? 0 : M.IN.FIRE);
+        if (s.pPose[0] !== M.POSE.JUMP && !(s.prevInput & M.IN.JUMP)) bits |= M.IN.JUMP;
+        step(bits);
+      }
+      fell = !up(s, shutter, t);
+      return {
+        ok: crossed && fell && alive && inSpanHits > 0 && live > 0,
+        detail: JSON.stringify({ crossed, from: +from.toFixed(2), fell, alive, inSpanHits, live, t: +s.roomTime.toFixed(2), x: +s.px[0].toFixed(2) })
+      };
+    });
+
+    treasury("raid treasury: with no barrier, in the Printer King's room (where lying prone is refused) an Ooga driven by its buttons shoots the bill-bats down standing, facing each as it hunts along the front line, and lives through 15 s of them", () => {
+      // The boss room with no waves, so the bats are the only danger while the King is shut.
+      const sim = M.create({ seed: 11, stage: quiet(V4.rooms.length - 1) }), s = sim.state;
+      settle(sim);
+      const lives = s.pLives[0];
+      let prone = false, alive = true, downed = 0;
+      for (let i = 0; i < 60; i++) { sim.setInput(M.IN.DOWN); sim.simulate(M.FIXED); if (s.pPose[0] === M.POSE.PRONE) prone = true; }
+      walkTo(sim, 2.25);
+      for (let i = 0; i < 15 * 120 && alive; i++) {
+        let bat = -1;
+        for (let k = 0; k < M.ENEMY_SLOTS; k++) {
+          if (!up(s, k, E.BILL_BAT) || s.ez[k] !== 0 || s.ey[k] > 1.6) continue;
+          if (bat < 0 || Math.abs(s.ex[k] - s.px[0]) < Math.abs(s.ex[bat] - s.px[0])) bat = k;
+        }
+        let bits = 0;
+        if (bat >= 0) {
+          const ahead = s.ex[bat] >= s.px[0] ? 1 : -1;
+          bits = ahead === s.pFace[0] ? (i % 2 ? 0 : M.IN.FIRE) : ahead > 0 ? M.IN.RIGHT : M.IN.LEFT;
+        }
+        const was = new Set();
+        for (let k = 0; k < M.ENEMY_SLOTS; k++) if (up(s, k, E.BILL_BAT)) was.add(k);
+        sim.setInput(bits); sim.simulate(M.FIXED);
+        for (const k of was) if (s.eType[k] === E.BILL_BAT && s.eRoutine[k] >= TY[E.BILL_BAT].destroyed) downed++;
+        if (s.pPose[0] === M.POSE.PRONE) prone = true;
+        if (s.pState[0] !== M.PSTATE.NORMAL || s.pLives[0] !== lives) alive = false;
+      }
+      sim.setInput(0);
+      return { ok: !prone && alive && downed >= 4, detail: JSON.stringify({ prone, alive, downed, t: +s.roomTime.toFixed(2) }) };
+    });
+
+    treasury("raid treasury: a ghost slot (FLAG.GHOST) takes no bullet and absorbs none, so a shot flies on through it to the back wall, and touches no Ooga, while the same slot without the flag is hit and the same roll kills", () => {
+      // The Counting House's Lobby with no waves: its low core, shot standing from under it, ghost and then not; then a
+      // coin barrel rolled through the standing Ooga, ghost and then not, with no barrier and no invincibility.
+      const lobby = Object.freeze({ ...S.STAGES[1], rooms: Object.freeze([Object.freeze({ ...S.STAGES[1].rooms[0], waves: new Float64Array(0) })]) });
+      const volley = (ghost) => {
+        const sim = M.create({ seed: 11, stage: lobby }), s = sim.state;
+        settle(sim);
+        const core = s.eType.indexOf(E.LEDGER_CORE), hp = s.eHp[core], deepest = new Float64Array(M.BULLETS);
+        if (ghost) s.eFlags[core] |= F.GHOST;
+        walkTo(sim, s.ex[core]);
+        let fired = 0, through = 0, stopped = 0;
+        for (let i = 0; i < 2 * 120; i++) {
+          const was = Uint8Array.from(s.bLive);
+          sim.setInput(M.IN.UP | (i % 2 ? 0 : M.IN.FIRE)); sim.simulate(M.FIXED);
+          for (let b = 0; b < M.BULLETS; b++) {
+            if (!was[b] && s.bLive[b]) { fired++; deepest[b] = s.bz[b]; } else if (s.bLive[b]) deepest[b] = s.bz[b];
+            else if (was[b]) { if (deepest[b] > 0.95) through++; else stopped++; }
+          }
+        }
+        sim.setInput(0);
+        return { fired, through, stopped, hit: hp - s.eHp[core] };
+      };
+      const roll = (ghost) => {
+        const sim = M.create({ seed: 11, stage: lobby }), s = sim.state;
+        settle(sim); until(sim, () => s.pInvincible[0] === 0, 5);
+        const lives = s.pLives[0], b = sim.spawn(E.COIN_BARREL, s.px[0], 0, 0);
+        s.ez[b] = 0.05;
+        if (ghost) s.eFlags[b] |= F.GHOST;
+        sim.simulate(1);
+        return { died: s.pState[0] !== M.PSTATE.NORMAL || s.pLives[0] !== lives };
+      };
+      const ghost = volley(true), plain = volley(false), ghostRoll = roll(true), plainRoll = roll(false);
+      return {
+        ok: F.GHOST > 0 && ghost.fired >= 4 && ghost.hit === 0 && ghost.stopped === 0 && ghost.through > 0 && plain.hit > 0 && plain.stopped > 0 && !ghostRoll.died && plainRoll.died,
+        detail: JSON.stringify({ GHOST: F.GHOST, ghost, plain, ghostRoll, plainRoll })
+      };
+    });
+
+    treasury("raid treasury: a drop guard is a ghost from the step it comes in until its wait in the hatch ends: an Ooga under a hatch firing up never hits one before it falls, and a forward fan in the Drop Room loses no pellet to one waiting", () => {
+      const D = LT.DROP;
+      // Under each drop room's first hatch and just beside it, firing up every other step for 30 s, rifle and rapid: each
+      // drop guard watched from the step it appears, and any that loses a hit point or is destroyed before its fall counted.
+      let spawns = 0, early = 0, ghostly = 0;
+      const spawnRooms = [2, 4, 5, 6];
+      for (const r of spawnRooms) for (const rapid of [0, 1]) for (const dx of [0, 0.1]) for (const seed of [1]) {
+        const doors = V4.rooms[r].doors, w = V4.rooms[r].waves;
+        let door = -1;
+        for (let k = 0; k < w.length && door < 0; k += 3) if (w[k + 1] === E.DROP_GUARD) door = doors[w[k + 2]];
+        const sim = M.create({ seed, stage: alone(r) }), s = sim.state;
+        settle(sim); s.pRapid[0] = rapid; s.pBarrier[0] = 1e9;
+        walkTo(sim, door + dx);
+        const was = Uint8Array.from(s.eType), wasRoutine = Uint8Array.from(s.eRoutine), dead = TY[E.DROP_GUARD].destroyed;
+        for (let i = 0; i < 30 * 120; i++) {
+          if (i % 120 === 0) s.pBarrier[0] = 1e9;
+          sim.setInput(M.IN.UP | (i % 2 ? 0 : M.IN.FIRE)); sim.simulate(M.FIXED);
+          for (let k = 0; k < M.ENEMY_SLOTS; k++) {
+            if (s.eType[k] === E.DROP_GUARD && was[k] !== E.DROP_GUARD) {
+              spawns++;
+              if (s.eFlags[k] & F.GHOST && s.ey[k] === LT.TUNE.DROP_START && s.eRoutine[k] === D.WARN) ghostly++;
+              if (s.eRoutine[k] >= dead) early++;   // destroyed on the step it came in
+            } else if (s.eType[k] === E.DROP_GUARD && wasRoutine[k] <= D.WARN && (s.eHp[k] < 1 || s.eRoutine[k] >= dead)) early++;
+            was[k] = s.eType[k]; wasRoutine[k] = s.eRoutine[k];
+          }
+        }
+        sim.setInput(0);
+      }
+      // A forward fan fired all the time in the Drop Room, standing or jumping, from along the front line either way: any
+      // pellet spent within reach of a drop guard still waiting in its hatch.
+      let absorbed = 0, runs = 0;
+      for (const jump of [false, true]) for (let x0 = 0.6; x0 <= 7.41; x0 += 0.4) for (const face of [1, -1]) {
+        const sim = M.create({ seed: 11, stage: alone(4) }), s = sim.state;
+        settle(sim); s.pBarrier[0] = 1e9; s.pWeapon[0] = M.WEAPON.FAN;
+        walkTo(sim, x0);
+        if (s.pFace[0] !== face) { sim.setInput(face > 0 ? M.IN.RIGHT : M.IN.LEFT); sim.simulate(M.FIXED); }
+        runs++;
+        for (let i = 0; i < 12 * 120; i++) {
+          if (i % 120 === 0) s.pBarrier[0] = 1e9;
+          let bits = i % 2 ? 0 : M.IN.FIRE;
+          if (jump && s.pPose[0] !== M.POSE.JUMP && !(s.prevInput & M.IN.JUMP)) bits |= M.IN.JUMP;
+          const was = Uint8Array.from(s.bLive), bx = Float64Array.from(s.bx), by = Float64Array.from(s.by), bz = Float64Array.from(s.bz), waiting = [];
+          for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.DROP_GUARD && s.eRoutine[k] <= D.WARN) waiting.push(k);
+          sim.setInput(bits); sim.simulate(M.FIXED);
+          for (const d of waiting) for (let b = 0; b < M.BULLETS; b++) {
+            if (was[b] && !s.bLive[b] && bz[b] < 0.08 && Math.abs(bx[b] - s.ex[d]) < 0.5 && by[b] > LT.TUNE.DROP_START - 0.2 && by[b] < LT.TUNE.DROP_START + 1.2) absorbed++;
+          }
+        }
+        sim.setInput(0);
+      }
+      return { ok: spawns >= 16 && ghostly === spawns && early === 0 && runs > 0 && absorbed === 0, detail: JSON.stringify({ spawns, ghostly, early, runs, absorbed }) };
+    });
+  }
+  {
+    // The stages' art as the scene draws it (raid-art-*.js into BL.raidArt): every type a built stage places (its records,
+    // room targets and waves), releases or mounts wears a look, its stage's skin, else an art type, else raid-models'
+    // (the scene throws as such a stage starts). What a type's routines release or mount is its def's `releases`, beside
+    // what any stage may hold (`raidEnemies.COMMON`: shots, items and lobs from any shooter, carrier or thrower, runners
+    // from the edge spawner), closed over transitively, so the list is exact; each stage is also played through under
+    // the autopilot with a standing barrier, and a type seen there outside the declared list fails, so a new release must
+    // be declared; and `register` refuses a `releases` that is not a list of ENEMY names. Every art look keeps inside its
+    // sim hit box (one with a `touch` box inside the two together: the VENT and the Spark fill theirs, the Mech's legs
+    // stand in its; a `screw`, the set-back piece riding over a ram or press, is not a look) with the sim's tier and
+    // origin; every room of a rooms stage with art builds with no dressing or barrier bar over a target's
+    // box or a door; a side stage or climb with art has a lift and a plank for each of the stage's own, and a belt, a tide
+    // basin with its rafts, a gust zone and a printing cylinder for each of the stage's belts, basins and floats, gusts
+    // and CHAIRMAN_ENGINE records; and every lob a stage's throwers throw (in the played run) has its look in
+    // `BL.raidArt.lobs[attr]`, inside the lob's box.
+    const art = { window: { BL: {}, location: { search: "" } }, location: { search: "" }, URLSearchParams, document: { createElement: () => ({ getContext: () => null }) }, performance, console };
+    for (const name of ["math", "compact-geometry", "scene", "models", "convex", "terrain", "sign-glyphs", "hub-models", ...RAID_SOURCES.slice(1), "raid-models", "raid-art-bank", "raid-art-tower", "raid-art-field", "raid-art-factory", "raid-art-lake", "raid-art-pass", "raid-art-reserve"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), art);
+    const { raidArt: A, raidModels, raidStages: AS, raidSim: AM, raidEnemies: AE } = art.window.BL, L = raidModels.looks(), faults = [];
+    const geo = (look) => look && look.geometry || look;
+    // Every vertex inside box b about origin o, or inside one of the boxes `more` (each about o too).
+    const inside = (g, b, o, more = []) => {
+      const v = g.verts, out = (b, i) => v[i] < b[0] - 1e-3 || v[i] > b[1] + 1e-3 || v[i + 1] < o + b[2] - 1e-3 || v[i + 1] > o + b[3] + 1e-3;
+      for (let i = 0; i < v.length; i += 3) if (out(b, i) && more.every((c) => out(c, i))) return false;
+      return true;
+    };
+    const NAMES = []; for (const name of Object.keys(AS.ENEMY)) NAMES[AS.ENEMY[name]] = name;
+    {
+      const ctx = { window: { BL: {} } };
+      for (const name of ["math", "raid-stages", "raid-enemies"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), ctx);
+      const RE = ctx.window.BL.raidEnemies, E = ctx.window.BL.raidStages.ENEMY, def = { routines: [() => {}], destroyed: 0 };
+      for (const bad of [["NOPE"], "VAULT_GUN", [], ["FREE"]]) {
+        let threw = false;
+        try { RE.register(E.AUDITOR, { ...def, releases: bad }); } catch (e) { threw = /releases/.test(e.message); }
+        if (!threw) faults.push(`register took releases ${JSON.stringify(bad)}`);
+      }
+      RE.register(E.AUDITOR, { ...def, releases: ["SHOT"] });
+      if (RE.TYPES[E.AUDITOR].releases.join() !== "SHOT") faults.push("register lost a good releases");
+    }
+    for (const stage of AS.STAGES) {
+      const sa = A.stages[stage.id] || null, skins = sa && sa.skins || {}, used = new Set(), thrown = new Set(), seen = new Set();
+      const take = (list, stride, at) => { for (let k = at; k < list.length; k += stride) used.add(list[k]); };
+      if (stage.kind === "rooms") for (const room of stage.rooms) { take(room.targets, 4, 2); take(room.waves, 3, 1); }
+      else take(stage.placed, 4, 2);
+      for (const name of AE.COMMON) used.add(AS.ENEMY[name]);
+      for (const t of used) for (const name of AE.TYPES[t].releases || []) used.add(AS.ENEMY[name]);
+      const sim = AM.create({ seed: 3, stage: AS.STAGES.indexOf(stage) }), s = sim.state;
+      for (let n = 0; n < 600 / AM.FIXED && s.phase !== AM.PHASE.CLEAR; n++) {
+        s.pBarrier[0] = 100;
+        sim.setInput(AM.autopilot(sim)); sim.simulate(AM.FIXED);
+        for (let k = 0; k < AM.ENEMY_SLOTS; k++) {
+          seen.add(s.eType[k]);
+          if (s.eType[k] === AS.ENEMY.LOB) thrown.add(s.eAttr[k]);
+        }
+      }
+      for (const t of seen) if (t !== AS.ENEMY.FREE && !used.has(t)) faults.push(`${stage.id}: ${NAMES[t]} appears in play but is neither placed nor in a def's releases`);
+      for (const name of Object.keys(AS.ENEMY)) {
+        const t = AS.ENEMY[name], look = skins[name] || A.types[name];
+        if (name === "FREE" || name === "ITEM" || name === "LOB") continue;
+        if (used.has(t) && !(look && look.build) && !L.enemies[t]) faults.push(`${stage.id}: ${name} has no look`);
+        if (!look) continue;
+        if (look.tier !== AM.TIER_OF[t] || Math.abs(look.origin - AM.ORIGIN_OF[t]) > 1e-9) faults.push(`${stage.id}: ${name}'s look is tier ${look.tier}, origin ${look.origin}`);
+        // A look that may reach into its touch box (`touch`: the VENT and the Spark fill it, the Mech's legs stand in it)
+        // keeps each vertex inside its bullet box or its touch box; a walker's legs (`LEG_HALF`, the Mech's) may stand
+        // on from the touch box's foot down to its own feet, within LEG_HALF of its middle.
+        const box = AM.RULES.SHOT_BOX[AM.TIER_OF[t]], o = AM.ORIGIN_OF[t], more = [];
+        if (look.touch) more.push([look.touch[0], look.touch[1], look.touch[2] - o, look.touch[3] - o]);
+        if (look.touch && look.LEG_HALF) more.push([-look.LEG_HALF, look.LEG_HALF, -o, look.touch[2] - o]);
+        const builds = Object.keys(look).filter((k) => typeof look[k] === "function" && look[k].length === 0 && !["cone", "pool", "poolLocked", "digits", "screw"].includes(k)).map((k) => [k, geo(look[k]())]);
+        if (look.swell) for (let k = 0; k < look.SWELLS; k++) builds.push([`swell ${k}`, look.swell(k)]);
+        for (const key of ["opening", "turnedOpening"]) if (look[key]) for (let k = 0; k < look.OPENINGS; k++) builds.push([`${key} ${k}`, geo(look[key](k))]);
+        for (const [k, g] of builds) if (!inside(g, box, o, more)) faults.push(`${stage.id}: ${name}.${k} leaves its box`);
+      }
+      if (sa && stage.kind === "rooms") for (let i = 0; i < stage.rooms.length; i++) {
+        try { const r = sa.roomShell(stage, i); if (r.clash || r.barClash) faults.push(`${stage.id} room ${i} clashes`); } catch (e) { faults.push(e.message); }
+      }
+      if (sa && stage.kind === "climb" && (sa.lifts(stage).length !== stage.lifts.length || sa.planks(stage).length !== stage.crumble.length)) faults.push(`${stage.id}: the art's lifts or planks are not the stage's`);
+      if (sa && stage.kind === "side") {
+        const count = (f, n) => f ? f(stage).length : 0;
+        const water = sa.water ? sa.water(stage) : [], zones = sa.weather ? sa.weather(stage).zones : sa.storm ? sa.storm(stage).zones : [];
+        const engines = stage.placed.filter((r, k) => k % 4 === 2 && r === AS.ENEMY.CHAIRMAN_ENGINE).length;
+        const pieces = { lifts: [count(sa.lifts), stage.lifts.length], belts: [count(sa.belts), stage.belts.length], basins: [water.length, stage.tide.basins.length],
+          rafts: [water.reduce((n, b) => n + b.rafts.length, 0), stage.tide.floats.length], gusts: [zones.length, (sa.weather || sa.storm) ? stage.gusts.length : 0], cylinders: [count(sa.cylinders), sa.cylinders ? engines : 0] };
+        for (const [what, [drawn, own]] of Object.entries(pieces)) if (drawn !== own) faults.push(`${stage.id}: the art draws ${drawn} ${what} for the stage's ${own}`);
+      }
+      for (const attr of thrown) {
+        const lob = A.lobs && A.lobs[attr];
+        if (!lob) faults.push(`${stage.id}: no BL.raidArt.lobs[${attr}]`);
+        else if (!inside(geo(lob()), AM.RULES.SHOT_BOX[AM.TIER_OF[AS.ENEMY.LOB]], AM.ORIGIN_OF[AS.ENEMY.LOB])) faults.push(`${stage.id}: lob ${attr} leaves its box`);
+      }
+      if (stage.id === "tower" && !thrown.has(1)) faults.push("tower: no shell thrown");
+      if (!seen.has(AS.ENEMY.SHOT)) faults.push(`${stage.id}: no shot seen, so the played run proves nothing`);
+    }
+    // raid-models' own looks (the Jungle Shore's, and the one any type with no art falls back to), open, shut and turned,
+    // an emplacement's opening frames, the printer's wind-up frames and heat, the other attackers' wind-up looks, and every pickup, against the type's bullet
+    // box with the sim's tier and origin, and the printer's dollar bill against the shot's: only what stands set back at z -0.3
+    // or further (the vault's body) may reach outside it, and the flying ledger's wingtips by their 1.1 cm (ruled to stay).
+    const SET_BACK = -0.3, SLACK = { [AS.ENEMY.CARRIER]: 0.012 };
+    const sets = [["enemies", L.enemies], ["shut", L.shut], ["turned", L.turned], ["turnedShut", L.turnedShut]];
+    L.items.forEach((g, a) => sets.push([`item ${a}`, Object.assign([], { [AS.ENEMY.ITEM]: g })]));
+    for (const key of ["opening", "turnedOpening", "winding", "turnedWinding"]) L[key].forEach((frames, t) => frames && frames.forEach((g, k) => sets.push([`${key} ${k}`, Object.assign([], { [t]: g })])));
+    sets.push(["heat", L.heat], ["turnedHeat", L.turnedHeat], ["wind", L.wind], ["turnedWind", L.turnedWind], ["bill", Object.assign([], { [AS.ENEMY.SHOT]: L.bill })], ["turnedBill", Object.assign([], { [AS.ENEMY.SHOT]: L.turnedBill })]);
+    for (const [set, list] of sets) list.forEach((g, t) => {
+      if (!g) return;
+      const b = AM.RULES.SHOT_BOX[AM.TIER_OF[t]], o = AM.ORIGIN_OF[t], slack = (SLACK[t] || 0) + 1e-3, v = g.verts;
+      for (let i = 0; i < v.length; i += 3) {
+        if (v[i + 2] <= SET_BACK) continue;
+        if (v[i] < b[0] - slack || v[i] > b[1] + slack || v[i + 1] < o + b[2] - slack || v[i + 1] > o + b[3] + slack) { faults.push(`raid-models: ${set} ${NAMES[t]} leaves its box`); return; }
+      }
+    });
+    // The registry's one rule: every stage key a stage's id, every type frozen, and a second registration throws (an art
+    // file loaded twice).
+    const ids = new Set(AS.STAGES.map((st) => st.id));
+    for (const id of Object.keys(A.stages)) if (!ids.has(id)) faults.push(`BL.raidArt.stages.${id} is no stage's id`);
+    for (const name of Object.keys(A.types)) if (!Object.isFrozen(A.types[name])) faults.push(`BL.raidArt.types.${name} is not frozen`);
+    for (const file of ["raid-art-bank", "raid-art-field", "raid-art-tower"]) {
+      let again = "";
+      try { runInNewContext(await readFile(new URL(`../src/js/${file}.js`, import.meta.url), "utf8"), art); } catch (e) { again = e.message; }
+      if (!/is already registered/.test(again)) faults.push(`${file} loaded twice: ${again || "no throw"}`);
+    }
+    record("raid art: every type a built stage places, releases or mounts (declared, and nothing undeclared seen in play) wears a look, every art look and raid-models' own (open, shut and turned, an emplacement's frames between, every attacker's wind-up look, the printer's wind-up frames and heat and its dollar bill, and every pickup) keeps inside its hit box with the sim's tier and origin but for what stands set back, no room's dressing or barrier covers a target or a door, a stage's art draws its own lifts, planks, belts, tide basins, rafts, gust zones and cylinders, every lob thrown has its look, and the art registry keys its stages by stage id, freezes its types and refuses a second registration",
+      faults.length === 0 && Object.keys(A.stages).length >= 4, JSON.stringify(faults.slice(0, 6)));
+  }
+  {
+    // Every climb in the campaign plans, on a fresh load so this is the planner's first call for each: a climb the planner
+    // cannot route throws here, by name, not minutes into a pilot-driven check.
+    const fresh = { window: { BL: {} } };
+    for (const name of RAID_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), fresh);
+    const { raidStages: CS, raidAutopilot: CP } = fresh.window.BL, planned = {};
+    for (const st of CS.STAGES.filter((g) => g.kind === "climb")) {
+      try { const plan = CP.stageRoute(st); planned[st.id] = plan.N > 0 && plan.goal >= 0 ? "ok" : `N ${plan.N}, goal ${plan.goal}`; } catch (e) { planned[st.id] = e.message; }
+    }
+    record("raid pilot: every climb in the campaign plans its route on the planner's first call",
+      Object.keys(planned).length >= 1 && Object.values(planned).every((v) => v === "ok"), JSON.stringify(planned));
+  }
+  // The autopilot on side stages (raid pilot:).
+  {
+    // The side pilot: one route for every side stage on the climb's planner (runs, lifts and tide basins; jumps
+    // flown before they are kept), and one fight (a spot on the route's nodes and a pose and aim whose line meets a part's
+    // box). Each check drives the autopilot on a small fixture side stage, two screens of `scr` from f(col, row), a cell's
+    // character or true for solid; `pilot` records a check, a throw recording its failure.
+    const pilot = (name, f) => {
+      let r;
+      try { r = f(); } catch (e) { r = { ok: false, detail: String(e && e.stack || e) }; }
+      record(name, r.ok, r.detail);
+    };
+    const src = {};
+    for (const name of RAID_SOURCES) src[name] = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
+    // The raid sources in a fresh context, with the fixture boss's two types registered before raid-sim.js closes the
+    // registry: PILOT_BOSS, shut while its two PILOT_PARTs stand (spawned at PARTS, each linked to it), whose fall clears.
+    const PARTS = [[3, 4], [5, 1.25]];
+    const ctx = { window: { BL: {} } };
+    runInNewContext(src.math, ctx); runInNewContext(src["raid-stages"], ctx);
+    {
+      const RS = ctx.window.BL.raidStages, k = Object.keys(RS.ENEMY).length;
+      ctx.window.BL.raidStages = { ...RS, ENEMY: Object.freeze({ ...RS.ENEMY, PILOT_BOSS: k, PILOT_PART: k + 1 }) };
+    }
+    runInNewContext(src["raid-enemies"], ctx); for (const name of RAID_LEGIONS) runInNewContext(src[name], ctx);
+    {
+      const BL = ctx.window.BL, X = BL.raidStages.ENEMY, { register, FLAG, bossBreak, dieStart, dieFade, release } = BL.raidEnemies;
+      const begin = (c, i) => { c.state.eRoutine[i]++; }, hold = () => {};
+      const parts = (c, i) => { let n = 0; for (let j = 0; j < c.ENEMY_SLOTS; j++) if (c.state.eLink[j] === i && c.state.eType[j] === X.PILOT_PART && c.state.eRoutine[j] < 2) n++; return n; };
+      const init = (c, i) => { c.state.eBurst[i] = PARTS.length; c.state.eRoutine[i]++; };
+      const fight = (c, i) => {
+        const s = c.state;
+        while (s.eBurst[i] > 0) { const at = PARTS[PARTS.length - s.eBurst[i]], k = c.spawn(X.PILOT_PART, at[0], at[1], 0); if (k < 0) break; s.eLink[k] = i; s.eBurst[i]--; }
+        if (s.phase === c.PHASE.PLAY) s.phase = c.PHASE.BOSS;
+        if (s.eFlags[i] & FLAG.SHUT && s.eBurst[i] === 0 && parts(c, i) === 0) s.eFlags[i] &= ~FLAG.SHUT;
+      };
+      register(X.PILOT_BOSS, { routines: [init, fight, bossBreak, dieFade, release], destroyed: 2, flags: FLAG.MACHINE | FLAG.SHUT, boss: true, hp: 6, tier: 3, points: 1000, origin: 1 });
+      register(X.PILOT_PART, { routines: [begin, hold, dieStart, dieFade, release], destroyed: 2, flags: FLAG.MACHINE, hp: 4, tier: 1, points: 100, origin: 0 });
+    }
+    runInNewContext(src["raid-terrain"], ctx); runInNewContext(src["raid-sim"], ctx); runInNewContext(src["raid-autopilot"], ctx);
+    const PS2 = ctx.window.BL.raidStages, PM = ctx.window.BL.raidSim, PA = ctx.window.BL.raidAutopilot, PX = PS2.ENEMY, PP = PM.PSTATE;
+    const scr = (f) => { const rows = []; for (let r = 0; r < PS2.SCREEN_H; r++) { let a = ""; for (let c = 0; c < PS2.SCREEN_W; c++) { const k = f(c, r); a += k === true ? "#" : k || "."; } rows.unshift(a); } return rows; };
+    const side = (id, screens, extra) => PS2.parse({ kind: "side", id, name: id, rows: screens[0].map((_, r) => screens.map((sc) => sc[r]).join("")), start: { col: 1, row: 10 }, lockScreen: screens.length - 1, spawner: { base: 0 }, placed: [], ...extra });
+    // Steps the autopilot up to `seconds`, under a standing barrier when asked, until `stop` (each step) says so.
+    const fly = (sim, seconds, barrier, stop) => {
+      const s = sim.state;
+      for (let i = 0; i < seconds * 120 && s.phase !== PM.PHASE.CLEAR && s.phase !== PM.PHASE.OVER; i++) {
+        if (barrier && i % 120 === 0) s.pBarrier[0] = 1e9;
+        sim.setInput(PM.autopilot(sim)); sim.simulate(PM.FIXED);
+        if (stop && stop(s)) return true;
+      }
+      return false;
+    };
+    const standing = (s) => s.pState[0] === PP.NORMAL && s.pPose[0] !== PM.POSE.JUMP;
+
+    pilot("raid pilot: a lift waiting at the floor, the only way up to the lock screen's floor, is boarded at its low end and left at its high end, whenever the pilot comes to it", () => {
+      const lift = [[12, 2, 1, 9, 1.5, 2]], screens = [scr((c, r) => r === 0 || (r === 1 && c < 12) || (c >= 14 && r <= 9)), scr((c, r) => r <= 9)];
+      const st = side("pilot-lift", screens, { lifts: lift });
+      let none = "";
+      try { PA.stageRoute(side("pilot-lift-none", screens, {})); } catch (e) { none = e.message; }
+      const runs = [0, 1.7, 3.1, 5.9].map((wait) => {
+        const sim = PM.create({ seed: 1, stage: st }), s = sim.state;
+        sim.simulate(wait);
+        let boarded = false, rode = 0, deaths = 0;
+        const left = fly(sim, 40, false, (s) => {
+          const on = standing(s) && s.px[0] >= 6 && s.px[0] < 7;
+          if (on && Math.abs(s.py[0] - 1) < 1e-3) boarded = true;
+          if (on) rode = Math.max(rode, s.py[0]);
+          if (s.pState[0] === PP.DEAD) deaths++;
+          return boarded && standing(s) && s.px[0] >= 7 && Math.abs(s.py[0] - 5) < 1e-3;
+        });
+        return { wait, boarded, rode: +rode.toFixed(3), left, deaths, time: +s.time.toFixed(2) };
+      });
+      return {
+        ok: PS2.validate(st).length === 0 && /no run on the lock screen is reached/.test(none) && runs.every((r) => r.boarded && r.left && r.rode > 4.99 && r.deaths === 0),
+        detail: JSON.stringify({ faults: PS2.validate(st), none, runs })
+      };
+    });
+
+    pilot("raid pilot: a tide basin a metre under its banks at low water, with rafts two cells apart, is crossed from the start at any phase of the tide, and an Ooga dropped into its water at any column and phase is out on the far bank within one cycle", () => {
+      const st = side("pilot-basin", [scr((c, r) => r === 0 || (r <= 3 && (c < 4 || c > 11)) || (r === 1 ? "~" : "")), scr((c, r) => r <= 3)], { tide: { basins: [[4, 11, 1, 3]], floats: [[6, 6], [9, 9]] } });
+      const out = (s) => standing(s) && s.px[0] >= 6.15;
+      const crossed = [0, 2, 4.5, 6, 8, 10, 12.5].map((wait) => {
+        const sim = PM.create({ seed: 1, stage: st }), s = sim.state;
+        sim.simulate(wait);
+        const t0 = s.time, done = fly(sim, 30, false, out);
+        return { wait, done, took: +(s.time - t0).toFixed(2) };
+      });
+      const trapped = [];
+      let worst = 0;
+      for (let col = 4; col <= 11; col++) {
+        for (const wait of [0, 3.5, 5.2, 7, 9.5, 11.6]) {
+          const sim = PM.create({ seed: 1, stage: st }), s = sim.state;
+          sim.simulate(1.2 + wait);
+          s.px[0] = (col + 0.5) * PS2.CELL; s.py[0] = 2.5; s.pvy[0] = 0; s.pPose[0] = PM.POSE.JUMP; s.camX = 0;
+          const t0 = s.time, done = fly(sim, 30, false, out), took = s.time - t0;
+          worst = Math.max(worst, took);
+          if (!done || took > PM.TIDE_PERIOD + 1) trapped.push({ col, wait, done, took: +took.toFixed(2), x: +s.px[0].toFixed(2) });
+        }
+      }
+      return { ok: PS2.validate(st).length === 0 && crossed.every((r) => r.done && r.took < 15) && trapped.length === 0, detail: JSON.stringify({ faults: PS2.validate(st), crossed, worst: +worst.toFixed(2), trapped }) };
+    });
+
+    pilot("raid pilot: 1-cell gaps inside a gust zone that blows by turns are crossed through blows, never waiting for the calm, without a fall, whatever the clock when the pilot sets out", () => {
+      const st = side("pilot-gust", [scr((c, r) => r <= 1 && (c < 4 || c % 4 !== 3)), scr((c, r) => r <= 1 && (c % 4 !== 3 || c === 15))], { gusts: [[3, 31, 0]] });
+      const plan = PA.stageRoute(st);
+      let calm = 0;
+      for (let e = 0; e < plan.eCalm.length; e++) calm += plan.eCalm[e];
+      const runs = [0, 1, 2, 3, 4, 5, 6, 6.5].map((wait) => {
+        const sim = PM.create({ seed: 1, stage: st }), s = sim.state;
+        sim.simulate(wait);
+        let deaths = 0, blown = 0, air = false;
+        const done = fly(sim, 60, false, (s) => {
+          if (s.pState[0] === PP.DEAD) deaths++;
+          const up = s.pState[0] === PP.NORMAL && s.pPose[0] === PM.POSE.JUMP;
+          if (up && !air && PM.gustPhase(s.time) === PM.GUST.BLOW) blown++;
+          air = up;
+          return standing(s) && s.px[0] > 13.9;
+        });
+        return { wait, done, deaths, blown, time: +s.time.toFixed(2) };
+      });
+      return { ok: PS2.validate(st).length === 0 && calm === 0 && runs.every((r) => r.done && r.deaths === 0) && runs.some((r) => r.blown > 0), detail: JSON.stringify({ calm, runs }) };
+    });
+
+    pilot("raid pilot: a belt carrying toward a hatch never carries the pilot in while it stops on the belt to shoot a printer past the hatch, then it jumps the hatch", () => {
+      // The printer at column 28, so the screen opens it (EMPLACE_IN inside its right edge) while the pilot is still on the belt.
+      const st = side("pilot-belt", [scr((c, r) => r <= 1), scr((c, r) => r <= 1 && c !== 9 && c !== 10), scr((c, r) => r <= 1)], { belts: [[12, 24, 1, 0.9]], placed: [[28, 2, PX.PRINTER, 0]] });
+      const runs = [1, 2, 3, 4].map((seed) => {
+        const sim = PM.create({ seed, stage: st }), s = sim.state;
+        let deaths = 0, minX = Infinity, maxX = 0, fell = false, seen = false, killed = -1;
+        const done = fly(sim, 60, true, (s) => {
+          if (s.pState[0] === PP.DEAD) deaths++;
+          const k = s.eType.indexOf(PX.PRINTER), alive = k >= 0 && s.eRoutine[k] < PM.DESTROYED[PX.PRINTER];
+          if (alive && s.pState[0] === PP.NORMAL) { seen = true; minX = Math.min(minX, s.px[0]); maxX = Math.max(maxX, s.px[0]); if (s.py[0] < 0.99) fell = true; }
+          if (seen && !alive && killed < 0) killed = +s.time.toFixed(2);
+          return s.px[0] > 15.4;
+        });
+        return { seed, done, deaths, minX: +minX.toFixed(3), maxX: +maxX.toFixed(3), fell, killed };
+      });
+      // The belt's cells are columns 12 to 24 (6 to 12.5 m), the hatch columns 25 and 26.
+      return { ok: PS2.validate(st).length === 0 && runs.every((r) => r.done && r.deaths === 0 && !r.fell && r.minX > 6 && r.maxX < 12.5 - PM.RULES.BOX[PM.POSE.STAND][0] && r.killed > 0), detail: JSON.stringify(runs) };
+    });
+
+    pilot("raid pilot: a fixture boss's parts, one over a pit beside a perch and one low in a basin, fall to up-forward shots from the perch and down-forward shots from the bank, measured through the controls, and the boss's fall clears", () => {
+      const st = side("pilot-fight", [
+        scr((c, r) => (r === 0 && c !== 5 && c !== 6) || (r <= 1 && c <= 1) || (r <= 3 && ((c >= 2 && c <= 4) || c === 7 || c >= 12)) || (r === 1 && c >= 8 && c <= 11 ? "~" : "")),
+        scr((c, r) => r <= 3)
+      ], { placed: [[14, 4, PX.PILOT_BOSS, 0]], tide: { basins: [[8, 11, 1, 3]], floats: [] } });
+      // Each part's hits, as the aim and the feet of the shot fired last before each (up-forward is aim 1, down-forward 7
+      // facing right, 5 facing left): the parts are told by where they stand.
+      const runs = [1, 2, 3].map((seed) => {
+        const sim = PM.create({ seed, stage: st }), s = sim.state, hits = { perch: [], basin: [] };
+        let aim = -1, x = 0, y = 0, live = 0;
+        const hp = new Int16Array(PM.ENEMY_SLOTS);
+        fly(sim, 120, true, (s) => {
+          let n = 0;
+          for (let b = 0; b < PM.BULLETS; b++) n += s.bLive[b];
+          if (n > live) { aim = s.pAim[0]; x = +s.px[0].toFixed(3); y = +s.py[0].toFixed(3); }
+          live = n;
+          for (let k = 0; k < PM.ENEMY_SLOTS; k++) {
+            if (s.eType[k] === PX.PILOT_PART && s.eHp[k] < hp[k]) hits[s.ex[k] < 4 ? "perch" : "basin"].push([aim, x, y]);
+            hp[k] = s.eType[k] === PX.PILOT_PART ? s.eHp[k] : 0;
+          }
+          return false;
+        });
+        return { seed, phase: s.phase, time: +s.time.toFixed(2), hits };
+      });
+      const perch = (h) => h[0] === 1 && h[2] === 2 && h[1] >= 1 && h[1] <= 2.5, bank = (h) => (h[0] === 7 || h[0] === 5) && h[2] === 2 && (h[1] < 4 || h[1] > 6);
+      return {
+        ok: PS2.validate(st).length === 0 && runs.every((r) => r.phase === PM.PHASE.CLEAR && r.hits.perch.length === 4 && r.hits.perch.every(perch) && r.hits.basin.length === 4 && r.hits.basin.every(bank)),
+        detail: JSON.stringify(runs)
+      };
+    });
+
+    // regression: a jump shot's spot was chosen under a block, so the jump bumped its head short of the part's height and
+    // no shot met it; and in the air the target was always passed by (the "no spot from this node" mark matched the air's
+    // node -1), so the aimed jump shot never fired.
+    pilot("raid pilot: a machine only a jump's forward shot reaches falls to jump shots, with a block over the naive spot or none, and every jump shot fired meets the box's height", () => {
+      const runs = [["block over the spot", 9, 12], ["clear spot", 10, 12]].map(([name, b0, b1]) => {
+        const st = side("pilot-jump", [scr((c, r) => r <= 1 || (r === 4 && c >= b0 && c <= b1)), scr((c, r) => r <= 1)], { placed: [[11, 5, PX.PILOT_PART, 0]] });
+        const sim = PM.create({ seed: 1, stage: st }), s = sim.state, b = PM.RULES.SHOT_BOX[PM.TIER_OF[PX.PILOT_PART]], hits = [];
+        let live = 0, hp = -1, k = -1, last = null, jumps = 0, outside = 0;
+        fly(sim, 20, true, (s) => {
+          let n = 0, fresh = -1;
+          for (let j = 0; j < PM.BULLETS; j++) if (s.bLive[j]) { n++; if (s.bAge[j] <= PM.FIXED * 1.01) fresh = j; }
+          if (k < 0) k = s.eType.indexOf(PX.PILOT_PART);
+          if (n > live && fresh >= 0) {
+            last = [s.pPose[0], s.pAim[0]];
+            if (s.pPose[0] === PM.POSE.JUMP) { jumps++; const dy = s.bly[fresh] - s.ey[k] - PM.ORIGIN_OF[PX.PILOT_PART]; if (dy <= b[2] || dy > b[3]) outside++; }
+          }
+          live = n;
+          if (k >= 0) { if (hp >= 0 && s.eHp[k] < hp) hits.push(last); hp = s.eHp[k]; }
+          return k >= 0 && s.eRoutine[k] >= PM.DESTROYED[PX.PILOT_PART];
+        });
+        return { name, killed: k >= 0 && s.eRoutine[k] >= PM.DESTROYED[PX.PILOT_PART], time: +s.time.toFixed(2), hits, jumps, outside };
+      });
+      return {
+        ok: runs.every((r) => r.killed && r.time < 10 && r.hits.length === PM.HP_OF[PX.PILOT_PART] && r.hits.every((h) => h[0] === PM.POSE.JUMP && (h[1] === 0 || h[1] === 4)) && r.outside === 0),
+        detail: JSON.stringify(runs)
+      };
+    });
+
+    pilot("raid pilot: an Ooga under a standing barrier, steered by the autopilot, clears the Jungle Shore within 900 s on four seeds", () => {
+      const runs = [1, 2, 3, 4].map((seed) => {
+        const sim = M.create({ seed }), s = sim.state;
+        let i = 0, deaths = 0, dead = false;
+        for (; i < 900 * 120 && s.phase !== M.PHASE.CLEAR && s.phase !== M.PHASE.OVER; i++) {
+          if (i % 120 === 0) s.pBarrier[0] = 1e9;
+          sim.setInput(M.autopilot(sim)); sim.simulate(M.FIXED);
+          if (s.pState[0] === M.PSTATE.DEAD && !dead) deaths++;
+          dead = s.pState[0] === M.PSTATE.DEAD;
+        }
+        return { seed, done: s.phase === M.PHASE.CLEAR, time: +s.time.toFixed(1), deaths };
+      });
+      return { ok: runs.every((r) => r.done && r.time < 900 && r.deaths === 0), detail: JSON.stringify(runs) };
+    });
+  }
+  // The field troops (raid field:).
+  {
+    // The field troops (raid-legion-field.js) on fixture side stages, measured through the sim: its walls, its bullets
+    // against their boxes, its contacts and its lobs. `field` parses one screen (or `screens`) from a cell function
+    // `at(col, row)`, row 0 the bottom; `landed` lands the Ooga, puts it at x and sets its invincibility and barrier
+    // (the barrier keeps the sim's `attack` on and nothing kills, invincibility turns `attack` off); `watch` steps n
+    // seconds, calling `each` after every step until it returns true.
+    const FT = context.window.BL.raidLegionField, FL = FT.LOOK, FU = FT.TUNE, K = S.KIND, IN = M.IN, FX = M.FIXED, LEFT = R.AIM_STEPS / 2;
+    const field = (id, at, start = { col: 2, row: 3 }, screens = 1) => S.parse({
+      id, name: id, start, lockScreen: screens - 1, spawner: { base: 0 }, placed: [],
+      rows: Array.from({ length: S.SCREEN_H }, (_, r) => Array.from({ length: S.SCREEN_W * screens }, (_, c) => at(c, S.SCREEN_H - 1 - r)).join(""))
+    });
+    const floor = (c, r) => r < 3 ? "#" : ".";   // ground's top at 1.5 m, feet in row 3
+    const fieldCheck = (name, f) => { let r; try { r = f(); } catch (e) { r = { ok: false, detail: String(e && e.stack || e) }; } record(name, r.ok, r.detail); };
+    const landed = (stage, { x, invincible = 0, barrier = 0 } = {}) => {
+      const sim = M.create({ seed: 7, stage }), s = sim.state;
+      settle(sim);
+      if (x !== undefined) s.px[0] = x;
+      s.pInvincible[0] = invincible; s.pBarrier[0] = barrier;
+      return sim;
+    };
+    const watch = (sim, seconds, each) => { for (let n = Math.round(seconds / FX); n > 0; n--) { sim.simulate(FX); if (each && each()) return; } };
+    const shotsLive = (s) => s.bLive.reduce((n, v) => n + v, 0);
+    const round = (v) => +v.toFixed(4);
+
+    fieldCheck("raid field: the Auditor walks at the nearest Ooga and stands within AUDITOR_STOP of it, at a ledge's end rather than walk off, at a wall and in the air, faces the Ooga and turns the step it is passed, lobs its clipboard to land on the Ooga's feet, spends forward shots either way it faces and falls to a diagonal and to a shot in its back", () => {
+      const flat = field("audit", floor), shelf = field("shelf", (c, r) => r < 3 ? "#" : r === 4 && c >= 8 ? "=" : ".");
+      // From 6 m right of an Ooga under the barrier: where it stops and faces, when its first lob leaves, and each lob's
+      // last place before it lands, against the Ooga's feet.
+      const a = landed(flat, { barrier: 1e9 }), as = a.state, ak = a.spawn(E.AUDITOR, as.px[0] + 6, as.py[0], 0), t0 = as.time;
+      const lobs = [];
+      let lob = -1, seen = null, first = -1, shots = 0, walked = 0;
+      watch(a, 9, () => {
+        if (lob >= 0 && as.eType[lob] !== E.LOB) { lobs.push(seen); lob = -1; }
+        for (let j = 0; j < M.ENEMY_SLOTS; j++) {
+          if (as.eType[j] === E.SHOT) shots++;
+          if (lob < 0 && as.eType[j] === E.LOB) { lob = j; if (first < 0) first = as.time - t0; }
+        }
+        if (lob >= 0) seen = { x: round(as.ex[lob] - as.px[0]), y: round(as.ey[lob] - as.py[0]), attr: as.eAttr[lob] };
+        if (as.evx[ak] !== 0) walked++;
+      });
+      const stop = { dx: round(as.ex[ak] - as.px[0]), aim: as.eAim[ak], routine: as.eRoutine[ak], walked };
+      // On a ledge 1 m up whose left end is 2.75 m from the Ooga: it walks to the end and stands there.
+      const e = landed(shelf, { invincible: 1e9 }), es = e.state, ek = e.spawn(E.AUDITOR, 7.25, 2.5, 0);
+      let least = Infinity, heights = new Set();
+      watch(e, 6, () => { least = Math.min(least, es.ex[ek]); heights.add(es.ey[ek]); });
+      const end = { least: round(least), x: round(es.ex[ek]), heights: [...heights], aim: es.eAim[ek] };
+      // Then from 1 m left of the ledge's end, under it, an up-forward diagonal destroys it, for its points.
+      es.px[0] = 3; es.pFace[0] = 1; e.setInput(IN.UP | IN.RIGHT | IN.FIRE); e.simulate(FX); e.setInput(0); e.simulate(0.5);
+      const diagonal = { routine: es.eRoutine[ek], hp: es.eHp[ek], score: es.pScore[0] };
+      // Forward shots into it, standing 2.5 m off: from its left as it faces left, and from its right as it faces right.
+      const front = (from, x0, face) => {
+        const f = landed(flat, { x: x0, invincible: 1e9 }), fs = f.state;
+        f.simulate(FX);
+        const k = f.spawn(E.AUDITOR, from, fs.py[0], 0);
+        f.simulate(3.5);
+        fs.pFace[0] = face;
+        const at = fs.ex[k], aim = fs.eAim[k];
+        let fired = 0, past = false;
+        for (let n = 0; n < 5; n++) {
+          f.setInput(IN.FIRE); f.simulate(FX); f.setInput(0); fired += shotsLive(fs);
+          watch(f, 0.4, () => { for (let b = 0; b < M.BULLETS; b++) if (fs.bLive[b] && (fs.bx[b] - fs.ex[k]) * face > 0.5) past = true; });
+        }
+        return { aim, dx: round(at - fs.px[0]), fired, past, hp: fs.eHp[k], routine: fs.eRoutine[k] };
+      };
+      const left = front(6, 1.25, 1), right = front(2.75, 6.25, -1);
+      // Passed: standing 2.5 m right of an Ooga and facing it, the Ooga set 1.5 m on its right, one step turns it right.
+      // A level shot from the right (its front now) is spent; one from close on its left (its back), which meets it on
+      // the shot's first step, before it turns again, destroys it.
+      const tn = landed(flat, { invincible: 1e9 }), ts = tn.state, tk = tn.spawn(E.AUDITOR, ts.px[0] + 4.75, ts.py[0], 0);
+      tn.simulate(3.5);
+      const X = ts.ex[tk], turned = { was: ts.eAim[tk], dx: round(X - ts.px[0]) };
+      ts.px[0] = X + 1.5; tn.simulate(FX);
+      turned.aim = ts.eAim[tk];
+      ts.pFace[0] = -1; tn.setInput(IN.FIRE); tn.simulate(FX); tn.setInput(0);
+      let behind = false;
+      watch(tn, 0.6, () => { for (let b = 0; b < M.BULLETS; b++) if (ts.bLive[b] && ts.bx[b] < X - 0.5) behind = true; });
+      turned.front = { hp: ts.eHp[tk], routine: ts.eRoutine[tk], aim: ts.eAim[tk], past: behind };
+      ts.px[0] = X - 0.6; ts.pFace[0] = 1; tn.setInput(IN.FIRE); tn.simulate(FX); tn.setInput(0);
+      turned.back = { hp: ts.eHp[tk], routine: ts.eRoutine[tk], score: ts.pScore[0] };
+      // At a wall: a 0.5 m rise between it and an Ooga on the rise 6 m off. It walks to the rise and stands flush against
+      // it, facing the Ooga, and never moves from there.
+      const rise = field("rise", (c, r) => r < 3 || (c <= 9 && r < 4) ? "#" : ".", { col: 2, row: 4 });
+      const w = landed(rise, { invincible: 1e9 }), ws = w.state, wk = w.spawn(E.AUDITOR, 7.5, 1.5, 0);
+      w.simulate(3.5);
+      const atWall = ws.ex[wk];
+      let moved = 0;
+      watch(w, 6, () => { moved = Math.max(moved, Math.abs(ws.ex[wk] - atWall)); });
+      const wall = { x: round(atWall), moved, aim: ws.eAim[wk], type: ws.eType[wk], face: 5 + R.BOX[M.POSE.STAND][0] };
+      // In the air: put down 3 m over the ground, far from the Ooga, it falls straight, walking at most the one step it
+      // takes before its first fall.
+      const drop = landed(flat, { invincible: 1e9 }), ds = drop.state, dk = drop.spawn(E.AUDITOR, 7.25, 4.5, 0);
+      let landedAt = -1;
+      watch(drop, 1, () => { if (ds.ey[dk] === 1.5) { landedAt = ds.ex[dk]; return true; } });
+      const air = { drift: landedAt < 0 ? null : round(7.25 - landedAt) };
+      const near = (v, want, within) => Math.abs(v - want) <= within;
+      return {
+        ok: stop.dx <= FU.AUDITOR_STOP && stop.dx > FU.AUDITOR_STOP - 2 * FU.AUDITOR_V * FX && stop.aim === LEFT && stop.routine < 3 && walked > 0 &&
+          near(first, FU.AUDITOR_FIRST + FU.AUDITOR_WIND, 3 * FX) && lobs.length >= 2 && shots === 0 &&
+          lobs.every((l) => l.attr === 0 && Math.abs(l.x) < 0.06 && l.y >= 0 && l.y < 0.06) &&
+          end.least >= 4 && end.x < 4 + FU.AUDITOR_V * FX && end.heights.length === 1 && end.heights[0] === 2.5 && end.aim === LEFT &&
+          diagonal.routine >= 3 && diagonal.hp === 0 && diagonal.score === 300 &&
+          left.aim === LEFT && right.aim === 0 && [left, right].every((r) => r.fired === 5 && !r.past && r.hp === 1 && r.routine < 3 && Math.abs(r.dx) <= FU.AUDITOR_STOP) &&
+          turned.was === LEFT && turned.dx <= FU.AUDITOR_STOP && turned.aim === 0 && turned.front.hp === 1 && turned.front.routine < 3 && turned.front.aim === 0 && !turned.front.past &&
+          turned.back.hp === 0 && turned.back.routine >= 3 && turned.back.score === 300 &&
+          wall.type === E.AUDITOR && wall.x >= wall.face - 1e-4 && wall.x < wall.face + FU.AUDITOR_V * FX && wall.moved === 0 && wall.aim === LEFT &&
+          air.drift !== null && air.drift >= 0 && air.drift <= FU.AUDITOR_V * FX + 1e-4,
+        detail: JSON.stringify({ stop, first: round(first), lobs: lobs.slice(0, 3), shots, end, diagonal, left, right, turned, wall, air })
+      };
+    });
+
+    fieldCheck("raid field: the Tax Collector sets off at the nearest Ooga and never turns toward it, jumps a 2-cell hatch and a 1 m step a RUNNER falls into and turns at, and turns back only at a wall over 1 m", () => {
+      // Ground at 1.5 m with a hatch over columns 4 and 5, a 1 m step from column 9 and a wall at column 15 from the
+      // ground up; the Ooga (invincible) stands at column 7, between the hatch and the step.
+      const course = field("tax", (c, r) => c === 15 ? "#" : c === 4 || c === 5 ? "." : r < 3 || (c >= 9 && r < 5) ? "#" : ".", { col: 7, row: 3 });
+      const runAt = (type, x, seconds) => {
+        const sim = landed(course, { invincible: 1e9 }), s = sim.state, k = sim.spawn(type, x, s.py[0], 0);
+        sim.simulate(FX);
+        const heading = Math.sign(s.evx[k]);
+        let low = Infinity, onStep = false, passed = false, turn = null;
+        watch(sim, seconds, () => {
+          if (s.eType[k] !== type) return true;
+          if (s.ex[k] >= 2 && s.ex[k] <= 3) low = Math.min(low, s.ey[k]);
+          if (s.ex[k] > 4.5 + 0.19 && s.ey[k] === 2.5) onStep = true;
+          if (s.ex[k] > s.px[0] + 0.5) passed = true;
+          if (Math.sign(s.evx[k]) !== heading) { turn = { x: round(s.ex[k]), y: round(s.ey[k]), behind: s.px[0] < s.ex[k] }; return true; }
+        });
+        return { heading, low: low === Infinity ? null : round(low), onStep, passed, turn, alive: s.eType[k] === type, y: round(s.ey[k]) };
+      };
+      const tax = runAt(E.TAX_COLLECTOR, 0.75, 6), runner = runAt(E.RUNNER, 0.75, 3), stepped = runAt(E.RUNNER, 3.6, 2);
+      const wallFace = 7.5 - R.BOX[M.POSE.STAND][0];
+      return {
+        ok: tax.heading === 1 && tax.low !== null && tax.low >= 1.5 && tax.onStep && tax.passed && tax.turn !== null && tax.turn.behind &&
+          tax.turn.x > wallFace - FU.TAX_V * FX * 2 && tax.turn.y === 2.5 &&
+          (runner.low !== null && runner.low < 1.5 || !runner.alive) && !runner.passed &&
+          stepped.heading === 1 && stepped.turn !== null && stepped.turn.x < 4.5 && stepped.turn.y === 1.5,
+        detail: JSON.stringify({ tax, runner, stepped, wallFace })
+      };
+    });
+
+    fieldCheck("raid field: the Repo Truck drives left and parks after TRUCK_RUN, or with its front (TRUCK_NOSE, its armour box's) TRUCK_LOOK short of a pit or a solid cell, in the routines its look reads; lets out at most TRUCK_TROOPS runners behind it, none while nothing may fire and none into a wall close behind it; and its armour cannot be jumped, by the jump's touch box", () => {
+      // A pit over columns 6 and 7 (its near edge at 4 m), and a 0.5 m block at column 5 (its face at 3 m).
+      const road = field("road", floor), pit = field("pit", (c, r) => c === 6 || c === 7 ? "." : floor(c, r)), block = field("block", (c, r) => c === 5 && r < 4 ? "#" : floor(c, r));
+      // From 7.25 m with the Ooga at 1.25 m under the barrier: where and when it parks, the routines and speeds it drives
+      // and parks in, and each runner it lets out (a slot turning RUNNER), where against it and when.
+      const drive = (stage, seconds, held = false) => {
+        const sim = landed(stage, held ? { invincible: 1e9 } : { barrier: 1e9 }), s = sim.state, k = sim.spawn(E.REPO_TRUCK, 7.25, s.py[0], 0), t0 = s.time;
+        const was = Array.from(s.eType), runners = [], looks = new Set();
+        let park = null;
+        watch(sim, seconds, () => {
+          looks.add(`${s.eRoutine[k]}:${s.evx[k] < 0 ? "moving" : s.evx[k] === 0 ? "still" : "back"}`);
+          if (park === null && s.eRoutine[k] === FL.REPO_TRUCK.parked) park = { x: round(s.ex[k]), t: round(s.time - t0) };
+          for (let j = 0; j < M.ENEMY_SLOTS; j++) {
+            if (s.eType[j] === E.RUNNER && was[j] !== E.RUNNER) runners.push({ t: round(s.time - t0), behind: round(s.ex[j] - s.ex[k]) });
+            was[j] = s.eType[j];
+          }
+        });
+        return { park, runners, looks: [...looks].sort(), routine: s.eRoutine[k], x: round(s.ex[k]) };
+      };
+      const flat = drive(road, 14), short = drive(pit, 3), walled = drive(block, 3), held = drive(road, 3.5, true);
+      // Backed: a wall from column 15 (7.5 m) and a pit over column 8 that parks it at once, 1 m from the wall, its drop
+      // point (1.5 m behind) inside the wall.
+      const backed = (() => {
+        const sim = landed(field("backed", (c, r) => c === 15 ? "#" : c === 8 ? "." : floor(c, r)), { barrier: 1e9 }), s = sim.state, k = sim.spawn(E.REPO_TRUCK, 6.5, s.py[0], 0);
+        let runners = 0;
+        watch(sim, 8, () => { for (let j = 0; j < M.ENEMY_SLOTS; j++) if (s.eType[j] === E.RUNNER) runners++; });
+        return { x: round(s.ex[k]), routine: s.eRoutine[k], held: s.eBurst[k], runners };
+      })();
+      const front = (r, edge) => r.park !== null && r.park.x - FU.TRUCK_NOSE > edge && r.park.x - FU.TRUCK_NOSE <= edge + FU.TRUCK_LOOK + FU.TRUCK_V * FX + 1e-4;
+      const wantLooks = [`${FL.REPO_TRUCK.drive}:moving`, `${FL.REPO_TRUCK.parked}:still`].sort().join();
+      const stepDrive = FU.TRUCK_V * FX;
+      // Jumping at it, parked at 4.25 m with its runners kept in: from four takeoffs a running jump meets it in the air, short
+      // of its middle (the 2.25 m jump carries the Ooga's point over the box's front, 2.13 m up, before it comes down into
+      // the box: it is 2.75 m long, more than the 2.11 m a jump carries).
+      const leap = (x0) => {
+        const sim = landed(road, { invincible: 1e9 }), s = sim.state, k = sim.spawn(E.REPO_TRUCK, 7.25, s.py[0], 0);
+        sim.simulate(FX); s.eBurst[k] = 0; sim.simulate(3);
+        s.px[0] = x0; s.pInvincible[0] = 0;
+        let rise = 0, furthest = x0, pose = -1, died = false;
+        sim.setInput(IN.RIGHT | IN.JUMP); sim.simulate(FX); sim.setInput(IN.RIGHT);
+        watch(sim, 2, () => {
+          if (s.pState[0] !== PS.NORMAL) { died = true; pose = s.pPose[0]; return true; }
+          rise = Math.max(rise, s.py[0] - 1.5); furthest = Math.max(furthest, s.px[0]);
+        });
+        sim.setInput(0);
+        return { x0, died, pose, rise: round(rise), furthest: round(furthest), truck: round(s.ex[k]), routine: s.eRoutine[k] };
+      };
+      const leaps = [1.6, 1.9, 2.2, 2.5].map(leap);
+      const apex = M.TUNE.JUMP_V * M.TUNE.JUMP_V / (2 * M.TUNE.GRAVITY);
+      return {
+        ok: flat.park !== null && Math.abs(flat.park.x - (7.25 - FU.TRUCK_RUN)) <= stepDrive && Math.abs(flat.park.t - FU.TRUCK_RUN / FU.TRUCK_V) <= 2 * FX &&
+          flat.x === flat.park.x && flat.looks.join() === wantLooks && flat.runners.length === FU.TRUCK_TROOPS &&
+          flat.runners.every((r, n) => Math.abs(r.t - (n + 1) * FU.TRUCK_DROP) <= 3 * FX && Math.abs(r.behind - FU.TRUCK_TROOP_X) < 1e-3) &&
+          FU.TRUCK_NOSE === -R.SHOT_BOX[R.TIER.ARMOUR][0] && front(short, 4) && short.looks.join() === wantLooks && front(walled, 3) && walled.looks.join() === wantLooks &&
+          held.park !== null && held.runners.length === 0 &&
+          backed.x === 6.5 && backed.routine === FL.REPO_TRUCK.parked && backed.runners === 0 && backed.held === FU.TRUCK_TROOPS &&
+          leaps.every((l) => l.died && l.pose === M.POSE.JUMP && l.rise <= apex + 1e-3 && l.furthest < l.truck && l.routine === FL.REPO_TRUCK.parked),
+        detail: JSON.stringify({ nose: FU.TRUCK_NOSE, flat, short: short.park, walled: walled.park, held: { park: held.park, runners: held.runners.length }, backed, leaps })
+      };
+    });
+
+    fieldCheck("raid field: a Spark runs along its floor and is gone at a hatch, a ledge's end, a wall and the end of its life, and any jump clears it while standing meets it, by the sim's contacts", () => {
+      // Ground at 1.5 m with a hatch over columns 2 and 3, a ledge 1.5 m up over columns 9 to 12 and a wall at column 15;
+      // the Ooga (invincible, which a spark passes through) at column 6. Each spark followed to its last step.
+      const track = field("spark", (c, r) => c === 15 ? "#" : r < 3 ? (c === 2 || c === 3 ? "." : "#") : r === 5 && c >= 9 && c <= 12 ? "=" : ".", { col: 6, row: 3 });
+      const sim = landed(track, { invincible: 1e9 }), s = sim.state;
+      const sparks = [[3.4, 1.5, 1], [6, 3, 1], [6, 1.5, 0]].map(([x, y, attr]) => ({ k: sim.spawn(E.SPARK, x, y, attr), last: x, y, gone: false, runs: true }));
+      watch(sim, 2, () => {
+        for (const p of sparks) {
+          if (p.gone) continue;
+          if (s.eType[p.k] !== E.SPARK) { p.gone = true; continue; }
+          p.last = s.ex[p.k];
+          if (s.ey[p.k] !== p.y || s.eRoutine[p.k] !== FL.SPARK.run) p.runs = false;
+        }
+        return sparks.every((p) => p.gone);
+      });
+      const [hatch, edge, wall] = sparks, step = FU.SPARK_V * FX;
+      // Its life: three screens of ground, a spark from the screen's left edge running right after an Ooga running right.
+      const long = landed(field("long", floor, { col: 8, row: 3 }, 3), { invincible: 1e9 }), l = long.state;
+      long.simulate(FX);
+      const lk = long.spawn(E.SPARK, l.camX + 1, 1.5, 0), t0 = l.time;
+      let life = null, lastX = 0, onScreen = false;
+      long.setInput(IN.RIGHT);
+      watch(long, 4, () => { if (l.eType[lk] !== E.SPARK) { life = round(l.time - t0); return true; } lastX = l.ex[lk]; onScreen = lastX > l.camX && lastX < l.camX + SCREEN; });
+      long.setInput(0);
+      // Meeting an Ooga that can be hurt: standing it kills; a jump at any moment as it comes, in place or running either
+      // way, leaves it to pass under, gone or behind the Ooga, with the Ooga still standing.
+      const road = field("ground", floor);
+      const meet = (d, bits) => {
+        const m = landed(road, { x: 2 }), ms = m.state, k = m.spawn(E.SPARK, 2 + d, 1.5, 1);
+        m.setInput(bits); m.simulate(FX); m.setInput(bits & ~IN.JUMP);
+        watch(m, 1.4, () => ms.pState[0] !== PS.NORMAL || ms.eType[k] !== E.SPARK || (ms.pvy[0] === 0 && ms.ex[k] < ms.px[0] - 0.5));
+        m.setInput(0);
+        return { d, bits, state: ms.pState[0], gone: ms.eType[k] !== E.SPARK, behind: ms.eType[k] === E.SPARK && ms.ex[k] < ms.px[0] - 0.5 };
+      };
+      const standing = meet(1, 0), jumps = [[0.3, IN.JUMP], [0.7, IN.JUMP], [1.1, IN.JUMP], [1.5, IN.JUMP], [1.9, IN.JUMP], [2.3, IN.JUMP], [2.5, IN.JUMP | IN.RIGHT], [1, IN.JUMP | IN.LEFT]].map(([d, bits]) => meet(d, bits));
+      return {
+        ok: sparks.every((p) => p.gone && p.runs) && hatch.last >= 2 && hatch.last < 2 + step + 1e-3 && edge.last >= 4.5 && edge.last < 4.5 + step + 1e-3 &&
+          wall.last < 7.5 && wall.last >= 7.5 - step - 1e-3 &&
+          life !== null && Math.abs(life - FU.SPARK_LIFE) <= 2 * FX && onScreen &&
+          standing.state === PS.DEAD && standing.gone && jumps.every((j) => j.state === PS.NORMAL && (j.gone || j.behind)),
+        detail: JSON.stringify({ last: sparks.map((p) => round(p.last)), runs: sparks.map((p) => p.runs), life, lastX: round(lastX), onScreen, standing, jumps })
+      };
+    });
+  }
+  // Stage 5, The Lightning Factory Floor (raid factory:).
+  {
+    // Stage 5, The Lightning Factory Floor: twelve screens of belts, hatches and arc pylons to the Grid Warden.
+    // `factory` records a check, a throw recording its failure. The boss is played by the controls on the real stage: an
+    // Ooga set down on the run-up past every record but the Warden's (no edge spawner, so nothing else takes a shot), under
+    // a standing barrier (which leaves the Warden's attacks on, since `attack` holds while no Ooga is invincible), walks to
+    // the lock, and fires with the real muzzles at the parts' real boxes.
+    const factory = (name, f) => {
+      let r;
+      try { r = f(); } catch (e) { r = { ok: false, detail: String(e && e.stack || e) }; }
+      record(name, r.ok, r.detail);
+    };
+    const FS = S.STAGES.find((g) => g.id === "factory"), BLF = context.window.BL.raidLegionFactory, FT = BLF.TUNE, LK = BLF.LOOK;
+    const F = context.window.BL.raidEnemies.FLAG, IN = M.IN, CELL = S.CELL, WL = LK.GRID_WARDEN;
+    const grounded = (s) => s.pState[0] === PS.NORMAL && s.pPose[0] !== M.POSE.JUMP;
+    const up = (s, k, t) => s.eType[k] === t && s.eRoutine[k] < TY[t].destroyed;
+    // A sim on the real stage with the Ooga landed and past its drop-in's invincibility, every slot empty, the edge spawner
+    // off and the placed list passed up to record `from` (every record, by default).
+    const bare = (seed, from = FS.placed.length / 4) => {
+      const sim = M.create({ seed, stage: FS }), s = sim.state;
+      until(sim, () => s.pState[0] === PS.NORMAL && s.pInvincible[0] === 0, 8);
+      for (let k = 0; k < M.ENEMY_SLOTS; k++) s.eType[k] = E.FREE;
+      s.spawnTimer = 1e9; s.listCursor = from;
+      return sim;
+    };
+    const place = (s, x, y) => { s.px[0] = x; s.py[0] = y; s.pvx[0] = 0; s.pvy[0] = 0; s.camX = Math.max(s.camX, Math.min(x - SCREEN / 2, s.lockX)); };
+
+    // rule: the stage is the spec's (a broken grid, belt or record changes what the player meets), and the legion file
+    // exports what the art reads.
+    factory("raid factory: The Lightning Factory Floor is the campaign's fifth stage, twelve side screens with four belts on the floor's top row (the one forward, on screen 4, ending at the hatch in columns 74 and 75), pylons, auditors, tax collectors, snipers and the crucible along it and the Grid Warden on its lock screen, and passes its own validation; its legion file exports the Warden's muzzle and spark point and every LOOK state as a routine index", () => {
+      const types = new Set(), at = (k) => [FS.placed[k], FS.placed[k + 1], FS.placed[k + 2]];
+      for (let k = 2; k < FS.placed.length; k += 4) types.add(FS.placed[k]);
+      const last = at(FS.placed.length - 4), need = ["CLERK", "SENSOR", "CARRIER", "TAX_COLLECTOR", "AUDITOR", "ARC_PYLON", "LOBBYIST", "COIN_DRONE", "BOND_MORTAR", "GRID_WARDEN"];
+      const forward = FS.belts.filter((b) => b[3] > 0), hatch = [74, 75].every((c) => [0, 1, 2].every((r) => S.cellAt(FS, c, r) === S.KIND.EMPTY));
+      const beltsOnFloor = FS.belts.every((b) => b[2] === 2 && S.cellAt(FS, b[0], 2) === S.KIND.SOLID && S.cellAt(FS, b[0], 3) === S.KIND.EMPTY);
+      const looks = Object.values(LK).every((t) => Object.values(t).every(Number.isInteger)) && LK.ARC_PYLON.charge === 4 && WL.charge === 2 && WL.overload === 3 &&
+        WL.destroyed === TY[E.GRID_WARDEN].destroyed && LK.CAPACITOR.destroyed === TY[E.CAPACITOR].destroyed && LK.ARC_PYLON.destroyed === TY[E.ARC_PYLON].destroyed;
+      const pair = (v) => Array.isArray(v) && v.length === 2 && v.every(Number.isFinite);
+      return {
+        ok: FS.kind === "side" && FS.name === "The Lightning Factory Floor" && FS.screens === 12 && FS.lockScreen === 11 && FS.spawner.base === 208 &&
+          FS.start.col === 3 && FS.start.row === 12 && S.validate(FS).length === 0 && FS.placed.length === 28 * 4 && need.every((n) => types.has(E[n])) &&
+          last[2] === E.GRID_WARDEN && last[0] === 186 && last[1] === 3 && Math.floor(last[0] / S.SCREEN_W) === FS.lockScreen && TY[E.GRID_WARDEN].boss && TY[E.GRID_WARDEN].scaled &&
+          FS.belts.length === 4 && beltsOnFloor && forward.length === 1 && forward[0][0] === 64 && forward[0][1] === 73 && hatch &&
+          TY[E.CAPACITOR].main === E.GRID_WARDEN && pair(FT.WARDEN_MUZZLE) && pair(FT.WARDEN_SPARK_FROM) && looks,
+        detail: JSON.stringify({ faults: S.validate(FS), screens: FS.screens, lock: FS.lockScreen, records: FS.placed.length / 4, belts: FS.belts, last, hatch, beltsOnFloor, looks, LOOK: LK, muzzle: FT.WARDEN_MUZZLE, spark: FT.WARDEN_SPARK_FROM })
+      };
+    });
+
+    // rule: the forward belt on screen 4 carries an Ooga that stands still into the hatch at its end. Set down idle on the
+    // belt at three columns, alone on the stage, it starts to fall as its feet pass the hatch's edge (x 37), in the time the
+    // belt's 0.9 m/s gives from where it stood, and the fall kills it.
+    factory("raid factory: screen 4's forward belt carries an Ooga standing still into the hatch at columns 74 and 75, from each of three spots on it in the time the belt's speed gives, and the fall kills it", () => {
+      const v = FS.belts.find((b) => b[3] > 0)[3], edge = 74 * CELL;
+      const rides = [65, 68, 72].map((col) => {
+        const sim = bare(1), s = sim.state, x0 = (col + 0.5) * CELL;
+        place(s, x0, 3 * CELL);
+        sim.setInput(0);
+        let fell = -1, died = -1, at = 0, i = 0;
+        for (; i < 10 * 120 && died < 0; i++) {
+          sim.simulate(M.FIXED);
+          if (fell < 0 && s.py[0] < 3 * CELL - 1e-6) { fell = (i + 1) * M.FIXED; at = s.px[0]; }
+          if (s.pState[0] === PS.DEAD) died = (i + 1) * M.FIXED;
+        }
+        const want = (edge - x0) / v;
+        return { col, want: +want.toFixed(3), fell: +fell.toFixed(3), at: +at.toFixed(3), died: +died.toFixed(3) };
+      });
+      return {
+        ok: rides.every((r) => r.fell > 0 && Math.abs(r.fell - r.want) <= 2 * M.FIXED + 1e-6 && r.at >= edge && r.at < edge + CELL && r.died > r.fell && r.died - r.fell < 1),
+        detail: JSON.stringify(rides)
+      };
+    });
+
+    // rule: an arc pylon's spark runs along the surface the pylon stands on and dies where that surface ends. A pylon set on
+    // the real stage's floor left of the screen-4 hatch with the Ooga beyond it, and one on the machine deck with the Ooga on
+    // the floor left of the deck, each on the screen clear of the edge where an emplacement shuts: each glows (routine
+    // `charge`) PYLON_FIRST after the screen opens it and for PYLON_CHARGE, then sends a spark from its feet toward the
+    // Ooga's side, which holds the pylon's height as it runs at 4 m/s and is gone as it passes the hatch's edge or the
+    // deck's; the pylon charges again PYLON_GAP later.
+    factory("raid factory: an arc pylon glows for PYLON_CHARGE, PYLON_FIRST after the screen opens it and every PYLON_GAP after its spark, then sends a spark from its feet toward the Ooga's side that runs along the surface it stands on and dies at the screen-4 hatch on the floor and at the machine deck's edge", () => {
+      const run = (col, row, oogaX, endX) => {
+        const sim = bare(2), s = sim.state;
+        place(s, oogaX, 3 * CELL);
+        s.pBarrier[0] = 1e9;
+        const k = sim.spawn(E.ARC_PYLON, (col + 0.5) * CELL, row * CELL, 0), px = s.ex[k], py = s.ey[k];
+        let charges = [], sparks = [], spark = -1, path = [], i = 0, was = -1, opened = -1;
+        for (; i < 6 * 120; i++) {
+          const before = new Set(); for (let j = 0; j < M.ENEMY_SLOTS; j++) if (s.eType[j] === E.SPARK) before.add(j);
+          sim.setInput(0); sim.simulate(M.FIXED);
+          if (s.pBarrier[0] < 100) s.pBarrier[0] = 1e9;
+          const t = +((i + 1) * M.FIXED).toFixed(3);
+          if (opened < 0 && s.eType[k] === E.ARC_PYLON && !(s.eFlags[k] & F.SHUT)) opened = t;
+          if (s.eRoutine[k] === LK.ARC_PYLON.charge && was !== LK.ARC_PYLON.charge) charges.push(t);
+          was = s.eRoutine[k];
+          for (let j = 0; j < M.ENEMY_SLOTS; j++) if (s.eType[j] === E.SPARK && !before.has(j)) {
+            sparks.push({ t, x: s.ex[j], y: s.ey[j], attr: s.eAttr[j] });
+            if (spark < 0) { spark = j; path = []; }
+          }
+          if (spark >= 0) { if (s.eType[spark] === E.SPARK) path.push([s.ex[spark], s.ey[spark]]); else spark = -2; }
+        }
+        const last = path[path.length - 1] || [NaN, NaN], dir = oogaX > px ? 0 : 1;
+        return {
+          opened, charges, sparks: sparks.map((p) => ({ ...p, x: +p.x.toFixed(3), y: +p.y.toFixed(3) })), steps: path.length, last: [+last[0].toFixed(3), +last[1].toFixed(3)],
+          held: path.every((q) => Math.abs(q[1] - py) < 1e-6), from: sparks.length > 0 && Math.abs(sparks[0].x - px) < 1e-6 && Math.abs(sparks[0].y - py) < 1e-6 && sparks[0].attr === dir,
+          died: spark === -2 && (dir === 0 ? last[0] < endX && last[0] > endX - 0.1 : last[0] > endX && last[0] < endX + 0.1), alive: s.pState[0] === PS.NORMAL
+        };
+      };
+      const hatch = run(70, 3, 38.25, 74 * CELL), deck = run(87, 5, 40.25, 84 * CELL);
+      const timed = (r) => r.opened > 0 && r.charges.length >= 2 && Math.abs(r.charges[0] - r.opened - M.FIXED - FT.PYLON_FIRST) <= 2 * M.FIXED && r.sparks.length >= 2 &&
+        Math.abs(r.sparks[0].t - r.charges[0] - FT.PYLON_CHARGE) <= 2 * M.FIXED && Math.abs(r.charges[1] - r.sparks[0].t - FT.PYLON_GAP) <= 2 * M.FIXED;
+      return { ok: [hatch, deck].every((r) => timed(r) && r.from && r.held && r.died && r.alive), detail: JSON.stringify({ hatch, deck }) };
+    });
+
+    // The Grid Warden by the controls. `atBoss(seed)` sets the Ooga down on the run-up (only the Warden's record left to
+    // come), walks it to the lock and waits for both jars; the step it returns keeps the barrier standing, holds the
+    // Warden's routine and shut state and its jars' a step at a time in `log`, and counts each new spark and shot where it
+    // starts (at the Warden's spark point, its tower top or a jar).
+    const atBoss = (seed) => {
+      const sim = bare(seed, FS.placed.length / 4 - 1), s = sim.state, log = [], born = [];
+      place(s, 84, 3 * CELL);
+      s.pBarrier[0] = 1e9;
+      let w = -1, caps = [], t = 0, most = 0;
+      const step = (bits) => {
+        const seen = new Set(); for (let j = 0; j < M.ENEMY_SLOTS; j++) if (s.eType[j] !== E.FREE) seen.add(j * 256 + s.eType[j]);
+        sim.setInput(bits); sim.simulate(M.FIXED); t++;
+        if (s.pBarrier[0] < 100) s.pBarrier[0] = 1e9;
+        if (w < 0) return;
+        log.push([s.eRoutine[w], s.eFlags[w] & F.SHUT, ...caps.map((k) => up(s, k, E.CAPACITOR) ? s.eFlags[k] & F.SHUT : -1)]);
+        let n = 0;
+        for (let j = 0; j < M.ENEMY_SLOTS; j++) {
+          if (s.eType[j] === E.SPARK) n++;
+          if ((s.eType[j] === E.SPARK || s.eType[j] === E.SHOT) && !seen.has(j * 256 + s.eType[j])) born.push({ t, type: s.eType[j], x: s.ex[j], y: s.ey[j], attr: s.eAttr[j] });
+        }
+        if (n > most) most = n;
+      };
+      for (let i = 0; i < 20 * 120 && !(s.camX === s.lockX && w >= 0 && caps.length === 2); i++) {
+        step(IN.RIGHT);
+        w = s.eType.indexOf(E.GRID_WARDEN);
+        caps = []; for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.CAPACITOR) caps.push(k);
+        caps.sort((a, b) => s.eAttr[a] - s.eAttr[b]);
+      }
+      const walk = (x) => {
+        for (let i = 0; i < 10 * 120 && Math.abs(s.px[0] - x) > 0.02; i++) step(s.px[0] < x ? IN.RIGHT : IN.LEFT);
+        if (s.pFace[0] < 0) step(IN.RIGHT);
+        step(0);
+      };
+      const wait = (done, limit = 30) => { for (let i = 0; i < limit * 120 && !done(); i++) step(0); };
+      return { sim, s, w, caps, step, walk, wait, log, born, t: () => t, most: () => most };
+    };
+    // Each run of `log` entries with one routine, as [routine, steps, shut throughout, every standing jar shut throughout,
+    // every standing jar open throughout].
+    const spans = (log) => {
+      const out = [];
+      for (const e of log) {
+        const jars = e.slice(2).filter((v) => v >= 0), last = out[out.length - 1];
+        if (!last || last[0] !== e[0]) out.push([e[0], 0, true, true, true]);
+        const cur = out[out.length - 1];
+        cur[1]++; cur[2] = cur[2] && e[1] !== 0; cur[3] = cur[3] && jars.every((v) => v !== 0); cur[4] = cur[4] && jars.every((v) => v === 0);
+      }
+      return out;
+    };
+    const TUNE_G = M.TUNE.GRAVITY, JUMP_MUZZLE = M.TUNE.MUZZLE[M.POSE.JUMP][0][1];
+    // Fires `bits` on alternate steps through one charge window while slot k stands; a jump's forward shot is fired on the
+    // steps that carry its muzzle (the ball's forward point, from where the step leaves the feet) inside slot k's box, going
+    // up or coming down (the 2.25 m jump's peak passes over a part its 1.5 m one peaked at), and
+    // an up-forward one (up and right held for the step it fires) is followed by a step holding left, so the Ooga keeps its
+    // spot (a step's run either way) and faces right again as it fires.
+    const volley = (b, k, type, bits) => {
+      const s = b.s;
+      b.wait(() => s.eRoutine[b.w] === WL.charge);
+      for (let i = 0; s.eRoutine[b.w] === WL.charge && up(s, k, type); i++) {
+        if (bits === "jump") {
+          if (grounded(s)) b.step(IN.JUMP);
+          else {
+            const m = s.py[0] + s.pvy[0] * M.FIXED - TUNE_G * M.FIXED * M.FIXED / 2 + JUMP_MUZZLE, o = s.ey[k] + M.ORIGIN_OF[type], box = M.RULES.SHOT_BOX[M.TIER_OF[type]];
+            b.step(i % 2 && m > o + box[2] + 0.02 && m < o + box[3] - 0.02 ? IN.FIRE : 0);
+          }
+        } else if (bits & IN.RIGHT) b.step(i % 2 ? IN.LEFT : bits);
+        else b.step(i % 2 ? 0 : bits);
+      }
+      for (let i = 0; i < 120 && !grounded(s); i++) b.step(0);
+    };
+    const hps = (b) => [b.w, ...b.caps].map((k) => b.s.eHp[k]);
+
+    // The main fight: shut in guard (forward shots at the core, fired while the guard has a second left to run and landing
+    // before it ends, do nothing), the upper jar shot down by up-forward
+    // diagonals from the floor 2.55 m off, the lower by jump-forward shots through its height, then overload, and the core by
+    // standing forward shots from three spots along the floor.
+    const LATE = 9.6;
+    let fight;
+    try {
+      const b = atBoss(5), s = b.s, [upper, lower] = b.caps, core = b.w;
+      const start = { x: s.ex[core], y: s.ey[core], upper: [s.ex[upper], s.ey[upper]], lower: [s.ex[lower], s.ey[lower]], hp: s.eHp[core], phase: s.phase };
+      b.walk(90.5);
+      // Guard: forward shots at the core while it is shut.
+      b.wait(() => s.eRoutine[core] === WL.guard);
+      const guardHp = hps(b);
+      for (let i = 0; s.eRoutine[core] === WL.guard && s.eTimer[core] > 1; i++) b.step(i % 2 ? 0 : IN.FIRE);
+      for (let i = 0; s.eRoutine[core] === WL.guard && s.bLive.some((v) => v); i++) b.step(0);
+      const guardHit = hps(b).join() !== guardHp.join() || s.eRoutine[core] !== WL.guard;
+      // The guard's sparks are capped: sparks set running on the floor just before its next one, to SPARK_MAX in all, and
+      // the step it is due on sends none from its spark point.
+      b.wait(() => s.eRoutine[core] === WL.guard && s.evx[core] <= M.FIXED + 1e-6 && s.evx[core] > 0);
+      const sparksNow = () => { let n = 0; for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.SPARK) n++; return n; };
+      for (let k = 0; sparksNow() < FT.SPARK_MAX; k++) b.sim.spawn(E.SPARK, 90 - k * 0.3, 3 * CELL, 1);
+      const sparkedBefore = sparksNow(), bornBefore = b.born.length;
+      b.step(0);
+      const fromPoint = b.born.slice(bornBefore).filter((p) => p.type === E.SPARK).length;
+      const capped = { before: sparkedBefore, sent: fromPoint, due: s.evx[core] > FT.WARDEN_SPARK - 2 * M.FIXED };
+      // The upper jar from the floor, 2.55 m off, up-forward.
+      b.walk(s.ex[upper] - 2.55);
+      const u0 = hps(b);
+      for (let n = 0; n < 12 && up(s, upper, E.CAPACITOR); n++) volley(b, upper, E.CAPACITOR, IN.UP | IN.RIGHT | IN.FIRE);
+      const u1 = hps(b);
+      // Two whole charges let pass untouched first, from the guard after the upper jar's: the lower jar falls within one
+      // charge to jump shots, and the guard's cycle is to be seen at least three times.
+      b.wait(() => s.eRoutine[core] === WL.guard);
+      for (let n = 0; n < 2; n++) { b.wait(() => s.eRoutine[core] === WL.charge); b.wait(() => s.eRoutine[core] === WL.guard); }
+      // The lower jar by jump-forward shots fired through its height, from the floor left of the gantry (where a jump straight up
+      // would land on the gantry), 3.2 m off.
+      b.walk(s.camX + 0.6);
+      for (let n = 0; n < 12 && up(s, lower, E.CAPACITOR); n++) volley(b, lower, E.CAPACITOR, "jump");
+      const l1 = hps(b);
+      // Overload: open for good, a spark every WARDEN_SPARK_LATE and a spread every WARDEN_SPREAD from the tower top.
+      b.wait(() => s.eRoutine[core] === WL.overload);
+      const from = b.t(), logAt = b.log.length, bornAt = b.born.length;
+      for (let i = 0; i < LATE * 120 + 2; i++) b.step(0);
+      const late = b.born.slice(bornAt), lateSpan = spans(b.log.slice(logAt));
+      // The core by standing forward shots from three spots on the floor.
+      const spots = [s.camX + 0.6, 90.5, 92.1], core1 = [];
+      for (const x of spots) {
+        if (!up(s, core, E.GRID_WARDEN)) break;
+        b.walk(x);
+        const was = s.eHp[core];
+        for (let i = 0; i < 240 && up(s, core, E.GRID_WARDEN); i++) b.step(i % 2 ? 0 : IN.FIRE);
+        core1.push({ x: +s.px[0].toFixed(2), standing: grounded(s) && s.pPose[0] === M.POSE.STAND, took: was - s.eHp[core] });
+      }
+      for (let i = 0; i < 60 * 120 && up(s, core, E.GRID_WARDEN); i++) b.step(i % 2 ? 0 : IN.FIRE);
+      b.step(0);
+      fight = {
+        start, guardHit, capped, u0, u1, l1, core1, fell: !up(s, core, E.GRID_WARDEN), phase: s.phase, others: s.eType.filter((t, k) => t !== E.FREE && k !== core).length,
+        spans: spans(b.log), lateSpan, most: b.most(), late: late.map((p) => ({ t: p.t - from, type: p.type, x: +p.x.toFixed(2), y: +p.y.toFixed(2), attr: p.attr })), born: b.born, w: core, caps: b.caps
+      };
+    } catch (e) { fight = { error: String(e && e.stack || e) }; }
+
+    // rule: the Warden's windows and attacks as the player feels them: shut and open, the window's length, the discharge,
+    // overload, and where its sparks and shots start.
+    factory("raid factory: the Grid Warden is shut with both jars through each WARDEN_GUARD guard (a forward shot at its core does nothing), sends its sparks from WARDEN_SPARK_FROM and its aimed shot from WARDEN_MUZZLE, never more than SPARK_MAX sparks at once; opens with its standing jars through each charge, WARDEN_CHARGE long and WARDEN_CHARGE_CAP longer for each jar destroyed, at whose end each standing jar fires its pair and the tower a spread of three from its top; and once both jars are gone stays open in overload, a spark every WARDEN_SPARK_LATE and a spread every WARDEN_SPREAD", () => {
+      if (fight.error) return { ok: false, detail: fight.error };
+      const steps = (sec) => Math.round(sec / M.FIXED), near = (n, sec) => Math.abs(n - steps(sec)) <= 2;
+      const body = fight.spans.slice(1, -1), guards = body.filter((p) => p[0] === WL.guard), charges = body.filter((p) => p[0] === WL.charge);
+      const lens = charges.map((p) => p[1]);
+      const two = lens.filter((n) => near(n, FT.WARDEN_CHARGE)).length, three = lens.filter((n) => near(n, FT.WARDEN_CHARGE + FT.WARDEN_CHARGE_CAP)).length;
+      const ordered = lens.every((n, k) => k === 0 || n >= lens[k - 1] - 2) && lens.every((n) => near(n, FT.WARDEN_CHARGE) || near(n, FT.WARDEN_CHARGE + FT.WARDEN_CHARGE_CAP));
+      const W = fight.start, spark = [W.x + FT.WARDEN_SPARK_FROM[0], W.y + FT.WARDEN_SPARK_FROM[1]], top = [W.x + FT.WARDEN_MUZZLE[0], W.y + FT.WARDEN_MUZZLE[1]];
+      const at = (p, q) => Math.abs(p.x - q[0]) < 1e-3 && Math.abs(p.y - q[1]) < 1e-3;
+      const sparks = fight.born.filter((p) => p.type === E.SPARK), shots = fight.born.filter((p) => p.type === E.SHOT);
+      // Guard shots at the tower top come one at a time; a discharge's spread three at once, with each standing jar's pair.
+      const byT = new Map(); for (const p of shots.filter((p) => at(p, top))) byT.set(p.t, (byT.get(p.t) || 0) + 1);
+      const singles = [...byT.values()].filter((n) => n === 1).length, triples = [...byT.values()].filter((n) => n === 3).length;
+      const jarShots = shots.filter((p) => at(p, W.upper) || at(p, W.lower)).length;
+      const lateSparks = fight.late.filter((p) => p.type === E.SPARK).length, lateTriples = new Set(fight.late.filter((p) => p.type === E.SHOT && at(p, top)).map((p) => p.t)).size;
+      return {
+        ok: guards.length >= 3 && guards.every((p) => p[2] && p[3] && near(p[1], FT.WARDEN_GUARD)) && !fight.guardHit && fight.capped.before === FT.SPARK_MAX && fight.capped.sent === 0 && fight.capped.due &&
+          charges.length >= 2 && charges.every((p) => !p[2] && p[4]) && two >= 1 && three >= 1 && ordered &&
+          sparks.length > 0 && sparks.filter((p) => p.attr === 1).every((p) => at(p, spark) || Math.abs(p.x - 90) < 0.7) && sparks.some((p) => at(p, spark)) &&
+          singles >= 2 && triples >= 2 && jarShots >= 4 &&
+          fight.lateSpan.length === 1 && fight.lateSpan[0][0] === WL.overload && !fight.lateSpan[0][2] && Math.abs(lateSparks - LATE / FT.WARDEN_SPARK_LATE) <= 1 && Math.abs(lateTriples - LATE / FT.WARDEN_SPREAD) <= 1 && fight.most <= FT.SPARK_MAX,
+        detail: JSON.stringify({ spans: fight.spans, guardHit: fight.guardHit, capped: fight.capped, lens, singles, triples, jarShots, lateSpan: fight.lateSpan, lateSparks, lateTriples, most: fight.most, sparkAt: spark, top })
+      };
+    });
+
+    // Each part that must fall, by the controls on the real stage: the main fight above, and two more Oogas, one taking the
+    // lower jar with up-forward diagonals from the floor 1.5 m off, the other the upper from the row 4 gantry 1.55 m off.
+    // Every hit lands on the part shot at, and no other.
+    let alt;
+    try {
+      const lowerDiag = (() => {
+        const b = atBoss(6), s = b.s, [upper, lower] = b.caps;
+        b.walk(s.ex[lower] - 1.5);
+        const was = hps(b);
+        for (let n = 0; n < 12 && up(s, lower, E.CAPACITOR); n++) volley(b, lower, E.CAPACITOR, IN.UP | IN.RIGHT | IN.FIRE);
+        return { x: +s.px[0].toFixed(2), feet: s.py[0], was, now: hps(b), fell: !up(s, lower, E.CAPACITOR) };
+      })();
+      const upperGantry = (() => {
+        const b = atBoss(7), s = b.s, [upper] = b.caps;
+        b.walk(89.6);
+        b.step(IN.JUMP); for (let i = 0; i < 120 && !(grounded(s) && s.py[0] > 3 * CELL); i++) b.step(i < 30 ? IN.JUMP : 0);
+        b.walk(s.ex[upper] - 1.55);
+        const on = grounded(s) && Math.abs(s.py[0] - 5 * CELL) < 1e-6, was = hps(b);
+        for (let n = 0; n < 12 && up(s, upper, E.CAPACITOR); n++) volley(b, upper, E.CAPACITOR, IN.UP | IN.RIGHT | IN.FIRE);
+        return { x: +s.px[0].toFixed(2), feet: s.py[0], on, still: grounded(s) && Math.abs(s.py[0] - 5 * CELL) < 1e-6, was, now: hps(b), fell: !up(s, upper, E.CAPACITOR) };
+      })();
+      alt = { lowerDiag, upperGantry };
+    } catch (e) { alt = { error: String(e && e.stack || e) }; }
+
+    // rule: every part that must fall can be hit by the controls, standing where the spec says (its world points pinned).
+    factory("raid factory: every part of the Grid Warden falls to the controls with the sim's own muzzles and boxes: the upper jar to up-forward diagonals from the floor 2.55 m off or from the row 4 gantry 1.55 m off, the lower jar to jump-forward shots through its height from the floor or up-forward diagonals from the floor 1.5 m off, and the core, at its boss hit points, to standing forward shots from three spots along the floor; each part's hits land on it alone, and the core's fall clears the stage", () => {
+      if (fight.error || alt.error) return { ok: false, detail: fight.error || alt.error };
+      const { start, u0, u1, l1, core1 } = fight, { lowerDiag, upperGantry } = alt;
+      const hp0 = TY[E.GRID_WARDEN].hp + M.RULES.BOSS_HP_STRENGTH * M.RULES.STRENGTH[M.WEAPON.RIFLE];
+      // The spec's world points (the Warden at x 93.25, feet 1.5; the jars at x 91.85, 4.7 and 3.5), as the sim's Float32
+      // positions hold them.
+      const at = (p, x, y) => Math.abs(p[0] - Math.fround(x)) <= 1e-6 && Math.abs(p[1] - Math.fround(y)) <= 1e-6;
+      const placed = at([start.x, start.y], 93.25, 1.5) && at(start.upper, 91.85, 4.7) && at(start.lower, 91.85, 3.5);
+      return {
+        ok: placed && start.hp === hp0 && start.phase === M.PHASE.BOSS && u1[1] === 0 && u1[0] === u0[0] && u1[2] === u0[2] && l1[2] === 0 && l1[0] === u0[0] &&
+          core1.length === 3 && core1.every((c) => c.standing && c.took > 0) && fight.fell && fight.phase === M.PHASE.CLEAR && fight.others === 0 &&
+          lowerDiag.fell && lowerDiag.feet === 3 * CELL && lowerDiag.now[0] === lowerDiag.was[0] && lowerDiag.now[1] === lowerDiag.was[1] &&
+          upperGantry.on && upperGantry.still && upperGantry.fell && upperGantry.now[0] === upperGantry.was[0] && upperGantry.now[2] === upperGantry.was[2],
+        detail: JSON.stringify({ placed, hp0, start, u0, u1, l1, core1, fell: fight.fell, phase: fight.phase, others: fight.others, lowerDiag, upperGantry })
+      };
+    });
+
+    // playthrough: the autopilot reaches the Warden and clears the stage.
+    factory("raid factory: an Ooga under a standing barrier, steered by the autopilot, clears The Lightning Factory Floor within 900 s on four seeds", () => {
+      if (!FS) throw new Error("no stage with id factory");
+      const runs = [1, 2, 3, 4].map((seed) => {
+        const sim = M.create({ seed, stage: FS }), s = sim.state, limit = 900 * 120;
+        let i = 0;
+        for (; i < limit && s.phase !== M.PHASE.CLEAR && s.phase !== M.PHASE.OVER; i++) {
+          if (i % 120 === 0) s.pBarrier[0] = 1e9;
+          sim.setInput(M.autopilot(sim)); sim.simulate(M.FIXED);
+        }
+        return { seed, stage: sim.stage.id, done: s.phase === M.PHASE.CLEAR && i < limit, time: +s.time.toFixed(1), x: +s.px[0].toFixed(2), locked: s.camX === s.lockX };
+      });
+      return { ok: runs.every((r) => r.stage === "factory" && r.done && r.locked), detail: JSON.stringify(runs) };
+    });
+  }
+  // Stage 6, Mempool Lake (raid mempool:).
+  {
+    // Stage 6, Mempool Lake: the stage's data, the tide's pools and rafts as an Ooga meets them, the fee eels and
+    // the Backlog Leviathan (raid-legion-lake.js), each played through the controls on the real stage. A scenario empties
+    // the stage around the Ooga where it needs to (the placed list run out, or run to the Leviathan's record, and the edge
+    // spawner held off) and stands the Ooga where it is measured.
+    const IDX = S.STAGES.findIndex((g) => g.id === "mempool"), L = S.STAGES[IDX], E = M.ENEMY, PS = M.PSTATE, P = M.POSE, IN = M.IN, C = S.CELL;
+    const LL = context.window.BL.raidLegionLake, T = LL.TUNE, F = context.window.BL.raidEnemies.FLAG, TY = context.window.BL.raidEnemies.TYPES;
+    const mempool = (name, f) => { let r; try { r = f(); } catch (e) { r = { ok: false, detail: String(e && e.stack || e) }; } record(name, r.ok, r.detail); };
+    const basins = L ? L.tide.basins : [], floats = L ? L.tide.floats : [], LAKE = basins[4];
+    const inBasin = (col) => basins.findIndex((b) => col >= b[0] && col <= b[1]);
+    const rafted = (col) => floats.some((f) => col >= f[0] && col <= f[1]);
+    const topAt = (b, time) => (M.tideLevel(basins[b], time) + 1) * C;
+    const step = (sim, bits) => { sim.state.spawnTimer = 1e9; sim.setInput(bits); sim.simulate(M.FIXED); };
+    // A sim on the stage whose placed list starts at record `from` (none: past the last) and whose spawner is held off.
+    const fresh = (from, seed = 7) => { const sim = M.create({ seed, stage: IDX }); sim.state.listCursor = from === undefined ? L.placed.length / 4 : from; sim.state.spawnTimer = 1e9; return sim; };
+    // The Ooga stood at x, y in a pose, in play and not invincible, the screen round it.
+    const place = (sim, x, y, pose) => {
+      const s = sim.state;
+      s.px[0] = x; s.py[0] = y; s.pvx[0] = 0; s.pvy[0] = 0; s.pState[0] = PS.NORMAL; s.pPose[0] = pose; s.pInvincible[0] = 0;
+      s.camX = Math.min(Math.max(x - 4, 0), s.lockX);
+    };
+    // On to the first step of the next tide cycle, at low water.
+    const toLow = (sim) => { const s = sim.state; for (let i = 0; i < 15 * 120; i++) { const was = s.time % M.TIDE_PERIOD; step(sim, 0); if (s.time % M.TIDE_PERIOD < was) return; } throw new Error("no tide cycle began"); };
+    const standing = (s) => s.pState[0] === PS.NORMAL && s.pPose[0] === P.STAND;
+
+    mempool("raid mempool: Mempool Lake is the campaign's sixth stage, twelve screens with five tide basins and eleven rafts, its start, lock screen 11 and spawner base 200, the Leviathan's record in its lake on the lock screen, and passes its own validation; every eel and the Leviathan stand in the cell over their basin's low water and in no raft's column, every basin's high water is flush with its banks, the tunnel's screens hang no solid cell over open air, the drop-in column at the lock is bank, the art's tunnel and cliff screens ride with the stage, both lake types come in a ghost, and the repo truck parks clear of the ledge at columns 156 to 159", () => {
+      const faults = [], recs = [];
+      if (!L) return { ok: false, detail: "no mempool stage" };
+      for (let k = 0; k < L.placed.length; k += 4) recs.push(Array.from(L.placed.subarray(k, k + 4)));
+      for (const [col, row, type] of recs) {
+        if (type !== E.FEE_EEL && type !== E.LEVIATHAN) continue;
+        const b = inBasin(col);
+        if (b < 0 || row !== basins[b][2] + 1 || rafted(col)) faults.push(`record at ${col}, ${row} not over its basin's low water off the rafts`);
+      }
+      basins.forEach(([c0, c1, , high], b) => {
+        for (const col of [c0 - 1, c1 + 1]) if (S.cellAt(L, col, high) !== S.KIND.SOLID || S.cellAt(L, col, high + 1) === S.KIND.SOLID) faults.push(`basin ${b}'s bank at ${col} is not flush with its high water`);
+      });
+      for (const screen of L.art.tunnel) for (let col = screen * S.SCREEN_W; col < (screen + 1) * S.SCREEN_W; col++) {
+        for (let row = 1; row < L.rows; row++) if (S.cellAt(L, col, row) === S.KIND.SOLID && S.cellAt(L, col, row - 1) !== S.KIND.SOLID) faults.push(`tunnel column ${col} hangs solid at row ${row}`);
+      }
+      const drop = Math.floor((L.lockScreen * S.SCREEN_W * C + M.TUNE.DROP_X) / C);
+      if (inBasin(drop) >= 0 || S.cellAt(L, drop, 2) !== S.KIND.SOLID || S.cellAt(L, drop, 3) !== S.KIND.EMPTY) faults.push(`the drop-in column ${drop} at the lock is no bank`);
+      const last = recs[recs.length - 1];
+      // The repo truck, left alone (its record and nothing after it, the Ooga under a barrier off to its left), parks
+      // with its touch box clear of the ledge over columns 156 to 159, whose standers it would otherwise touch.
+      const truckAt = recs.findIndex((r) => r[2] === E.REPO_TRUCK), tsim = fresh(truckAt), ts = tsim.state;
+      place(tsim, (recs[truckAt][0] - 5) * C, 1.5, P.STAND);
+      let truck = -1;
+      for (let i = 0; i < 8 * 120; i++) { ts.pBarrier[0] = 1e9; ts.listCursor = Math.min(ts.listCursor, truckAt + 1); step(tsim, 0); if (truck < 0) truck = ts.eType.indexOf(E.REPO_TRUCK); }
+      const reach = M.RULES.BOXES[M.TIER_OF[E.REPO_TRUCK]][P.STAND], parked = truck >= 0 && ts.evx[truck] === 0 && ts.eType[truck] === E.REPO_TRUCK ? +(ts.ex[truck] + reach[1]).toFixed(3) : null;
+      if (!(parked !== null && parked < 156 * C)) faults.push(`the truck parks with its touch box's right edge at ${parked}, over the ledge from ${156 * C}`);
+      return {
+        ok: S.STAGES[5] === L && L.kind === "side" && L.name === "Mempool Lake" && L.screens === 12 && L.rows === S.SCREEN_H && S.validate(L).length === 0 &&
+          L.start.col === 3 && L.start.row === 12 && L.lockScreen === 11 && L.spawner.base === 200 && recs.length === 35 && basins.length === 5 && floats.length === 11 &&
+          last[2] === E.LEVIATHAN && Math.floor(last[0] / S.SCREEN_W) === L.lockScreen && inBasin(last[0]) === 4 && TY[E.LEVIATHAN].boss && (TY[E.FEE_EEL].flags & F.GHOST) !== 0 && (TY[E.LEVIATHAN].flags & F.GHOST) !== 0 &&
+          L.art.tunnel.join() === "5,6" && L.art.cliff.join() === "7,8" && Object.isFrozen(L) && faults.length === 0,
+        detail: JSON.stringify({ index: S.STAGES.indexOf(L), screens: L.screens, records: recs.length, faults: S.validate(L), art: L.art, truck: parked, wrong: faults })
+      };
+    });
+
+    // The tide as a wading Ooga meets it: in each basin at either end, from the first step of low water, holding toward
+    // that end's bank; and an Ooga killed (by a shot through the real contact) as low water begins, over the long pool,
+    // whose drop-in falls into it.
+    let pools;
+    try {
+      const freed = [];
+      basins.forEach(([c0, c1, low, high], b) => {
+        for (const end of [-1, 1]) {
+          const sim = fresh(), s = sim.state, bank = (high + 1) * C;
+          toLow(sim);
+          place(sim, ((end < 0 ? c0 : c1) + 0.5) * C, (low + 1) * C, P.WATER);
+          step(sim, 0);
+          const wading = s.pPose[0] === P.WATER, lives = s.pLives[0];
+          let i = 0, out = false;
+          for (; i < 20 * 120 && !out; i++) {
+            step(sim, end < 0 ? IN.LEFT : IN.RIGHT);
+            const col = Math.floor(s.px[0] / C);
+            out = standing(s) && (end < 0 ? col < c0 : col > c1) && Math.abs(s.py[0] - bank) < 1e-4;
+          }
+          freed.push({ b, end, wading, out, seconds: +(i / 120).toFixed(2), alive: s.pState[0] === PS.NORMAL && s.pLives[0] === lives });
+        }
+      });
+      const sim = fresh(), s = sim.state, [c0, , low, high] = basins[1];
+      toLow(sim);
+      place(sim, (c0 - 0.5) * C, (high + 1) * C, P.STAND);
+      s.camX = (c0 + 1.5) * C - M.TUNE.DROP_X;   // the drop-in's first column, the screen's left edge + DROP_X, is the pool's second
+      sim.spawn(E.SHOT, s.px[0], s.py[0] + 0.5, 0);
+      const lives = s.pLives[0];
+      let i = 0;
+      for (; i < 5 * 120 && !(s.pState[0] === PS.NORMAL && s.pLives[0] < lives); i++) step(sim, 0);
+      const landed = { seconds: +(i / 120).toFixed(2), x: s.px[0], y: s.py[0], pose: s.pPose[0], low: M.tidePhase(s.time) === M.TIDE.LOW, col: Math.floor(s.px[0] / C) };
+      let j = 0;
+      for (; j < 20 * 120 && !(standing(s) && Math.floor(s.px[0] / C) < c0 && Math.abs(s.py[0] - (high + 1) * C) < 1e-4) && s.pState[0] === PS.NORMAL; j++) step(sim, IN.LEFT);
+      pools = { freed, respawn: { landed, seconds: +(j / 120).toFixed(2), out: standing(s), lives: s.pLives[0], died: lives - s.pLives[0], wantLow: (low + 1) * C } };
+    } catch (e) { pools = { error: String(e && e.stack || e) }; }
+    mempool("raid mempool: every pool frees a wading Ooga within one 14 s tide cycle, at either end of each basin, from the first step of low water, and an Ooga whose drop-in falls into a pool at low water lands wading, alive, and walks out within a cycle", () => ({
+      ok: !pools.error && pools.freed.length === 10 && pools.freed.every((f) => f.wading && f.out && f.alive && f.seconds <= M.TIDE_PERIOD) &&
+        pools.respawn.landed.pose === P.WATER && pools.respawn.landed.low && inBasin(pools.respawn.landed.col) === 1 && Math.abs(pools.respawn.landed.y - pools.respawn.wantLow) < 1e-4 &&
+        pools.respawn.died === 1 && pools.respawn.out && pools.respawn.seconds <= M.TIDE_PERIOD,
+      detail: JSON.stringify(pools)
+    }));
+
+    let rafts;
+    try {
+      // Each raft a cell from a bank, at low water: stood on its cell nearest the bank, a jump toward the bank lands on it.
+      rafts = [[23, 1], [64, 1], [99, -1], [106, 1], [145, 1]].map(([col, dir]) => {
+        const b = inBasin(col), [c0, c1, low, high] = basins[b], sim = fresh(), s = sim.state;
+        toLow(sim);
+        place(sim, (col + 0.5) * C, (low + 1) * C, P.STAND);
+        step(sim, 0);
+        const onRaft = standing(s) && Math.abs(s.py[0] - (low + 1) * C) < 1e-4 && rafted(col);
+        step(sim, (dir > 0 ? IN.RIGHT : IN.LEFT) | IN.JUMP);
+        let i = 0;
+        for (; i < 2 * 120 && s.pPose[0] === P.JUMP; i++) step(sim, dir > 0 ? IN.RIGHT : IN.LEFT);
+        const landed = Math.floor(s.px[0] / C);
+        return { col, onRaft, landed, y: s.py[0], bank: (high + 1) * C, low: M.tidePhase(s.time) === M.TIDE.LOW, out: dir > 0 ? landed > c1 : landed < c0 };
+      });
+    } catch (e) { rafts = { error: String(e && e.stack || e) }; }
+    mempool("raid mempool: the rafts at 23, 63 to 64, 99, 106 and 145 let a jump out at low water: stood on the raft's cell nearest its bank, a jump toward the bank lands on it while the water is still low", () => ({
+      ok: Array.isArray(rafts) && rafts.length === 5 && rafts.every((r) => r.onRaft && r.out && r.low && Math.abs(r.y - r.bank) < 1e-4),
+      detail: JSON.stringify(rafts)
+    }));
+
+    // The eels, in the long pool at low water. An eel let go there (the debug spawn verb), and an Ooga stood about it.
+    let eels;
+    try {
+      const [c0, c1, low] = basins[1], lo = c0 * C + T.EEL_INSET, hi = (c1 + 1) * C - T.EEL_INSET, wade = (low + 1) * C;
+      const box = M.RULES.SHOT_BOX[M.TIER_OF[E.FEE_EEL]], origin = M.ORIGIN_OF[E.FEE_EEL];
+      const inBox = (s, k, x, y) => { const dx = x - s.ex[k], dy = y - s.ey[k] - origin; return dx >= box[0] && dx < box[1] && dy > box[2] && dy <= box[3]; };
+      const eelAt = (sim, col) => { const s = sim.state, k = sim.spawn(E.FEE_EEL, (col + 0.5) * C, wade, 0); step(sim, 0); return k; };
+      // Bullets that, after a step, are live with their point inside eel k's bullet box: shots it let through.
+      const passed = (s, k) => { let n = 0; for (let b = 0; b < M.BULLETS; b++) if (s.bLive[b] && inBox(s, k, s.bx[b], s.by[b])) n++; return n; };
+      const lurking = (s, k) => s.eType[k] === E.FEE_EEL && s.eRoutine[k] === LL.LOOK.FEE_EEL.lurk && (s.eFlags[k] & (F.SHUT | F.GHOST)) === (F.SHUT | F.GHOST);
+      // Forward: an Ooga wading 4 m off, out of its range, firing along the water at it.
+      const fwd = (() => {
+        const sim = fresh(), s = sim.state;
+        toLow(sim);
+        place(sim, (c0 + 0.5) * C, wade, P.WATER);
+        const k = eelAt(sim, c0 + 8);
+        let through = 0, kept = true;
+        for (let i = 0; i < 3 * 120; i++) { step(sim, i % 2 ? 0 : IN.FIRE); through += passed(s, k); kept = kept && lurking(s, k); }
+        return { through, kept, hp: s.eHp[k], y: s.ey[k], score: s.pScore[0] };
+      })();
+      // Down-forward: from a raft at low water over an eel held lurking (its timer kept from running out), running a step
+      // either way so each shot flies down-forward.
+      const down = (() => {
+        const sim = fresh(), s = sim.state;
+        toLow(sim);
+        place(sim, 28, wade, P.STAND);
+        const k = eelAt(sim, 58);
+        let through = 0, kept = true, aimed = 0;
+        for (let i = 0; i < 2 * 120; i++) {
+          s.eTimer[k] = 1e9;
+          step(sim, i % 2 ? IN.LEFT | IN.DOWN : IN.RIGHT | IN.DOWN | IN.FIRE);
+          if (i % 2 === 0 && s.pAim[0] === 7) aimed++;
+          through += passed(s, k); kept = kept && lurking(s, k);
+        }
+        return { through, kept, aimed, hp: s.eHp[k], score: s.pScore[0], alive: s.pState[0] === PS.NORMAL };
+      })();
+      // Touch: a wading Ooga walks the pool over an eel held lurking.
+      const touch = (() => {
+        const sim = fresh(), s = sim.state;
+        toLow(sim);
+        place(sim, (c0 + 1.5) * C, wade, P.WATER);
+        const k = eelAt(sim, 58), lives = s.pLives[0];
+        let over = false;
+        for (let i = 0; i < 3 * 120 && s.pState[0] === PS.NORMAL; i++) { s.eTimer[k] = 1e9; step(sim, IN.RIGHT); if (Math.abs(s.px[0] - s.ex[k]) < 0.05) over = true; }
+        return { over, alive: s.pState[0] === PS.NORMAL && s.pLives[0] === lives, x: s.px[0] };
+      })();
+      // The leap: an Ooga wading 2 m off is leapt at and killed where the eel comes down, and the eel lands back lurking in
+      // its basin; one 3.5 m off is never leapt at.
+      const leap = (() => {
+        const sim = fresh(), s = sim.state;
+        toLow(sim);
+        place(sim, (c0 + 5.5) * C, wade, P.WATER);
+        const k = eelAt(sim, c0 + 9);
+        let began = -1, killed = null, inside = true, landed = null;
+        for (let i = 0; i < 4 * 120 && !landed; i++) {
+          step(sim, 0);
+          if (began < 0 && s.eRoutine[k] === LL.LOOK.FEE_EEL.leap) began = +(i / 120).toFixed(2);
+          if (began >= 0) inside = inside && s.ex[k] >= lo - 1e-4 && s.ex[k] <= hi + 1e-4;
+          if (!killed && s.pState[0] === PS.DEAD) killed = { leaping: s.eRoutine[k] === LL.LOOK.FEE_EEL.leap, open: (s.eFlags[k] & (F.SHUT | F.GHOST)) === 0 };
+          if (began >= 0 && lurking(s, k)) landed = { x: s.ex[k], y: s.ey[k], basin: inBasin(Math.floor(s.ex[k] / C)) };
+        }
+        // An Ooga on the bank 1 m off: the eel leaps toward it and lands back in its basin, short of the bank.
+        const bank = fresh(), bs = bank.state;
+        toLow(bank);
+        place(bank, (c0 - 0.5) * C, (basins[1][3] + 1) * C, P.STAND);
+        const e = eelAt(bank, c0 + 1);
+        let leapt = false, held = true, home = null;
+        for (let i = 0; i < 4 * 120 && !home; i++) {
+          step(bank, 0);
+          if (bs.eRoutine[e] === LL.LOOK.FEE_EEL.leap) leapt = true;
+          if (leapt) held = held && bs.ex[e] >= lo - 1e-4 && bs.ex[e] <= hi + 1e-4;
+          if (leapt && lurking(bs, e)) home = { x: bs.ex[e], basin: inBasin(Math.floor(bs.ex[e] / C)), alive: bs.pState[0] === PS.NORMAL };
+        }
+        const far = fresh(), fs = far.state;
+        toLow(far);
+        place(far, (c0 + 2) * C, wade, P.WATER);
+        const j = eelAt(far, c0 + 9);
+        let still = true;
+        for (let i = 0; i < 5 * 120; i++) { step(far, 0); still = still && lurking(fs, j); }
+        return { began, killed, inside, landed, toBank: { leapt, held, home }, still, farOff: +(fs.ex[j] - fs.px[0]).toFixed(2) };
+      })();
+      // A leaping eel is open: an Ooga on the bank 1.5 m off shoots it down with forward shots as it comes, for its points.
+      const shot = (() => {
+        const sim = fresh(), s = sim.state;
+        toLow(sim);
+        place(sim, (c0 - 0.5) * C, (basins[1][3] + 1) * C, P.STAND);
+        const k = eelAt(sim, c0 + 2), score = s.pScore[0];
+        for (let i = 0; i < 3 * 120 && s.eRoutine[k] < TY[E.FEE_EEL].destroyed; i++) step(sim, i % 2 ? 0 : IN.FIRE);
+        return { down: s.eRoutine[k] >= TY[E.FEE_EEL].destroyed || s.eType[k] === E.FREE, paid: s.pScore[0] - score, alive: s.pState[0] === PS.NORMAL };
+      })();
+      eels = { fwd, down, touch, leap, shot };
+    } catch (e) { eels = { error: String(e && e.stack || e) }; }
+    mempool("raid mempool: a lurking eel is out of reach of forward shots along the water and of a down-forward shot from a raft (each flies on through its box) and of a wading Ooga's touch; it leaps at an Ooga within EEL_RANGE, open and deadly, kills a wading Ooga where it comes down and lands back lurking in its basin, never leaves its basin's bounds, leaves one out of range alone, and falls to a forward shot as it leaps", () => {
+      const { fwd, down, touch, leap, shot } = eels;
+      return {
+        ok: !eels.error && fwd.through > 0 && fwd.kept && fwd.hp === 1 && fwd.score === 0 && down.through > 0 && down.kept && down.aimed > 0 && down.hp === 1 && down.score === 0 && down.alive &&
+          touch.over && touch.alive && Math.abs(leap.began - T.EEL_WAIT) < 0.05 && leap.killed && leap.killed.leaping && leap.killed.open && leap.inside &&
+          leap.landed && leap.landed.basin === 1 && leap.toBank.held && leap.toBank.home && leap.toBank.home.basin === 1 && leap.toBank.home.alive && leap.still && leap.farOff > T.EEL_RANGE && shot.down && shot.paid === M.POINTS_OF[E.FEE_EEL] && shot.alive,
+        detail: JSON.stringify(eels)
+      };
+    });
+
+    // The Leviathan: the stage's list run to its record and the Ooga stood on the lock screen, so it comes in as it would.
+    const ARRIVE = L ? L.placed.length / 4 - 1 : 0;
+    const boss = (x, y, pose, seed = 7) => {
+      const sim = fresh(ARRIVE, seed), s = sim.state;
+      place(sim, x, y, pose);
+      step(sim, 0);
+      const lev = s.eType.indexOf(E.LEVIATHAN);
+      if (lev < 0) throw new Error("the Leviathan did not come");
+      return { sim, s, lev };
+    };
+    const SPOT_X = (lev, s, k) => s.evy[lev] + T.LEV_SPOTS[k];
+    const spotOf = (s, lev) => T.LEV_SPOTS.findIndex((d) => Math.abs(s.ex[lev] - s.evy[lev] - d) < 0.05);
+    const LOOKS = LL.LOOK.LEVIATHAN, ORIGIN = M.ORIGIN_OF[E.LEVIATHAN];
+    // Watches the Leviathan for `seconds` with the Ooga left where it stands under a standing barrier: each surfacing (its
+    // spot as an offset from its record, how long it rose, stayed up and then down), the shots it spat after surfacing, its
+    // flags and height by routine, its speed and facing, the eels, and the latest it is still winding up after its spit
+    // in a surfacing (-1 for never).
+    const watch = (b, seconds) => {
+      const { sim, s, lev } = b, out = { up: [], spits: [], wrongFlags: 0, wrongY: 0, moving: 0, still: 0, aims: new Set(), lunges: [], eels: { most: 0, spawned: [] }, xs: [Infinity, -Infinity], toldPastSpit: -1 };
+      let routine = s.eRoutine[lev], since = 0, cur = null;
+      const was = Array.from(s.eType);
+      for (let i = 0; i < seconds * 120; i++) {
+        if (i % 120 === 0) s.pBarrier[0] = 1e9;
+        const t0 = s.time, x0 = s.ex[lev];
+        step(sim, 0);
+        if (s.eType[lev] !== E.LEVIATHAN) break;
+        const r = s.eRoutine[lev], top = topAt(4, t0), flags = s.eFlags[lev] & (F.SHUT | F.GHOST);
+        since += M.FIXED;
+        if (r !== routine) {
+          if (cur) cur[routine === LOOKS.rise ? "rose" : routine === LOOKS.surfaced ? "stayed" : "down"] = +since.toFixed(3);
+          if (r === LOOKS.surfaced) { cur = { at: +s.time.toFixed(3), spot: +(s.ex[lev] - s.evy[lev]).toFixed(3), top }; out.up.push(cur); }
+          routine = r; since = 0;
+        }
+        if ((r === LOOKS.submerged && flags !== (F.SHUT | F.GHOST)) || (r === LOOKS.rise && flags !== F.SHUT) || (r === LOOKS.surfaced && flags !== 0)) out.wrongFlags++;
+        if ((r === LOOKS.submerged && Math.abs(s.ey[lev] - (top - T.LEV_DEPTH)) > 1e-4) || (r === LOOKS.surfaced && Math.abs(s.ey[lev] - top) > 1e-4)) out.wrongY++;
+        if (s.ex[lev] !== x0 && r === LOOKS.surfaced) out.moving++;
+        if (s.ex[lev] === x0 && s.evx[lev] !== 0) out.still++;
+        if (s.evx[lev] === 0) out.aims.add(s.eAim[lev]);
+        if (r === LOOKS.surfaced && s.evx[lev] !== 0) out.lunges.push([+since.toFixed(3), s.evx[lev], s.eAim[lev]]);
+        if (r === LOOKS.surfaced && since > T.LEV_SPIT + M.FIXED / 2 && s.eFlags[lev] & F.WIND) out.toldPastSpit = Math.max(out.toldPastSpit, +since.toFixed(3));
+        out.xs[0] = Math.min(out.xs[0], s.ex[lev]); out.xs[1] = Math.max(out.xs[1], s.ex[lev]);
+        let eels = 0;
+        for (let k = 0; k < M.ENEMY_SLOTS; k++) {
+          if (s.eType[k] === E.SHOT && was[k] !== E.SHOT && Math.abs(s.ex[k] - s.ex[lev]) < 1e-3 && Math.abs(s.ey[k] - s.ey[lev] - ORIGIN) < 1e-3) out.spits.push(+(r === LOOKS.surfaced ? since : -1).toFixed(3));
+          if (s.eType[k] === E.FEE_EEL && was[k] !== E.FEE_EEL) out.eels.spawned.push(Math.floor(s.ex[k] / C));
+          if (s.eType[k] === E.FEE_EEL && s.eRoutine[k] < TY[E.FEE_EEL].destroyed) eels++;
+          was[k] = s.eType[k];
+        }
+        out.eels.most = Math.max(out.eels.most, eels);
+        if (r === LOOKS.surfaced && cur) cur.back = Math.abs(s.ex[lev] - SPOT_X(lev, s, T.LEV_PATTERN[s.eAttr[lev]])) < 1e-3;
+      }
+      out.aims = [...out.aims];
+      return out;
+    };
+    let levs;
+    try {
+      // Phase 1 with the Ooga on the left bank, and phase 2 (its hit points brought to half, as it comes) with the Ooga on
+      // the left bank and then on the right.
+      const one = boss(89, 1.5, P.STAND), first = watch(one, 60);
+      const late = (x) => { const b = boss(x, 1.5, P.STAND); b.s.eHp[b.lev] = b.s.eBurst[b.lev] / 2; return watch(b, 60); };
+      const half = one.s.eBurst[one.lev] / 2, second = late(89), third = late(94);
+      // Facing's hysteresis: still and surfaced in phase 1, the Ooga stood (under a barrier) at points along x from the
+      // head's middle, each for a few steps: past LEV_FACE right, inside the band right, across the middle inside it, past
+      // LEV_FACE left, and back across inside the band and out past it right.
+      const four = boss(89, 1.5, P.STAND), s4 = four.s, k4 = four.lev, band = [];
+      for (let i = 0; i < 10 * 120 && s4.eRoutine[k4] !== LOOKS.surfaced; i++) { if (i % 120 === 0) s4.pBarrier[0] = 1e9; step(four.sim, 0); }
+      s4.pBarrier[0] = 1e9;
+      for (const d of [0.8, 0.3, -0.3, -0.6, -0.3, 0.3, 0.6]) {
+        for (let i = 0; i < 6; i++) { s4.px[0] = s4.ex[k4] + d; s4.py[0] = topAt(4, s4.time); s4.pvy[0] = 0; step(four.sim, 0); }
+        band.push([d, s4.eAim[k4], s4.eRoutine[k4] === LOOKS.surfaced && s4.evx[k4] === 0]);
+      }
+      // Under it while it is down: an Ooga on the raft at column 182, over the first spot it lies under and inside the
+      // first spot it rises at, jumping and shooting straight down through it while it lies submerged, no barrier.
+      const three = boss(91.3, 1.5, P.STAND), s3 = three.s, k3 = three.lev;
+      s3.py[0] = topAt(4, s3.time);
+      let through = 0, shots = 0, alive = true, fired = false, died = null;
+      const hp3 = s3.eHp[k3], bb = M.RULES.SHOT_BOX[M.TIER_OF[E.LEVIATHAN]];
+      for (let i = 0; i < 6 * 120 && !died; i++) {
+        const sub = s3.eRoutine[k3] === LOOKS.submerged, air = s3.pPose[0] === P.JUMP;
+        let bits = 0;
+        if (sub && !air) { bits = IN.JUMP; fired = false; }
+        else if (sub && air && s3.pvy[0] < 0 && !fired) { bits = IN.DOWN | IN.FIRE; fired = true; shots++; }
+        else if (air) bits = IN.DOWN;
+        step(three.sim, bits);
+        for (let b = 0; b < M.BULLETS; b++) {
+          if (!s3.bLive[b] || s3.eRoutine[k3] !== LOOKS.submerged) continue;
+          const dx = s3.bx[b] - s3.ex[k3], dy = s3.by[b] - s3.ey[k3] - ORIGIN;
+          if (dx >= bb[0] && dx < bb[1] && dy > bb[2] && dy <= bb[3]) through++;
+        }
+        if (s3.eRoutine[k3] === LOOKS.submerged) alive = alive && s3.pState[0] === PS.NORMAL;
+        if (s3.pState[0] === PS.DEAD) died = { routine: s3.eRoutine[k3], spot: spotOf(s3, k3), shots: s3.eType.filter((t) => t === E.SHOT).length };
+      }
+      // Phase 2 brought on after the spit (its hit points put to half 0.1 s past it, the Ooga under a barrier): no wind-up
+      // and no lunge for the rest of that surfacing, and the next one lunges.
+      const mid = boss(89, 1.5, P.STAND), sm = mid.s, km = mid.lev;
+      for (let i = 0; i < 20 * 120 && !(sm.eRoutine[km] === LOOKS.surfaced && sm.eTimer[km] >= T.LEV_SPIT + 0.1); i++) { if (i % 120 === 0) sm.pBarrier[0] = 1e9; step(mid.sim, 0); }
+      const afterSpit = { surfaced: sm.eRoutine[km] === LOOKS.surfaced, toldNow: 0, lungedNow: false, lungedNext: false };
+      sm.eHp[km] = sm.eBurst[km] / 2;
+      let sank = false;
+      for (let i = 0; i < 12 * 120 && sm.eType[km] === E.LEVIATHAN; i++) {
+        if (i % 120 === 0) sm.pBarrier[0] = 1e9;
+        step(mid.sim, 0);
+        if (sm.eRoutine[km] !== LOOKS.surfaced) sank = true;
+        const lunging = Math.abs(sm.evx[km]) === T.LEV_LUNGE_V;
+        if (!sank) { afterSpit.lungedNow = afterSpit.lungedNow || lunging; if (sm.eFlags[km] & F.WIND) afterSpit.toldNow++; }
+        else if (lunging) afterSpit.lungedNext = true;
+      }
+      levs = { first, second, third, band, half, afterSpit, under: { through, shots, alive, died, hp: s3.eHp[k3] === hp3 } };
+    } catch (e) { levs = { error: String(e && e.stack || e) }; }
+    mempool("raid mempool: the Leviathan lies submerged shut and a ghost (shots through it fly on, it touches nobody) and surfaces on its pattern A, C, B, A, B, C at its spots inside its basin, deadly once it rises, spits three aimed shots LEV_SPIT after surfacing and keeps still, its speed 0, facing the Ooga, turning only once the Ooga is LEV_FACE past its middle, its wind-up over at its spit; in phase 2 it stays up LEV_UP_LATE and down LEV_DOWN_LATE, winds up to LEV_LUNGE_AT and lunges toward the Ooga's side (left and right) from LEV_LUNGE_AT at LEV_LUNGE_V over its basin's water to its end, facing its way, and is back on its spot as it sinks, letting eels go in its basin's open water, never more than LEV_EELS alive; phase 2 reached after a spit neither winds up nor lunges until the next surfacing", () => {
+      if (levs.error) return { ok: false, detail: levs.error };
+      // The stage spec's own numbers: spots A, B and C a metre left of the record and a half and one and a half right of it,
+      // surfaced at in the order A, C, B, A, B, C; the spit 0.6 s after surfacing; two eels at most.
+      const { first, second, third, band, under, afterSpit } = levs, P6 = [-1, 1.5, 0.5, -1, 0.5, 1.5], SPIT = 0.6, EELS = 2;
+      // A phase 2 watch's lunges going `dir` (-1 left, 1 right): full speed its way, facing it, from LEV_LUNGE_AT to its end
+      // (a step's grace), then back to the spot facing its motion; inside [lo, hi] and reaching the end it lunged to.
+      const lunged = (w, dir) => {
+        const full = w.lunges.filter(([, v]) => Math.abs(v) === T.LEV_LUNGE_V), back = w.lunges.filter(([, v]) => Math.abs(v) !== T.LEV_LUNGE_V);
+        return full.length > 0 && back.length > 0 && w.still === 0 && w.xs[0] >= lo - 1e-4 && w.xs[1] <= hi + 1e-4 && near(dir < 0 ? w.xs[0] : w.xs[1], dir < 0 ? lo : hi) &&
+          full.every(([t, v, aim]) => v === dir * T.LEV_LUNGE_V && aim === (dir > 0 ? 0 : 6) && t > T.LEV_LUNGE_AT - 1e-3 && t < T.LEV_LUNGE_AT + T.LEV_LUNGE_T + 2 * M.FIXED) &&
+          back.every(([t, v, aim]) => t > T.LEV_LUNGE_AT + T.LEV_LUNGE_T - 1e-3 && aim === (v > 0 ? 0 : 6));
+      };
+      const pattern = (up) => up.length >= 12 && up.every((u, n) => Math.abs(u.spot - P6[n % P6.length]) < 1e-3);
+      const lo = LAKE[0] * C + T.LEV_INSET, hi = (LAKE[1] + 1) * C - T.LEV_INSET, firstUp = first.up.slice(0, -1), lateUp = second.up.slice(0, -1);
+      const near = (a, b) => Math.abs(a - b) < 0.02;
+      return {
+        ok: pattern(first.up) && pattern(second.up) && first.wrongFlags === 0 && first.wrongY === 0 && second.wrongFlags === 0 && second.wrongY === 0 &&
+          firstUp.every((u) => near(u.rose, T.LEV_RISE) && near(u.stayed, T.LEV_UP) && near(u.down, T.LEV_DOWN)) &&
+          first.spits.length === 3 * first.up.length && first.spits.every((t) => near(t, SPIT)) && first.moving === 0 && first.still === 0 && first.aims.join() === "6" &&
+          lateUp.every((u) => near(u.rose, T.LEV_RISE) && near(u.stayed, T.LEV_UP_LATE) && near(u.down, T.LEV_DOWN_LATE) && u.back) &&
+          lunged(second, -1) && lunged(third, 1) && third.aims.join() === "0" && pattern(third.up) &&
+          first.toldPastSpit === -1 && second.toldPastSpit > T.LEV_SPIT && second.toldPastSpit <= T.LEV_LUNGE_AT + 1e-3 &&
+          afterSpit.surfaced && afterSpit.toldNow === 0 && !afterSpit.lungedNow && afterSpit.lungedNext &&
+          band.map(([, aim, still]) => still ? aim : -1).join() === "0,0,0,6,6,6,0" &&
+          second.eels.most === EELS && second.eels.spawned.length >= EELS && second.eels.spawned.every((col) => inBasin(col) === 4 && !rafted(col)) && first.eels.spawned.length === 0 &&
+          under.through > 0 && under.shots >= 2 && under.alive && under.hp && under.died && under.died.routine === LOOKS.rise && under.died.spot === T.LEV_PATTERN[0],
+        detail: JSON.stringify({ ...levs, first: { ...first, up: first.up.slice(0, 8) }, second: { ...second, up: second.up.slice(0, 8), lunges: second.lunges.slice(0, 4), lunged: second.lunges.length }, third: { ...third, up: third.up.slice(0, 8), lunges: third.lunges.slice(0, 4), lunged: third.lunges.length } })
+      };
+    });
+
+    // Reach. With its hit points kept past anything a run gives (so it stays in phase 1 and on its spots), and under a
+    // standing barrier, the Ooga stands still and shoots: forward from either bank, forward from a raft, and down-forward
+    // (running a step either way) from places on the banks and the perches. Each hit is put down to the spot the head stood
+    // on and the water it rode (low at 0.5 m, high at 1.5 m). Each place is tried with the Leviathan coming in at four
+    // moments a quarter of a tide cycle apart, so each spot surfaces at every stage of the tide.
+    let reach;
+    try {
+      const BANK = 1.5, PERCH = 2.5, MID = 3.5, ways = [];
+      const way = (name, x, y, face, down) => ways.push({ name, x, y, face, down });
+      way("left bank", 89.6, BANK, 1, false); way("right bank", 94, BANK, -1, false);
+      way("raft 182 left", 91.25, 0, -1, false); way("raft 182 right", 91.25, 0, 1, false); way("raft 185 right", 92.75, 0, 1, false); way("raft 185 left", 92.75, 0, -1, false);
+      for (const x of [89.5, 89.75]) way(`left bank ${x}`, x, BANK, 1, true);
+      for (const x of [93.75, 94, 94.25]) way(`right bank ${x}`, x, BANK, -1, true);
+      for (const x of [89.5, 90, 90.25]) way(`left perch ${x}`, x, PERCH, 1, true);
+      for (const x of [92.75, 93, 93.5]) way(`right perch ${x}`, x, PERCH, -1, true);
+      way("middle perch 90.75", 90.75, MID, 1, true); way("middle perch 92.25", 92.25, MID, -1, true);
+      for (const w of ways) {
+        w.hits = new Set(); w.wrongAim = 0;
+        for (const delay of [0, 3.5, 7, 10.5]) {
+          const sim = fresh(ARRIVE), s = sim.state;
+          for (let i = 0; i < delay * 120; i++) step(sim, 0);
+          place(sim, w.x, w.y || topAt(4, s.time), P.STAND);
+          const lev = (() => { step(sim, 0); return s.eType.indexOf(E.LEVIATHAN); })();
+          s.eHp[lev] = 255;
+          const run = w.face > 0 ? IN.RIGHT : IN.LEFT, back = w.face > 0 ? IN.LEFT : IN.RIGHT;
+          if (s.pFace[0] !== w.face) step(sim, run);
+          for (let i = 0; i < 40 * 120; i++) {
+            if (i % 120 === 0) s.pBarrier[0] = 1e9;
+            const hp = s.eHp[lev], t0 = s.time;
+            step(sim, w.down ? (i % 2 ? back | IN.DOWN : run | IN.DOWN | IN.FIRE) : i % 2 ? 0 : IN.FIRE);
+            if (s.eHp[lev] < hp) {
+              const top = topAt(4, t0), spot = spotOf(s, lev);
+              w.hits.add(`${"ABC"[spot] || "?"}${top === 0.5 ? "low" : top === 1.5 ? "high" : "mid"}`);
+              if (s.eHp[lev] < 128) s.eHp[lev] = 255;
+            }
+            if (!w.y) continue;
+            const dx = s.px[0] - s.ex[lev];
+            if (s.evx[lev] === 0 && Math.abs(dx) > T.LEV_FACE + 0.1 && s.eAim[lev] !== (dx > 0 ? 0 : 6)) w.wrongAim++;
+          }
+        }
+        w.hits = [...w.hits].sort();
+      }
+      reach = ways;
+    } catch (e) { reach = { error: String(e && e.stack || e) }; }
+    mempool("raid mempool: the Leviathan can be hit at every spot at high and at low water: at high water by standing forward shots from either bank; at low water by down-forward shots from a bank or a perch and by forward shots from a raft; and it faces the Ooga whenever it keeps still", () => {
+      if (!Array.isArray(reach)) return { ok: false, detail: reach.error };
+      const hit = (filter, tag) => reach.some((w) => filter(w) && w.hits.includes(tag));
+      const every = (filter, tide) => ["A", "B", "C"].every((spot) => hit(filter, spot + tide));
+      return {
+        ok: every((w) => w.name === "left bank", "high") && every((w) => w.name === "right bank", "high") &&
+          every((w) => w.down, "low") && every((w) => w.name.startsWith("raft"), "low") && reach.every((w) => w.wrongAim === 0),
+        detail: JSON.stringify(reach.map((w) => [w.name, w.hits.join(" "), w.wrongAim]))
+      };
+    });
+
+    let clears;
+    try {
+      // The autopilot on the whole stage under a standing barrier, renewed every second, on four seeds.
+      clears = [1, 2, 3, 4].map((seed) => {
+        const sim = M.create({ seed, stage: IDX }), s = sim.state;
+        let i = 0, deaths = 0;
+        for (; i < 900 * 120 && s.phase !== M.PHASE.CLEAR; i++) {
+          if (i % 120 === 0) s.pBarrier[0] = 1e9;
+          const was = s.pState[0];
+          sim.setInput(M.autopilot(sim)); sim.simulate(M.FIXED);
+          if (was !== PS.DEAD && s.pState[0] === PS.DEAD) deaths++;
+        }
+        return { seed, done: s.phase === M.PHASE.CLEAR, time: +s.time.toFixed(1), x: +s.px[0].toFixed(2), deaths };
+      });
+    } catch (e) { clears = { error: String(e && e.stack || e) }; }
+    mempool("raid mempool: an Ooga under a standing barrier, steered by the autopilot, clears Mempool Lake within 900 s on four seeds", () => ({
+      ok: Array.isArray(clears) && clears.length === 4 && clears.every((c) => c.done && c.deaths === 0 && c.time <= 900),
+      detail: JSON.stringify(clears)
+    }));
+
+    let fall;
+    try {
+      // From full health, under a standing barrier, the Ooga on the left bank shooting forward until it falls.
+      const { sim, s, lev } = boss(89.6, 1.5, P.STAND), full = s.eHp[lev];
+      let i = 0, late = false;
+      for (; i < 400 * 120 && s.eType[lev] === E.LEVIATHAN && s.eRoutine[lev] < TY[E.LEVIATHAN].destroyed; i++) {
+        if (i % 120 === 0) s.pBarrier[0] = 1e9;
+        step(sim, i % 2 ? 0 : IN.FIRE);
+        if (s.eHp[lev] * 2 <= full) late = true;
+      }
+      for (let j = 0; j < 120; j++) step(sim, 0);
+      fall = { full, late, seconds: +(i / 120).toFixed(1), phase: s.phase, others: s.eType.filter((t) => t !== E.FREE).length, score: s.pScore[0] };
+    } catch (e) { fall = { error: String(e && e.stack || e) }; }
+    mempool("raid mempool: shot down from full health from the left bank, the Leviathan's fall clears the stage and empties every other slot", () => ({
+      ok: !fall.error && fall.late && fall.phase === M.PHASE.CLEAR && fall.others === 0 && fall.full === TY[E.LEVIATHAN].hp && fall.score >= M.POINTS_OF[E.LEVIATHAN],
+      detail: JSON.stringify(fall)
+    }));
+  }
+  // Stage 7, Bifrost Pass (raid bifrost:).
+  {
+    // Stage 7, Bifrost Pass: fourteen screens up the crystal pass, two gust zones over its bridges, icicles and
+    // shard throwers (raid-legion-pass.js) and the Bailout Mech under the cliff. `bifrost` records a check, a throw
+    // recording its failure. `placedAt` stands a sim on the real stage with the Ooga at x, feet y, the screen at camX, the
+    // list's cursor at record `from` (the records from it on spawn as their columns come into view), the spawner off and
+    // every slot and bullet empty; `fireOn` presses fire every other step with `bits` held.
+    const bifrost = (name, f) => {
+      let r;
+      try { r = f(); } catch (e) { r = { ok: false, detail: String(e && e.stack || e) }; }
+      record(name, r.ok, r.detail);
+    };
+    const B7 = S.STAGES.find((g) => g.id === "bifrost"), PT = context.window.BL.raidLegionPass.TUNE, F7 = context.window.BL.raidEnemies.FLAG;
+    const IN = M.IN, POSE = M.POSE, CELL = S.CELL;
+    const ENDS = B7 ? B7.placed.length / 4 : 0;
+    const recordOf = (type, col) => { for (let k = 0; k < B7.placed.length; k += 4) if (B7.placed[k + 2] === type && (col === undefined || B7.placed[k] === col)) return k / 4; return -1; };
+    const slotOf = (s, type) => { for (let k = M.ENEMY_SLOTS - 1; k >= 0; k--) if (s.eType[k] === type) return k; return -1; };
+    const count = (s, type) => s.eType.filter((t) => t === type).length;
+    const step = (sim, bits) => { sim.setInput(bits); sim.simulate(M.FIXED); };
+    const fireOn = (sim, bits, n) => { for (let i = 0; i < n; i++) step(sim, bits | (i % 2 === 0 ? IN.FIRE : 0)); };
+    const placedAt = (seed, x, y, camX, from) => {
+      const sim = M.create({ seed, stage: B7 }), s = sim.state;
+      ready(sim);
+      s.px[0] = x; s.py[0] = y; s.pvx[0] = 0; s.pvy[0] = 0; s.pPose[0] = POSE.STAND; s.pFace[0] = 1; s.pAim[0] = 0;
+      s.camX = camX; s.listCursor = from; s.spawnTimer = 1e9; s.bLive.fill(0); s.eType.fill(E.FREE);
+      return sim;
+    };
+    const LOCK = B7 ? B7.lockScreen * S.SCREEN_W * CELL : 0, MECH_AT = B7 ? recordOf(E.MECH) : -1;
+
+    bifrost("raid bifrost: Bifrost Pass is the campaign's seventh stage, fourteen screens with two gust zones blowing left, shard throwers, icicles under the arches and the Bailout Mech on its lock screen, and passes its own validation; the Mech's pods sit on its armour box and its gun fires from inside it", () => {
+      const types = new Set();
+      for (let k = 2; k < B7.placed.length; k += 4) types.add(B7.placed[k]);
+      const last = (ENDS - 1) * 4, pod = TY[E.MECH_POD], b = M.RULES.SHOT_BOX, arm = b[M.TIER_OF[E.MECH]], em = b[M.TIER_OF[E.MECH_POD]], o = M.ORIGIN_OF[E.MECH];
+      const top = o + arm[3], m = PT.MECH_MUZZLE;
+      const seated = pod.mounts.length === 2 && pod.mounts.every((a, k) => a[0] === PT.MECH_POD_MOUNTS[k][0] && a[1] === PT.MECH_POD_MOUNTS[k][1] && Math.abs(a[1] + em[2] - top) < 1e-9);
+      const inside = m[0] >= arm[0] && m[0] < arm[1] && m[1] - o > arm[2] && m[1] - o <= arm[3];
+      return {
+        ok: S.STAGES.indexOf(B7) === 6 && B7.kind === "side" && B7.name === "Bifrost Pass" && B7.screens === 14 && B7.lockScreen === 13 && B7.spawner.base === 192 &&
+          B7.start.col === 3 && B7.start.row === 12 && S.validate(B7).length === 0 && ENDS === 42 &&
+          JSON.stringify(B7.gusts) === JSON.stringify([[48, 111, -1], [160, 191, -1]]) && ["SHARD_THROWER", "ICICLE", "MECH"].every((n) => types.has(E[n])) &&
+          B7.placed[last + 2] === E.MECH && Math.floor(B7.placed[last] / S.SCREEN_W) === B7.lockScreen && TY[E.MECH].boss && pod.main === E.MECH && seated && inside,
+        detail: JSON.stringify({ index: S.STAGES.indexOf(B7), faults: S.validate(B7), records: ENDS, gusts: B7.gusts, mounts: pod.mounts, top, muzzle: m, seated, inside })
+      };
+    });
+
+    // Review focus 4: every gap inside a gust zone, found from the stage's cells (a hole in a walking surface, open above,
+    // between cells that hold an Ooga up, over a fatal pit), is one cell wide, and the autopilot's route plan holds a jump
+    // across each that lands under every push the gust gives (the edge's `eCalm` 0); each such jump is flown on the sim by
+    // the controls while the gust blows into the Ooga's face: it stands at the middle of the edge's takeoff span as a blow
+    // starts, jumps, and steers to the edge's aim as the pilot steers, and must land beyond the gap alive. The route's own
+    // move off the near side is reported too (`routeCalm` 1 where the pilot waits for a calm there). No enemy is on the
+    // screen.
+    let gaps;
+    try {
+      const at = (c, r) => S.cellAt(B7, c, r), pit = (c, r) => { for (let k = r; k >= 0; k--) if (at(c, k) !== S.KIND.EMPTY) return false; return true; };
+      const list = [];
+      for (const [c0, c1] of B7.gusts) {
+        for (let r = 0; r < B7.rows - 1; r++) {
+          for (let c = c0; c <= c1; c++) {
+            if (at(c, r) !== S.KIND.EMPTY || at(c - 1, r) === S.KIND.EMPTY || at(c - 1, r + 1) !== S.KIND.EMPTY) continue;
+            let e = c;
+            while (at(e, r) === S.KIND.EMPTY && pit(e, r) && at(e, r + 1) === S.KIND.EMPTY && e - c < S.SCREEN_W) e++;
+            if (e > c && at(e, r) !== S.KIND.EMPTY && at(e, r + 1) === S.KIND.EMPTY) list.push({ col: c, row: r, wide: e - c });
+          }
+        }
+      }
+      const P = M.TUNE.GUST_CALM + M.TUNE.GUST_WARN + M.TUNE.GUST_BLOW, plan = context.window.BL.raidAutopilot.stageRoute(B7);
+      gaps = list.map((g) => {
+        const a = plan.segAt[g.row * B7.cols + g.col - 1], beyond = (g.col + g.wide) * CELL;
+        let e = -1;
+        for (let k = plan.eStart[a]; k < plan.eStart[a + 1]; k++) {
+          if (plan.eMove[k] !== 0 || plan.eCalm[k] !== 0 || plan.x0[plan.eTo[k]] < beyond) continue;
+          if (e < 0 || k === plan.via[a]) e = k;
+        }
+        const route = plan.via[a], out = { ...g, routeCalm: route >= 0 ? plan.eCalm[route] : -1, edge: e };
+        if (e < 0) return out;
+        const x = (plan.eTx0[e] + plan.eTx1[e]) / 2, aim = plan.eAx[e], y = (g.row + 1) * CELL;
+        const sim = placedAt(1, x, y, Math.min(LOCK, Math.max(0, x - 4)), ENDS), s = sim.state;
+        s.time = (Math.floor(s.time / P) + 1) * P + M.TUNE.GUST_CALM + M.TUNE.GUST_WARN;
+        let over = false, landed = null, died = false;
+        for (let i = 0; i < M.TUNE.GUST_BLOW / M.FIXED && !landed && !died; i++) {
+          step(sim, (i === 0 ? IN.JUMP : 0) | (s.px[0] < aim - 0.04 ? IN.RIGHT : s.px[0] > aim + 0.04 ? IN.LEFT : 0));
+          if (s.pState[0] !== PS.NORMAL) died = true;
+          else if (s.pPose[0] === POSE.JUMP) { if (Math.floor(s.px[0] / CELL) === g.col && M.gustPhase(s.time) === M.GUST.BLOW) over = true; }
+          else if (over) landed = { x: +s.px[0].toFixed(3), y: s.py[0] };
+        }
+        return { ...out, from: +x.toFixed(3), to: plan.eTo[e], feet: plan.feet[plan.eTo[e]], over, landed, died };
+      });
+    } catch (e) { gaps = { error: String(e && e.stack || e) }; }
+    bifrost("raid bifrost: every gap inside both gust zones is one cell wide over a fatal pit, and the autopilot's route plan crosses each with a jump that, flown on the sim while the gust blows into the Ooga's face, lands beyond it alive", () => ({
+      ok: Array.isArray(gaps) && gaps.length === 9 && gaps.every((g) => g.wide === 1 && g.edge >= 0 && g.over && g.landed && !g.died && g.landed.y === g.feet && g.landed.x >= (g.col + 1) * CELL),
+      detail: JSON.stringify(gaps)
+    }));
+
+    bifrost("raid bifrost: an icicle hangs under its arch, shivers for ICICLE_SHIVER once an Ooga passes within ICICLE_TRIGGER under it, then falls and bursts on the floor into two shots skittering along the ground either way", () => {
+      // The icicle at column 116 under the gallery's roof, the Ooga walking in under it on the floor (held invincible, so
+      // the thrower beside it holds its fire; the burst is the icicle's own).
+      const sim = placedAt(7, 56, 1.5, 52, recordOf(E.ICICLE, 116)), s = sim.state;
+      s.pInvincible[0] = 1e9;
+      step(sim, 0);
+      const k = slotOf(s, E.ICICLE), x = s.ex[k], LK = context.window.BL.raidLegionPass.LOOK.ICICLE;
+      step(sim, 0);
+      const hang = s.ey[k];
+      let shiver = null, fall = -1, burst = null;
+      for (let i = 0; i < 4 / M.FIXED && !burst; i++) {
+        const shots = new Set();
+        for (let j = 0; j < M.ENEMY_SLOTS; j++) if (s.eType[j] === E.SHOT) shots.add(j);
+        const was = s.eRoutine[k];
+        step(sim, IN.RIGHT);
+        if (s.eType[k] !== E.ICICLE) {
+          burst = [];
+          for (let j = 0; j < M.ENEMY_SLOTS; j++) if (s.eType[j] === E.SHOT && !shots.has(j)) burst.push({ x: +s.ex[j].toFixed(4), y: +s.ey[j].toFixed(4), attr: s.eAttr[j] });
+          break;
+        }
+        if (was === LK.hang && s.eRoutine[k] === LK.shiver) shiver = { dx: +(x - s.px[0]).toFixed(4), t: s.time };
+        if (was === LK.shiver && s.eRoutine[k] === LK.fall) fall = s.time - shiver.t;
+      }
+      for (let i = 0; i < 4; i++) step(sim, 0);
+      const moving = burst && burst.length === 2 ? (() => { const out = []; for (let j = 0; j < M.ENEMY_SLOTS; j++) if (s.eType[j] === E.SHOT && Math.abs(s.ey[j] - 1.6) < 1e-4) out.push(+s.evx[j].toFixed(3), +s.evy[j].toFixed(3)); return out; })() : null;
+      const step1 = M.TUNE.RUN * M.FIXED;
+      return {
+        ok: Math.abs(hang - (9 * CELL - PT.ICICLE_HANG)) < 1e-4 && shiver && shiver.dx <= PT.ICICLE_TRIGGER && shiver.dx > PT.ICICLE_TRIGGER - 2 * step1 &&
+          Math.abs(fall - PT.ICICLE_SHIVER) <= M.FIXED + 1e-6 && burst && burst.length === 2 && burst.every((b) => Math.abs(b.x - x) < 1e-4 && Math.abs(b.y - (3 * CELL + PT.ICICLE_BURST)) < 1e-4) &&
+          burst.map((b) => b.attr).sort((p, q) => p - q).join() === "0,6" && moving && moving.length === 4 && moving.filter((v, i) => i % 2 === 1).every((v) => v === 0) &&
+          moving.filter((v, i) => i % 2 === 0).sort((p, q) => p - q).join() === [-M.TUNE.ENEMY_SHOT_V, M.TUNE.ENEMY_SHOT_V].join(),
+        detail: JSON.stringify({ x, hang, shiver, fall, burst, moving })
+      };
+    });
+
+    bifrost("raid bifrost: a shard thrower's shard lands at the Ooga's feet and bursts three ways there, along the ground both ways and straight up", () => {
+      // The thrower at column 25 on the first shelf, the Ooga standing on the shelf 1.5 m to its left under a barrier.
+      const sim = placedAt(3, 11.25, 2.5, 7, recordOf(E.SHARD_THROWER, 25)), s = sim.state;
+      s.pBarrier[0] = 1e9;
+      let lob = -1, burst = null, thrown = 0;
+      for (let i = 0; i < 4 / M.FIXED && !burst; i++) {
+        const shots = new Set();
+        for (let j = 0; j < M.ENEMY_SLOTS; j++) if (s.eType[j] === E.SHOT) shots.add(j);
+        step(sim, 0);
+        if (lob >= 0 && s.eType[lob] !== E.LOB) {
+          burst = [];
+          for (let j = 0; j < M.ENEMY_SLOTS; j++) if (s.eType[j] === E.SHOT && !shots.has(j)) burst.push({ x: +s.ex[j].toFixed(3), y: +s.ey[j].toFixed(4), attr: s.eAttr[j] });
+        } else if (lob < 0) { lob = slotOf(s, E.LOB); if (lob >= 0) thrown = s.eAttr[lob]; }
+      }
+      return {
+        ok: lob >= 0 && thrown === 2 && burst && burst.length === 3 && burst.map((b) => b.attr).sort((p, q) => p - q).join() === "0,3,6" &&
+          burst.every((b) => Math.abs(b.y - 2.6) < 1e-4 && Math.abs(b.x - 11.25) < 0.1 && b.x === burst[0].x),
+        detail: JSON.stringify({ lob, thrown, burst })
+      };
+    });
+
+    // The Bailout Mech, played by the controls on the locked boss screen: the Ooga under a barrier fires standing forward
+    // shots from the floor at the shut Mech, climbs to the row 6 perch (one jump from under it, up through the row 4 perch,
+    // since the 2.25 m jump lands on what it rises 2 m through) and shoots the pods down from there, standing, facing
+    // them, then drops back to the floor (down and jump twice) and
+    // shoots the open Mech down.
+    let mech;
+    try {
+      const sim = placedAt(5, LOCK + 1, 1.5, LOCK, MECH_AT), s = sim.state, armour = () => s.eHp[m];
+      s.pBarrier[0] = 1e9;
+      for (let i = 0; i < 3; i++) step(sim, 0);
+      const m = slotOf(s, E.MECH), hp = s.eHp[m], pods = [];
+      for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.MECH_POD) pods.push(k);
+      const mounted = pods.map((k) => ({ attr: s.eAttr[k], link: s.eLink[k], dx: +(s.ex[k] - s.ex[m]).toFixed(4), dy: +(s.ey[k] - s.ey[m]).toFixed(4) }));
+      // Standing forward shots from the floor while both pods stand: each ends on the Mech's front.
+      let fired = 0, past = 0;
+      for (let i = 0; i < 3 / M.FIXED; i++) {
+        const live = s.bLive.reduce((n, v) => n + v, 0);
+        step(sim, i % 2 === 0 ? IN.FIRE : 0);
+        if (s.bLive.reduce((n, v) => n + v, 0) > live) fired++;
+        for (let b = 0; b < 16; b++) if (s.bLive[b] && s.bx[b] > s.ex[m] - 1.2) past++;
+        if (i % 120 === 0) s.pBarrier[0] = 1e9;
+      }
+      const shut = { hp: armour(), flagged: (s.eFlags[m] & F7.SHUT) !== 0, fired, past };
+      // Up onto the row 6 perch: walk under it and the row 4 perch, and jump, landing 2 m up.
+      const climb = (x, feet) => {
+        for (let i = 0; i < 2 / M.FIXED && Math.abs(s.px[0] - x) > 0.04; i++) step(sim, s.px[0] < x ? IN.RIGHT : IN.LEFT);
+        step(sim, IN.JUMP);
+        for (let i = 0; i < 2 / M.FIXED && !(s.pPose[0] !== POSE.JUMP && s.pvy[0] === 0); i++) step(sim, 0);
+        return s.py[0] === feet;
+      };
+      const up = [climb(LOCK + 1.6, 3.5)];
+      for (let i = 0; i < 2 / M.FIXED && Math.abs(s.px[0] - (LOCK + 1.85)) > 0.04; i++) step(sim, s.px[0] < LOCK + 1.85 ? IN.RIGHT : IN.LEFT);
+      step(sim, 0);
+      const order = [], perch = { x: +s.px[0].toFixed(3), y: s.py[0], pose: s.pPose[0] };
+      let stayed = true, openAt = null;
+      for (let i = 0; i < 30 / M.FIXED && order.length < 2; i++) {
+        if (i % 120 === 0) s.pBarrier[0] = 1e9;
+        step(sim, i % 2 === 0 ? IN.FIRE : 0);
+        if (s.py[0] !== 3.5 || s.pPose[0] !== POSE.STAND) stayed = false;
+        for (const k of pods) if (s.eType[k] === E.MECH_POD && s.eRoutine[k] >= M.DESTROYED[E.MECH_POD] && !order.some((o) => o.slot === k)) order.push({ slot: k, attr: s.eAttr[k], shut: (s.eFlags[m] & F7.SHUT) !== 0, hp: armour() });
+      }
+      step(sim, 0);
+      openAt = { flagged: (s.eFlags[m] & F7.SHUT) !== 0, hp: armour() };
+      // Down to the floor, then standing forward shots at the open Mech until it falls.
+      for (let n = 0; n < 2; n++) {
+        step(sim, IN.DOWN | IN.JUMP);
+        for (let i = 0; i < 2 / M.FIXED && !(s.pPose[0] !== POSE.JUMP && s.pvy[0] === 0 && s.py[0] < 3.5 - n); i++) step(sim, IN.DOWN);
+        for (let i = 0; i < 10; i++) step(sim, 0);
+      }
+      const floor = { x: +s.px[0].toFixed(3), y: s.py[0] };
+      const lost = [];
+      for (let i = 0; i < 60 / M.FIXED && s.phase !== M.PHASE.CLEAR; i++) {
+        if (i % 120 === 0) { s.pBarrier[0] = 1e9; lost.push(hp - armour()); }
+        step(sim, i % 2 === 0 ? IN.FIRE : 0);
+      }
+      mech = { hp, mounted, shut, up, perch, order, stayed, openAt, floor, lost: lost.slice(0, 4), phase: s.phase, others: s.eType.filter((t, k) => t !== E.FREE && k !== m).length, time: +s.time.toFixed(2) };
+    } catch (e) { mech = { error: String(e && e.stack || e) }; }
+
+    bifrost("raid bifrost: the Bailout Mech mounts its two pods on its armour as it comes, and spends every standing forward shot from the floor, losing no hit point, while a pod stands", () => ({
+      ok: !mech.error && mech.mounted.length === 2 && mech.mounted.every((p) => PT.MECH_POD_MOUNTS[p.attr][0] === p.dx && Math.abs(PT.MECH_POD_MOUNTS[p.attr][1] - p.dy) < 1e-4 && p.link >= 0) &&
+        mech.shut.fired >= 10 && mech.shut.past === 0 && mech.shut.hp === mech.hp && mech.shut.flagged,
+      detail: JSON.stringify(mech)
+    }));
+    bifrost("raid bifrost: both pods fall to standing forward shots from the row 6 perch, reached by the controls, the front first, the Mech unharmed and shut until the second falls, then open (the pods sit on its armour, so the row 8 perch's standing shots pass over them)", () => ({
+      ok: !mech.error && mech.up.every(Boolean) && mech.perch.y === 3.5 && mech.stayed && mech.order.length === 2 && mech.order[0].attr === 0 && mech.order[1].attr === 1 &&
+        mech.order.every((o) => o.hp === mech.hp) && mech.order[0].shut && !mech.openAt.flagged && mech.openAt.hp === mech.hp,
+      detail: JSON.stringify(mech)
+    }));
+    bifrost("raid bifrost: once open the Mech takes standing forward shots from the floor, and its fall clears the stage with every other slot empty", () => ({
+      ok: !mech.error && mech.floor.y === 1.5 && mech.lost.length > 1 && mech.lost[1] > 0 && mech.phase === M.PHASE.CLEAR && mech.others === 0,
+      detail: JSON.stringify(mech)
+    }));
+
+    bifrost("raid bifrost: a drop crate drifts down under its chute and drops two runners where it lands, and one shot before it lands drops nobody", () => {
+      // A crate let go over the boss screen's floor (no Mech): left alone, and shot by an Ooga standing under it firing up.
+      const drop = (shoot) => {
+        const sim = placedAt(4, shoot ? LOCK + 3 : LOCK + 0.5, 1.5, LOCK, ENDS), s = sim.state;
+        s.pBarrier[0] = 1e9;
+        const k = sim.spawn(E.DROP_CRATE, LOCK + 3, 5.5, 0);
+        let runners = [], chute = false, gone = false;
+        for (let i = 0; i < 6 / M.FIXED && !gone; i++) {
+          step(sim, shoot && i % 2 === 0 ? IN.UP | IN.FIRE : shoot ? IN.UP : 0);
+          if (s.eRoutine[k] === context.window.BL.raidLegionPass.LOOK.DROP_CRATE.chute) chute = true;
+          if (s.eType[k] !== E.DROP_CRATE) {
+            gone = true;
+            for (let j = 0; j < M.ENEMY_SLOTS; j++) if (s.eType[j] === E.RUNNER) runners.push({ x: +s.ex[j].toFixed(3), y: s.ey[j] });
+          }
+        }
+        for (let i = 0; i < 2 / M.FIXED; i++) { step(sim, 0); if (count(s, E.RUNNER) > runners.length) runners = runners.concat([{ late: true }]); }
+        return { chute, gone, runners };
+      };
+      const left = drop(false), shot = drop(true);
+      return {
+        ok: left.chute && left.gone && left.runners.length === 2 && left.runners.every((r) => r.y === 1.5) && left.runners.map((r) => r.x).sort((p, q) => p - q).join() === [LOCK + 3 - PT.CRATE_SPREAD, LOCK + 3 + PT.CRATE_SPREAD].join() &&
+          shot.gone && shot.runners.length === 0,
+        detail: JSON.stringify({ left, shot })
+      };
+    });
+
+    bifrost("raid bifrost: the Mech's pods always mount: with every other slot full it stands shut with none, mounts both as slots come free, and opens only once both have mounted and fallen", () => {
+      const sim = placedAt(6, LOCK + 0.5, 1.5, LOCK, ENDS), s = sim.state;
+      s.pInvincible[0] = 1e9;
+      for (let k = 0; k < M.ENEMY_SLOTS - 1; k++) sim.spawn(E.ITEM, LOCK + 6.5, 1.5, S.ITEM.RAPID);
+      s.listCursor = MECH_AT;
+      for (let i = 0; i < 2 / M.FIXED; i++) step(sim, 0);
+      const m = slotOf(s, E.MECH), full = { mech: m, pods: count(s, E.MECH_POD), shut: (s.eFlags[m] & F7.SHUT) !== 0, phase: s.phase, free: count(s, E.FREE) };
+      // Two slots free: the pods take them at once.
+      let freed = 0;
+      for (let k = 0; k < M.ENEMY_SLOTS && freed < 2; k++) if (s.eType[k] === E.ITEM) { s.eType[k] = E.FREE; freed++; }
+      step(sim, 0); step(sim, 0);
+      const pods = [];
+      for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.MECH_POD) pods.push({ attr: s.eAttr[k], link: s.eLink[k] });
+      return {
+        ok: m >= 0 && full.pods === 0 && full.shut && full.phase === M.PHASE.BOSS && full.free === 0 && pods.length === 2 &&
+          pods.every((p) => p.link === m) && pods.map((p) => p.attr).sort().join() === "0,1" && (s.eFlags[m] & F7.SHUT) !== 0,
+        detail: JSON.stringify({ full, pods })
+      };
+    });
+
+    // The Mech's standing touch box in every pose (`standTouch`): an Ooga lies prone on the floor where the Mech comes in,
+    // and the Mech arrives over it, before its gun's first shot. Unprotected it is crushed; under a barrier or invincible
+    // it lies on under the Mech's box for a second unhurt; with two players, player 1 lying there is crushed while player 0
+    // stands clear at the screen's left.
+    const lie = (seed, guard) => {
+      const two = guard === "second", sim = M.create({ seed, stage: B7, players: two ? 2 : 1 }), s = sim.state, p = two ? 1 : 0;
+      until(sim, () => [0, p].every((q) => s.pState[q] === PS.NORMAL && s.pInvincible[q] === 0), 10);
+      for (const q of [0, p]) { s.px[q] = q === p ? LOCK + 4.3 : LOCK + 0.5; s.py[q] = 1.5; s.pvx[q] = 0; s.pvy[q] = 0; s.pPose[q] = POSE.STAND; }
+      s.camX = LOCK; s.listCursor = ENDS; s.spawnTimer = 1e9; s.bLive.fill(0); s.eType.fill(E.FREE);
+      if (guard === "barrier") s.pBarrier[p] = 1e9;
+      if (guard === "invincible") s.pInvincible[p] = 1e9;
+      const go = () => { sim.setInput(p === 0 ? IN.DOWN : 0, 0); if (two) sim.setInput(IN.DOWN, 1); sim.simulate(M.FIXED); };
+      for (let i = 0; i < 10; i++) go();
+      const lying = s.pPose[p] === POSE.PRONE && s.pState[p] === PS.NORMAL;
+      s.listCursor = MECH_AT;
+      let died = null, under = 0;
+      const box = M.RULES.BOXES[M.TIER_OF[E.MECH]][POSE.STAND];
+      for (let i = 0; i < 1 / M.FIXED && !died; i++) {
+        go();
+        const m = slotOf(s, E.MECH), dx = m >= 0 ? s.px[p] - s.ex[m] : NaN;
+        if (dx >= box[0] && dx < box[1]) under++;
+        if (s.pState[p] === PS.DEAD) died = { pose: s.pPose[p], x: +s.px[p].toFixed(3), mech: +s.ex[m].toFixed(3), shots: count(s, E.SHOT) + count(s, E.SPARK), t: +s.time.toFixed(3) };
+      }
+      return { guard, lying, died, under, pose: s.pPose[p], other: two ? s.pState[0] : PS.NORMAL };
+    };
+    bifrost("raid bifrost: the Mech touches an Ooga in any pose with its standing touch box, so one lying under its feet is crushed (player 1 as well as player 0), while one lying there under a barrier or invincible is spared", () => {
+      const r = ["none", "second", "barrier", "invincible"].map((guard, k) => lie(2 + k, guard));
+      const crushed = (o) => o.lying && o.died !== null && o.died.pose === POSE.PRONE && o.died.shots === 0 && o.other === PS.NORMAL;
+      const spared = (o) => o.lying && o.died === null && o.pose === POSE.PRONE && o.under === Math.round(1 / M.FIXED);
+      return { ok: crushed(r[0]) && crushed(r[1]) && spared(r[2]) && spared(r[3]), detail: JSON.stringify(r) };
+    });
+
+    // The boss fight's slots, the Ooga under a barrier on the row 6 perch with the edge spawner on: 30 s still with both
+    // pods up, then forward fire until both fall, then 30 s still with the Mech open. Each stretch, every shot and spark
+    // the sim was asked for found a slot (its `shots` counter, asked and given; only the Mech fires here), and never more
+    // than CRATE_CAP crates flew, the pods' and the Mech's together.
+    const fight = (x, y) => {
+      const sim = placedAt(8, x, y, LOCK, MECH_AT), s = sim.state;
+      s.spawnTimer = 1;
+      for (let i = 0; i < 3; i++) step(sim, 0);   // the Mech comes and mounts its pods
+      const stretch = (seconds, fire, until) => {
+        const asked = sim.shots[0], given = sim.shots[1];
+        let crates = 0, runners = 0, pods = 2, i = 0;
+        for (; i < seconds / M.FIXED && !(until && until()); i++) {
+          if (i % 120 === 0) s.pBarrier[0] = 1e9;
+          step(sim, fire && i % 2 === 0 ? IN.FIRE : 0);
+          let c = 0;
+          for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.DROP_CRATE && s.eRoutine[k] < M.DESTROYED[E.DROP_CRATE]) c++;
+          crates = Math.max(crates, c); runners = Math.max(runners, count(s, E.RUNNER)); pods = Math.min(pods, count(s, E.MECH_POD));
+        }
+        return { asked: sim.shots[0] - asked, refused: sim.shots[0] - asked - (sim.shots[1] - given), crates, runners, pods, seconds: +(i * M.FIXED).toFixed(2) };
+      };
+      const up = stretch(30, false), m = slotOf(s, E.MECH);
+      const shoot = stretch(20, true, () => count(s, E.MECH_POD) === 0);
+      const open = stretch(30, false);
+      return { up, shoot, open, opened: (s.eFlags[m] & F7.SHUT) === 0, y: s.py[0], phase: s.phase };
+    };
+    // The crates' cap, shared: two crates let go high over the floor by the cliff drift down for over 5 s, through both
+    // pods' first launches (at 2 s and 4 s), and no third crate flies.
+    const held = () => {
+      const sim = placedAt(9, LOCK + 1.85, 3.5, LOCK, MECH_AT), s = sim.state;
+      s.pBarrier[0] = 1e9;
+      for (let i = 0; i < 3; i++) step(sim, 0);
+      for (const x of [LOCK + 6.2, LOCK + 6.8]) sim.spawn(E.DROP_CRATE, x, 6.9, 0);
+      let most = 0, least = M.ENEMY_SLOTS;
+      for (let i = 0; i < 5 / M.FIXED; i++) {
+        step(sim, 0);
+        const c = count(s, E.DROP_CRATE);
+        most = Math.max(most, c); least = Math.min(least, c);
+      }
+      return { most, least, pods: count(s, E.MECH_POD) };
+    };
+    let flow;
+    try { flow = { perch: fight(LOCK + 1.85, 3.5), held: held() }; } catch (e) { flow = { error: String(e && e.stack || e) }; }
+    bifrost("raid bifrost: in the Mech's fight, under a barrier on the row 6 perch with the edge spawner on, every shot and spark it asks for finds a slot (30 s with its pods up, 30 s open), and no more than CRATE_CAP crates fly at once, the pods' and any other's together", () => ({
+      ok: !flow.error && flow.perch.up.pods === 2 && flow.perch.opened && flow.perch.phase === M.PHASE.BOSS && flow.perch.y === 3.5 && flow.perch.shoot.refused === 0 &&
+        [flow.perch.up, flow.perch.open].every((r) => r.asked >= 10 && r.refused === 0 && r.crates >= 1 && r.crates <= PT.CRATE_CAP && r.runners >= 1) &&
+        flow.held.pods === 2 && flow.held.most === PT.CRATE_CAP && flow.held.least === PT.CRATE_CAP,
+      detail: JSON.stringify(flow)
+    }));
+
+    // The whole stage under the autopilot with a standing barrier (renewed every second), four seeds: the Mech in play
+    // (`boss`, its first step), the screen at its lock (a side boss's screen scrolls on to it), and the Mech fallen.
+    let clears;
+    try {
+      clears = [1, 2, 3, 4].map((seed) => {
+        const sim = M.create({ seed, stage: B7 }), s = sim.state, limit = 900 / M.FIXED;
+        let i = 0, deaths = 0, dead = false, boss = -1;
+        for (; i < limit && s.phase !== M.PHASE.CLEAR && s.phase !== M.PHASE.OVER; i++) {
+          if (i % 120 === 0) s.pBarrier[0] = 1e9;
+          sim.setInput(M.autopilot(sim)); sim.simulate(M.FIXED);
+          if (s.pState[0] === PS.DEAD && !dead) deaths++;
+          dead = s.pState[0] === PS.DEAD;
+          if (boss < 0 && s.phase === M.PHASE.BOSS) boss = +s.time.toFixed(1);
+        }
+        return { seed, done: s.phase === M.PHASE.CLEAR && i < limit, time: +s.time.toFixed(1), boss, deaths, locked: s.camX === s.lockX };
+      });
+    } catch (e) { clears = { error: String(e && e.stack || e) }; }
+    bifrost("raid bifrost: an Ooga under a standing barrier, steered by the autopilot, clears Bifrost Pass within 900 s on four seeds", () => ({
+      ok: Array.isArray(clears) && clears.length === 4 && clears.every((c) => c.done && c.boss > 0 && c.locked && c.deaths === 0),
+      detail: JSON.stringify(clears)
+    }));
+  }
+  {
+    // Stage 8, The Reserve: rams over the floor, two belts, the paper storm, the Chairman's lift up to the gallery
+    // and the Chairman's Engine on the lock screen. `reserve` records a check, a throw recording its failure. The fights
+    // play the real grid with only the records a check needs (`only`), so the field troops stay out of them; an Ooga is
+    // stood on the lock screen's floor where a check starts there (`atLock`), as the tower's vent check stands one.
+    const reserve = (name, f) => {
+      let r;
+      try { r = f(); } catch (e) { r = { ok: false, detail: String(e && e.stack || e) }; }
+      record(name, r.ok, r.detail);
+    };
+    const RES = S.STAGES.find((g) => g.id === "reserve"), RL = context.window.BL.raidLegionReserve, RT = RL.TUNE, LK = RL.LOOK;
+    const IN = M.IN, F = context.window.BL.raidEnemies.FLAG, K = S.KIND, C = S.CELL, STAND = M.POSE.STAND;
+    const only = (...types) => {
+      const out = [];
+      for (let k = 0; k < RES.placed.length; k += 4) if (types.includes(RES.placed[k + 2])) out.push(...RES.placed.subarray(k, k + 4));
+      return { ...RES, placed: Int16Array.from(out) };
+    };
+    const atLock = (sim, x) => {
+      const s = sim.state;
+      s.camX = s.lockX; s.px[0] = x; s.py[0] = 1.5; s.pvx[0] = 0; s.pvy[0] = 0; s.pState[0] = PS.NORMAL; s.pPose[0] = STAND;
+    };
+    const step = (sim, bits) => { sim.setInput(bits); sim.simulate(M.FIXED); };
+    const fireOn = (s) => s.prevInput & IN.FIRE ? 0 : IN.FIRE;
+    // Toward x, then facing `face` there (1 right, -1 left, 0 either): a turn moves the Ooga a step, so once it faces the
+    // right way it holds within twice the band it walks to.
+    const toward = (s, x, face = 0) => {
+      const d = x - s.px[0], held = face !== 0 && s.pFace[0] === face;
+      if (Math.abs(d) > (held ? 0.2 : 0.1)) return d > 0 ? IN.RIGHT : IN.LEFT;
+      return face !== 0 && !held ? (face > 0 ? IN.RIGHT : IN.LEFT) : 0;
+    };
+    const slotOf = (s, type) => { for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === type && s.eRoutine[k] < M.DESTROYED[type]) return k; return -1; };
+    const live = (s) => { let n = 0; for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] !== E.FREE) n++; return n; };
+    const top = (stage, col) => { for (let r = stage.rows - 1; r >= 0; r--) if (S.cellAt(stage, col, r) !== K.EMPTY) return r + 1; return -1; };
+
+    // rule: the stage as stage-8.md lays it out, and the layout rules it names.
+    reserve("raid reserve: The Reserve is the campaign's last stage, ten screens with a belt back on screen 2 and one forward on screen 6, the paper storm blowing left over columns 64 to 111, the Chairman's lift at columns 133 to 135 and the Chairman's Engine on its lock screen, and passes its own validation; no ledge stands in the lift's path, whose low end is flush with the floor at columns 128 to 132 and high end with the gallery at 136 to 139; every ram's sweep is clear of every ledge and solid cell; and nothing is handed out after screen 6", () => {
+      const recs = [], items = [], rams = [], faults = [];
+      for (let k = 0; k < RES.placed.length; k += 4) recs.push(Array.from(RES.placed.subarray(k, k + 4)));
+      for (const [col, row, type, attr] of recs) {
+        if (type === E.CARRIER || type === E.SENSOR) items.push([col, attr]);
+        if (type === E.RAM) rams.push([col, row]);
+      }
+      const [lift] = RES.lifts, [lc, lw, low, high] = lift;
+      for (let c = lc; c < lc + lw; c++) for (let r = low; r <= high + 2; r++) if (S.cellAt(RES, c, r) !== K.EMPTY && r > 1) faults.push(`lift path ${c},${r}`);
+      for (let c = 128; c <= 132; c++) if (top(RES, c) !== low + 1) faults.push(`floor ${c} at row ${top(RES, c)}`);
+      for (let c = 136; c <= 139; c++) if (top(RES, c) !== high + 1) faults.push(`gallery ${c} at row ${top(RES, c)}`);
+      // A ram's sweep: every box of its tier (the touch boxes by pose and the bullet box), from its floor plus RAM_DOWN up
+      // to its floor plus RAM_UP, over its column's middle; no cell above its floor in that span may be anything but empty.
+      const boxes = [...R.BOXES[M.TIER_OF[E.RAM]], R.SHOT_BOX[M.TIER_OF[E.RAM]]];
+      const bx0 = Math.min(...boxes.map((b) => b[0])), bx1 = Math.max(...boxes.map((b) => b[1])), by0 = Math.min(...boxes.map((b) => b[2])), by1 = Math.max(...boxes.map((b) => b[3]));
+      for (const [col, row] of rams) {
+        const x = (col + 0.5) * C, floor = row * C;
+        if (top(RES, col) !== row) faults.push(`ram ${col} not on its floor`);
+        for (let c = Math.floor((x + bx0) / C); c * C < x + bx1; c++) {
+          for (let r = row; r * C < floor + RT.RAM_UP + by1; r++) if ((r + 1) * C > floor + RT.RAM_DOWN + by0 && S.cellAt(RES, c, r) !== K.EMPTY) faults.push(`ram ${col} meets ${c},${r}`);
+        }
+      }
+      const last = recs[recs.length - 1];
+      const want = [[18, M.ITEM.AUTO], [58, M.ITEM.CORK], [60, M.ITEM.RAPID], [90, M.ITEM.FAN], [100, M.ITEM.BARRIER]];
+      return {
+        ok: S.STAGES[S.STAGES.length - 1] === RES && RES.kind === "side" && RES.name === "The Reserve" && RES.screens === 10 && RES.lockScreen === 9 &&
+          RES.spawner.base === 184 && RES.start.col === 3 && RES.start.row === 12 && S.validate(RES).length === 0 && recs.length === 31 &&
+          JSON.stringify(RES.belts) === "[[32,42,2,-0.9],[96,111,2,0.9]]" && JSON.stringify(RES.gusts) === "[[64,111,-1]]" &&
+          JSON.stringify(RES.lifts) === "[[133,3,2,8,1,1.5]]" && rams.length === 4 && last[2] === E.CHAIRMAN_ENGINE && last[0] === 154 &&
+          Math.floor(last[0] / S.SCREEN_W) === RES.lockScreen && JSON.stringify(items) === JSON.stringify(want) && items.every(([col]) => col < 7 * S.SCREEN_W) && faults.length === 0,
+        detail: JSON.stringify({ id: RES.id, last: S.STAGES[S.STAGES.length - 1].id, faults, validate: S.validate(RES), items, rams, records: recs.length })
+      };
+    });
+
+    // rule: the lift is the only way up. A search over every place an Ooga can stand (an empty cell over ground, room for a
+    // head), more generous than the Ooga (any jump 2 m along and 1.5 m up, any fall 3 m along, through walls), reaches
+    // the gallery and the Engine's floor from the start only with the lift's ride added; without it, never.
+    reserve("raid reserve: the Chairman's lift is required: a reach search more generous than any jump finds the gallery and the Engine's floor from the start with the lift's ride and never without it", () => {
+      const stands = [], index = new Map(), key = (c, r) => r * RES.cols + c;
+      for (let c = 0; c < RES.cols; c++) for (let r = 1; r < RES.rows; r++) {
+        if (S.cellAt(RES, c, r) === K.EMPTY && S.cellAt(RES, c, r - 1) !== K.EMPTY && S.cellAt(RES, c, r + 1) !== K.SOLID) { index.set(key(c, r), stands.length); stands.push([c, r]); }
+      }
+      const [lc, lw, low, high] = RES.lifts[0];
+      const reach = (withLift) => {
+        const seen = new Set([key(RES.start.col, 3)]), queue = [[RES.start.col, 3]];
+        const visit = (c, r) => { const k = key(c, r); if (!seen.has(k)) { seen.add(k); queue.push([c, r]); } };
+        while (queue.length) {
+          const [c, r] = queue.shift();
+          for (const [c2, r2] of stands) if ((r2 - r <= 3 && r2 >= r && Math.abs(c2 - c) <= 4) || (r2 < r && Math.abs(c2 - c) <= 6)) visit(c2, r2);
+          // The lift: boarded on its low end's top (stood on as row low + 1) from anywhere a jump reaches it, ridden to its high end.
+          if (withLift) {
+            for (let x = lc; x < lc + lw; x++) {
+              if ((r <= low + 1 && low + 1 - r <= 3 && Math.abs(x - c) <= 4) || (c >= lc && c < lc + lw && r === low + 1)) { visit(x, low + 1); visit(x, high + 1); }
+              if (c >= lc && c < lc + lw && r === high + 1) for (const [c2, r2] of stands) if ((r2 - r <= 3 && Math.abs(c2 - x) <= 4) || (r2 < r && Math.abs(c2 - x) <= 6)) visit(c2, r2);
+            }
+          }
+        }
+        let gallery = false, engine = false;
+        for (let c = 136; c <= 139; c++) if (seen.has(key(c, high + 1))) gallery = true;
+        for (let c = 144; c <= 156; c++) if (seen.has(key(c, 3))) engine = true;
+        return { gallery, engine, reached: seen.size };
+      };
+      const without = reach(false), withIt = reach(true);
+      return { ok: withIt.gallery && withIt.engine && !without.gallery && !without.engine, detail: JSON.stringify({ without, withIt, stands: stands.length }) };
+    });
+
+    // rule: a ram can be run under. Measured on the sim, on the real stage's first ram (column 24) alone: the danger is
+    // read from the sim's own contacts (an Ooga standing at the ram's x, revived on the step it dies), the foot's width
+    // from where a standing Ooga dies under the ram held down, and the crossing is run through the controls: from left of
+    // the foot, setting off as the ram clears its danger, the Ooga runs across alive; setting off into its slam, it dies.
+    const ramRun = (() => {
+      try {
+        const lone = only(E.RAM), col = lone.placed[0], floor = lone.placed[1] * C, x0 = (col + 0.5) * C;
+        const fresh = () => {
+          const sim = M.create({ seed: 4, stage: lone }), s = sim.state;
+          s.camX = x0 - 3; s.px[0] = x0 - 2.5; s.py[0] = floor; s.pState[0] = PS.NORMAL; s.pPose[0] = STAND; s.spawnTimer = 1e9;
+          step(sim, 0);
+          return sim;
+        };
+        // Danger over two cycles: each step the Ooga stands at the ram's x, not invincible; a death there is noted and undone.
+        const probe = fresh(), s = probe.state, ram = slotOf(s, E.RAM), mask = [], ys = [];
+        const revive = (x) => { s.pState[0] = PS.NORMAL; s.pPose[0] = STAND; s.pTimer[0] = 0; s.px[0] = x; s.py[0] = floor; s.pvx[0] = 0; s.pvy[0] = 0; };
+        const cycle = RT.RAM_WAIT + RT.RAM_WARN + (RT.RAM_UP - RT.RAM_DOWN) / RT.RAM_SLAM_V + RT.RAM_HOLD + (RT.RAM_UP - RT.RAM_DOWN) / RT.RAM_RISE_V;
+        for (let i = 0; i < Math.ceil(2 * cycle / M.FIXED); i++) {
+          revive(x0); s.pInvincible[0] = 0;
+          step(probe, 0);
+          mask.push(s.pState[0] === PS.DEAD ? 1 : 0); ys.push(s.ey[ram]);
+        }
+        revive(x0 - 2.5);
+        let safe = 0, run = 0, danger = 0;
+        for (let i = 0; i < 2 * mask.length; i++) { if (mask[i % mask.length]) { run = 0; if (i < mask.length) danger++; } else if (++run > safe) safe = run; }
+        // The foot: where a standing Ooga dies under the ram held down, every centimetre either side of its x.
+        const held = fresh(), h = held.state, rh = slotOf(h, E.RAM);
+        h.eRoutine[rh] = LK.RAM.down; h.ey[rh] = h.evy[rh] + RT.RAM_DOWN; h.eTimer[rh] = 1e9;
+        let lo = Infinity, hi = -Infinity;
+        for (let x = x0 - 2; x <= x0 + 2; x += 0.01) {
+          h.pState[0] = PS.NORMAL; h.pPose[0] = STAND; h.pTimer[0] = 0; h.px[0] = x; h.py[0] = floor; h.pvx[0] = 0; h.pvy[0] = 0; h.pInvincible[0] = 0;
+          step(held, 0);
+          if (h.pState[0] === PS.DEAD) { lo = Math.min(lo, x); hi = Math.max(hi, x); }
+        }
+        // Crossings through the controls: wait left of the foot, then run right, setting off on the step the ram leaves
+        // its danger rising (timed), or as it starts its slam (badly timed).
+        const cross = (timed) => {
+          const sim = fresh(), t = sim.state, r = slotOf(t, E.RAM), start = lo - 0.25;
+          for (let i = 0; i < 1200 && Math.abs(t.px[0] - start) > 0.02; i++) step(sim, toward(t, start));
+          t.pInvincible[0] = 0;
+          let was = t.eRoutine[r], go = false, dead = false, i = 0;
+          for (; i < 12 * 120 && !dead && t.px[0] < hi + 0.5; i++) {
+            const now = t.eRoutine[r];
+            if (!go) go = timed ? was === LK.RAM.rise && t.ey[r] >= t.evy[r] + RT.RAM_DOWN + 1 : was === LK.RAM.warn && now === LK.RAM.slam;
+            was = now;
+            step(sim, go ? IN.RIGHT : 0);
+            if (t.pState[0] === PS.DEAD) dead = true;
+          }
+          return { go, dead, x: +t.px[0].toFixed(3), stand: t.pPose[0] === STAND };
+        };
+        return { danger: +(danger / 2 * M.FIXED).toFixed(3), safe: +(safe * M.FIXED).toFixed(3), foot: +(hi - lo + 0.01).toFixed(2), across: +((hi - lo + 0.01) / M.TUNE.RUN).toFixed(3), lo: +lo.toFixed(2), hi: +hi.toFixed(2), x0, timed: cross(true), late: cross(false), low: Math.min(...ys), high: Math.max(...ys) };
+      } catch (e) { return { error: String(e && e.stack || e) }; }
+    })();
+    reserve("raid reserve: a ram's safe window is longer than a run across its foot, measured on the sim (its danger from the sim's own contacts, its foot from where a standing Ooga dies under it): an Ooga setting off as it clears runs across alive, and one setting off into its slam dies", () => ({
+      ok: !ramRun.error && ramRun.safe > ramRun.across && ramRun.foot > 2 && ramRun.timed.go && !ramRun.timed.dead && ramRun.timed.x > ramRun.hi && ramRun.late.go && ramRun.late.dead,
+      detail: JSON.stringify(ramRun)
+    }));
+
+    // rule: what looks solid is solid. A ram spends every shot that meets it and takes no damage, the clear-screen and the
+    // barrier's touch leave it standing, and its slot frees only once it is left behind off the screen.
+    reserve("raid reserve: a ram is a machine shut for life: standing forward shots at it while it is down are spent on it with no hit point lost, the clear-screen and a barriered Ooga walking into it leave it standing, and it frees only once the widest of its boxes has left the screen", () => {
+      const lone = only(E.RAM), col = lone.placed[0], floor = lone.placed[1] * C, x0 = (col + 0.5) * C;
+      const sim = M.create({ seed: 4, stage: lone }), s = sim.state;
+      s.camX = x0 - 3; s.px[0] = x0 - 2.5; s.py[0] = floor; s.pState[0] = PS.NORMAL; s.pPose[0] = STAND; s.spawnTimer = 1e9; s.pInvincible[0] = 1e9;
+      step(sim, 0);
+      const ram = slotOf(s, E.RAM), hp = s.eHp[ram];
+      for (let i = 0; i < 600 && s.eRoutine[ram] !== LK.RAM.down; i++) step(sim, 0);
+      let fired = 0, past = 0;
+      for (let i = 0; s.eRoutine[ram] === LK.RAM.down && i < 600; i++) {
+        const bits = fireOn(s);
+        if (bits && s.bLive.indexOf(0) >= 0) fired++;
+        step(sim, bits);
+        for (let b = 0; b < M.BULLETS; b++) if (s.bLive[b] && s.bx[b] > x0 + 1.4) past++;
+      }
+      const shot = { fired, past, hp: s.eHp[ram], routine: s.eRoutine[ram], shut: (s.eFlags[ram] & F.SHUT) !== 0 };
+      const item = sim.spawn(E.ITEM, s.px[0], s.py[0] + 0.25, M.ITEM.CLEAR);
+      step(sim, 0);
+      const cleared = { taken: s.eType[item] !== E.ITEM, hp: s.eHp[ram], alive: s.eType[ram] === E.RAM && s.eRoutine[ram] < M.DESTROYED[E.RAM] };
+      s.pInvincible[0] = 0; s.pBarrier[0] = 1e9;
+      for (let i = 0; i < 4 * 120; i++) step(sim, toward(s, x0));
+      const walked = { alive: s.eType[ram] === E.RAM && s.eRoutine[ram] < M.DESTROYED[E.RAM], under: Math.abs(s.px[0] - x0) < 0.2, points: s.pScore[0] };
+      s.pBarrier[0] = 0; s.pInvincible[0] = 1e9;
+      let freedAt = null;
+      for (let i = 0; i < 20 * 120 && freedAt === null; i++) {
+        step(sim, IN.RIGHT);
+        if (s.eType[ram] !== E.RAM) freedAt = +(s.camX - x0).toFixed(3);
+      }
+      // Freed only once the widest of its tier's boxes (the bullet box and the touch boxes by pose) has left the screen.
+      const tier = M.TIER_OF[E.RAM], widest = Math.max(...[R.SHOT_BOX[tier], ...R.BOXES[tier]].map((b) => Math.max(-b[0], b[1])));
+      return {
+        ok: hp > 0 && shot.fired > 4 && shot.past === 0 && shot.hp === hp && shot.shut && cleared.taken && cleared.alive && cleared.hp === hp && walked.alive && walked.under && walked.points === 0 &&
+          freedAt !== null && freedAt > widest && M.POINTS_OF[E.RAM] === 0 && (TY[E.RAM].flags & (F.SHUT | F.MACHINE)) === (F.SHUT | F.MACHINE),
+        detail: JSON.stringify({ hp, shot, cleared, walked, freedAt, widest })
+      };
+    });
+
+    // The Engine's fight, scripted on the lock screen under a standing barrier (so its parts and shots fire, as `attack`
+    // holds, and nothing kills), with the Engine the only record. Presses: the Ooga waits at the screen's left edge, so a
+    // press tracks it to its left end, over the floor; when one warns there it runs right out of the press's reach and
+    // turns, and fires standing forward while the press is down (four hits only, its first time down, so it rises and
+    // comes down again); waiting, it fires up at the press over it. Pod: for a
+    // second and a half it fires standing forward at the shut core, then from the row-6 perch (up from the floor onto
+    // the row-4 perch, then onto it), standing forward at the pod's low swing, for one loop and a half; then from the
+    // floor under the figure's middle, firing up as it passes over until it falls. Core: standing on the floor facing it, firing forward.
+    // Each step it notes every part's hit points and routine, the Ooga's pose and place at each hit, and the slots in use.
+    const fight = (() => {
+      try {
+        const sim = M.create({ seed: 3, stage: only(E.CHAIRMAN_ENGINE) }), s = sim.state, T = M.TUNE;
+        atLock(sim, 74);
+        const out = { routines: [], pressHits: [], podHits: { perch: 0, floor: 0, other: 0 }, coreHits: [], spent: {}, peak: 0, full: 0, dock: null, undock: null, loop: null };
+        const hpOf = new Map();
+        let lastRoutine = -1, mode = "", perchFrom = -1;
+        const downs = new Uint8Array(M.ENEMY_SLOTS), SPARE = 4;
+        for (let i = 0; i < 240 * 120 && s.phase !== M.PHASE.CLEAR; i++) {
+          if (i % 120 === 0) s.pBarrier[0] = 1e9;
+          const eng = slotOf(s, E.CHAIRMAN_ENGINE), fire = fireOn(s), feet = s.py[0], stand = s.pPose[0] === STAND;
+          let bits = 0;
+          if (eng >= 0) {
+            const r = s.eRoutine[eng];
+            if (r !== lastRoutine) { out.routines.push([r, +s.time.toFixed(2)]); lastRoutine = r; }
+            if (r <= LK.CHAIRMAN_ENGINE.presses) {
+              let target = -1;
+              for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.ENGINE_PRESS && s.eRoutine[k] >= LK.ENGINE_PRESS.warn && s.eRoutine[k] <= LK.ENGINE_PRESS.down && s.ex[k] < 72.5) target = k;
+              // On a press's first time down it takes only SPARE hits, so it rises, tracks and comes down again hurt.
+              if (target >= 0 && s.eRoutine[target] === LK.ENGINE_PRESS.down && downs[target] === 0) downs[target] = 1;
+              if (target >= 0 && s.eRoutine[target] !== LK.ENGINE_PRESS.down && downs[target] === 1) downs[target] = 2;
+              const spare = target >= 0 && downs[target] === 1 && s.eHp[target] <= M.HP_OF[E.ENGINE_PRESS] - SPARE;
+              if (target >= 0) { bits = toward(s, s.ex[target] + 1.75, -1); if (!bits && s.eRoutine[target] === LK.ENGINE_PRESS.down && !spare) bits = fire; }
+              else { bits = toward(s, 72.25); if (!bits) bits = IN.UP | fire; }
+            } else if (r === LK.CHAIRMAN_ENGINE.pod) {
+              const pod = slotOf(s, E.ENGINE_POD);
+              if (out.undock === null && pod >= 0 && s.eRoutine[pod] >= LK.ENGINE_POD.undock) out.undock = { x: +s.ex[pod].toFixed(3), y: +s.ey[pod].toFixed(3), attr: s.eAttr[pod], shut: (s.eFlags[pod] & F.SHUT) !== 0 };
+              if (perchFrom < 0) perchFrom = s.time;
+              if (s.time - perchFrom < 1.5) { mode = "shut core"; bits = toward(s, 75.9, 1); if (!bits) bits = fire; }
+              else if (out.podHits.perch < 5 && s.time - perchFrom < 12) {
+                // Onto the row-6 perch: under the row-4 perch, jump; on it, walk under the row-6 perch and jump; there,
+                // stand left of the pod's right-hand low swing facing right, firing.
+                mode = "perch";
+                if (feet < 2) { bits = toward(s, 73.2); if (!bits && stand) bits = IN.JUMP; }
+                else if (feet < 3) { bits = toward(s, 74); if (!bits && stand) bits = IN.JUMP; }
+                else { bits = toward(s, 74.4, 1); if (!bits) bits = fire; }
+              } else {
+                mode = "floor";
+                if (feet > 1.6) bits = IN.DOWN | (s.prevInput & IN.JUMP ? 0 : IN.JUMP);
+                // Firing up only while the pod is within a metre of overhead, so each pass meets a fresh four (a stream fired
+                // all along can fall into step with the pod's loop and pass between its passes every time).
+                else { bits = toward(s, 74.25); if (!bits) bits = IN.UP | (Math.abs(s.ex[pod] - s.px[0]) < 1 ? fire : 0); }
+              }
+            } else { mode = "core"; bits = toward(s, 75.9, 1); if (!bits && feet === 1.5) bits = fire; }
+          }
+          for (let k = 0; k < M.ENEMY_SLOTS; k++) hpOf.set(k, s.eType[k] === E.FREE ? -1 : s.eHp[k] + 256 * s.eType[k]);
+          const flying = [];
+          for (let b = 0; b < M.BULLETS; b++) if (s.bLive[b]) flying.push([b, s.bx[b] + s.bvx[b] * M.FIXED, s.by[b] + s.bvy[b] * M.FIXED]);
+          step(sim, bits);
+          const used = live(s);
+          if (used > out.peak) out.peak = used;
+          if (used === M.ENEMY_SLOTS) out.full++;
+          for (let k = 0; k < M.ENEMY_SLOTS; k++) {
+            const t = s.eType[k], was = hpOf.get(k);
+            if (was < 0 || Math.floor(was / 256) !== t || s.eHp[k] === was % 256) continue;
+            const ooga = { x: +s.px[0].toFixed(3), y: s.py[0], pose: s.pPose[0], aim: s.pAim[0] };
+            for (let n = was % 256 - s.eHp[k]; n > 0; n--) {
+              if (t === E.ENGINE_PRESS) out.pressHits.push({ routine: s.eRoutine[k], px: +s.ex[k].toFixed(3), py: s.ey[k], ...ooga });
+              else if (t === E.ENGINE_POD) { if (mode === "perch" && s.py[0] === 3.5 && s.pAim[0] === 0) out.podHits.perch++; else if (mode === "floor" && s.py[0] === 1.5 && s.pAim[0] === 2) out.podHits.floor++; else out.podHits.other++; }
+              else if (t === E.CHAIRMAN_ENGINE) out.coreHits.push({ routine: s.eRoutine[k], ...ooga });
+            }
+          }
+          // A bullet spent on a shut part of the Engine: gone this step where it would have flown into that part's bullet box.
+          for (const [b, x, y] of flying) {
+            if (s.bLive[b]) continue;
+            for (let k = 0; k < M.ENEMY_SLOTS; k++) {
+              const t = s.eType[k];
+              if ((t !== E.ENGINE_PRESS && t !== E.CHAIRMAN_ENGINE && t !== E.ENGINE_POD) || !(s.eFlags[k] & F.SHUT)) continue;
+              const box = R.SHOT_BOX[M.TIER_OF[t]], dx = x - s.ex[k], dy = y - s.ey[k] - M.ORIGIN_OF[t];
+              if (dx >= box[0] && dx < box[1] && dy > box[2] && dy <= box[3]) out.spent[t] = (out.spent[t] || 0) + 1;
+            }
+          }
+          // The flying pod's bullet box over its first loop of POD_T, against the screen's edges (camX, camX + width, 0, top).
+          const pod = slotOf(s, E.ENGINE_POD);
+          if (pod >= 0 && s.eRoutine[pod] === LK.ENGINE_POD.fly && (out.loop === null || out.loop.steps < RT.POD_T / M.FIXED)) {
+            const b = R.SHOT_BOX[M.TIER_OF[E.ENGINE_POD]], y = s.ey[pod] + M.ORIGIN_OF[E.ENGINE_POD];
+            if (out.loop === null) out.loop = { steps: 0, left: Infinity, right: -Infinity, low: Infinity, high: -Infinity, camX: s.camX, top: RES.rows * C };
+            const L = out.loop;
+            L.steps++; L.left = Math.min(L.left, s.ex[pod] + b[0] - s.camX); L.right = Math.max(L.right, s.ex[pod] + b[1] - s.camX);
+            L.low = Math.min(L.low, y + b[2]); L.high = Math.max(L.high, y + b[3]);
+          }
+          if (out.dock === null) { const pod = slotOf(s, E.ENGINE_POD); if (pod >= 0 && eng >= 0) out.dock = { dx: +(s.ex[pod] - s.ex[eng]).toFixed(3), dy: +(s.ey[pod] - s.ey[eng]).toFixed(3) }; }
+        }
+        out.phase = s.phase; out.time = +s.time.toFixed(2); out.others = live(s) - (slotOf(s, E.CHAIRMAN_ENGINE) >= 0 || s.eType.includes(E.CHAIRMAN_ENGINE) ? 1 : 0);
+        out.score = s.pScore[0];
+        return out;
+      } catch (e) { return { error: String(e && e.stack || e) }; }
+    })();
+    reserve("raid reserve: the Chairman's presses take shots only while down and fall to standing forward shots from the floor, fired from outside the press's reach; each press tracks the Ooga between its Engine's x less PRESS_LEFT and less PRESS_RIGHT, wherever the Engine stands", () => {
+      // The clamp from the Engine's record: on a small floor with the Engine at column 20, an Ooga at either end of the
+      // floor draws the press to that end of its track.
+      const rows = [...Array(11).fill("................................"), ...Array(3).fill("################################")];
+      const small = S.parse({ id: "presses", name: "Presses", rows, start: { col: 2, row: 12 }, lockScreen: 1, spawner: { base: 0 }, placed: [[20, 3, E.CHAIRMAN_ENGINE, 0]] });
+      const ends = [1, 15.5].map((x) => {
+        const sim = M.create({ seed: 2, stage: small }), s = sim.state;
+        s.camX = 4; s.px[0] = x; s.py[0] = 1.5; s.pState[0] = PS.NORMAL; s.pPose[0] = STAND; s.pInvincible[0] = 1e9;
+        step(sim, 0);
+        let press = -1;
+        for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === E.ENGINE_PRESS && s.eAttr[k] === 1) press = k;
+        const eng = slotOf(s, E.CHAIRMAN_ENGINE);
+        for (let i = 0; i < 5 * 120 && s.eRoutine[press] === LK.ENGINE_PRESS.track; i++) step(sim, 0);
+        return +(s.ex[press] - s.ex[eng]).toFixed(3);
+      });
+      const hits = fight.pressHits || [];
+      return {
+        ok: !fight.error && hits.length === 2 * M.HP_OF[E.ENGINE_PRESS] && hits.every((h) => h.routine === LK.ENGINE_PRESS.down || h.routine > M.DESTROYED[E.ENGINE_PRESS]) &&
+          hits.every((h) => h.pose === STAND && h.y === 1.5 && h.aim === 4 && h.x - h.px > 1.375 && h.py === 1.5 + RT.PRESS_FOOT) && fight.spent[E.ENGINE_PRESS] > 0 &&
+          ends[0] === -RT.PRESS_LEFT && ends[1] === -RT.PRESS_RIGHT,
+        detail: JSON.stringify({ hits: hits.length, first: hits[0], last: hits[hits.length - 1], spent: fight.spent, ends, error: fight.error })
+      };
+    });
+    reserve("raid reserve: the Chairman's pod stays docked, shut, on its mount clear of both presses' sweeps while either press stands, undocks as the last falls (leaving the mount, opened), keeps its whole box on the screen over a loop of its figure of eight, is hit along it by forward shots from the row-6 perch and up shots from the floor, and holds its 40 hit points whatever the weapon", () => {
+      // The docked pod's boxes (its bullet box, which its look fills, and the standing touch box) against a press's anywhere
+      // it can be: any x on its track, any height from its home to the floor.
+      const boxes = (tier) => [R.BOXES[tier][STAND], R.SHOT_BOX[tier]];
+      const pod = boxes(M.TIER_OF[E.ENGINE_POD]), press = boxes(M.TIER_OF[E.ENGINE_PRESS]);
+      const [mx, my] = TY[E.ENGINE_POD].mounts[0];
+      const podX1 = mx + Math.max(...pod.map((b) => b[1])), podX0 = mx + Math.min(...pod.map((b) => b[0]));
+      const pressX1 = -RT.PRESS_RIGHT + Math.max(...press.map((b) => b[1]));
+      const podY0 = my + M.ORIGIN_OF[E.ENGINE_POD] + Math.min(...pod.map((b) => b[2])), pressY1 = RT.PRESS_HOME + Math.max(...press.map((b) => b[3]));
+      const clear = pressX1 < podX0 || podY0 > pressY1;
+      // Docked, it is shut: an Ooga (invincible) under it on the floor fires up at it for two seconds while the presses stand.
+      const docked = M.create({ seed: 3, stage: only(E.CHAIRMAN_ENGINE) }), d = docked.state;
+      atLock(docked, 77.65); d.pInvincible[0] = 1e9;
+      step(docked, 0);
+      const dp = slotOf(d, E.ENGINE_POD);
+      let upFired = 0;
+      for (let i = 0; i < 240; i++) { const bits = IN.UP | fireOn(d); if (bits & IN.FIRE && d.bLive.indexOf(0) >= 0) upFired++; step(docked, bits); }
+      const shut = { hp: d.eHp[dp], fired: upFired, shut: (d.eFlags[dp] & F.SHUT) !== 0, routine: d.eRoutine[dp], x: d.ex[dp], above: d.bly.some((y, b) => d.bLive[b] && y > d.ey[dp] + 0.6) };
+      // Its hit points with the fan held: the pod's fixed, the Engine's by the formula.
+      const fan = M.create({ seed: 3, stage: only(E.CHAIRMAN_ENGINE) }), f = fan.state;
+      atLock(fan, 74); f.pWeapon[0] = M.WEAPON.FAN; f.pInvincible[0] = 1e9;
+      step(fan, 0);
+      const rifle = M.create({ seed: 3, stage: only(E.CHAIRMAN_ENGINE) }), rs = rifle.state;
+      atLock(rifle, 74); rs.pInvincible[0] = 1e9;
+      step(rifle, 0);
+      const hp = { pod: f.eHp[slotOf(f, E.ENGINE_POD)], engine: f.eHp[slotOf(f, E.CHAIRMAN_ENGINE)], rifle: rs.eHp[slotOf(rs, E.CHAIRMAN_ENGINE)] };
+      // The pod's whole box stays on the screen over a loop (a millimetre's tolerance for the Float32 positions).
+      const L = fight.loop, onScreen = !!L && L.steps >= RT.POD_T / M.FIXED - 1 && L.left >= -1e-3 && L.right <= S.SCREEN_W * C + 1e-3 && L.low >= -1e-3 && L.high <= L.top + 1e-3;
+      const u = fight.undock;
+      return {
+        ok: !fight.error && clear && fight.dock && fight.dock.dx === mx && fight.dock.dy === my && u && u.attr >= TY[E.ENGINE_POD].mounts.length && !u.shut &&
+          fight.routines.length >= 3 && fight.podHits.perch > 0 && fight.podHits.floor > 0 && fight.podHits.perch + fight.podHits.floor + fight.podHits.other === 40 &&
+          hp.pod === 40 && hp.engine === 88 && hp.rifle === 64 && hp.engine - hp.rifle === 8 * 3 && onScreen &&
+          shut.hp === 40 && shut.fired > 4 && shut.shut && shut.routine === LK.ENGINE_POD.docked && !shut.above,
+        detail: JSON.stringify({ loop: L, shut, clear, podX0, pressX1, podY0, pressY1, dock: fight.dock, undock: u, podHits: fight.podHits, hp, error: fight.error })
+      };
+    });
+    reserve("raid reserve: the Chairman's Engine runs its phases in order (presses, pod, core), stays shut until the pod falls, then falls to standing forward shots from the floor, clearing the stage with every other slot emptied, slots to spare throughout; and the campaign goes on from The Reserve to its ending", () => {
+      const order = (fight.routines || []).map(([r]) => r), core = fight.coreHits || [];
+      const hp = M.HP_OF[E.CHAIRMAN_ENGINE];
+      // The campaign: with The Reserve last (as in STAGES), the stage before it clears into it, and its Engine's fall
+      // goes to the ending, then back to the first stage a loop on. The Engine is put straight into its core phase on its
+      // last hit point and shot down standing.
+      const CP = context.window.BL.raidCampaign, camp = CP.create({ seed: 3, stages: [S.STAGES[0], only(E.CHAIRMAN_ENGINE)] }), seen = [];
+      camp.sim.state.phase = M.PHASE.CLEAR;
+      camp.simulate(M.FIXED);
+      seen.push(camp.state.phase);
+      camp.simulate(CP.TUNE.TRANSITION + 0.1);
+      seen.push(camp.state.phase, camp.state.stageIndex);
+      const cs = camp.sim.state;
+      atLock(camp.sim, 75.6); cs.pFace[0] = 1; cs.pInvincible[0] = 1e9;
+      camp.simulate(M.FIXED);
+      const eng = slotOf(cs, E.CHAIRMAN_ENGINE);
+      cs.eRoutine[eng] = LK.CHAIRMAN_ENGINE.core; cs.eFlags[eng] &= ~F.SHUT; cs.eHp[eng] = 1;
+      for (let i = 0; i < 240 && camp.state.phase === CP.PHASE.PLAY; i++) { camp.setInput(cs.prevInput & IN.FIRE ? 0 : IN.FIRE); camp.simulate(M.FIXED); }
+      seen.push(camp.state.phase);
+      camp.simulate(CP.TUNE.ENDING + 0.1);
+      seen.push(camp.state.phase, camp.state.stageIndex, camp.state.loops);
+      const lastIsReserve = S.STAGES[S.STAGES.length - 1].id === "reserve";
+      return {
+        ok: !fight.error && JSON.stringify(order) === JSON.stringify([LK.CHAIRMAN_ENGINE.presses, LK.CHAIRMAN_ENGINE.pod, LK.CHAIRMAN_ENGINE.core]) &&
+          core.length === hp && core.every((h) => h.routine >= LK.CHAIRMAN_ENGINE.core && h.pose === STAND && h.y === 1.5 && h.aim === 0) && fight.spent[E.CHAIRMAN_ENGINE] > 0 &&
+          fight.phase === M.PHASE.CLEAR && fight.others === 0 && fight.full === 0 && fight.peak < M.ENEMY_SLOTS && lastIsReserve && JSON.stringify(seen) === JSON.stringify([CP.PHASE.TRANSITION, CP.PHASE.PLAY, 1, CP.PHASE.ENDING, CP.PHASE.PLAY, 0, 1]),
+        detail: JSON.stringify({ order, core: core.length, spent: fight.spent, phase: fight.phase, others: fight.others, peak: fight.peak, full: fight.full, time: fight.time, seen, lastIsReserve, error: fight.error })
+      };
+    });
+
+    // rule: a boss's attacks find their slots. An Ooga held on the row-6 perch, then the row-4 perch (under a barrier, so
+    // nothing kills it), through the pod phase and the core phase, 30 s each on the Engine-only stage: every shot, shell
+    // or burst the fight asks for gets a slot (the sim's `shots`, asked and given), and no step has all sixteen slots
+    // taken. The presses (and for the core the pod) are put straight to their destroyed routines to reach each phase.
+    reserve("raid reserve: with an Ooga held on either perch through the pod and core phases, every shot the Engine's fight asks for finds a slot and no step takes all sixteen", () => {
+      const runs = [];
+      for (const phase of ["pod", "core"]) for (const [where, x, y] of [["row 6", 74.4, 3.5], ["row 4", 73.4, 2.5]]) {
+        const sim = M.create({ seed: 5, stage: only(E.CHAIRMAN_ENGINE) }), s = sim.state;
+        atLock(sim, x); s.py[0] = y;
+        step(sim, 0);
+        const done = (type) => { for (let k = 0; k < M.ENEMY_SLOTS; k++) if (s.eType[k] === type && s.eRoutine[k] < M.DESTROYED[type]) { s.eHp[k] = 0; s.eRoutine[k] = M.DESTROYED[type]; } };
+        done(E.ENGINE_PRESS);
+        for (let i = 0; i < 2 * 120; i++) { s.pBarrier[0] = 1e9; step(sim, 0); }
+        if (phase === "core") done(E.ENGINE_POD);
+        const asked = sim.shots[0], given = sim.shots[1];
+        const hx = s.px[0], hy = s.py[0];
+        let full = 0, held = hy === y;
+        for (let i = 0; i < 30 * 120; i++) {
+          s.pBarrier[0] = 1e9;
+          step(sim, 0);
+          if (live(s) === M.ENEMY_SLOTS) full++;
+          if (s.px[0] !== hx || s.py[0] !== hy) held = false;
+        }
+        const eng = slotOf(s, E.CHAIRMAN_ENGINE);
+        runs.push({ phase, where, routine: eng >= 0 ? s.eRoutine[eng] : -1, asked: sim.shots[0] - asked, given: sim.shots[1] - given, full, held });
+      }
+      const want = { pod: LK.CHAIRMAN_ENGINE.pod, core: LK.CHAIRMAN_ENGINE.core };
+      return { ok: runs.every((r) => r.routine === want[r.phase] && r.held && r.asked > 0 && r.asked === r.given && r.full === 0), detail: JSON.stringify(runs) };
+    });
+
+    // playthrough: the stage cleared under the autopilot and a standing barrier on four seeds, and how it took the lift:
+    // the step it stood on the lift (`riding`: in its columns, on its top), where it boarded, where it last stood on it,
+    // and where it next stood once off it (the gallery, or the step past it, 1 m lower, which the 2.11 m jump reaches
+    // from the lift's top); and the slots in use while the Engine fought.
+    const [lc, lw, low, high] = (RES && RES.lifts[0]) || [-1, 0, -1, -1];   // no lift: every ride check fails, nothing throws
+    let clears;
+    try {
+      clears = [1, 2, 3, 4].map((seed) => {
+        const t0 = Date.now(), sim = M.create({ seed, stage: RES }), s = sim.state, limit = 900 * 120;
+        let i = 0, deaths = 0, dead = false, on = false, off = false, board = null, left = null, rides = [], peak = 0;
+        for (; i < limit && s.phase !== M.PHASE.CLEAR && s.phase !== M.PHASE.OVER; i++) {
+          if (i % 120 === 0) s.pBarrier[0] = 1e9;
+          sim.setInput(M.autopilot(sim)); sim.simulate(M.FIXED);
+          if (s.pState[0] === PS.DEAD && !dead) deaths++;
+          dead = s.pState[0] === PS.DEAD;
+          const col = Math.floor(s.px[0] / C), grounded = s.pState[0] === PS.NORMAL && s.pPose[0] !== M.POSE.JUMP;
+          const riding = grounded && col >= lc && col < lc + lw && Math.abs(s.py[0] - M.liftTop(RES.lifts[0], s.time)) < 1e-3;
+          if (riding && !on) board = { x: +s.px[0].toFixed(2), y: +s.py[0].toFixed(3) };
+          if (riding) left = { x: +s.px[0].toFixed(2), y: +s.py[0].toFixed(3) };
+          if (!riding && on) off = true;
+          if (off && grounded && !riding) { rides.push({ board, left, to: { x: +s.px[0].toFixed(2), y: +s.py[0].toFixed(3) } }); off = false; }
+          on = riding;
+          if (s.phase === M.PHASE.BOSS) peak = Math.max(peak, live(s));
+        }
+        return { seed, done: s.phase === M.PHASE.CLEAR && i < limit, time: +s.time.toFixed(1), deaths, locked: s.camX === s.lockX, rides, peak, wall: (Date.now() - t0) / 1000 };
+      });
+    } catch (e) { clears = { error: String(e && e.stack || e) }; }
+    reserve("raid reserve: an Ooga under a standing barrier, steered by the autopilot, clears The Reserve within 900 s on four seeds, boarding the Chairman's lift at its low end, flush with the floor, and leaving it at its high end onto the gallery or the step past it, with slots to spare while the Engine fights", () => ({
+      ok: Array.isArray(clears) && clears.length === 4 && clears.every((c) => c.done && c.locked && c.deaths === 0 && c.peak < M.ENEMY_SLOTS && c.rides.length >= 1 &&
+        c.rides.every((r) => r.board.y === (low + 1) * C && r.left.y === (high + 1) * C && Math.floor(r.to.x / C) >= lc + lw &&
+          ((r.to.y === (high + 1) * C && Math.floor(r.to.x / C) <= 139) || (r.to.y === (high - 1) * C && Math.floor(r.to.x / C) <= 141)))),
+      detail: JSON.stringify(clears)
+    }));
   }
 };
 // Regression: an idle hub loaded the whole hunt; a lazy entry must also hear a follower before its host has loaded it.
@@ -26304,6 +33020,346 @@ for (const id of ["cloud-hopper", "drop", "orbit", "mine", "invaders", "stampede
   scene("arcade", { label: `cabinet ${id} desktop`, exclusive: true, query: "character=portlandhodl&pos=0", opts: { motion: true }, steps: [cabinetVisit(id)] });
   scene("arcade", { label: `cabinet ${id} phone`, query: "character=portlandhodl&pos=0", opts: { w:390,h:844,mobile:true,motion:true }, steps: [cabinetVisit(id)] });
 }
+// ---- Ooga Raid ----
+// The run is played in debug `simulate` (whole fixed steps, no frames); the keys go through the real keyboard path and
+// are measured on screen: each Ooga's node and every drawn shot projected through the scene's camera. A standing
+// barrier (written into the current stage's sim, which a hand-over replaces) keeps the measured Ooga alive.
+const RAID_CODES = { a: "KeyA", d: "KeyD", w: "KeyW", j: "KeyJ", " ": "Space", ",": "Comma", ".": "Period", ArrowLeft: "ArrowLeft", ArrowRight: "ArrowRight" };
+const RAID_SEEN = `(() => { const B = window.__ooga, R = B.raid, s = R.sim.state, at = (n) => { const q = B.project(n.position.x, n.position.y, n.position.z); return [Math.round(q.x), Math.round(q.y)]; };
+  const looks = Object.values(window.BL.raidModels.looks().bullets), shots = window.BL.scenes.raid.root.children.filter((n) => n.visible && looks.includes(n.geometry)).map(at);
+  const owners = []; for (let i = 0; i < s.bLive.length; i++) if (s.bLive[i]) owners.push(s.bOwner[i]);
+  return { oogas: R.crews.map((c) => at(c.node)), shots, owners, time: +s.time.toFixed(3), phase: R.campaign.state.phase }; })()`;
+const RAID_BARRIER = `(() => { __ooga.raid.sim.state.pBarrier.fill(1e6); return true; })()`;
+// Every slot emptied and the spawner and the placed list held, so a shot fired to be watched meets nothing (the shore's
+// spawner sends a runner every 1.2 s, and one in the way spends the shot before it is seen); RAID_RESUME lets both go on
+// from where they were held.
+const RAID_CLEAR = `(() => { const s = __ooga.raid.sim.state; window.__raidHeld = [s.spawnTimer, s.listCursor]; s.eType.fill(0); s.spawnTimer = 1e9; s.listCursor = 1e6; return true; })()`;
+const RAID_RESUME = `(() => { const s = __ooga.raid.sim.state; [s.spawnTimer, s.listCursor] = window.__raidHeld; delete window.__raidHeld; return true; })()`;
+// Counts every payment (`__raidPaid`) over the arcade's tickets at the start (`__raidTickets`); RAID_UNPAID puts the
+// game's own addTickets back at the end of the step.
+const RAID_PAID = `(() => { const g = window.__ooga.game, add = g.addTickets; window.__raidPaid = []; window.__raidAdd = add; window.__raidTickets = g.state.arcade.tickets; g.addTickets = (n) => { window.__raidPaid.push(n); return add(n); }; return true; })()`;
+const RAID_UNPAID = `(() => { window.__ooga.game.addTickets = window.__raidAdd; delete window.__raidAdd; return true; })()`;
+// Holds `keys` for `seconds` of frames and returns what is on screen before they are let go.
+const raidHold = async (b, keys, seconds) => {
+  for (const k of keys) await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: k, text: k.length === 1 ? k : undefined, code: RAID_CODES[k] });
+  await b.evaluate(`window.__ooga.advance(${seconds}, 1 / 60)`);
+  const seen = await b.evaluate(RAID_SEEN);
+  for (const k of keys) await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: RAID_CODES[k] });
+  await b.evaluate(`window.__ooga.advance(0.3, 1 / 60)`);
+  return seen;
+};
+// A shot's way on screen: fired by `keys` (a three-frame press), then where the drawn shots stand 0.06 s later. Only
+// a press that leaves exactly one shot drawn both times is read.
+const raidShot = async (b, keys) => {
+  for (const k of keys) await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: k, text: k.length === 1 ? k : undefined, code: RAID_CODES[k] });
+  await b.evaluate(`window.__ooga.advance(0.05, 1 / 60)`);
+  for (const k of keys) await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: RAID_CODES[k] });
+  const a = await b.evaluate(RAID_SEEN);
+  await b.evaluate(`window.__ooga.advance(0.06, 1 / 60)`);
+  const c = await b.evaluate(RAID_SEEN);
+  await b.evaluate(`window.__ooga.advance(0.6, 1 / 60)`);
+  // Each shot at the later read paired with the nearest at the first; the closest pair is one shot's flight.
+  let move = null;
+  for (const q of c.shots) for (const p of a.shots) { const d = [q[0] - p[0], q[1] - p[1]]; if (!move || Math.hypot(...d) < Math.hypot(...move)) move = d; }
+  return { shots: a.shots.length, later: c.shots.length, owners: a.owners, dx: move && move[0], dy: move && move[1] };
+};
+const raidMoved = (from, to) => [to[0] - from[0], to[1] - from[1]];
+const raidPlay = { name: "raid playthrough", why: "playthrough: the campaign plays through all eight stages and its loop to the run's end, shown, saved and paid once", run: async (b) => {
+  await b.evaluate(RAID_PAID);
+  const card = await b.evaluate(`!document.querySelector('[data-intro="raid"]').hidden`);
+  await b.key("Enter");
+  await b.evaluate(`window.__ooga.advance(0.3, 1 / 60)`);
+  // All eight stages, each placed by the campaign in turn, under the autopilot; held at the ending's card, then on into
+  // the loop's first stage.
+  const run = await b.evaluate(`(() => { const R = __ooga.raid, STAGES = BL.raidStages.STAGES; const closed = document.querySelector('[data-intro="raid"]').hidden; R.newRun({ stages: STAGES, seed: 1 }); R.autopilot = true;
+    const seen = [], kinds = [], cards = [], calls = []; let t = 0, ending = null, cardsAt = R.weight.cards, callsAt = R.weight.calls;
+    const look = () => { const i = R.campaign.state.stageIndex; if (seen[seen.length - 1] !== i) { seen.push(i); kinds.push(R.sim.stage.kind); } };
+    // Each boss card and weapon callout as it is shown, with whether its DOM shows (the timers that hide them wait for frames).
+    const weigh = () => { const w = R.weight; if (w.cards > cardsAt) { cardsAt = w.cards; cards.push([w.card, !document.getElementById("raid-bosscard").hidden]); } if (w.calls > callsAt) { callsAt = w.calls; calls.push([w.call, !document.getElementById("raid-call").hidden]); } };
+    for (; t < 1800 && R.campaign.state.loops < 1; t++) { look(); R.sim.state.pBarrier.fill(1e6); R.simulate(1); weigh();
+      if (!ending && R.campaign.state.phase === "ending") { const c = document.getElementById("raid-card"); ending = { shown: !c.hidden, sign: document.getElementById("raid-card-sign").getAttribute("aria-label") || document.getElementById("raid-card-sign").textContent, at: t }; } }
+    look(); R.autopilot = false; return { closed, t, seen, kinds, ending, loops: R.campaign.state.loops, phase: R.campaign.state.phase, cards, calls }; })()`);
+  // The run's end: the Ooga let fall with no lives or continues left (a fixture, so the end comes in one shot), then
+  // Enter at game over ends the run and shows its card.
+  const over = await b.evaluate(`(() => { const R = __ooga.raid; R.simulate(3); const s = R.sim.state; s.pBarrier[0] = 0; s.pInvincible[0] = 0; s.pLives[0] = 0; s.continues = 0; R.sim.spawn(BL.raidSim.ENEMY.SHOT, s.px[0], s.py[0] + 0.5, 0); let n = 0; for (; n < 600 && R.campaign.state.phase !== "over"; n++) R.simulate(1 / 120); return { phase: R.campaign.state.phase, n }; })()`);
+  await b.key("Enter");
+  await b.evaluate(`window.__ooga.advance(1, 1 / 60)`);
+  const end = await b.evaluate(`(() => { const B = window.__ooga, R = B.raid, s = R.sim.state, saved = JSON.parse(localStorage.getItem("oogaboogaland.v1") || "{}").raid; return { phase: R.campaign.state.phase, results: !document.getElementById("raid-results").hidden, rows: [...document.querySelectorAll("#raid-rows li")].map((li) => li.textContent.trim()), score: s.pScore[0], due: BL.raidSim.tickets(s.pScore[0]), paid: window.__raidPaid.slice(), tickets: B.game.state.arcade.tickets - window.__raidTickets, best: B.game.state.raid.best, saved: saved && saved.best }; })()`);
+  await b.evaluate(`window.__ooga.advance(1, 1 / 60)`);
+  const later = await b.evaluate(`window.__raidPaid.length`);
+  await b.evaluate(RAID_UNPAID);
+  const s = end.score, best = end.best;
+  const BOSS_CARDS = "The Bank Vault|The Mint Press|The Inflation Balloon|The Printer King|The Grid Warden|The Backlog Leviathan|The Bailout Mech|The Chairman's Engine";
+  record("raid playthrough: Enter closes the title card, the campaign plays all eight stages in turn (side, rooms, climb, rooms, then four side stages) under the autopilot to the Raid complete card and on into its loop, each boss named on its card as it enters and each pickup called out, and the run's end shows its results with the score, saved as the best on the furthest stage with the loop done, its tickets paid once",
+    card && run.closed && run.seen.join() === "0,1,2,3,4,5,6,7,0" && run.cards.slice(0, 8).map((c) => c[0]).join("|") === BOSS_CARDS && run.cards.every((c) => c[1]) && run.calls.length > 0 && run.calls.every((c) => c[1]) && run.kinds.join() === "side,rooms,climb,rooms,side,side,side,side,side" && run.loops === 1 && run.ending && run.ending.shown && /Raid complete/.test(run.ending.sign)
+      && over.phase === "over" && end.phase === "end" && end.results && end.rows.some((r) => /^Score/.test(r) && r.replace(/\D/g, "") === String(s)) && s > 0
+      && best && best.score === s && best.stage === 7 && best.looped === true && end.saved && end.saved.score === s && end.saved.stage === 7 && end.saved.looped === true
+      && end.paid.length === 1 && end.paid[0] === end.due && end.tickets === end.due && later === 1, JSON.stringify({ card, run, over, end, later }));
+  // Enter on the results card starts a new raid, for the steps after.
+  await b.key("Enter");
+  await b.evaluate(`window.__ooga.advance(2.5, 1 / 60)`);
+  const again = await b.evaluate(`(() => { const R = __ooga.raid; return { phase: R.campaign.state.phase, score: R.sim.state.pScore[0], results: !document.getElementById("raid-results").hidden }; })()`);
+  record("raid playthrough: Enter on the results card starts a new raid", again.phase === "play" && again.score === 0 && !again.results, JSON.stringify(again));
+  // That run's dice come from the clock; the steps after play a pinned one, so a shot never meets an enemy by chance.
+  await b.evaluate(`(() => { __ooga.raid.newRun({ seed: 2 }); __ooga.advance(2.5, 1 / 60); return true; })()`);
+} };
+// The music follows the campaign, read through the audio's debug handle (`audio.music`, the tune chosen) over displayed
+// frames: the stage's own loop from its start, the boss's once the boss is in play, the clear's jingle under the stage
+// card, the next stage's own loop (its steps already scheduled on the chip), game over's sting, and on a run of the last
+// stage alone the ending under its card. The boss and the clears are fixtures (the sim's phase set), game over the
+// playthrough's fixture shot; a pinned run is left for the steps after, as the playthrough leaves one.
+const raidMusic = { name: "raid music", why: "rule: the music follows the campaign: each stage's own tune from its start, the boss's in the boss fight, the clear's jingle, game over's sting and the ending", run: async (b) => {
+  const r = await b.evaluate(`(() => { const B = __ooga, R = B.raid, P = BL.raidSim.PHASE, STAGES = BL.raidStages.STAGES, tune = () => R.audio.music, seen = {};
+    R.newRun({ stages: STAGES, seed: 3 }); B.advance(0.2, 1 / 60); seen.stage = [tune(), R.sim.stage.id];
+    R.sim.state.phase = P.BOSS; B.advance(0.1, 1 / 60); seen.boss = tune();
+    const M = BL.raidSim, st = R.sim.stage, s0 = R.sim.state; let main = -1;
+    for (let k = 0; k < st.placed.length; k += 4) if (M.BOSS_MAIN[st.placed[k + 2]]) main = st.placed[k + 2];
+    const slot = R.sim.spawn(main, s0.camX + 6, s0.py[0], 0); B.advance(1 / 60, 1 / 60);
+    s0.eRoutine[slot] = M.DESTROYED[main]; B.advance(0.1, 1 / 60); seen.clear = [tune(), R.campaign.state.phase, R.audio.musicDucked]; seen.weight = R.weight;
+    window.__raidMusicContext = R.audio.context;
+    B.advance(2.2, 1 / 60); seen.next = [tune(), R.sim.stage.id, R.campaign.state.phase]; seen.playing = { ready: R.audio.ready, step: R.audio.musicStep }; seen.settled = R.weight;
+    R.newRun({ stages: STAGES, seed: 3 }); R.sim.state.pBarrier.fill(1e6); R.simulate(3);
+    const s = R.sim.state; s.pBarrier[0] = 0; s.pInvincible[0] = 0; s.pLives[0] = 0; s.continues = 0; R.sim.spawn(BL.raidSim.ENEMY.SHOT, s.px[0], s.py[0] + 0.5, 0);
+    for (let n = 0; n < 600 && R.campaign.state.phase !== "over"; n++) R.simulate(1 / 120);
+    B.advance(0.1, 1 / 60); seen.over = [tune(), R.campaign.state.phase];
+    R.newRun({ stages: [STAGES[STAGES.length - 1]], seed: 3 }); B.advance(0.2, 1 / 60); seen.last = tune();
+    R.sim.state.phase = P.CLEAR; B.advance(0.1, 1 / 60); seen.ending = [tune(), R.campaign.state.phase];
+    R.newRun({ seed: 2 }); B.advance(2.5, 1 / 60); return seen; })()`);
+  record("raid music: the music follows the campaign: the stage's own tune from its start, the boss's once the boss is in play, the clear's jingle under the stage card, still under the boss's break's duck as it starts, the next stage's own tune, playing on the chip, game over's sting, and the ending under the ending's card",
+    r.stage.join() === "shore,shore" && r.boss === "boss" && r.clear.join() === "clear,transition,true" && r.next.join() === "counting,counting,play" && r.playing.ready && r.playing.step > 0
+      && r.over.join() === "over,over" && r.last === "reserve" && r.ending.join() === "ending,ending", JSON.stringify(r));
+  record("raid music: the boss's fall holds the run a moment and shakes the play, and both have passed by the next stage",
+    r.weight.hitstop > 0 && r.weight.hitstop <= 0.12 && r.weight.shake > 0 && r.settled.hitstop === 0 && r.settled.shake === 0, JSON.stringify({ weight: r.weight, settled: r.settled }));
+} };
+// A stage that places a type with no look throws as it is prepared (under the stage card), naming the type: a fixture
+// copy of Bifrost Pass under its own art entry (a fresh look table) with the ICICLE look taken out of the registry.
+const raidLooks = { name: "raid looks", why: "rule: a stage holding a type with no look must fail as it starts, naming the type, not minutes into play when one is first drawn; and a printer's wind-up and its dollar bills, and every attacker's wind-up, which warn a player of its shots, must show", run: async (b) => {
+  const r = await b.evaluate(`(() => { const A = BL.raidArt, st = BL.raidStages.STAGES.find((x) => x.id === "bifrost"), icicle = A.types.ICICLE; let message = "";
+    A.stages["fixture-no-icicle"] = Object.assign({}, A.stages.bifrost);
+    delete A.types.ICICLE;
+    try { __ooga.raid.prepare({ ...st, id: "fixture-no-icicle" }); } catch (e) { message = e.message; }
+    A.types.ICICLE = icicle;
+    delete A.stages["fixture-no-icicle"];
+    return { message, real: !!__ooga.raid.prepare(st) }; })()`);
+  record("raid looks: a stage that places a type with no look throws as it is prepared, naming the stage and the type, and the real stage prepares",
+    /fixture-no-icicle/.test(r.message) && /ICICLE/.test(r.message) && /no look/.test(r.message) && r.real, JSON.stringify(r));
+  // A printer put down 3 m ahead of the Ooga on the shore (under a barrier, the screen cleared and the spawner held), drawn
+  // over displayed frames: once it winds up it wears more than one of its spin frames, its heat shows and soot and embers
+  // rise from the smoke pool (`__ooga.raid.printer`), its bill-green tell ring closes on it and its motor's cue sounds
+  // (`__ooga.raid.tells`); then its shot is drawn as the dollar bill. Then a clerk put down there: as it winds up it wears
+  // its wind-up look under a coin-gold ring, silent (a soldier's wind-up is seen, not heard); then an arc pylon, a
+  // machine: as it charges its spark-blue ring closes and the tell's cue sounds.
+  await b.evaluate(RAID_BARRIER); await b.evaluate(RAID_CLEAR);
+  const w = await b.evaluate(`(() => { const B = __ooga, R = B.raid, s = R.sim.state, E = BL.raidSim.ENEMY, WIND = BL.raidEnemies.PRINTER_WIND, L = BL.raidModels.looks();
+    const k = R.sim.spawn(E.PRINTER, s.px[0] + 3, s.py[0], 0), spins = L.winding[E.PRINTER].concat(L.turnedWinding[E.PRINTER]), frames = new Set(), out = {};
+    let n = 0;
+    for (; n < 300 && s.eRoutine[k] !== WIND; n++) B.advance(1 / 60, 1 / 60);
+    out.wound = s.eRoutine[k] === WIND;
+    for (let i = 0; i < 24 && s.eRoutine[k] === WIND; i++) { B.advance(1 / 60, 1 / 60); for (const c of BL.scenes.raid.root.children) if (c.visible && spins.includes(c.geometry)) frames.add(c.geometry); }
+    out.cue = R.printer; out.frames = frames.size; out.printerTell = R.tells;
+    for (n = 0; n < 120 && R.printer.bills === 0; n++) B.advance(1 / 60, 1 / 60);
+    out.shot = R.printer; out.billAttr = [...s.eAttr].filter((a, j) => s.eType[j] === E.SHOT).every((a) => a >= BL.raidSim.RULES.AIM_STEPS);
+    s.eType[k] = E.FREE; for (let j = 0; j < s.eType.length; j++) if (s.eType[j] === E.SHOT) s.eType[j] = E.FREE;
+    B.advance(1 / 60, 1 / 60);
+    const c = R.sim.spawn(E.CLERK, s.px[0] + 3, s.py[0], 0), F = BL.raidSim.FLAG;
+    for (n = 0; n < 300 && !(s.eFlags[c] & F.WIND); n++) B.advance(1 / 60, 1 / 60);
+    B.advance(1 / 60, 1 / 60);
+    out.clerkTell = R.tells;
+    s.eType[c] = E.FREE; for (let j = 0; j < s.eType.length; j++) if (s.eType[j] === E.SHOT) s.eType[j] = E.FREE;
+    B.advance(1 / 60, 1 / 60);
+    const y = R.sim.spawn(E.ARC_PYLON, s.px[0] + 3, s.py[0], 0);
+    for (n = 0; n < 600 && !(s.eFlags[y] & F.WIND); n++) B.advance(1 / 60, 1 / 60);
+    B.advance(1 / 60, 1 / 60);
+    out.pylonTell = R.tells;
+    s.eType[y] = E.FREE; for (let j = 0; j < s.eType.length; j++) if (s.eType[j] === E.SHOT || s.eType[j] === E.SPARK) s.eType[j] = E.FREE;
+    return out; })()`);
+  await b.evaluate(RAID_RESUME);
+  const pt = w.printerTell, ct = w.clerkTell, yt = w.pylonTell;
+  record("raid looks: a printer winding up spins through its frames, glows its heat, puffs soot and embers from the smoke pool and closes a bill-green ring with its motor's cue, and its shot is drawn as a dollar bill; a clerk winding up wears its wind-up look under a coin-gold ring, silently; an arc pylon charging closes a spark ring with the tell's cue",
+    w.wound && w.frames >= 2 && w.cue.winding === 1 && w.cue.heat === 1 && w.cue.smoke >= 2 && w.cue.embers >= 1 && w.shot.bills >= 1 && w.billAttr &&
+      pt.rings === 1 && pt.families.join() === "BILL" && pt.cues.windUp >= 1 && ct.winding === 1 && ct.winds === 1 && ct.rings === 1 && ct.families.join() === "COIN" && ct.cues.tell === pt.cues.tell &&
+      yt.winding === 1 && yt.rings === 1 && yt.families.join() === "SPARK" && yt.cues.tell === ct.cues.tell + 1, JSON.stringify(w));
+} };
+const raidKeys = { name: "raid keys", why: "rule: steering keys came out mirrored in two other games; the raid's keys move, aim, jump and fire their way on screen", run: async (b) => {
+  await b.evaluate(RAID_BARRIER);
+  const start = await b.evaluate(RAID_SEEN);
+  const rows = {};
+  let at = start.oogas[0];
+  for (const k of ["d", "a", "ArrowLeft", "ArrowRight"]) {
+    await b.evaluate(RAID_BARRIER);
+    const seen = await raidHold(b, [k], 0.35);
+    rows[k] = raidMoved(at, seen.oogas[0]);
+    at = (await b.evaluate(RAID_SEEN)).oogas[0];
+  }
+  await b.evaluate(RAID_BARRIER);
+  const before = (await b.evaluate(RAID_SEEN)).oogas[0], jump = await raidHold(b, [" "], 0.2);
+  rows.space = raidMoved(before, jump.oogas[0]);
+  await b.evaluate(`window.__ooga.advance(1, 1 / 60)`);
+  await b.evaluate(RAID_BARRIER); await b.evaluate(RAID_CLEAR);
+  rows.j = await raidShot(b, ["j"]);
+  // The J shot can still be in flight: emptied, so the W+J read counts only its own.
+  await b.evaluate(`(() => { __ooga.raid.sim.state.bLive.fill(0); return true; })()`);
+  rows.wj = await raidShot(b, ["w", "j"]);
+  await b.evaluate(RAID_RESUME);
+  const right = (v) => v[0] > 20 && Math.abs(v[1]) < 8, left = (v) => v[0] < -20 && Math.abs(v[1]) < 8;
+  record("raid keys: D and the right arrow move the Ooga right on screen, A and the left arrow left, Space lifts it up the screen, J fires a shot that flies on the way it faces (right) and W with J fires one up the screen",
+    start.phase === "play" && right(rows.d) && left(rows.a) && left(rows.ArrowLeft) && right(rows.ArrowRight) && rows.space[1] < -20
+      && rows.j.shots === 1 && rows.j.owners.join() === "0" && rows.j.dx > 5 && Math.abs(rows.j.dy) < 3 && rows.wj.shots === 1 && rows.wj.dy < -5 && Math.abs(rows.wj.dx) < 3, JSON.stringify({ start, rows }));
+} };
+const raidPause = { name: "raid pause", why: "rule: P pauses and resumes the run, and Escape opens the pause card and closes it, the run's clock held while it shows", run: async (b) => {
+  const st = `(() => { const R = __ooga.raid; return { paused: R.paused, card: !document.getElementById("raid-pause").hidden, music: R.audio.musicPaused, time: +R.sim.state.time.toFixed(4) }; })()`;
+  const step = async (key) => { if (key) await b.key(key); await b.evaluate(`window.__ooga.advance(0.5, 1 / 60)`); const a = await b.evaluate(st); await b.evaluate(`window.__ooga.advance(0.5, 1 / 60)`); return { ...a, later: (await b.evaluate(st)).time }; };
+  const r = { running: await step(null), p: await step("p"), resumed: await step("p"), escape: await step("Escape"), closed: await step("Escape") };
+  const held = (x) => x.paused && x.card && x.music && x.later === x.time, runs = (x) => !x.paused && !x.card && !x.music && x.later > x.time;
+  record("raid pause: P pauses with the pause card up, the clock held and the music halted, P again plays on; Escape opens the card and holds the clock and the music, Escape again closes it and plays on",
+    runs(r.running) && held(r.p) && runs(r.resumed) && held(r.escape) && runs(r.closed), JSON.stringify(r));
+} };
+// A standard gamepad (navigator.getGamepads stubbed, the pad announced as the browser announces one) plays player 1 when
+// alone: the stick runs it right on screen, A lifts it up the screen, X fires a shot that flies on the way it faces, and
+// Start pauses and again plays on. The stub and the pad are taken away at the end.
+// The fixture pad: `navigator.getGamepads` stubbed to return it, announced as the browser announces one, with the buttons
+// in `held` down as it appears (Chrome shows a pad only once a button is pressed); RAID_PAD_OFF takes it away again.
+const RAID_PAD_ON = (held = []) => `(() => { const held = ${JSON.stringify(held)}, pad = { index: 0, id: "fixture pad", connected: true, mapping: "standard", timestamp: 0, axes: [0, 0, 0, 0],
+    buttons: Array.from({ length: 17 }, (_, k) => ({ pressed: held.includes(k), touched: held.includes(k), value: held.includes(k) ? 1 : 0 })) };
+    window.__pad = pad; Object.defineProperty(navigator, "getGamepads", { configurable: true, value: () => [pad, null, null, null] });
+    const e = new Event("gamepadconnected"); Object.defineProperty(e, "gamepad", { value: pad }); window.dispatchEvent(e); return true; })()`;
+const RAID_PAD_OFF = `(() => { const p = window.__pad; p.connected = false; delete navigator.getGamepads; const e = new Event("gamepaddisconnected"); Object.defineProperty(e, "gamepad", { value: p }); window.dispatchEvent(e); delete window.__pad; return true; })()`;
+const raidPadButton = (b, k, on) => b.evaluate(`(() => { const p = window.__pad; p.buttons[${k}].pressed = ${on}; p.buttons[${k}].value = ${on ? 1 : 0}; return true; })()`);
+const raidPad = { name: "raid gamepad", why: "rule: steering came out mirrored in two other games; a standard pad's stick, A, X and Start move, jump, fire and pause player 1 their way on screen", run: async (b) => {
+  await b.evaluate(RAID_PAD_ON());
+  const set = (code) => b.evaluate(`(() => { const p = window.__pad; ${code}; return true; })()`);
+  const button = (k, on) => raidPadButton(b, k, on);
+  await b.evaluate(`window.__ooga.advance(0.2, 1 / 60)`);
+  await b.evaluate(RAID_BARRIER);
+  const a = await b.evaluate(RAID_SEEN);
+  await set("p.axes[0] = 1");
+  await b.evaluate(`window.__ooga.advance(0.35, 1 / 60)`);
+  const ran = await b.evaluate(RAID_SEEN);
+  await set("p.axes[0] = 0");
+  await b.evaluate(`window.__ooga.advance(0.3, 1 / 60)`);
+  await b.evaluate(RAID_BARRIER);
+  const before = await b.evaluate(RAID_SEEN);
+  await button(0, true);
+  await b.evaluate(`window.__ooga.advance(0.2, 1 / 60)`);
+  const jumped = await b.evaluate(RAID_SEEN);
+  await button(0, false);
+  await b.evaluate(`window.__ooga.advance(1, 1 / 60)`);
+  await b.evaluate(RAID_BARRIER); await b.evaluate(RAID_CLEAR);
+  await button(2, true);
+  await b.evaluate(`window.__ooga.advance(0.05, 1 / 60)`);
+  await button(2, false);
+  const fired = await b.evaluate(RAID_SEEN);
+  await b.evaluate(`window.__ooga.advance(0.06, 1 / 60)`);
+  const flown = await b.evaluate(RAID_SEEN);
+  await b.evaluate(`window.__ooga.advance(0.6, 1 / 60)`);
+  await b.evaluate(RAID_RESUME);
+  const pause = async () => { await button(9, true); await b.evaluate(`window.__ooga.advance(0.1, 1 / 60)`); await button(9, false); await b.evaluate(`window.__ooga.advance(0.1, 1 / 60)`);
+    return b.evaluate(`({ paused: __ooga.raid.paused, card: !document.getElementById("raid-pause").hidden })`); };
+  const paused = await pause(), resumed = await pause();
+  await b.evaluate(RAID_PAD_OFF);
+  await b.evaluate(`window.__ooga.advance(0.2, 1 / 60)`);
+  const moved = raidMoved(a.oogas[0], ran.oogas[0]), lift = raidMoved(before.oogas[0], jumped.oogas[0]);
+  const shot = fired.shots.length === 1 && flown.shots.length === 1 ? raidMoved(fired.shots[0], flown.shots[0]) : null;
+  record("raid gamepad: a standard pad's stick runs player 1 right on screen, A lifts it up the screen, X fires a shot that flies on the way it faces, and Start pauses and plays on",
+    moved[0] > 20 && Math.abs(moved[1]) < 8 && lift[1] < -20 && fired.owners.join() === "0" && shot && shot[0] > 5 && Math.abs(shot[1]) < 3 &&
+      paused.paused && paused.card && !resumed.paused && !resumed.card, JSON.stringify({ moved, lift, owners: fired.owners, shot, paused, resumed }));
+} };
+// The frame loop mid-fight on the Jungle Shore: the autopilot plays under a standing barrier for 20 s (so every code path
+// a fight takes has run and been optimized), then 12 chunks of 120 frames go through __ooga.advance at a constant frame
+// length (DT, worked out once), each chunk's used heap kept (the page runs with precise memory info). No chunk may see a
+// collection (the heap in use going down), at most one may be a burst (V8 re-tiering, as the unit tier's climb window
+// reads it), and the rest together grow by under 4 KB: under 3 bytes a frame, where one small object a frame would be 23 KB.
+const raidHeap = { name: "raid heap", why: "rule: the frame loop allocates nothing per frame, or a long run stutters on collections",
+  open: "the raid's own frame code now keeps one shape from its first frame (the crew's damped record and the sim's state store a fraction in each fractional field at creation, and the aims read from typed arrays), so raid-crew.js pose and poseGun and raid-sim.js stepPlayer reach their optimized tier by about 25 s of play, where they allocate nothing, and drop back only for a few seconds when a path is first taken late (the first wall, the first down-forward aim, the first turn); the 12 chunks still read 16 to 400 KB, most of them bursts: the first one or two while pose and stepPlayer finish tiering, geometry uploads as new screens scroll in (gl-renderer.js writeFace and put, 90 to 330 KB a chunk), the autopilot that drives this check (raid-autopilot.js sidePilot and lineClear, 15 to 110 KB a chunk, never run in play), Legion routines met for the first time (raid-enemies.js), and in the calmest chunks 16 to 35 KB (about 135 to 290 B a frame): gl-renderer.js render's own boxing (about 9 KB a chunk), director.js step's sceneTime handed to every scene's update(dt, elapsed) (the scene contract), the debug advance's performance.now() and the raid's Web Audio cues (AudioParam calls box their numbers); the bound allows none of these; unfixed", run: async (b) => {
+  const r = await b.evaluate(`(() => { const B = window.__ooga, R = B.raid, DT = 1 / 60; R.autopilot = true;
+    for (let t = 0; t < 20; t++) { R.sim.state.pBarrier.fill(1e6); B.advance(1, DT); }
+    const chunks = []; let at = performance.memory.usedJSHeapSize;
+    for (let c = 0; c < 12; c++) { R.sim.state.pBarrier[0] = 1e6; B.advance(120 * DT, DT); const now = performance.memory.usedJSHeapSize; chunks.push(now - at); at = now; }
+    R.autopilot = false; R.sim.state.pBarrier.fill(1e6);
+    return { chunks, phase: R.campaign.state.phase, camX: +R.sim.state.camX.toFixed(2) }; })()`);
+  const collected = r.chunks.filter((c) => c < 0).length, bursts = r.chunks.filter((c) => c > 32 * 1024).length;
+  const calm = r.chunks.filter((c) => c >= 0 && c <= 32 * 1024).reduce((a, c) => a + c, 0);
+  record("raid heap: mid-fight on the Jungle Shore, 1,440 frames through the frame loop run no collection and grow the heap by under 4 KB, at most one chunk a re-tiering burst",
+    r.phase === "play" && r.camX > 0 && collected === 0 && bursts <= 1 && calm < 4 * 1024, JSON.stringify({ ...r, collected, bursts, calm }));
+} };
+// Game over with continues left: Enter continues, the run goes on with the lives back, a continue fewer and the score
+// at zero, and the stage clock running.
+const raidContinue = { name: "raid continue", why: "rule: a continue at game over restores the lives and plays on, spending one continue", run: async (b) => {
+  const over = await b.evaluate(`(() => { const R = __ooga.raid, s = R.sim.state; R.sim.award(3000); s.pBarrier[0] = 0; s.pInvincible[0] = 0; s.pLives[0] = 0; const left = s.continues;
+    R.sim.spawn(BL.raidSim.ENEMY.SHOT, s.px[0], s.py[0] + 0.5, 0); let n = 0; for (; n < 600 && R.campaign.state.phase !== "over"; n++) R.simulate(1 / 120);
+    __ooga.advance(1, 1 / 60); return { phase: R.campaign.state.phase, left }; })()`);
+  await b.key("Enter");
+  await b.evaluate(`window.__ooga.advance(0.5, 1 / 60)`);
+  const on = await b.evaluate(`(() => { const R = __ooga.raid, s = R.sim.state, t = s.time; __ooga.advance(2, 1 / 60); return { phase: R.campaign.state.phase, lives: s.pLives[0], continues: s.continues, score: s.pScore[0], ran: +(s.time - t).toFixed(2), state: s.pState[0] }; })()`);
+  record("raid continue: game over with continues left takes Enter as a continue: the run plays on with two lives in reserve, a continue fewer and the score at zero",
+    over.phase === "over" && over.left > 0 && on.phase === "play" && on.lives === 2 && on.continues === over.left - 1 && on.score === 0 && on.ran > 1.9, JSON.stringify({ over, on }));
+} };
+// The gate, fed through the scene's account handler as a sign-in or sign-out mid-visit would reach it (this page has no
+// backend): a signed-in account plays on; a signed-out one, and one whose account look never came back, is told why and
+// sent home, the second after walking back in. The step ends back in the raid, on its title card.
+const raidGate = { name: "raid gate", why: "rule: on a site with accounts only a signed-in visitor plays; a signed-out one, or one whose account look did not come back, is told why and sent home", run: async (b) => {
+  // A scene change settles between tasks, so the wait yields after each frame (as tourGo does).
+  const feed = (account, wait) => b.evaluate(`(async () => { const B = window.__ooga, R = B.raid; R.account(${JSON.stringify(account)}); B.advance(0.1, 1 / 60);
+    const refusal = R.refusal, toast = document.getElementById("toast").textContent;
+    for (let i = 0; i < ${wait} && (B.transitioning || B.scene === "raid"); i++) { B.advance(1 / 30, 1 / 30); await new Promise((r) => setTimeout(r, 0)); }
+    return { refusal, toast, scene: B.scene }; })()`);
+  const signedIn = await feed({ resolved: true, backend: true, me: { login: "tester" } }, 60);
+  const signedOut = await feed({ resolved: true, backend: true, me: null }, 150);
+  const walked = (await tourGo(b, "raid")).scene;
+  const unchecked = await feed({ resolved: false, backend: false, me: null }, 150);
+  const back = (await tourGo(b, "raid")).scene;
+  const SIGN_IN = "Sign in to play Ooga Raid", UNCHECKED = "Couldn't check sign-in. Reload to try again.";
+  record("raid gate: a signed-in account plays on; a signed-out one is told to sign in and sent home, and one whose account look never came back is told so and sent home",
+    signedIn.refusal === null && signedIn.scene === "raid" && signedOut.refusal === SIGN_IN && signedOut.toast === SIGN_IN && signedOut.scene === "hub" &&
+      walked === "raid" && unchecked.refusal === UNCHECKED && unchecked.toast === UNCHECKED && unchecked.scene === "hub" && back === "raid",
+    JSON.stringify({ signedIn, signedOut, walked, unchecked, back }));
+} };
+const raidTwo = { name: "raid two players", why: "rule: two players pick on the title card and each plays with their own keys, neither moving the other", run: async (b) => {
+  const card = await b.evaluate(`!document.querySelector('[data-intro="raid"]').hidden`);
+  await b.key("2");
+  await b.evaluate(`window.__ooga.advance(0.2, 1 / 60)`);
+  const picked = await b.evaluate(`({ players: __ooga.raid.players, crews: __ooga.raid.crews.length, pressed: document.getElementById("raid-2p").getAttribute("aria-pressed") })`);
+  // The run on the card took the clock's dice as the scene came back in; this one plays pinned dice.
+  await b.evaluate(`(() => { __ooga.raid.newRun({ players: 2, seed: 3 }); return true; })()`);
+  await b.key("Enter");
+  await b.evaluate(`window.__ooga.advance(2.5, 1 / 60)`);
+  await b.evaluate(RAID_BARRIER);
+  // Player 2's shot first, from where it dropped: further right it meets the ledge over the beach (x 4.5) at once.
+  const rows = { fire2: await raidShot(b, ["."]) };
+  for (const [name, keys, secs] of [["right2", ["ArrowRight"], 0.35], ["jump2", [","], 0.2], ["right1", ["d"], 0.35]]) {
+    await b.evaluate(RAID_BARRIER);
+    const a = await b.evaluate(RAID_SEEN), c = await raidHold(b, keys, secs);
+    rows[name] = [raidMoved(a.oogas[0], c.oogas[0]), raidMoved(a.oogas[1], c.oogas[1])];
+    await b.evaluate(`window.__ooga.advance(0.8, 1 / 60)`);
+  }
+  const still = (v) => Math.abs(v[0]) < 2 && Math.abs(v[1]) < 2;
+  record("raid two players: 2 on the title card picks two players; the right arrow moves player 2 right on screen, comma lifts player 2, full stop fires player 2's shot, and D moves player 1, each leaving the other where it stood",
+    card && picked.players === 2 && picked.crews === 2 && picked.pressed === "true" && rows.right2[1][0] > 20 && still(rows.right2[0]) && rows.jump2[1][1] < -20 && still(rows.jump2[0])
+      && rows.right1[0][0] > 20 && still(rows.right1[1]) && rows.fire2.shots === 1 && rows.fire2.owners.join() === "1" && rows.fire2.dx > 5 && Math.abs(rows.fire2.dy) < 3, JSON.stringify({ card, picked, rows }));
+} };
+// The arcade's back door: Space at its station opens Ooga Raid (this page has no backend, so no sign-in is asked);
+// a run that scored (4,000 points awarded on top, so the payment is two tickets, not none) is left by the pause card's
+// Exit, settled once, and the same Ooga stands back at the door.
+const arcadeRaidDoor = { name: "arcade raid door", why: "rule: the back door opens Ooga Raid, and leaving the run by the pause card's Exit settles it once and brings the same Ooga back to the door", run: async (b) => {
+  // Stood at the door's station, grounded and facing it, as every station's Space asks (the arcade machine step's way).
+  await b.evaluate(`(() => { const B = window.__ooga, st = B.arcade.stations.find((s) => s.kind === "door"); B.pilot.navigate({ position: { x: st.play.x, y: 0, z: st.play.z }, yaw: st.play.facing - Math.PI, pitch: 0.2, dist: 4 });
+    const a = B.pilot.player; a.root.rotation.y = st.play.facing; a.hop = a.hopV = 0; B.advance(0.2, 1 / 60); })()`);
+  await b.key(" ");
+  const opened = await untilPage(b, 'B.scene === "raid" && !B.transitioning', 15000);
+  await b.evaluate(RAID_PAID);
+  await b.key("Enter");
+  const played = await b.evaluate(`(() => { const R = __ooga.raid; R.newRun({ seed: 4 }); R.autopilot = true; let t = 0; for (; t < 120 && R.sim.state.pScore[0] === 0; t++) { R.sim.state.pBarrier.fill(1e6); R.simulate(1); } R.autopilot = false; R.sim.award(4000); return { score: R.sim.state.pScore[0], t }; })()`);
+  await b.key("Escape");
+  await b.evaluate(`window.__ooga.advance(0.2, 1 / 60)`);
+  const card = await b.evaluate(`!document.getElementById("raid-pause").hidden`);
+  await b.evaluate(`document.querySelector('#raid-pause [data-action="leave"]').click()`);
+  await untilPage(b, 'B.scene === "arcade" && !B.transitioning', 15000);
+  await b.evaluate(`window.__ooga.advance(0.5, 1 / 60)`);
+  const back = await b.evaluate(`(() => { const B = window.__ooga, st = B.arcade.stations.find((s) => s.kind === "door"), p = B.pilot.player; return { scene: B.scene, who: p && p.traits.name, off: p ? Math.hypot(p.root.position.x - st.play.x, p.root.position.z - st.play.z) : null, paid: window.__raidPaid, due: BL.raidSim.tickets(${played.score}), best: B.game.state.raid.best }; })()`);
+  await b.evaluate(RAID_UNPAID);
+  record("arcade raid door: Space at the back door opens Ooga Raid, a run that scored and is left by the pause card's Exit is settled once (its best saved and its tickets paid), and the same Ooga stands back at the door",
+    opened && played.score > 0 && card && back.scene === "arcade" && back.who === "portlandhodl" && back.off < 0.5 && back.paid.length === 1 && back.due >= 2 && back.paid[0] === back.due && back.best && back.best.score === played.score, JSON.stringify({ opened, played, card, back }));
+} };
 scene("arcade", { label: "cabinet canvas2d", query: "character=portlandhodl&canvas2d=1&pos=0", steps: [cabinetVisit("snake")] });
 scene("arcade", { label: "cabinet interruptions", opts: { motion: true }, steps: [{ name: "cabinet interruptions", why: "regression: cancelling a menu or partial zoom must return without enlarging the screen or holding controls", run: async b => {
   await b.evaluate(`__ooga.arcade.open('drop')`);
@@ -26340,12 +33396,162 @@ scene("arcade", { label: "cabinet public route", opts: { motion: true }, steps: 
   const cancelled = await wait(`document.body.dataset.cabinetPhase === 'idle' && document.body.dataset.activeScene === 'arcade'`);
   record("cabinet public route: direct arrival and a link from the hall both visit the cabinet, play and cancel cleanly", menu && full && returned && linked && cancelled, JSON.stringify({menu,full,returned,linked,cancelled}));
 } }] });
-scene("arcade", { query: "character=portlandhodl", exclusive: true, steps: [arcadeWalking, arcadeMachine, arcadeHall, arcadeCarry, arcadeMaintenance, arcadeStage, arcadeBlockHall, arcadeHandrail, arcadePlay, trip("arcade")] });
+scene("arcade", { query: "character=portlandhodl", exclusive: true, steps: [arcadeWalking, arcadeMachine, arcadeRaidDoor, arcadeHall, arcadeCarry, arcadeMaintenance, arcadeStage, arcadeBlockHall, arcadeHandrail, arcadePlay, trip("arcade")] });
 scene("arcade", { query: "character=portlandhodl", steps: [arcadeSpectatorAmmo] });
 scene("arcade", { label: "ghost spectate follows", query: "character=portlandhodl", steps: [arcadeSpectateFollow] });
 scene("arcade", { query: "character=portlandhodl", steps: [arcadeRemoteWeapons] });
 scene("arcade", { query: "character=portlandhodl", steps: [arcadeHuntGear] });
 for (const view of ["carry", "combat"]) scene("arcade", { label: "herald click " + view, query: "character=portlandhodl", steps: [arcadeHeraldClick(view)] });
+// Shaman's Secrets on the title card, through the real keys and clicks. The record is set by hand (stage 4 not yet
+// cleared, then cleared), and every secret is turned off and the record put back at the end, so the steps after play
+// plain runs. The Konami code opens the tablet (the director's feed panel stays shut), with the stage select and mirror
+// mode "???"; Enter turns the focused secret on, the arrows walk on, a locked one refuses; Escape closes it back to the
+// card under a new run with the secrets on (the sim's bits, 30 lives, the strip's mark), kept in the save as a fresh
+// load reads it. With stage 4 cleared the stage select opens and mirror mode stays locked; a click turns it on, a press
+// outside closes the tablet with the card still up, the card names the stage and the down arrow steps the run's start.
+const RAID_CODE = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
+const RAID_SECRETS_SEEN = `(() => { const R = __ooga.raid, c = R.cheats.state, b = (id) => document.querySelector('#raid-secrets [data-secret="' + id + '"]');
+  return { open: !document.getElementById("raid-secrets").hidden, card: !document.querySelector('[data-intro="raid"]').hidden, feed: __ooga.feedPanel.open, on: c.on, run: c.run, bits: c.bits, simBits: R.sim.state.cheats,
+    stages: b("stages").children[0].textContent, mirror: b("mirror").children[0].textContent, lives: document.getElementById("raid-lives").textContent, mark: !document.getElementById("raid-cheat-mark").hidden,
+    start: document.getElementById("raid-start").hidden ? null : document.getElementById("raid-start-name").textContent, stageIndex: R.campaign.state.stageIndex }; })()`;
+const raidSecrets = { name: "raid secrets", why: "rule: the Konami code on the title card opens Shaman's Secrets, its toggles persist in the save, and the locked ones stay locked until earned", run: async (b) => {
+  await b.evaluate(`(() => { const G = __ooga.game, R = __ooga.raid; window.__raidRecord = G.state.raid.best; for (const id of BL.game.RAID_CHEATS) R.cheats.set(id, false); G.setRaidStart(0); G.state.raid.best = { score: 100, stage: 3, looped: false }; R.newRun(); return true; })()`);
+  const press = async (k, n = 1) => { for (let i = 0; i < n; i++) await b.key(k); await b.evaluate(`window.__ooga.advance(0.05, 1 / 60)`); };
+  for (const k of RAID_CODE) await press(k);
+  const opened = await b.evaluate(RAID_SECRETS_SEEN);
+  await press("Enter");
+  await press("ArrowDown", 4);
+  await press("Enter");
+  await press("ArrowDown", 4);
+  await press("Enter");
+  const toggled = await b.evaluate(RAID_SECRETS_SEEN);
+  await press("Escape");
+  const closed = await b.evaluate(RAID_SECRETS_SEEN);
+  const saved = await b.evaluate(`({ stored: JSON.parse(localStorage.getItem("oogaboogaland.v1")).raid.cheats, loaded: BL.game.create({ catalog: BL.models.SWAG }).state.raid.cheats })`);
+  // Stage 4 cleared: the stage select is earned, mirror mode not yet.
+  await b.evaluate(`(() => { __ooga.game.state.raid.best = { score: 100, stage: 4, looped: false }; return true; })()`);
+  for (const k of RAID_CODE) await press(k);
+  const earned = await b.evaluate(RAID_SECRETS_SEEN);
+  const at = await b.evaluate(`(() => { const r = document.querySelector('#raid-secrets [data-secret="stages"]').getBoundingClientRect(), t = document.getElementById("raid-secrets").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, ox: Math.max(8, t.left - 20), oy: t.top + 20 }; })()`);
+  await b.click(at.x, at.y);
+  await b.evaluate(`window.__ooga.advance(0.05, 1 / 60)`);
+  const clicked = await b.evaluate(RAID_SECRETS_SEEN);
+  await b.click(at.ox, at.oy);
+  await b.evaluate(`window.__ooga.advance(0.05, 1 / 60)`);
+  const outside = await b.evaluate(RAID_SECRETS_SEEN);
+  await press("ArrowDown");
+  const stepped = await b.evaluate(RAID_SECRETS_SEEN);
+  await b.evaluate(`(() => { const G = __ooga.game, R = __ooga.raid; R.cheats.close(); for (const id of BL.game.RAID_CHEATS) R.cheats.set(id, false); G.setRaidStart(0); G.state.raid.best = window.__raidRecord; delete window.__raidRecord; R.cheats.set("lives", false); return true; })()`);
+  await b.evaluate(`window.__ooga.advance(0.05, 1 / 60)`);
+  const after = await b.evaluate(RAID_SECRETS_SEEN);
+  const X = { LIVES: 1, SLOW: 16 };
+  record("raid secrets: the Konami code on the title card opens Shaman's Secrets with the stage select and mirror mode locked and the feed panel shut; Enter and the arrows turn secrets on and a locked one stays off; Escape closes back to the card under a run with them (30 lives, the strip's mark), kept in the save; clearing stage 4 earns the stage select, not mirror mode; a click turns it on, a press outside closes, and the card's chooser steps the run's start",
+    opened.open && opened.card && !opened.feed && opened.stages === "???" && opened.mirror === "???" && JSON.stringify(opened.on) === "[]" &&
+      JSON.stringify(toggled.on) === JSON.stringify(["lives", "slow"]) && toggled.open &&
+      !closed.open && closed.card && JSON.stringify(closed.run) === JSON.stringify(["lives", "slow"]) && closed.bits === (X.LIVES | X.SLOW) && closed.simBits === closed.bits && closed.lives === "30" && closed.mark &&
+      JSON.stringify(saved.stored) === JSON.stringify(["lives", "slow"]) && JSON.stringify(saved.loaded) === JSON.stringify(["lives", "slow"]) &&
+      earned.open && earned.stages === "Stage select" && earned.mirror === "???" && clicked.on.includes("stages") && clicked.open &&
+      !outside.open && outside.card && outside.start && /^Stage 1: /.test(outside.start) && outside.stageIndex === 0 && /^Stage 2: /.test(stepped.start) && stepped.stageIndex === 1 &&
+      !after.open && after.card && after.run.length === 0 && after.bits === 0 && !after.mark && after.start === null,
+    JSON.stringify({ opened, toggled, closed, saved, earned, clicked, outside, stepped, after }));
+} };
+// On a phone: the same code as swipes on the title card (up up down down left right left right) and two taps on it opens
+// the tablet, which fits the screen with every toggle under a thumb; a tap turns a secret on and a tap outside closes it,
+// the card still up, under a run with it and no mark in the strip (big heads only change the look, so the run counts).
+// Every secret is turned off again at the end.
+const raidPhoneSecrets = { name: "raid phone secrets", why: "rule: the Konami code on the title card opens Shaman's Secrets on a phone too, as swipes and taps, and the tablet fits a phone", run: async (b) => {
+  await b.evaluate(`(() => { for (const id of BL.game.RAID_CHEATS) __ooga.raid.cheats.set(id, false); return true; })()`);
+  const p = await b.evaluate(`(() => { const r = document.querySelector('[data-intro="raid"] .game-intro-title').getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
+  const touch = async (to) => {
+    await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: p.x, y: p.y }] });
+    if (to) for (const k of [0.5, 1]) await b.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: p.x + to[0] * k, y: p.y + to[1] * k }] });
+    await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await b.evaluate(`window.__ooga.advance(0.05, 1 / 60)`);
+  };
+  for (const to of [[0, -70], [0, -70], [0, 70], [0, 70], [-70, 0], [70, 0], [-70, 0], [70, 0], null, null]) await touch(to);
+  const opened = await b.evaluate(RAID_SECRETS_SEEN);
+  const fits = await b.evaluate(PHONE(['#raid-secrets [data-secret="lives"]', '#raid-secrets [data-secret="mirror"]', '#raid-secrets [data-action="raid-secrets-close"]']));
+  const tap = async (x, y) => { await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] }); await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); await b.evaluate(`window.__ooga.advance(0.05, 1 / 60)`); };
+  const at = await b.evaluate(`(() => { const r = document.querySelector('#raid-secrets [data-secret="heads"]').getBoundingClientRect(), t = document.getElementById("raid-secrets").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, ox: 8, oy: t.bottom + 8 < innerHeight ? t.bottom + 8 : t.top - 8 }; })()`);
+  await tap(at.x, at.y);
+  const tapped = await b.evaluate(RAID_SECRETS_SEEN);
+  await tap(at.ox, at.oy);
+  const outside = await b.evaluate(RAID_SECRETS_SEEN);
+  await b.evaluate(`(() => { for (const id of BL.game.RAID_CHEATS) __ooga.raid.cheats.set(id, false); return true; })()`);
+  record("raid phone secrets: swipes up up down down left right left right and two taps on the title card open Shaman's Secrets, which fits the phone with every toggle under a thumb; a tap turns a secret on and a tap outside closes it, the card still up, and big heads alone puts no mark in the strip",
+    opened.open && opened.card && fits.length === 0 && tapped.open && tapped.on.includes("heads") && !outside.open && outside.card && outside.run.includes("heads") && !outside.mark,
+    JSON.stringify({ opened, fits, tapped, outside }));
+} };
+// The pad on the title card, through the fixture pad: its d-pad's up, down, left and right (buttons 12 to 15), B (1) and A
+// (0) tapped a few frames each. RAID_PAD_CARD reads the card, the tablet, the players and the button the pad has marked.
+const RAID_PAD_CODE = [12, 12, 13, 13, 14, 15, 14, 15, 1, 0];
+const RAID_PAD_CARD = `(() => { const one = document.getElementById("raid-1p"), two = document.getElementById("raid-2p");
+  return { card: !document.querySelector('[data-intro="raid"]').hidden, open: !document.getElementById("raid-secrets").hidden, players: __ooga.raid.players,
+    mark: one.hasAttribute("data-pad-mark") ? 1 : two.hasAttribute("data-pad-mark") ? 2 : 0, help: document.querySelector(".raid-players-help").textContent }; })()`;
+const raidPadTap = async (b, k) => { await raidPadButton(b, k, true); await b.evaluate(`window.__ooga.advance(0.05, 1 / 60)`); await raidPadButton(b, k, false); await b.evaluate(`window.__ooga.advance(0.05, 1 / 60)`); };
+// A pad that connects on its first press (its up held as it appears), then the rest of the code on its d-pad then B A:
+// the tablet opens and the players stay one at every press; B closes the tablet back to the card.
+const raidPadConnect = { name: "raid pad connect", why: "regression: a pad Chrome showed only on its first press lost that press, so the code on its d-pad went wrong, picked two players and never opened Shaman's Secrets", run: async (b) => {
+  await b.evaluate(`(() => { for (const id of BL.game.RAID_CHEATS) __ooga.raid.cheats.set(id, false); return true; })()`);
+  const start = await b.evaluate(RAID_PAD_CARD);
+  await b.evaluate(RAID_PAD_ON([12]));
+  await b.evaluate(`window.__ooga.advance(0.05, 1 / 60)`);
+  await raidPadButton(b, 12, false);
+  await b.evaluate(`window.__ooga.advance(0.05, 1 / 60)`);
+  const players = [];
+  for (const k of RAID_PAD_CODE.slice(1)) { await raidPadTap(b, k); players.push((await b.evaluate(RAID_PAD_CARD)).players); }
+  const opened = await b.evaluate(RAID_PAD_CARD);
+  await raidPadTap(b, 1);
+  const closed = await b.evaluate(RAID_PAD_CARD);
+  await b.evaluate(RAID_PAD_OFF);
+  await b.evaluate(`window.__ooga.advance(0.1, 1 / 60)`);
+  record("raid pad connect: a pad that connects on its first press counts that press, so the code on its d-pad then B A opens Shaman's Secrets with the players one at every press, and B closes it back to the card",
+    start.card && start.players === 1 && !start.open && players.every((n) => n === 1) && opened.open && opened.card && opened.players === 1 && !closed.open && closed.card && closed.players === 1,
+    JSON.stringify({ start, players, opened, closed }));
+} };
+// The code with a wrong press mid-way (right where left belongs), then the whole code: the players never change at any
+// press, and the tablet opens. Then the d-pad marks 1 Player and 2 Players on the card (the players unchanged, the card
+// up, its help line naming the pad's picking) and A plays the marked two; the run is put back to one player.
+const raidPadRetry = { name: "raid pad retry", why: "regression: on the title card the d-pad's left and right picked the players, so a pad code that went wrong once picked two players", run: async (b) => {
+  await b.evaluate(RAID_PAD_ON());
+  await b.evaluate(`window.__ooga.advance(0.1, 1 / 60)`);
+  const start = await b.evaluate(RAID_PAD_CARD), players = [];
+  for (const k of [12, 12, 13, 13, 15, ...RAID_PAD_CODE]) { await raidPadTap(b, k); players.push((await b.evaluate(RAID_PAD_CARD)).players); }
+  const opened = await b.evaluate(RAID_PAD_CARD);
+  await raidPadTap(b, 1);
+  await raidPadTap(b, 14);
+  const one = await b.evaluate(RAID_PAD_CARD);
+  await raidPadTap(b, 15);
+  const two = await b.evaluate(RAID_PAD_CARD);
+  await raidPadTap(b, 0);
+  const played = await b.evaluate(RAID_PAD_CARD);
+  await b.evaluate(RAID_PAD_OFF);
+  await b.evaluate(`(() => { __ooga.raid.newRun({ players: 1 }); __ooga.advance(0.1, 1 / 60); return true; })()`);
+  record("raid pad retry: a pad code gone wrong once and tried again never changes the players and opens Shaman's Secrets; on the card the d-pad marks 1 Player or 2 Players without picking, the help line names it, and A plays the players marked",
+    start.card && start.players === 1 && players.every((n) => n === 1) && opened.open && opened.players === 1 &&
+      one.card && !one.open && one.players === 1 && one.mark === 1 && two.card && two.players === 1 && two.mark === 2 && /d-pad marks/.test(two.help) &&
+      !played.card && played.players === 2,
+    JSON.stringify({ start, players, opened, one, two, played }));
+} };
+// Two players picked by one person: player 2 presses nothing while player 1 plays the Jungle Shore under the autopilot,
+// both under a standing barrier. The screen goes on past the first two screens, player 2 still in the run.
+const raidIdle = { name: "raid idle player", why: "regression: playing alone with two players picked, player 1 could not move forward: the screen waited on player 2, who pressed nothing", run: async (b) => {
+  const r = await b.evaluate(`(() => { const R = __ooga.raid; R.newRun({ players: 2, seed: 5 }); R.autopilot = true;
+    for (let t = 0; t < 25; t++) { R.sim.state.pBarrier.fill(1e6); R.simulate(1); }
+    R.autopilot = false; const s = R.sim.state;
+    return { players: R.players, camX: +s.camX.toFixed(2), px: [+s.px[0].toFixed(2), +s.px[1].toFixed(2)], states: [s.pState[0], s.pState[1]], stage: R.campaign.state.stageIndex, phase: R.campaign.state.phase }; })()`);
+  const SCREEN_X = 8, OUT = 3;
+  record("raid idle player: with two players picked and player 2 pressing nothing, player 1 plays the Jungle Shore forward past its first two screens, player 2 carried along and still in the run",
+    r.players === 2 && (r.camX > 2 * SCREEN_X || r.stage > 0) && r.states[1] !== OUT, JSON.stringify(r));
+  await b.evaluate(`(() => { __ooga.raid.newRun({ players: 1 }); return true; })()`);
+} };
+// The raid's round trip, and the music's context, taken by the raid music step, closed by then (as DSB's is on leaving).
+const raidTrip = { ...trip("raid"), run: async (b) => {
+  await trip("raid").run(b);
+  const r = await b.evaluate(`(() => { const c = window.__raidMusicContext; delete window.__raidMusicContext; return { taken: !!c, state: c ? c.state : null, fresh: __ooga.raid.audio.context !== c }; })()`);
+  record("raid music: leaving closes the music's audio context", r.taken && r.state === "closed" && r.fresh, JSON.stringify(r));
+} };
+scene("raid", { steps: [raidPlay, raidMusic, raidLooks,raidKeys, raidPause, raidPad, raidHeap, raidContinue, raidGate, raidSecrets, raidPadConnect, raidPadRetry, raidTrip, raidTwo, raidIdle] });
 scene("skee", { steps: [carnivalPlay("skee", 0.5), trip("skee")] });
 scene("hoops", { steps: [carnivalPlay("hoops", 0.2), trip("hoops")] });
 scene("shy", { steps: [carnivalPlay("shy", 0.7), trip("shy")] });
@@ -27586,6 +34792,8 @@ scene("hub", { label: "sphere keypad", query: "solo=1&character=portlandhodl&vie
   record("timechain keypad phone: in first person every physical key, 1–9, 0, Back, Enter and Directory, is on screen with nothing over it", keys.length === 13 && keys.every((k) => k.on && k.free), JSON.stringify(keys));
 } }] });
 scene("arcade", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("arcade", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
+// pos=0 hides the debug position readout, which otherwise stands over the nav's Pause.
+scene("raid", { query: "pos=0", opts: PHONE_SIZE, steps: [raidPhoneSecrets, phone("raid", { card: '[data-intro="raid"]', required: ["#joy-move", "#act", "#raid-fire", "#raid-pause-btn", "#leave-hud"] })] });
 
 // Focused component fixtures enter DSB directly with the selected Ooga.
 // The Bifrost entrance playthrough separately exercises the real travel windows.
@@ -37625,7 +44833,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
   await cloudHopperFailureChecks(BL);
-  await deferredLoadingChecks(); await doorReadyChecks(); await propSyncChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await mirrorRippleChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await partyRadioChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await hammockChecks(); await poolLayoutChecks(); await gameRulesChecks(); await highscoreClientChecks(); await ghostHuntChecks(); await donationClientChecks(); await donationResumeCheck(); await poolWildlifeChecks(); await totemFeedChecks();
+  await deferredLoadingChecks(); await doorReadyChecks(); await propSyncChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await mirrorRippleChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await partyRadioChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await hammockChecks(); await poolLayoutChecks(); await gameRulesChecks(); await highscoreClientChecks(); await ghostHuntChecks(); await donationClientChecks(); await donationResumeCheck(); await poolWildlifeChecks(); await totemFeedChecks(); await raidSaveChecks(); await raidChecks(); await raidSecretsChecks(); await raidMusicChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.

@@ -141,7 +141,8 @@ export const buildTree = (BL = load()) => {
                 children: [node("ghost-arena", zoneMap.landOf("ghost-arena"), { land: "haunt", via: "hallway's end", zones: ["ghost-arena", "arcade-hunt", "arcade.arena"],
                   objects: [{ cls: "GameHost", prefix: "ghost-hunt:" }], blurb: "A round of dark stone under the stars, where the ghost hunt is played." })] }),
               node("arcade-block-hall", "Block Frenzy hall", { land: "arcade", via: "upper hall", blurb: "An open-air ledge and the zipline out into the sky.",
-                children: [node("block-frenzy", zoneMap.landOf("block-frenzy"), { land: "block", via: "zipline", zones: ["block-frenzy"], ...at("blockfrenzy") })] })
+                children: [node("block-frenzy", zoneMap.landOf("block-frenzy"), { land: "block", via: "zipline", zones: ["block-frenzy"], ...at("blockfrenzy") })] }),
+              node("arcade-raid", route("oogaraid").title, { land: "arcade", via: "back door", zones: ["scene-raid"], ...at("oogaraid") })
             ] })
         ] }),
       node("rainforest", zoneMap.landOf("rainforest"), { land: "rainforest", via: "vine bridge", where: "between 3 and 4 o'clock", zones: ["rainforest"],
