@@ -2023,6 +2023,8 @@
       onHover: (hit, p) => {
         if (hit && !inView(hit)) hit = null;
         if (hit?.owner.kind === "cabinet" && GAMES[hit.owner.game] && !GAMES[hit.owner.game].unavailable) BL.deferred.prefetchScene(GAMES[hit.owner.game].id);
+        else if (hit?.owner.kind === "machine") BL.deferred.prefetchScene(hit.owner.station.game.kind);
+        else if (hit?.owner.kind === "retro") BL.deferred.prefetchScene(AM.RETRO[hit.owner.retro].id);
         if (hit) hud.tooltip.show(tipFor(hit), p.x, p.y);
         else hud.tooltip.hide();
       },
@@ -2249,6 +2251,13 @@
       for (let i = 0; i < live.length; i++) {
         const c = live[i], dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
         if (GAMES[c.game] && !GAMES[c.game].unavailable && dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(GAMES[c.game].id);
+      }
+      // The carnival machines and the deck's retro cabinets share one chunk, fetched at the same reach.
+      for (let i = 0; i < stations.length; i++) {
+        const s = stations[i], id = s.kind === "machine" ? s.game.kind : s.kind === "retro" ? s.id : null;
+        if (!id) continue;
+        const dx = p.x - s.play.x, dy = p.y - (s.y || 0), dz = p.z - s.play.z;
+        if (dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(id);
       }
     }
     if (!leaving) pilot.readInput(dt);

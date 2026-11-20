@@ -82,13 +82,15 @@ export function externalizePage(html, out, block, data = []) {
     .replace(scriptHash, "").replace(stylePolicy, "style-src 'self'");
 }
 
-// The DSB rooms' pictures (article thumbnails, product covers, profile previews) and Cloud Hopper's title and result
-// art are data URIs in these modules; the DSB ones travel in the deferred dsb bundle, Cloud Hopper's in the page's own
-// script. Each picture is set as an image's src either way,
+// The DSB rooms' pictures (article thumbnails, product covers, profile previews), Cloud Hopper's title and result
+// art and the Halloween herald's three views are data URIs in these modules; the DSB ones travel in the deferred dsb
+// bundle, the herald's in arcade-scene, Cloud Hopper's in the page's own script. Each picture is set as an image's src either way,
 // under `img-src 'self' data:`. Each becomes art/<module>-<sha256>.<ext> holding the same bytes, so a bundle or the
 // page carries only the address, and the picture is fetched only when a menu or a title card shows it.
 export const PICTURE_MODULES = ["js/without-rulers-data.js", "js/stackchain-art.js", "js/proof-of-ink-data.js", "js/meme-factory-data.js",
-  "js/cloud-hopper-art.js"];
+  "js/cloud-hopper-art.js",
+  "js/ghost-herald-data.js", // HALLOWEEN: the herald's views; goes with the ghost hunt.
+];
 export function externalizePictures(src, text, out) {
   mkdirSync(join(out, "art"), { recursive: true });
   let count = 0;
