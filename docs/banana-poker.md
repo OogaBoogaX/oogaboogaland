@@ -172,6 +172,55 @@ Scenery is built lazily and cached for at most those five themes. Retired scener
 nodes leave the graph for the renderer's existing housekeeping; no new per-frame
 geometry, particles or allocations were introduced by theme switching.
 
+## The floor
+
+A crowd walks the floor in every theme. Its cast has 29 invented characters,
+none of them a contributor: twelve walking guests, five gorilla staff and twelve
+seat-only opponents. Every name ends in `/ember-den`, so none can match a GitHub
+login, and none is registered as a character or joins the roster.
+
+- **Guests.** Two high rollers in dinner jackets with cigars, three businessmen
+  with briefcases, three ladies in gowns with clutches and heels, two old Oogas
+  on canes, one on a walking frame and one comic drunk with a glass and a tilted
+  hat. Each type walks its own way: the businessmen hurry, the ladies sway, the
+  canes plant upright at every other step, the frame lifts and shuffles, the
+  drunk weaves.
+- **Staff.** Two waiters with a tray of drinks held out level, the pit boss and
+  two security in dark glasses.
+- **Opponents.** Twelve characters who only ever sit at a table. Every
+  computer opponent sits as one of them, never twice at one table, and a seat
+  keeps its opponent for good. A human seat always shows the hashed
+  `Banana Bot <seat>` stand-in. When a seat changes hands, empties or is the
+  visitor's, its old figure leaves the table.
+
+How many walk follows the renderer: 16 on the high tier, 10 on medium, 6 on the
+lowest and on Canvas 2D. The day picks who walks, the same on every page: a
+waiter and security always, the pit boss and the second waiter and security on
+a full floor, then guests in the day's order, with at most one drunk and one
+frame. Members are built one at a time as they first appear.
+
+Guests walk to the table rails, the bar stools, the lounge sofas, the cashier
+cage and the ropes, sit down by a short slide, watch a table for a while and
+move on. The waiters make rounds of a stool and three tables, the pit boss
+keeps the middle of the floor, and security stands at the doors and ropes. When
+a theme without the bar or lounges comes in, anyone seated stands and walks on.
+
+The crowd reads only what every player sees of a table: its pot, phase, hand
+number, winner and whether anyone is all in. It never sees a card. A big pot
+brings the pit boss to that table and leans the watchers in, an all in puts a
+hand to their heads, and a win makes them cheer. Members speak short lines, at
+most two bubbles at a time, greet a visitor who comes close, and the drunk
+mutters. After his third stumble, security walks him to a sofa.
+
+Members give way to the visitor's Ooga and to other players. A guest held up
+for a few seconds goes somewhere else; it does not plan a way round. Members
+are never walk blocks, so nobody is ever stuck behind one.
+
+On an M-series Mac the full crowd of 16 costs about 164 draw calls and 77,000
+triangles a frame over the empty floor; the lowest tier's six cost about 69
+draw calls and 30,000 triangles. Building a member takes 4 to 8 ms, one every
+0.15 s.
+
 ## Chips and rules
 
 - No-limit Texas Hold'em; blinds 5/10, free starting stack 1,000.

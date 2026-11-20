@@ -15,6 +15,11 @@
   const targets = [], snapshots = new Array(10);
   let HERO = "local-player", connecting = false, unsubscribeAccount = null, remotes = null, footsteps = null;
   let visit = 0, pendingLive = null;
+  // The crowd walking the floor (poker-crowd.js), as many as the renderer's tier carries, giving way to the bodies in
+  // `crowdBodies`: the visitor's Ooga and the other players here, rewritten in place each frame.
+  let crowd = null, renderer = null, crowdTimer = 0;
+  const CROWD_CAP = { high: 16, medium: 10, low: 6 }, crowdBodies = [], ownBody = { x: 0, z: 0, radius: 0 };
+  const crowdCap = () => renderer.kind === "canvas2d" ? 6 : CROWD_CAP[renderer.quality];
   const NO_ACTORS = [], CLEAR = { x: 0, z: 0 };
   let extraLights = new Float32Array(0);
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the room
@@ -29,6 +34,17 @@
     BL.net.state.released = null;
     // Nobody walks the floor without an Ooga: one no longer theirs goes back out, where the island hands them their own.
     if (denied && people.player === avatar) { pilot.release(true); hud.toast(denied); leaveFloor(); }
+  };
+  // The crowd's whole view of table i, from what every player sees: the pot, the phase, the hand, its winner (the first
+  // non-refund pot's first, once the hand has a result) and whether anyone still in it is all in. Never a seat's cards.
+  const publicState = (i, out) => {
+    const s = snapshots[i];
+    out.pot = s.pot; out.phase = s.phase; out.hand = s.hand;
+    let winner = -1, allIn = false;
+    if (s.result) for (let k = 0; k < s.result.pots.length; k++) if (!s.result.pots[k].refund) { winner = s.result.pots[k].winners[0]; break; }
+    for (let j = 0; j < s.seats.length; j++) { const p = s.seats[j]; if (p && p.inHand && p.stack === 0) allIn = true; }
+    out.winner = winner; out.allIn = allIn;
+    return out;
   };
   const nextHand = new Float64Array(10), completed = new Int32Array(10);
   let theme = Themes.get("gatsby");
@@ -53,6 +69,7 @@
     renderOpts.sky = theme.sky; renderOpts.ground = theme.ground; renderOpts.direct = theme.direct; renderOpts.ambientFloor = theme.ambient; renderOpts.bloomStrength = theme.bloom ?? 0.24; renderOpts.directStrength = theme.directStrength ?? 0.38;
     // A theme's fittings may stand where a standing Ooga is: it steps to the nearest spot clear of them.
     BL.pokerModels.setFloor(theme.id);
+    if (crowd) crowd.refloor(BL.pokerModels.spots(theme.id));
     // A theme's own lights (Banana Club's bar and cage) follow the room's thirteen, in slots no tier keeps first.
     extraLights = BL.pokerModels.lights(theme.id); renderOpts.lightCount = 13 + extraLights.length / 8;
     const p = avatar && (seatTable < 0 || pendingStand) ? avatar.root.position : null;
@@ -90,18 +107,23 @@
       view.chips[j].visible = !!p && p.stack > 0;
       view.chips[j].scale.y = p ? Math.min(12, Math.max(1, Math.ceil(p.stack / 200))) : 1;
       const visibleActor = !!p && (p.bot || !!session.live && p.id !== HERO);
+      // A computer opponent sits as its seat's cast member, a live player as the hashed stand-in, never a real
+      // contributor; when the seat changes hands, empties or is the visitor's, the old figure leaves the table.
+      const traits = visibleActor ? BL.pokerCrowdModels.seatFigure(i, j, p.bot) : null;
+      if (view.actors[j] && view.actors[j].traits !== traits) { S.removeChild(view.root, view.actors[j].root); view.actors[j] = null; }
       if (visibleActor && !view.actors[j]) {
-        // Generic, hashed local bots; no claim of a real contributor being online.
-        const actor = BL.models.caveman(BL.contributors.traitsFor("Banana Bot " + j));
+        const actor = BL.models.caveman(traits);
         actor.root.position.x = slot.x; actor.root.position.z = slot.z; actor.root.position.y = 0.6;
         actor.root.rotation.y = slot.yaw; actor.root.scale.x = actor.root.scale.y = actor.root.scale.z = 0.82;
-        if (actor.parts.club) actor.parts.club.visible = false;
+        // A cast member's item stays in hand (its dress hides the club when it carries none).
+        if (actor.parts.club && !p.bot) actor.parts.club.visible = false;
+        // Held a little up in the hand, clear of the seat it would rest in.
+        else if (actor.parts.club?.visible) actor.parts.club.position.y += 0.11;
         if (actor.parts.gun) actor.parts.gun.visible = false;
         if (actor.parts.legR) actor.parts.legR.rotation.x = -1.35;
         if (actor.parts.legL) actor.parts.legL.rotation.x = -1.35;
         view.actors[j] = actor; S.addChild(view.root, actor.root);
       }
-      if (view.actors[j]) view.actors[j].root.visible = visibleActor;
     }
     for (let j = 0; j < 5; j++) { view.board[j].visible = j < s.board.length && Number.isInteger(s.board[j]); if (view.board[j].visible) view.board[j].geometry = BL.pokerModels.card(s.board[j]); }
     view.button.visible = s.dealer >= 0;
@@ -232,7 +254,7 @@
     }
     visit++;
     tableView = false;
-    game = ctx.game; world = ctx.world; go = ctx.go; leaving = false; timer = 0; HERO = "local-player"; connecting = false;
+    game = ctx.game; world = ctx.world; go = ctx.go; renderer = ctx.renderer; crowdTimer = 0; leaving = false; timer = 0; HERO = "local-player"; connecting = false;
     if (ctx.from === "bifrost") document.querySelector('[data-intro="poker"]').hidden = true;
     session = world.poker || (world.poker = { tables: Array.from({ length: 10 }, () => BL.pokerRules.create()), selected: 0, pendingStand: false });
     if (!session.autoDeal) session.autoDeal = new Array(10).fill(true);
@@ -315,8 +337,12 @@
     mirror.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
     if (seatTable >= 0 && !pendingStand) sit(session.tables[seatTable].snapshot().seats.findIndex(s => s?.id === HERO));
     panel = BL.pokerHud.create(action, select); setTheme(theme.id); refresh(); setView(seatTable >= 0 && !pendingStand);
+    // After the theme's floor is set, so the crowd's lattice is read once.
+    crowd = BL.pokerCrowd.create({ root, fx, walkable: BL.pokerModels.walkable, spots: BL.pokerModels.spots(theme.id), publicState,
+      others: () => crowdBodies, visitor: () => crowdBodies[0] === ownBody ? ownBody : null,
+      day: Math.floor(Date.now() / 86400000), cap: crowdCap() });
     scene.root = root; scene.camera = camera; scene.input = input;
-    scene.debug = { camera, pilot, hud, crew: people, cavemen: people.cavemen, controls: pilot.controls, poker: { session, room, action, select, snapshots, renderOpts } };
+    scene.debug = { camera, pilot, hud, crew: people, cavemen: people.cavemen, controls: pilot.controls, poker: { session, room, action, select, snapshots, renderOpts, crowd } };
     if (new URLSearchParams(location.search).get("pokerLive") === "1") action("connect");
   };
   const update = (dt, elapsed) => {
@@ -337,6 +363,13 @@
     if (drivenHere && !leaving && seatTable < 0) BL.visitSpot.note("poker", "", drivenHere);
     remotes.update(dt);
     footsteps.update(drivenHere);
+    crowdBodies.length = 0;
+    if (avatar.root.visible) { ownBody.x = avatar.root.position.x; ownBody.z = avatar.root.position.z; ownBody.radius = avatar.bodyRadius; crowdBodies.push(ownBody); }
+    const remoteBodies = remotes.actors();
+    for (let i = 0; i < remoteBodies.length; i++) crowdBodies.push(remoteBodies[i]);
+    crowd.update(dt, elapsed);
+    crowdTimer += dt;
+    if (crowdTimer >= 1) { crowdTimer = 0; crowd.setCap(crowdCap()); }
     mirror.phase.update(dt, elapsed); mirror.body.update(dt); mirror.body.time = mirror.phase.ripples.time;
     if (pilot.player && (seatTable < 0 || pendingStand) && Math.abs(avatar.root.position.x) < BL.bifrostModels.WINDOW.halfW
       && avatar.root.position.z + avatar.bodyRadius > BL.pokerModels.EXIT_Z && !leaving) leaveFloor();
@@ -406,6 +439,7 @@
     for (const t of room.tables) t.agent.dispose();
     BL.pokerModels.setFloor("gatsby"); BL.pokerModels.setLite(false);
     remotes.dispose(); remotes = null; footsteps.dispose(); footsteps = null;
+    crowd.dispose(); crowd = null; crowdBodies.length = 0; renderer = null;
     people.dispose(); fx.dispose(); pilot.dispose();
     for (const n of targets) input.remove(n); targets.length = 0;
     mirror.phase.dispose(); mirror.body.dispose(); mirror.glass.mirrorRipples = null;
@@ -419,8 +453,8 @@
     snapshots.fill(null);
     return { targets: count };
   };
-  const liveGeometry = set => { if (room) for (const t of room.tables) t.agent.liveGeometry(set); if (avatar) set.add(avatar.headOpen).add(avatar.headClosed); if (remotes) remotes.liveGeometry(set); };
-  const stats = () => { let allNodes = 0, visibleNodes = 0; const walk = n => { allNodes++; for (const c of n.children) walk(c); }; walk(root); S.traverseVisible(root, () => visibleNodes++); return { allNodes, visibleNodes, targets: input.targetCount, tweens: S.tweenCount(), ...fx.stats(), ...(remotes ? remotes.stats() : {}) }; };
+  const liveGeometry = set => { if (room) for (const t of room.tables) t.agent.liveGeometry(set); if (avatar) set.add(avatar.headOpen).add(avatar.headClosed); if (remotes) remotes.liveGeometry(set); if (crowd) crowd.liveGeometry(set); };
+  const stats = () => { let allNodes = 0, visibleNodes = 0; const walk = n => { allNodes++; for (const c of n.children) walk(c); }; walk(root); S.traverseVisible(root, () => visibleNodes++); return { allNodes, visibleNodes, targets: input.targetCount, tweens: S.tweenCount(), ...fx.stats(), ...(remotes ? remotes.stats() : {}), ...(crowd ? crowd.stats() : {}) }; };
   // Voice zone: the Ember Den, a portal of its own off the Bifrost chamber.
   const scene = { id: "poker", voiceZone: "ember-den", micKey: true, enter, update, overlay: dt => fx.drawOverlay(dt, extra), onKey, leave, liveGeometry, stats, renderOpts,
     onDonation(donation, counted = null) {

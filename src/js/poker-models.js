@@ -441,8 +441,44 @@
     }
     throw new Error(`pokerModels.nearestClear: nothing clear within 4 m of (${x}, ${z})`);
   };
+  // The crowd's named places, `{ kind, x, z, yaw, table }` with yaw facing (sin, cos) and `table` -1 off the rails:
+  // four rail spots a table, the strolls down the promenade and the side aisles, the door, and in the club the bar
+  // stools, sofa seats, the cage's window and a bouncer's place by each rope. Stools and seats stand inside their
+  // furniture, being sat on; a standing spot inside something is moved out (a rail spot along its own line from the
+  // table, dropped past 1.5 m). Laid against the theme's own floor and cached per floor.
+  const spotCache = new Map(), STAND = { bodyRadius: 0.5 }, STROLL_Z = [30, 18, 6, -6, -18, -30];
+  const spots = themeId => {
+    const club = themeId === "gatsby", key = club ? "gatsby" : "cave";
+    if (spotCache.has(key)) return spotCache.get(key);
+    const was = solids, list = [], clear = { x: 0, z: 0 };
+    solids = club ? CLUB_SOLIDS : NO_SOLIDS;
+    const add = (kind, x, z, yaw, table = -1) => list.push(Object.freeze({ kind, x, z, yaw, table }));
+    const stand = (kind, x, z, yaw) => { nearestClear(x, z, STAND, clear); add(kind, clear.x, clear.z, yaw); };
+    TABLES.forEach((t, i) => {
+      for (const [ox, oz] of [[-3.4, -5.3], [3.4, -5.3], [-3.4, 5.3], [3.4, 5.3]]) {
+        const len = Math.hypot(ox, oz), ux = ox / len, uz = oz / len;
+        for (let d = 0; d <= 1.5; d += 0.25) {
+          const x = t.x + ox + ux * d, z = t.z + oz + uz * d;
+          if (walkable(x, z, x, z, 0, 2, STAND)) { add("rail", x, z, Math.atan2(-ux, -uz), i); break; }
+        }
+      }
+    });
+    for (const z of STROLL_Z) for (const x of [-20, 0, 20]) stand("stroll", x, z, 0);
+    for (const x of [-3, 3]) stand("door", x, 33, Math.PI);
+    if (club) for (const f of FURNITURE) {
+      const side = -Math.sign(f.x);
+      if (f.kind === "bar") for (let k = -6; k <= 6; k += 3) add("stool", f.x + k, -34.6, Math.PI);
+      else if (f.kind === "sofa") add("sofa", f.x + side * 0.5, f.z, side * Math.PI / 2);
+      else if (f.kind === "cage") add("cage", f.x + side * 1.6, f.z, -side * Math.PI / 2);
+      else if (f.kind === "rope") add("rope", f.x + side, f.z, side * Math.PI / 2);
+    }
+    solids = was;
+    const frozen = Object.freeze(list);
+    spotCache.set(key, frozen);
+    return frozen;
+  };
   // The bar wings' and the cage's warm lights, eight floats each (x, y, z, range, r, g, b, 0), after the room's thirteen.
   const CLUB_LIGHTS = Float32Array.from([-10, 3, -35.6, 9, 1, 0.7, 0.4, 0, 10, 3, -35.6, 9, 1, 0.7, 0.4, 0, 20.6, 2.4, 31, 7, 1, 0.85, 0.55, 0]), NO_LIGHTS = new Float32Array(0);
   const lights = themeId => BL.pokerThemes.get(themeId).id === "gatsby" ? CLUB_LIGHTS : NO_LIGHTS;
-  BL.pokerModels = { TABLES, SEATS, REAR_WALL_Z, PORTAL_Z, EXIT_Z, FURNITURE, HIGH_ROLLER, geometry, card, build, walkable, setFloor, setLite, nearestClear, lights };
+  BL.pokerModels = { TABLES, SEATS, REAR_WALL_Z, PORTAL_Z, EXIT_Z, FURNITURE, HIGH_ROLLER, geometry, card, build, walkable, setFloor, setLite, nearestClear, lights, spots };
 })();
