@@ -198,9 +198,10 @@ login, and none is registered as a character or joins the roster.
   two security in dark glasses.
 - **Opponents.** Twelve characters who only ever sit at a table. Every
   computer opponent sits as one of them, never twice at one table, and a seat
-  keeps its opponent for good. A human seat always shows the hashed
-  `Banana Bot <seat>` stand-in. When a seat changes hands, empties or is the
-  visitor's, its old figure leaves the table.
+  keeps its opponent for good. A human seat shows the hashed
+  `Banana Bot <seat>` stand-in unless that player sits there as their own Ooga
+  (below). When a seat changes hands, empties or is the visitor's, its old
+  figure leaves the table.
 
 How many walk follows the renderer: 16 on the high tier, 10 on medium, 6 on the
 lowest and on Canvas 2D. The day picks who walks, the same on every page: a
@@ -314,6 +315,44 @@ The new protocol uses proofs without publishing whole-deck seeds or private
 keys. Folded-card privacy depends on the assumptions in the protocol document.
 Independent review remains required. Refunds do not eliminate selective-abort
 bias or collusion.
+
+## Players at the tables
+
+Every signed-in player seated at a table is drawn once, as the Ooga they drive,
+sitting in their chair. The visitor's own Ooga sits in its chair while seated
+and stands up when it walks the floor. Each page sends where its Ooga is, as it
+always has; a position at chair height on a chair's spot reads as that chair
+(`poker-presence.js`), so nothing new goes over the wire. One sitting pose
+(`pokerModels.sitPose`, undone by `standPose`) seats the visitor, the stand-ins
+and the cast members alike.
+
+What a viewer sees depends on whether they are connected to the live tables:
+
+- **Live.** A player is drawn seated only when the live table holds a human in
+  that chair under the same name as the player's display name. Their own Ooga
+  takes the seat, the stand-in is not built (or is taken down within a frame),
+  and the table view shows their own Ooga's face. Anyone else at a chair, such
+  as a player sitting at their own practice table, is hidden until they stand,
+  so no figure stands in a seat the viewer can still take.
+- **Not live.** A player at a chair is drawn seated when that chair is empty on
+  this page, and hidden when this page's practice table has someone in it.
+
+Two players at one chair: the lower room id is drawn, the other hidden. The
+visitor's own chair is never given to anyone else.
+
+A live seat falls back to the stand-in, with the stand-in's face, when the
+player is not matched: their room connection is down or paused, the room
+already shows 32 other players (the pool's cap), their body is hidden (for
+example they drive the same Ooga as the visitor), or their display name
+differs between the room and the poker service. When a match starts or ends
+with no table event (a page drops, a player stands), the figure and the face
+follow within a frame. A page with no backend sees the floor exactly as before.
+
+Still to play-test: two real accounts at a live table; a rename between the two
+services; a full table of nine real players; a player sitting down from the
+aisle (their Ooga eases into the chair already in the sitting pose); cast
+members' held items against the rail now that seated arms reach forward; and
+the sitting pose by eye in each theme.
 
 ## Files and validation handoff
 

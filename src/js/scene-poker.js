@@ -17,6 +17,10 @@
   let visit = 0, pendingLive = null;
   // The visitor's Ooga sits in a chair: the crew's resident hook holds it there (no fall, no walk pose) while the rest move.
   let seated = false;
+  // Which remote each of the 90 chairs is honoured for this frame and last (poker-presence.js), and the resolver's one
+  // input, made in `enter`: a table whose chairs changed hands rebuilds its figures and the panel its faces.
+  let owner = null, lastOwner = null, lastBody = null, presenceInput = null;
+  const seatOf = (t, s) => snapshots[t].seats[s];
   // The room's music and sound (poker-audio.js): where the visitor hears from, written in place each frame, the crowd's
   // footfalls handed on to it, and whether a table's result may dip the music (not on the visit's first refresh).
   let audio = null, cheers = false;
@@ -91,6 +95,7 @@
   const modeAction = name => !leaving && !panel.focused && (seatTable < 0 || pendingStand) && pilot.modeAction(name);
   const placeInAisle = () => {
     if (!avatar) return;
+    BL.pokerModels.standPose(avatar);
     const p = BL.pokerModels.TABLES[selected];
     avatar.root.position.x = 0; avatar.root.position.y = avatar.baseY; avatar.root.position.z = p.z;
     avatar.root.rotation.y = Math.PI; avatar.root.visible = true;
@@ -100,7 +105,7 @@
   const sit = index => {
     const p = BL.pokerModels.TABLES[selected], s = BL.pokerModels.SEATS[index];
     avatar.root.position.x = p.x + s.x; avatar.root.position.z = p.z + s.z;
-    avatar.root.position.y = avatar.baseY + 0.45; avatar.root.rotation.y = s.yaw;
+    avatar.root.position.y = avatar.baseY + BL.pokerPresence.CHAIR_Y; avatar.root.rotation.y = s.yaw;
     pilot.controls.reset(); pilot.setActive(false); seated = true;
     document.body.dataset.pokerSeated = "true";
   };
@@ -112,12 +117,21 @@
       // A hand ending at the table the visitor sits at or watches, won or lost, dips the music, only when this visit saw it played.
       if (cheers && was && (!was.result || was.hand !== s.hand) && (i === seatTable || panel.focused && i === selected)) audio.win();
     }
+    seatFigures(i);
+    for (let j = 0; j < 5; j++) { view.board[j].visible = j < s.board.length && Number.isInteger(s.board[j]); if (view.board[j].visible) view.board[j].geometry = BL.pokerModels.card(s.board[j]); }
+    view.button.visible = s.dealer >= 0;
+    if (s.dealer >= 0) { const p = BL.pokerModels.SEATS[s.dealer]; view.button.position.x = p.x * 0.72; view.button.position.z = p.z * 0.65; view.button.position.y = 1.4; }
+  };
+  // Table i's seated figures, card backs and chips from its last snapshot, run on a table event and when a chair's
+  // remote changes (a live seat taken by its player's own Ooga keeps no stand-in).
+  const seatFigures = i => {
+    const s = snapshots[i], view = room.tables[i];
     for (let j = 0; j < BL.pokerModels.SEATS.length; j++) {
       const p = s.seats[j], slot = BL.pokerModels.SEATS[j];
       view.backs[j].visible = !!p && p.inHand && !p.folded && s.phase !== "showdown";
       view.chips[j].visible = !!p && p.stack > 0;
       view.chips[j].scale.y = p ? Math.min(12, Math.max(1, Math.ceil(p.stack / 200))) : 1;
-      const visibleActor = !!p && (p.bot || !!session.live && p.id !== HERO);
+      const visibleActor = !!p && (p.bot || !!session.live && p.id !== HERO && !owner[i * 9 + j]);
       // A computer opponent sits as its seat's cast member, a live player as the hashed stand-in, never a real
       // contributor; when the seat changes hands, empties or is the visitor's, the old figure leaves the table.
       const traits = visibleActor ? BL.pokerCrowdModels.seatFigure(i, j, p.bot) : null;
@@ -131,22 +145,24 @@
         // Held a little up in the hand, clear of the seat it would rest in.
         else if (actor.parts.club?.visible) actor.parts.club.position.y += 0.11;
         if (actor.parts.gun) actor.parts.gun.visible = false;
-        if (actor.parts.legR) actor.parts.legR.rotation.x = -1.35;
-        if (actor.parts.legL) actor.parts.legL.rotation.x = -1.35;
+        BL.pokerModels.sitPose(actor);
         view.actors[j] = actor; S.addChild(view.root, actor.root);
       }
     }
-    for (let j = 0; j < 5; j++) { view.board[j].visible = j < s.board.length && Number.isInteger(s.board[j]); if (view.board[j].visible) view.board[j].geometry = BL.pokerModels.card(s.board[j]); }
-    view.button.visible = s.dealer >= 0;
-    if (s.dealer >= 0) { const p = BL.pokerModels.SEATS[s.dealer]; view.button.position.x = p.x * 0.72; view.button.position.z = p.z * 0.65; view.button.position.y = 1.4; }
   };
   // The panel's face at each seat of the selected table, from one record a seat reused every update: the visitor's
-  // own Ooga, else the figure seated there (a bot's cast member, a live player's stand-in). The key changes only
-  // when the character does, so the panel paints only then.
+  // own Ooga, else a live player's own Ooga when they sit there as themselves, else the figure seated there (a bot's
+  // cast member, a live player's stand-in). The key changes only when the character does, so the panel paints only then.
   const faces = [];
   const faceFor = (i, p) => {
     if (!p) return null;
-    const mine = p.id === HERO, cave = mine ? avatar : room.tables[selected].actors[i];
+    const mine = p.id === HERO, rec = !mine && !p.bot ? owner[selected * 9 + i] : null, body = rec ? remotes.body(rec.id) : null;
+    if (body) {
+      const f = faces[i];
+      if (f.cave !== body || f.tag !== rec) { f.cave = body; f.tag = rec; f.key = "remote:" + rec.id + ":" + rec.body; }
+      return f;
+    }
+    const cave = mine ? avatar : room.tables[selected].actors[i];
     if (!cave) return null;
     const f = faces[i], tag = mine ? HERO : p.bot ? "" : p.id;
     if (f.cave !== cave || f.tag !== tag) { f.cave = cave; f.tag = tag; f.key = mine ? "me:" + cave.traits.name : p.bot ? "bot:" + cave.traits.name : "live:" + p.id; }
@@ -277,6 +293,8 @@
     }
     visit++; seated = false;
     tableView = false;
+    owner = new Array(90).fill(null); lastOwner = new Array(90).fill(null); lastBody = new Array(90).fill(null);
+    presenceInput = { tables: BL.pokerModels.TABLES, seats: BL.pokerModels.SEATS, remotes: BL.net.remotes, zone: null, live: false, heroId: null, seatOf };
     game = ctx.game; world = ctx.world; go = ctx.go; renderer = ctx.renderer; crowdTimer = 0; leaving = false; timer = 0; HERO = "local-player"; connecting = false;
     if (ctx.from === "bifrost") document.querySelector('[data-intro="poker"]').hidden = true;
     session = world.poker || (world.poker = { tables: Array.from({ length: 10 }, () => BL.pokerRules.create()), selected: 0, pendingStand: false });
@@ -336,7 +354,7 @@
     const name = [world.pilot, requested, BL.net.preferredCharacter()?.handle].find(n => BL.contributors.activeRoster.some(c => c.name === n && mayPick(c))) || (BL.contributors.activeRoster.find(mayPick) || BL.contributors.activeRoster[0]).name;
     world.pilot = null;
     const playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
-    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: false, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => select(selected), residentPose: cave => seated && cave === avatar };
+    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: false, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => select(selected), residentPose: cave => { if (!seated || cave !== avatar) return false; BL.pokerModels.sitPose(avatar); return true; } };
     people = shared.crew = BL.crew.create(shared);
     for (const cave of people.cavemen.values()) {
       cave.weapon.primaryOwned = cave.weapon.secondaryOwned = false;
@@ -353,8 +371,13 @@
     else pilot.navigate({ position: { x: 0, y: 0, z: 29 }, yaw: 0, pitch: 0.18, dist: 4 });
     keepCameraInside();
     unsubscribeAccount = BL.net.subscribe(accountChanged);
-    // Other signed-in players on the floor, as the Oogas they drive.
-    remotes = BL.remotePlayers.create({ root, crew: people, fx, posed: cave => { cave.parts.club.visible = cave.parts.gun.visible = false; } });
+    // Other signed-in players on the floor, as the Oogas they drive: one at a chair it is honoured for sits there, one
+    // at a chair someone else holds is hidden, one at no chair stands as the pool posed it.
+    remotes = BL.remotePlayers.create({ root, crew: people, fx, posed: (cave, feetY, rec) => {
+      cave.parts.club.visible = cave.parts.gun.visible = false;
+      const state = BL.pokerPresence.stateOf(BL.pokerModels.TABLES, BL.pokerModels.SEATS, owner, rec);
+      if (state === 1) BL.pokerModels.sitPose(cave); else if (state === 2) cave.root.visible = false;
+    } });
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
     audio = BL.pokerAudio.create(); cheers = false;
@@ -386,7 +409,25 @@
     BL.net.setBody(drivenHere ? drivenHere.traits.name : null);
     if (drivenHere) { const p = drivenHere.root.position; BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, 0, BL.crew.visualState(drivenHere)); BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned); }
     if (drivenHere && !leaving && seatTable < 0) BL.visitSpot.note("poker", "", drivenHere);
+    // Which remote each chair is honoured for, before the pool poses them by it.
+    presenceInput.zone = BL.net.state.zone; presenceInput.live = !!session.live; presenceInput.heroId = HERO;
+    BL.pokerPresence.resolve(presenceInput, owner);
     remotes.update(dt);
+    // A remote the pool draws no body for (its cap, the visitor's own Ooga, any other it hides) holds no chair: that
+    // seat keeps its stand-in and face. `posed` never hides a chair's owner, so this settles the same way every frame.
+    for (let k = 0; k < owner.length; k++) { const r = owner[k]; if (r) { const b = remotes.body(r.id); if (!b || !b.root.visible) owner[k] = null; } }
+    // After the pool, so a newly seated remote's body is there for its face: a table whose chairs changed hands (or
+    // whose seated remote changed Ooga) rebuilds its figures, and the panel follows once.
+    let rehoused = false;
+    for (let i = 0; i < 10; i++) {
+      let changed = false;
+      for (let k = i * 9; k < i * 9 + 9; k++) {
+        const rec = owner[k], body = rec ? rec.body : null;
+        if (rec !== lastOwner[k] || body !== lastBody[k]) { changed = true; lastOwner[k] = rec; lastBody[k] = body; }
+      }
+      if (changed) { seatFigures(i); rehoused = true; }
+    }
+    if (rehoused) updatePanel();
     footsteps.update(drivenHere);
     // The room is heard from the Ooga driven here, else the visitor's own, facing the view's way on the floor; a view
     // straight down keeps the last facing.
@@ -484,6 +525,7 @@
     scene.input = scene.debug = null;
     hud = panel = pilot = fx = people = avatar = room = mirror = input = session = game = world = go = null;
     snapshots.fill(null);
+    owner = lastOwner = lastBody = presenceInput = null;
     for (const f of faces) { f.cave = f.tag = null; f.key = ""; }
     return { targets: count };
   };

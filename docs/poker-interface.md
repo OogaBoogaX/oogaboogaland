@@ -48,8 +48,9 @@ over it:
   take their colours from the room's theme variables, so they follow a theme
   switch at once.
 - **Faces at the seats:** every occupied seat shows its character's face: the
-  visitor's own Ooga, a computer opponent's cast member, or a live player's
-  hashed stand-in. By default it is a 22px round badge on the seat's edge, on
+  visitor's own Ooga, a computer opponent's cast member, a live player's own
+  Ooga when they sit in that chair as themselves, or else their hashed
+  stand-in (see Players at the tables in [banana-poker.md](banana-poker.md)). By default it is a 22px round badge on the seat's edge, on
   the side away from that seat's cards and bet, so it covers no text; a seat
   112px or wider shows two columns with a 48px face beside the name. The acting
   seat's face ring glows and a folded seat's face dims. A face is painted only
@@ -125,6 +126,17 @@ Found / maintainer play-tests before marking the PR ready:
   20-character player name at 390px wide (it wraps and the seat stays on the
   table), and a live table with two signed-in accounts (faces and the deal
   gesture on live seats).
+- Seated players: the browser suite checks a remote seated as itself in a
+  chair this page has empty, hidden behind a computer opponent, standing at
+  floor height, and, with the tables made live as far as the scene reads them,
+  that a matched player takes the stand-in down within a frame and shows their
+  own face, that a hidden body leaves the stand-in and its face alone, and that
+  the stand-in and its face come back the frame after the player leaves. Still
+  to check: two real accounts at a live table (each sees the other seated, with
+  their own face), a rename between the room and the poker service (the seat
+  falls back to the stand-in), a full table of nine real players, a player
+  sitting down from the aisle, held items against the rail, and the sitting
+  pose by eye in all five themes.
 
 Keep the existing browser STOP ledger in force. These are acceptance tasks for
 the maintainer, not authorization to retry a blocked browser session. Live

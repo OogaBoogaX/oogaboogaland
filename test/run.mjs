@@ -26448,6 +26448,11 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
     BL.scenes.poker.onKey(new KeyboardEvent("keydown", { key: "x", code: "KeyX", cancelable: true }));
     document.getElementById("mode-hud").click();
     const modeHeld = B.pilot.player === cave && cave.weapon.aiming === aiming && document.body.hasAttribute("data-poker-seated");
+    // The driven Ooga a frame after sitting, then a frame after Walk the floor: its left leg's swing (0 standing still,
+    // the crew's standing gait), its left arm and its feet over its standing height. Return to the table seats it again for the rest of the step.
+    const pose = () => { B.advance(1 / 30, 1 / 30); return { leg: cave.parts.legL.rotation.x, arm: cave.parts.armL.rotation.x, lift: cave.root.position.y - cave.baseY }; };
+    const sat = pose(); click("walk"); const stood = pose(); click("return");
+    const sitting = { sat, stood, chair: BL.pokerPresence.CHAIR_Y, ok: sat.leg === -1.35 && sat.arm === -0.9 && Math.abs(sat.lift - BL.pokerPresence.CHAIR_Y) < 1e-9 && stood.leg === 0 && Math.abs(stood.lift) < 1e-3 && document.body.hasAttribute("data-poker-seated") };
     for (let i = 0; i < 4; i++) click("bots");
     // Each seat's figure as drawn: a bot's name, "none" for a bot with no figure up, "shown" for anything else drawn.
     const C = BL.pokerCrowdModels, t0 = P.session.tables[0], walking = new Set(C.castFor(Math.floor(Date.now() / 86400000), 16).map(m => m.traits.name));
@@ -26499,8 +26504,70 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
     const L = P.renderOpts.lights, lit = [];
     for (let i = 0; i < 10; i++) lit.push(BL.pokerModels.TABLES.findIndex(p => Math.abs(p.x - L[i * 8]) < 1e-3 && Math.abs(p.z - L[i * 8 + 2]) < 1e-3));
     const tableLights = new Set(lit.filter(i => i >= 0)).size, lightCount = P.renderOpts.lightCount;
-    return { count, seats, dealers, privateCards, modeHeld, phase: done.phase, total, shown, hands, tableTen: P.session.tables[9].snapshot().hand, standing: !document.body.hasAttribute("data-poker-seated"), tableLights, lightCount, dressed, faced, dealing, dealt, dealtFor };
+    return { count, seats, dealers, privateCards, modeHeld, phase: done.phase, total, shown, hands, tableTen: P.session.tables[9].snapshot().hand, standing: !document.body.hasAttribute("data-poker-seated"), tableLights, lightCount, dressed, faced, dealing, dealt, dealtFor, sitting };
   })()`);
+  record("rule: the visitor's own Ooga sits in its chair and stands up again", r.sitting.ok, JSON.stringify(r.sitting));
+  // A signed-in player as the room reports one (a record in BL.net.remotes, as the hub's hammock checks give one), in
+  // this scene's zone, driving a roster Ooga other than the visitor's, sent from table two's fourth chair at chair height.
+  // Not live: seated as itself in a chair this page has empty, hidden while a computer opponent takes that chair here,
+  // standing at floor height. Then live as far as the scene reads it (`session.live` with no deadline, never dealt to),
+  // with a human seat carrying the remote's name and its stand-in drawn (put up by the remote sitting once and leaving,
+  // since the fake never syncs a table): a remote driving the visitor's own Ooga (a body
+  // the pool hides) takes nothing from it; the remote arriving takes the stand-in down within a frame and puts its own
+  // face at the seat; leaving brings the stand-in and its face back the next frame. Whatever happens, the remotes, the
+  // seats and the fake are gone before the step goes on.
+  const presence = await b.evaluate(`(() => {
+    const B = __ooga, P = BL.scenes.poker.debug.poker, N = BL.net, M = BL.pokerModels, T = 1, J = 3, t1 = P.session.tables[T];
+    const name = BL.contributors.activeRoster.find(c => c.name !== "portlandhodl").name, spot = M.TABLES[T], chair = M.SEATS[J];
+    const peer = (id, body) => ({ id, login: "seat-peer-" + id, display: "Seat peer", body, zone: N.state.zone, poseZone: N.state.zone,
+      x: spot.x + chair.x, y: BL.pokerPresence.CHAIR_Y, z: spot.z + chair.z, yaw: chair.yaw, voice: false, muted: false });
+    const rec = peer(7301, name);
+    const look = id => { const c = BL.remotePlayers.body(id); return c ? { shown: c.root.visible, leg: c.parts.legL.rotation.x } : null; };
+    // The seat's face as the panel shows it, and a fresh face of a model at that canvas's size, each as an FNV-1a hash
+    // of every pixel read through a willReadFrequently copy, as the seat faces above are read.
+    const sheet = document.createElement("canvas"), sheetCtx = sheet.getContext("2d", { willReadFrequently: true });
+    const hashOf = c => { sheet.width = c.width; sheet.height = c.height; sheetCtx.clearRect(0, 0, c.width, c.height); sheetCtx.drawImage(c, 0, 0);
+      const d = sheetCtx.getImageData(0, 0, c.width, c.height).data; let hash = 2166136261; for (let k = 0; k < d.length; k++) hash = Math.imul(hash ^ d[k], 16777619) >>> 0; return hash; };
+    const seatFace = () => { const c = document.querySelectorAll(".poker-seat-button .poker-face")[J]; return c.hidden ? null : hashOf(c); };
+    const faceOf = cave => { const c = document.createElement("canvas"); BL.hud.renderFaceIcon(c, cave, null, 96); return hashOf(c); };
+    const view = P.room.tables[T], frame = () => B.advance(1 / 30, 1 / 30);
+    let seated, hidden, standing, before, mirrored, matched, left;
+    try {
+      N.remotes.set(rec.id, rec); frame(); seated = look(rec.id);
+      t1.join("bot-peer", "Bot peer", true, J); B.advance(0.9, 1 / 30); hidden = look(rec.id);
+      t1.leave("bot-peer"); B.advance(0.9, 1 / 30);
+      rec.y = 0; frame(); standing = look(rec.id);
+      rec.y = BL.pokerPresence.CHAIR_Y; N.remotes.delete(rec.id); frame();
+      // A human at that chair with the remote's name, then the tables made live as the scene reads them. The fake never
+      // syncs a table (only the live service's own updates would), so the stand-in is first put up by a presence change:
+      // the remote sits once and leaves, which builds it.
+      P.select(T); t1.join("guest-peer", rec.display, false, J); B.advance(0.9, 1 / 30);
+      P.session.live = { deadline: null, connection: "live", busy: false, fairness: null, dispose() {} };
+      frame(); N.remotes.set(rec.id, rec); frame(); N.remotes.delete(rec.id); frame(); const actor = view.actors[J];
+      before = { standIn: !!actor, face: seatFace(), own: actor ? faceOf(actor) : null };
+      // The same name driving the visitor's own Ooga: the pool keeps that body hidden, so the seat stays the stand-in's.
+      const me = BL.scenes.poker.debug.crew.player, twin = peer(7302, me ? me.traits.name : "");
+      N.remotes.set(twin.id, twin); frame();
+      mirrored = { me: !!me, body: look(twin.id), same: !!actor && view.actors[J] === actor, face: seatFace() };
+      N.remotes.delete(twin.id); frame();
+      N.remotes.set(rec.id, rec); frame();
+      matched = { standIn: !!view.actors[J], body: look(rec.id), face: seatFace(), own: faceOf(BL.remotePlayers.body(rec.id)) };
+      N.remotes.delete(rec.id); frame();
+      left = { standIn: !!view.actors[J], face: seatFace(), own: view.actors[J] ? faceOf(view.actors[J]) : null };
+    } finally {
+      delete P.session.live; N.remotes.delete(7301); N.remotes.delete(7302);
+      for (const id of ["bot-peer", "guest-peer"]) if (t1.snapshot().seats.some(p => p?.id === id)) t1.leave(id);
+      B.advance(0.9, 1 / 30);
+    }
+    const clean = !P.session.live && !view.actors[J] && !t1.snapshot().seats[J] && !N.remotes.has(7301) && !N.remotes.has(7302);
+    return { name, seated, hidden, standing, before, mirrored, matched, left, clean,
+      ok: !!seated && seated.shown && seated.leg === -1.35 && !!hidden && !hidden.shown && !!standing && standing.shown && standing.leg !== -1.35
+        && before.standIn && before.face !== null && before.face === before.own
+        && mirrored.me && !!mirrored.body && !mirrored.body.shown && mirrored.same && mirrored.face === before.face
+        && !matched.standIn && !!matched.body && matched.body.shown && matched.body.leg === -1.35 && matched.face !== null && matched.face === matched.own && matched.face !== before.face
+        && left.standIn && left.face !== null && left.face === left.own && clean };
+  })()`);
+  record("rule: a signed-in player at a chair sits as themselves, alone in that seat, and the stand-in returns when they go", presence.ok, JSON.stringify(presence));
   const dealer = await b.evaluate(`(() => {
     // Pixels with ink (alpha above 0), read through a willReadFrequently copy as the seat faces above are.
     const c = document.querySelector('[data-poker="dealer-face"]'), copy = document.createElement("canvas"), x = copy.getContext("2d", { willReadFrequently: true });
@@ -29855,6 +29922,71 @@ const ghostAudioChecks = async () => {
       &&out.walk.reschedules>0&&out.walk.reschedules<=52&&out.walk.decodes===0&&out.walk.loads===0&&out.walk.end===0
       &&Math.abs(out.mid-0.35*Math.SQRT1_2)<1e-4&&out.hushed===0&&out.after===1&&out.muted===0&&out.unmuted===out.mid
       &&!out.disposed.playing&&out.disposed.sources===0&&out.disposed.contexts===1&&out.disposed.state==="closed"&&out.disposed.sound,JSON.stringify(out));
+};
+// The Ember Den's seating rule (poker-presence.js) in a bare context, on the room's layout copied from poker-models.js
+// (`TABLES`, `SEATS`): which remote's sent position is a chair, and which remote a chair is honoured for. Remotes come
+// as a Map, as `BL.net.remotes` holds them, with the room's integer ids.
+const pokerPresenceChecks = () => {
+  const context = { window: { BL: {} } };
+  const source = readFileSync(join(root, "src/js/poker-presence.js"), "utf8");
+  runInNewContext(source, context);
+  const P = context.window.BL.pokerPresence;
+  const T = Array.from({ length: 10 }, (_, i) => ({ x: i % 2 ? 11 : -11, z: 24 - Math.floor(i / 2) * 12 }));
+  const S = Array.from({ length: 9 }, (_, i) => {
+    const a = -Math.PI / 2 + 0.55 + i * (Math.PI * 2 - 1.1) / 8;
+    return { x: Math.cos(a) * 6, z: Math.sin(a) * 4.2 };
+  });
+  const N = T.length * S.length, spot = k => ({ x: T[(k / S.length) | 0].x + S[k % S.length].x, z: T[(k / S.length) | 0].z + S[k % S.length].z });
+  const at = (t, s, dx, y, dz) => P.seatAt(T, S, T[t].x + S[s].x + dx, y, T[t].z + S[s].z + dz);
+  // Every chair's own spot reads as that chair, and no two chairs stand within two radii of each other.
+  let everyChairUnique = true, nearest = Infinity;
+  for (let k = 0; k < N; k++) {
+    const a = spot(k);
+    if (P.seatAt(T, S, a.x, P.CHAIR_Y, a.z) !== k) everyChairUnique = false;
+    for (let j = k + 1; j < N; j++) { const b = spot(j); nearest = Math.min(nearest, Math.hypot(a.x - b.x, a.z - b.z)); }
+  }
+  everyChairUnique = everyChairUnique && nearest > 2 * P.RADIUS;
+  // Every seat entry handed to `seatOf` throws if anything reads its cards.
+  let cardsUntouched = true;
+  const entry = (fields) => {
+    const e = Object.assign({ bot: false, id: "s", name: "" }, fields);
+    for (const key of ["cards", "hand", "hole"]) Object.defineProperty(e, key, { get() { cardsUntouched = false; throw new Error("read " + key); } });
+    return e;
+  };
+  const k = 3 * 9 + 4, ks = 3, kk = 4;
+  const remote = (id, fields) => Object.assign({ id, display: "Ann", zone: "poker", body: "ooga:ann", x: spot(k).x, y: P.CHAIR_Y, z: spot(k).z }, fields);
+  const owner = new Array(N).fill(null);
+  // One resolve: `seat` is what `seatOf` gives for chair k (every other chair gives null), live or not.
+  const resolve = (list, live, seat) => {
+    const remotes = new Map(list.map(r => [r.id, r]));
+    try { return P.resolve({ tables: T, seats: S, remotes, zone: "poker", live, heroId: "hero", seatOf: (t, s) => t === ks && s === kk ? seat : null }, owner); }
+    catch (err) { cardsUntouched = false; throw err; }
+  };
+  const honoured = (r, live, seat) => resolve([r], live, seat)[k] === r;
+  const ann = remote(5);
+  const liveMatched = honoured(ann, true, entry({ name: "Ann", id: "s1" }));
+  const liveWrongName = honoured(ann, true, entry({ name: "Bob", id: "s1" }));
+  const liveBotSeat = honoured(ann, true, entry({ name: "Ann", id: "s1", bot: true }));
+  const liveOpenSeat = honoured(ann, true, null);
+  // A seat and a remote that both carry no name (empty, or none at all) are never a match.
+  const liveNoName = honoured(remote(5, { display: "" }), true, entry({ name: "", id: "s1" })) || honoured(remote(5, { display: undefined }), true, entry({ name: undefined, id: "s1" }));
+  const practiceEmpty = honoured(ann, false, null);
+  const practiceTaken = honoured(ann, false, entry({ name: "Ann", id: "s1" }));
+  const low = remote(3), high = remote(9);
+  const ownSeatLive = resolve([ann], true, entry({ name: "Ann", id: "hero" }))[k];
+  const ownSeatPractice = resolve([ann], false, entry({ name: "Ann", id: "hero" }))[k];
+  const otherZone = resolve([remote(5, { zone: "hub" })], false, null)[k];
+  const noBody = resolve([remote(5, { body: null })], false, null)[k];
+  // The pair last, so `owner` holds their chair for stateOf.
+  resolve([high, low], false, null);
+  record("poker presence: a position reads as a chair only at chair height, on the spot", at(3, 4, 0, 0.45, 0) === 3 * 9 + 4 && at(3, 4, 0.49, 0.45, 0) === 3 * 9 + 4 && at(3, 4, 0.51, 0.45, 0) === -1 && at(3, 4, 0, 0, 0) === -1 && at(3, 4, 0, 0.56, 0) === -1);
+  record("poker presence: every chair is its own, none within reach of another", everyChairUnique, `nearest ${nearest.toFixed(2)} m`);
+  record("poker presence: live, a remote is honoured only in a human seat that carries its name", liveMatched && !liveWrongName && !liveBotSeat && !liveOpenSeat && !liveNoName, JSON.stringify({ liveMatched, liveWrongName, liveBotSeat, liveOpenSeat, liveNoName }));
+  record("poker presence: not live, a remote is honoured only in a chair this page has empty", practiceEmpty && !practiceTaken, JSON.stringify({ practiceEmpty, practiceTaken }));
+  record("poker presence: two at one chair, the lower id is honoured and the other hidden", owner[k] === low && P.stateOf(T, S, owner, high) === 2 && P.stateOf(T, S, owner, low) === 1);
+  record("poker presence: the visitor's own seat is never given to a remote", ownSeatLive === null && ownSeatPractice === null);
+  record("poker presence: another zone or no body is never seated", otherZone === null && noBody === null);
+  record("poker presence: the rule never reads a card", cardsUntouched && !/cards|hole|board|deck/.test(source));
 };
 // The Ember Den's music and room sound (poker-audio.js) on a fake AudioContext that counts every node it makes: no
 // context before a gesture or while the page is muted, one after, both channels held until dispose, and a minute of
@@ -36537,6 +36669,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   bigBitcoinChecks(BL);
   if(ARGS.includes("big-unit"))return;
   pokerChecks(BL);
+  pokerPresenceChecks();
   pokerAudioChecks(BL);
   {
     // A roof lip may intersect the visual pose, but a blocked core rejects a mount.

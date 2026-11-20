@@ -480,5 +480,18 @@
   // The bar wings' and the cage's warm lights, eight floats each (x, y, z, range, r, g, b, 0), after the room's thirteen.
   const CLUB_LIGHTS = Float32Array.from([-10, 3, -35.6, 9, 1, 0.7, 0.4, 0, 10, 3, -35.6, 9, 1, 0.7, 0.4, 0, 20.6, 2.4, 31, 7, 1, 0.85, 0.55, 0]), NO_LIGHTS = new Float32Array(0);
   const lights = themeId => BL.pokerThemes.get(themeId).id === "gatsby" ? CLUB_LIGHTS : NO_LIGHTS;
-  BL.pokerModels = { TABLES, SEATS, REAR_WALL_Z, PORTAL_Z, EXIT_Z, FURNITURE, HIGH_ROLLER, geometry, card, build, walkable, setFloor, setLite, nearestClear, lights, spots };
+  // The one sitting pose for a caveman at a table, the same for every figure: the legs forward over the chair and both
+  // arms brought forward to the rail. `standPose` sets back exactly these four rotations to the crew's standing values.
+  const SIT_LEGS = -1.35, SIT_ARMS = -0.9, STAND_ARMS = -0.2;
+  const sitPose = cave => {
+    const p = cave.parts;
+    if (p.legL) p.legL.rotation.x = SIT_LEGS; if (p.legR) p.legR.rotation.x = SIT_LEGS;
+    if (p.armL) p.armL.rotation.x = SIT_ARMS; if (p.armR) p.armR.rotation.x = SIT_ARMS;
+  };
+  const standPose = cave => {
+    const p = cave.parts;
+    if (p.legL) p.legL.rotation.x = 0; if (p.legR) p.legR.rotation.x = 0;
+    if (p.armL) p.armL.rotation.x = STAND_ARMS; if (p.armR) p.armR.rotation.x = STAND_ARMS;
+  };
+  BL.pokerModels = { TABLES, SEATS, REAR_WALL_Z, PORTAL_Z, EXIT_Z, FURNITURE, HIGH_ROLLER, geometry, card, build, walkable, setFloor, setLite, nearestClear, lights, spots, sitPose, standPose };
 })();
