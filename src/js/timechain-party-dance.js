@@ -274,7 +274,7 @@
       const yaw = c.root.rotation.y, slide = sA * k * o[SLIDE];
       c.root.position.x += slide * Math.cos(yaw); c.root.position.z -= slide * Math.sin(yaw);
       c.root.position.y += k * o[HOP];
-      c.root.rotation.y += k * o[SPIN];
+      c.root.rotation.y += st.spun = k * o[SPIN];
       const dip = k * o[DIP], bend = k * o[BEND], twist = sA * k * o[TWIST], lean = -sA * k * o[SWAY];
       upper(p.torso, dip, bend, twist, lean);
       upper(p.head, dip, bend, twist, lean);
@@ -298,7 +298,8 @@
     return {
       // Called after the crew and the other players are posed, for each Ooga shown: `eyes` for one seen from its own
       // eyes (the visitor's own in first person), which dances on but holds its slide, so the body stays under the
-      // view; `level` its player's number (0 to 9), `M` the room's music.
+      // view; `level` its player's number (0 to 9), `M` the room's music. Returns the spin it put on the body (rad), which
+      // the room turns a first-person view by.
       dance(cave, dt, eyes, level, M) {
         let st = dancers.get(cave);
         if (!st) dancers.set(cave, st = state(cave));
@@ -316,7 +317,7 @@
           st.k = standing && (st.still > DANCE.STILL || st.quick) ? Math.min(1, st.k + dt / (st.quick ? DANCE.QUICK : DANCE.EASE)) : Math.max(0, st.k - dt / DANCE.OUT);
           if (st.k >= 1) st.quick = false;
         }
-        if (st.k <= 0) { st.shown.fill(0); st.level = -1; return; }
+        if (st.k <= 0) { st.shown.fill(0); st.level = -1; return 0; }
         const name = cave.traits.name;
         if (name !== st.name) { st.name = name; st.lag = (BL.math.fnv1a(name) % 97) / 97 * DANCE.LAG; }
         const b = M.beat - st.lag, phrase = Math.floor(b / DANCE.PHRASE);
@@ -345,6 +346,7 @@
         save(st);
         apply(st, shown, smooth(st.k));
         posed.push(st);
+        return st.spun;
       },
       // Every body danced last frame back as the crew left it: called before anything moves them again.
       undance() {

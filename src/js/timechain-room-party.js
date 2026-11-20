@@ -2161,7 +2161,8 @@
     // white tape along its lip under an aluminium nosing, a velour skirt down its front with the subs built in behind
     // grilles, and a violet cove light under the nosing and along the foot, which glow with the music; stage stairs up
     // each end, their treads taped white, a dim step light in each riser and a handrail either side. Its top and the
-    // steps' are solids' tops, so an Ooga steps up them, or jumps up onto the deck anywhere.
+    // steps' are solids' tops, so an Ooga steps up them, or jumps up onto the deck anywhere; the camera keeps over them
+    // as over the floor (`floor`).
     const H = STAGE.H, W = STAGE.W, zs = stageZ(L), rw = ROOMS.radiusAt(L, 0) - 0.05, back = Math.asin(W / rw) / DEG, deck = [[-W, zs], [W, zs]];
     for (let i = 0; i <= 12; i++) { const p = polar(rw, 180 - back + 2 * back * i / 12); deck.push([p.x, p.z]); }
     K.slab(deck.reverse(), 0, H, C.stage);
@@ -2183,7 +2184,7 @@
       k.box(2 * W, 0.012, 0.014, PURPLE, 0, H - 0.055, zs + 0.05, { emissive: 1, glow: true });
       k.box(2 * W, 0.02, 0.02, PURPLE, 0, 0.035, zs + 0.03, { emissive: 1, glow: true });
     }, 0, 0, 0, { glow: true });
-    K.solid({ x: 0, z: zs - 4, hx: W, hz: 4, top: H, stay: true });
+    K.solid({ x: 0, z: zs - 4, hx: W, hz: 4, top: H, stay: true, floor: true });
     const sz = zs - STAGE.DOWN - STAGE.STEP_W / 2, out = W + STAGE.STEPS * STAGE.TREAD, rail = STAGE.STEP_W / 2 - 0.04;
     for (const side of [-1, 1]) {
       for (let s = 1; s <= STAGE.STEPS; s++) {
@@ -2192,7 +2193,7 @@
         K.box(x1 - x0, 0.012, STAGE.STEP_W, STAGE_C.tread, side * (x0 + x1) / 2, top + 0.006, sz);
         K.box(0.045, 0.003, STAGE.STEP_W, STAGE_C.tape, side * (x1 - 0.03), top + 0.0135, sz);
         for (const dz of [-0.6, 0.6]) K.box(0.004, 0.025, 0.09, STAGE_C.lamp, side * (x1 + 0.002), top * 0.55, sz + dz, { emissive: 0.55, glow: true });
-        K.solid({ x: side * (x0 + x1) / 2, z: sz, hx: STAGE.TREAD / 2, hz: STAGE.STEP_W / 2, top });
+        K.solid({ x: side * (x0 + x1) / 2, z: sz, hx: STAGE.TREAD / 2, hz: STAGE.STEP_W / 2, top, floor: true });
       }
       // The handrails: a post at the foot on the lowest tread and one on the deck, a rail and a mid rail between.
       const lo = H / (STAGE.STEPS + 1), xb = side * (out - 0.08), xt = side * (W - 0.08), up = 0.95;
@@ -2837,7 +2838,7 @@
       // An Ooga standing still on the floor dances (timechain-party-dance.js) at its player's level: called after the
       // crew and the other players are posed, for each Ooga shown, `off` for one that should stand still now (the
       // visitor's own, seen from its own eyes); `undance` takes every pose off again before anything moves the bodies.
-      dance(cave, dt, eyes, level) { dancer.dance(cave, dt, eyes, level, M); },
+      dance(cave, dt, eyes, level) { return dancer.dance(cave, dt, eyes, level, M); },
       undance() { dancer.undance(); },
       liveGeometry(set) { dancer.liveGeometry(set); },
       danceLevel: () => BL.partyDance.level(),

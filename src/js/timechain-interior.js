@@ -514,6 +514,17 @@
     // the theater at a shallow angle, its sphere's middle under the landing), so the eye is pulled in from the wall at
     // its height, then put between the floor and the dome over where it stands, and where they leave it no room it is
     // pulled further in, until it is inside all three.
+    // The ground under the eye: the room's floor, or the top of a solid marked `floor` it stands over (the Block Party's
+    // stage and its steps), within a little of its edge so the eye never grazes its side.
+    const floors = solids.filter((o) => o.floor);
+    const groundUnder = (x, z) => {
+      let g = ROOMS.floorAt(L, x, z);
+      for (let i = 0; i < floors.length; i++) {
+        const o = floors[i];
+        if (o.top > g && ROOMS.inBox(o, x, z, 0.2)) g = o.top;
+      }
+      return g;
+    };
     const clampCamera = (p) => {
       const x = p.x, y = p.y, z = p.z;
       if (!guided || Math.abs(p.x) > DOOR.halfW - 0.2) p.z = Math.min(p.z, L.doorZ - 0.2);
@@ -524,7 +535,7 @@
           const dy = clamp(p.y - L.c, -R + 0.1, R - 0.1), max = Math.sqrt(R * R - dy * dy), r = Math.hypot(p.x, p.z);
           if (r > max) { p.x *= max / r; p.z *= max / r; }
         }
-        const range = deckRange(p.x, p.z, ROOMS.floorAt(L, p.x, p.z) + 0.3, roof(p.x, p.z, 0.3), 0.3), lo = range.lo, hi = range.hi;
+        const range = deckRange(p.x, p.z, groundUnder(p.x, p.z) + 0.3, roof(p.x, p.z, 0.3), 0.3), lo = range.lo, hi = range.hi;
         if (lo <= hi) { p.y = clamp(p.y, lo, hi); if (!walled || Math.hypot(p.x, p.y - L.c, p.z) <= R + 1e-9) break; continue; }
         const r = Math.hypot(p.x, p.z), k = r > 0.25 ? (r - 0.25) / r : 0;
         p.x *= k; p.z *= k; p.y = lo;
@@ -538,8 +549,10 @@
       camera.target.x += p.x - x; camera.target.y += p.y - y; camera.target.z += p.z - z;
     };
     const view = { yaw: 0, pitch: 0.05, dist: 4, target: { x: L.arrival.x, y: 1.6, z: L.arrival.z } };
+    // The Block Party's orbit goes as far as the room is across, so only its walls (`clampCamera`) stop it: from one
+    // side of the floor the view backs out to the other.
     const pilot = pilotMod.create({
-      renderer, canvas, camera, hud, presets: { entrance: view }, landing: "entrance", pitch: [-0.2, 1.2], dist: [3, 8],
+      renderer, canvas, camera, hud, presets: { entrance: view }, landing: "entrance", pitch: [-0.2, 1.2], dist: [3, L.kind === "party" ? 2 * L.R : 8],
       follow: { y: 0.9, min: 3, max: 6, pitch: [0.2, 0.7] },
       clampTarget, clampCamera, observeOrbit: keepCameraInside, ceilingAt: (x, z) => deckRange(x, z, -Infinity, roof(x, z, 0), 0).hi, coarse: COARSE, mayPossess: (cave) => BL.net.mayDrive(cave.traits.name),
       jetpackStatus: (who) => {
@@ -1235,9 +1248,19 @@
         }
       } else if (guide.stage === "out") people.steer(0, 0, 0, 0, 0);
     };
+    // The view turned `a` (rad) about the visitor's Ooga's hips, as a dance spin turns the body (node rotation.y).
+    let viewSpun = 0;
+    const spinPoint = (p, o, c, s) => { const x = p.x - o.x, z = p.z - o.z; p.x = o.x + x * c + z * s; p.z = o.z - x * s + z * c; };
+    const spinView = (a) => {
+      const o = avatar.root.position, c = Math.cos(a), s = Math.sin(a);
+      spinPoint(camera.position, o, c, s); spinPoint(camera.target, o, c, s);
+    };
     const update = (dt, elapsed) => {
-      // Last frame's dancing comes off the bodies before anything reads or moves them (the Block Party's).
+      // Last frame's dancing comes off the bodies before anything reads or moves them (the Block Party's), and its spin
+      // off a first-person view.
       if (motion && motion.undance) motion.undance();
+      if (viewSpun && avatar) spinView(-viewSpun);
+      viewSpun = 0;
       pilot.readInput(dt);
       if (guide.stage && avatar) runGuide(dt);
       if (people) people.update(dt, elapsed);
@@ -1287,7 +1310,11 @@
       // A kind that moves the Oogas to its music (the Block Party's groove) poses each one, after the crew and the other
       // players are posed: the visitor's own (standing still, from its own eyes too, held under them) and every other shown.
       if (motion && motion.dance) {
-        if (avatar && !guide.stage) motion.dance(avatar, dt, pilot.mode === "first-person", danceLevel());
+        // Seen from its own eyes, the view spins with the body: turned about the hips as the body is, this frame only.
+        if (avatar && !guide.stage) {
+          const eyes = pilot.mode === "first-person", spun = motion.dance(avatar, dt, eyes, danceLevel()) || 0;
+          if (eyes && spun) spinView(viewSpun = spun);
+        }
         if (remotes) {
           const list = remotes.actors();
           for (let i = 0; i < list.length; i++) {
@@ -1317,12 +1344,30 @@
         return pilot.modeAction("mode-toggle");
       }
       if (BL.controls.matches(e, "escape")) {
-        if (!guide.stage && !pilot.escape()) walkOut();
+        if (!guide.stage && !leaving && !pilot.escape()) askExit();
         return true;
       }
       // A kind's own keys (the Lecture Hall's pause and sections).
       return !!(motion && motion.key && !guide.stage && motion.key(e, hud));
     };
+    // Escape asks before it walks the Ooga out (the Leave button and the Exit button do not): Leave walks out, Stay,
+    // Escape again or a press outside closes it. The Ooga is held while it is open, as the controls panel holds it.
+    const exitAsk = document.getElementById("sphere-exit");
+    const closeExit = () => { if (exitAsk.open) exitAsk.close(); pilot.setMenuOpen(false, false); };
+    const askExit = () => {
+      if (exitAsk.open) return;
+      pilot.controls.reset();
+      pilot.setMenuOpen(true, false);
+      exitAsk.showModal();
+    };
+    exitAsk.addEventListener("close", () => pilot.setMenuOpen(false, false), { signal: ctx.signal });
+    exitAsk.addEventListener("click", (e) => {
+      const choice = e.target.closest("[data-sphere-exit]");
+      if (!choice) return;
+      closeExit();
+      if (choice.dataset.sphereExit === "leave") walkOut();
+    }, { signal: ctx.signal });
+    hud.dismissOutside(exitAsk, closeExit);
     const onDonation = (donation, counted = null) => {
       game.recordDonation(donation, counted && counted.exact);
       world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
@@ -1368,6 +1413,7 @@
       }
       world.sphereKeep = null;
       finishScrub(true, false);
+      closeExit();
       reader.dispose();
       holdings.dispose();
       sound.dispose();

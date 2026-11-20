@@ -201,10 +201,11 @@
       // What a body cannot walk through, in this frame: a circle, or a box `hx` by `hz` either side turned with the frame.
       // With `stay` a walker meeting it is never shouldered round it (a stage it climbs by its own steps).
       // A `deck` (a box with both a `top` and a `below`) is a floor overhead: the room keeps the camera on the Ooga's
-      // side of it.
+      // side of it. A `floor` (the Block Party's stage) is ground to the camera too: its eye stays over its top, as over the
+      // room's floor.
       solid: (o) => {
         const p = at(o.x || 0, 0, o.z || 0), stay = !!o.stay;
-        into.solids.push(o.r !== undefined ? { x: p.x, z: p.z, r: o.r, top: o.top, below: o.below, stay } : { x: p.x, z: p.z, hx: o.hx, hz: o.hz, ry: K.yaw(o.ry || 0), top: o.top, below: o.below, stay, deck: !!o.deck });
+        into.solids.push(o.r !== undefined ? { x: p.x, z: p.z, r: o.r, top: o.top, below: o.below, stay } : { x: p.x, z: p.z, hx: o.hx, hz: o.hz, ry: K.yaw(o.ry || 0), top: o.top, below: o.below, stay, deck: !!o.deck, floor: !!o.floor });
       },
       // A seat for the visitor's Ooga: `y` its height over `floor`, what it stands on, facing `heading` in this frame;
       // standing up leaves it at `back` behind it.
