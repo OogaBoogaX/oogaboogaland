@@ -26437,7 +26437,7 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
   record("rule: the room's music opens on the visitor's first key",
     !silent.open && silent.contexts === 0 && heard.open && heard.contexts === 1, JSON.stringify({ before: { open: silent.open, contexts: silent.contexts }, heard }));
   await walkingModeControls(b, "poker");
-  const r = await b.evaluate(`(() => {
+  const r = await b.evaluate(`(async () => {
     const B = __ooga, P = BL.scenes.poker.debug.poker, click = a => document.querySelector('[data-poker-action="' + a + '"]').click();
     const suit = BL.pokerModels.geometry(P.session.theme);
     const count = P.room.tables.length, seats = P.room.tables.every(t => t.chairs.length === 9), dealers = P.room.tables.every(t =>
@@ -26465,17 +26465,54 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
     t0.leave("guest-x"); t0.join(swapId, swapName, true, swapSeat); const back = figures(); rooted.push(onRoot());
     const dressed = { before, gone, after, rooted, ok: bots.length === 8 && cast.length === 8 && cast.every(n => n.endsWith("/ember-den") && !walking.has(n)) &&
       new Set(cast).size === 8 && gone.every(n => n === null) && after.join() === before.join() && back.join() === before.join() && rooted.join() === "8,0,8,7,0,8" };
-    click("start");
+    // Each seat's face as the panel shows it: null when hidden, else how many pixels carry ink (alpha above 0) and an
+    // FNV-1a hash of every pixel, so two faces differ when any pixel does. Read through a willReadFrequently copy, since
+    // repeated readbacks of the page's own canvases warn on the console. A coarse step: only the scene's 0.8 s practice
+    // timer has to pass, and no table is playing while the faces are read.
+    const readSheet = document.createElement("canvas"), readCtx = readSheet.getContext("2d", { willReadFrequently: true });
+    const faceRead = () => { B.advance(0.9, 0.1); return [...document.querySelectorAll(".poker-seat-button .poker-face")].map(c => {
+      if (c.hidden || !c.getClientRects().length) return null;
+      readSheet.width = c.width; readSheet.height = c.height; readCtx.drawImage(c, 0, 0);
+      const d = readCtx.getImageData(0, 0, c.width, c.height).data; let ink = 0, hash = 2166136261;
+      for (let k = 0; k < d.length; k++) { hash = Math.imul(hash ^ d[k], 16777619) >>> 0; if ((k & 3) === 3 && d[k]) ink++; }
+      return { ink, hash }; }); };
+    // The visitor and three bots, then one of those bots leaves; every bot comes back to its seat after.
+    const heroSeat = t0.snapshot().seats.findIndex(p => p?.id === "local-player");
+    for (const [id] of bots.slice(3)) t0.leave(id);
+    const four = faceRead(), botFace = four[bots[0][2]];
+    t0.leave(bots[2][0]); const three = faceRead();
+    for (const [id, name, j] of bots.slice(2)) t0.join(id, name, true, j);
+    const shownFaces = list => list.filter(Boolean).length;
+    const faced = { four: four.map(f => f && f.ink), three: three.map(f => f && f.ink), heroSeat, ok: shownFaces(four) === 4 && four.every(f => !f || f.ink > 0)
+      && !!four[heroSeat] && !!botFace && four[heroSeat].hash !== botFace.hash && shownFaces(three) === 3 && three[bots[2][2]] === null };
+    // The deal re-renders the panel at once (the action's refresh), so the dealer's gesture shows with no frame between.
+    click("start"); const dealtAt = performance.now(), dealing = document.querySelector(".poker-dealer").hasAttribute("data-dealing");
     const t = P.session.tables[0], privateCards = t.snapshot().seats.every(s => s.cards.every(c => c === null));
     let guard = 0; while (t.playing && guard++ < 500) { if (t.snapshot("local-player").legal) click("call"); B.advance(0.81, 1 / 30); }
     const done = t.snapshot(), total = done.seats.reduce((n, s) => n + s.stack, 0), shown = document.querySelector('[data-poker="street"]').textContent, hands = P.audio.stats.hands;
+    // The gesture's timeout runs on real time (advance drives the scene's clock, never a timeout): wait out what is left of
+    // 750 ms since the deal, and never under 20 ms, since a zero-delay timer can run ahead of an overdue delayed one. The
+    // hand above settled, and table one's next deal waits five seconds of scene time, so nothing deals again meanwhile.
+    await new Promise(r => setTimeout(r, Math.max(20, 750 - (performance.now() - dealtAt))));
+    const dealtFor = performance.now() - dealtAt, dealt = document.querySelector(".poker-dealer").hasAttribute("data-dealing");
     click("stand"); P.select(9); click("bots"); click("start"); B.advance(1, 1 / 30);
     const L = P.renderOpts.lights, lit = [];
     for (let i = 0; i < 10; i++) lit.push(BL.pokerModels.TABLES.findIndex(p => Math.abs(p.x - L[i * 8]) < 1e-3 && Math.abs(p.z - L[i * 8 + 2]) < 1e-3));
     const tableLights = new Set(lit.filter(i => i >= 0)).size, lightCount = P.renderOpts.lightCount;
-    return { count, seats, dealers, privateCards, modeHeld, phase: done.phase, total, shown, hands, tableTen: P.session.tables[9].snapshot().hand, standing: !document.body.hasAttribute("data-poker-seated"), tableLights, lightCount, dressed };
+    return { count, seats, dealers, privateCards, modeHeld, phase: done.phase, total, shown, hands, tableTen: P.session.tables[9].snapshot().hand, standing: !document.body.hasAttribute("data-poker-seated"), tableLights, lightCount, dressed, faced, dealing, dealt, dealtFor };
   })()`);
+  const dealer = await b.evaluate(`(() => {
+    // Pixels with ink (alpha above 0), read through a willReadFrequently copy as the seat faces above are.
+    const c = document.querySelector('[data-poker="dealer-face"]'), copy = document.createElement("canvas"), x = copy.getContext("2d", { willReadFrequently: true });
+    copy.width = c.width; copy.height = c.height; x.drawImage(c, 0, 0);
+    const d = x.getImageData(0, 0, c.width, c.height).data; let ink = 0;
+    for (let k = 3; k < d.length; k += 4) if (d[k]) ink++;
+    return { ink };
+  })()`);
+  record("rule: the dealer's face is painted and the deal gesture shows on a deal and ends", dealer.ink > 0 && r.dealing && !r.dealt && r.dealtFor > 700,
+    JSON.stringify({ ...dealer, dealing: r.dealing, after: r.dealt, ms: Math.round(r.dealtFor) }));
   record("rule: a computer opponent sits as a dressed guest, a seat keeps its character, and a seat changing hands leaves one figure on the table", r.dressed.ok, JSON.stringify(r.dressed));
+  record("rule: every occupied seat shows its own character's face and an emptied seat loses it", r.faced.ok, JSON.stringify(r.faced));
   record("poker local play: ten suited dealers, 90 chairs, nine-player settlement, table ten playable and private snapshots", r.count === 10 && r.seats && r.dealers && r.privateCards && r.phase === "showdown" && r.total === 9000 && r.shown === "Hand complete" && r.tableTen === 1 && r.standing, JSON.stringify(r));
   record("poker modes: table focus keeps X and the portrait from changing the seated Ooga's mode", r.modeHeld);
   record("rule: the hand played out at the visitor's own table marks one hand for the music (one win() call)", r.hands === 1, JSON.stringify({ hands: r.hands }));
@@ -28343,6 +28380,10 @@ const pokerChecks = (BL) => {
     const short = t.snapshot("b"), amount = BL.pokerHud.betAmount(short, "pot");
     t.act("b", "raise", amount); t.act("c", "call"); const locked = t.snapshot("a");
     record("poker sizing: short all-in caps the preset and never bypasses closed raise rights", short.legal.min > short.legal.max && amount === 1000 && !locked.legal.canRaise && BL.pokerHud.betAmount(locked, "all") === null);
+    {
+      const c = (pot) => BL.pokerHud.potChips(pot, [0, 0, 0]).join();
+      record("poker pot chips: stacks grow with the pot and never pass eight", c(0) === "0,0,0" && c(10) === "1,0,0" && c(155) === "7,0,0" && c(400) === "8,2,0" && c(3200) === "8,8,2" && c(1e9) === "8,8,8");
+    }
     record("poker public state: blind markers and contributions are exposed without private cards", hu.smallBlind === hu.dealer && hu.bigBlind === 1 && hu.seats[0].totalBet === 5 && hu.seats[1].totalBet === 10 && hu.seats[0].lastAction === "Small blind" && hu.seats.every(p => !p || p.cards.every(c => c === null)));
   }
   const walk = BL.pokerModels.walkable, actor = { bodyRadius: 0.65 };

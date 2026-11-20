@@ -15,6 +15,8 @@
   const targets = [], snapshots = new Array(10);
   let HERO = "local-player", connecting = false, unsubscribeAccount = null, remotes = null, footsteps = null;
   let visit = 0, pendingLive = null;
+  // The visitor's Ooga sits in a chair: the crew's resident hook holds it there (no fall, no walk pose) while the rest move.
+  let seated = false;
   // The room's music and sound (poker-audio.js): where the visitor hears from, written in place each frame, the crowd's
   // footfalls handed on to it, and whether a table's result may dip the music (not on the visit's first refresh).
   let audio = null, cheers = false;
@@ -92,14 +94,14 @@
     const p = BL.pokerModels.TABLES[selected];
     avatar.root.position.x = 0; avatar.root.position.y = avatar.baseY; avatar.root.position.z = p.z;
     avatar.root.rotation.y = Math.PI; avatar.root.visible = true;
-    pilot.setActive(true); pilot.controls.reset();
+    pilot.setActive(true); pilot.controls.reset(); seated = false;
     document.body.removeAttribute("data-poker-seated");
   };
   const sit = index => {
     const p = BL.pokerModels.TABLES[selected], s = BL.pokerModels.SEATS[index];
     avatar.root.position.x = p.x + s.x; avatar.root.position.z = p.z + s.z;
     avatar.root.position.y = avatar.baseY + 0.45; avatar.root.rotation.y = s.yaw;
-    pilot.controls.reset(); pilot.setActive(false);
+    pilot.controls.reset(); pilot.setActive(false); seated = true;
     document.body.dataset.pokerSeated = "true";
   };
   const syncTable = i => {
@@ -138,6 +140,18 @@
     view.button.visible = s.dealer >= 0;
     if (s.dealer >= 0) { const p = BL.pokerModels.SEATS[s.dealer]; view.button.position.x = p.x * 0.72; view.button.position.z = p.z * 0.65; view.button.position.y = 1.4; }
   };
+  // The panel's face at each seat of the selected table, from one record a seat reused every update: the visitor's
+  // own Ooga, else the figure seated there (a bot's cast member, a live player's stand-in). The key changes only
+  // when the character does, so the panel paints only then.
+  const faces = [];
+  const faceFor = (i, p) => {
+    if (!p) return null;
+    const mine = p.id === HERO, cave = mine ? avatar : room.tables[selected].actors[i];
+    if (!cave) return null;
+    const f = faces[i], tag = mine ? HERO : p.bot ? "" : p.id;
+    if (f.cave !== cave || f.tag !== tag) { f.cave = cave; f.tag = tag; f.key = mine ? "me:" + cave.traits.name : p.bot ? "bot:" + cave.traits.name : "live:" + p.id; }
+    return f;
+  };
   const updatePanel = () => {
     hud.setPanelsHidden(seatTable >= 0 && session.tables[seatTable].playing);
     panel.setLive(session.live ? { ...(session.live.fairness || { phase: "connecting" }), connection: session.live.connection, busy: session.live.busy } : null);
@@ -172,7 +186,7 @@
       const previous = seatTable;
       seatTable = live.tables.findIndex(t => t.snapshot().seats.some(s => s?.id === HERO));
       if (seatTable >= 0 && previous < 0) { selected = seatTable; pendingStand = false; sit(live.tables[seatTable].snapshot().seats.findIndex(s => s?.id === HERO)); setView(true); }
-      if (previous >= 0 && seatTable < 0) { pendingStand = false; placeInAisle(); }
+      if (previous >= 0 && seatTable < 0) { pendingStand = false; placeInAisle(); if (panel.focused) setView(false); }
       refresh(true);
     }, message => { if (panel && session?.live === live) panel.notice(message); });
     pendingLive = live;
@@ -261,7 +275,7 @@
       presets[name] = { yaw: Math.PI, pitch: 1.48, dist: 7.1, target: { x: table.x, y: 1.41, z: table.z } };
       VIEW_NAMES[name] = `Table ${i + 1}`;
     }
-    visit++;
+    visit++; seated = false;
     tableView = false;
     game = ctx.game; world = ctx.world; go = ctx.go; renderer = ctx.renderer; crowdTimer = 0; leaving = false; timer = 0; HERO = "local-player"; connecting = false;
     if (ctx.from === "bifrost") document.querySelector('[data-intro="poker"]').hidden = true;
@@ -322,7 +336,7 @@
     const name = [world.pilot, requested, BL.net.preferredCharacter()?.handle].find(n => BL.contributors.activeRoster.some(c => c.name === n && mayPick(c))) || (BL.contributors.activeRoster.find(mayPick) || BL.contributors.activeRoster[0]).name;
     world.pilot = null;
     const playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
-    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: false, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => select(selected) };
+    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: false, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => select(selected), residentPose: cave => seated && cave === avatar };
     people = shared.crew = BL.crew.create(shared);
     for (const cave of people.cavemen.values()) {
       cave.weapon.primaryOwned = cave.weapon.secondaryOwned = false;
@@ -346,7 +360,8 @@
     audio = BL.pokerAudio.create(); cheers = false;
     mirror.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
     if (seatTable >= 0 && !pendingStand) sit(session.tables[seatTable].snapshot().seats.findIndex(s => s?.id === HERO));
-    panel = BL.pokerHud.create(action, select); setTheme(theme.id); refresh(); cheers = true; setView(seatTable >= 0 && !pendingStand);
+    while (faces.length < BL.pokerRules.SEATS) { const f = { key: "", cave: null, tag: null, paint: canvas => BL.hud.renderFaceIcon(canvas, f.cave, null, 96) }; faces.push(f); }
+    panel = BL.pokerHud.create(action, select, faceFor); panel.setDealer(room.tables[0].agent); setTheme(theme.id); refresh(); cheers = true; setView(seatTable >= 0 && !pendingStand);
     // After the theme's floor is set, so the crowd's lattice is read once.
     crowd = BL.pokerCrowd.create({ root, fx, walkable: BL.pokerModels.walkable, spots: BL.pokerModels.spots(theme.id), publicState,
       others: () => crowdBodies, visitor: () => crowdBodies[0] === ownBody ? ownBody : null,
@@ -357,7 +372,7 @@
   };
   const update = (dt, elapsed) => {
     pilot.readInput(dt);
-    if (!panel.focused) people.update(dt, elapsed);
+    people.update(dt, elapsed);
     pilot.update(dt);
     if (pilot.player) tableView = false;
     // Widen the table framing instead of backing the camera through the room's ceiling.
@@ -469,6 +484,7 @@
     scene.input = scene.debug = null;
     hud = panel = pilot = fx = people = avatar = room = mirror = input = session = game = world = go = null;
     snapshots.fill(null);
+    for (const f of faces) { f.cave = f.tag = null; f.key = ""; }
     return { targets: count };
   };
   const liveGeometry = set => { if (room) for (const t of room.tables) t.agent.liveGeometry(set); if (avatar) set.add(avatar.headOpen).add(avatar.headClosed); if (remotes) remotes.liveGeometry(set); if (crowd) crowd.liveGeometry(set); };

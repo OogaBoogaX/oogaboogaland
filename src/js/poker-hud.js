@@ -18,6 +18,13 @@
     }
     return Math.max(floor, Math.min(l.max, amount));
   };
+  // Three chip stacks under the pot number, each at most eight chips high.
+  const potChips = (pot, out) => {
+    out[0] = pot > 0 ? Math.min(8, Math.ceil(pot / 25)) : 0;
+    out[1] = pot > 0 ? Math.min(8, Math.floor(pot / 200)) : 0;
+    out[2] = pot > 0 ? Math.min(8, Math.floor(pot / 1600)) : 0;
+    return out;
+  };
   const position = (seat, own) => (seat - Math.max(0, own) + R.SEATS) % R.SEATS;
   const resultText = s => {
     if (!s.result) return "";
@@ -30,7 +37,7 @@
     }
     return lines.join(" / ");
   };
-  const create = (action, select) => {
+  const create = (action, select, faceFor) => {
     const el = document.getElementById("poker"), lobby = document.getElementById("poker-panel"), edge = el.querySelector(".panel-edge");
     const by = name => el.querySelector(`[data-poker="${name}"]`);
     const focus = by("focus"), seatRoot = el.querySelector(".poker-seats"), rows = [], seats = [];
@@ -46,6 +53,8 @@
     let filter = "all", viewBusy = false, lastLog = "", viewerId = null;
     const filterButtons = Array.from(el.querySelectorAll("[data-poker-filter]"));
     const tableSelect = by("table-select"), tableOptions = [];
+    const dealer = el.querySelector(".poker-dealer"), endDeal = () => { dealTimer = 0; dealer.removeAttribute("data-dealing"); };
+    let dealTimer = 0;
     const make = (tag, className, parent) => { const n = document.createElement(tag); if (className) n.className = className; if (parent) parent.appendChild(n); return n; };
     for (const theme of BL.pokerThemes.themes) {
       for (const picker of themeSelects) { const option = make("option", "", picker); option.value = theme.id; option.textContent = theme.name; }
@@ -58,7 +67,7 @@
       const theme = BL.pokerThemes.get(id), p = theme.ui;
       el.dataset.theme = theme.id;
       for (const [key, value] of Object.entries(p)) el.style.setProperty("--pk-" + key, value);
-      for (const [key, value] of Object.entries({ felt: theme.felt, line: p.accent + "66", soft: p.accent + "22", glow: p.accent + "55", surfaceSoft: p.surface + "aa", haloSoft: p.halo + "77", haloGlass: p.halo + "f2", deepGlass: p.deep + "f7" })) el.style.setProperty("--pk-" + key, value);
+      for (const [key, value] of Object.entries({ felt: theme.felt, line: p.accent + "66", soft: p.accent + "22", glow: p.accent + "55", surfaceSoft: p.surface + "aa", haloSoft: p.halo + "77", haloGlass: p.halo + "f2", deepGlass: p.deep + "f7", haloVeil: p.halo + "8c", deepVeil: p.deep + "d9" })) el.style.setProperty("--pk-" + key, value);
       for (const picker of themeSelects) picker.value = theme.id;
       for (const b of themeButtons) b.setAttribute("aria-pressed", String(b.dataset.pokerTheme === theme.id));
       by("theme-name").textContent = theme.name.toUpperCase();
@@ -75,9 +84,17 @@
     for (let i = 0; i < R.SEATS; i++) {
       const wrapper = make("div", "poker-seat", seatRoot), b = make("button", "poker-seat-button", wrapper);
       b.type = "button"; b.dataset.seat = i;
+      // The seated character's face, painted only when the character at the seat changes.
+      const face = make("canvas", "poker-face", b); face.width = face.height = 96; face.hidden = true; face.setAttribute("aria-hidden", "true");
       const badge = make("span", "poker-position", b), name = make("strong", "poker-player", b), stack = make("span", "poker-stack", b), last = make("small", "poker-last-action", b);
       const cards = make("div", "poker-seat-cards", wrapper), bet = make("span", "poker-bet", wrapper);
-      seats.push({ wrapper, b, badge, name, stack, last, cards, bet });
+      seats.push({ wrapper, b, face, faceKey: "", badge, name, stack, last, cards, bet });
+    }
+    const potRoot = by("pot-chips"), chipStacks = [], chipHeights = [0, 0, 0], chipScratch = [0, 0, 0];
+    for (let i = 0; i < 3; i++) {
+      const stack = make("span", "poker-chip-stack", potRoot);
+      for (let j = 0; j < 8; j++) make("i", "", stack).hidden = true;
+      chipStacks.push(stack);
     }
     const cards = (target, list, placeholders = false, reset = false) => {
       if (reset) target.replaceChildren();
@@ -192,6 +209,12 @@
       el.dataset.yourTurn = String(!!legal && !paused && !pendingStand && !blocked);
       by("pot-label").textContent = s.result ? "LAST POT" : "TOTAL POT";
       by("pot").textContent = chips(s.result ? s.lastPot : s.pot);
+      potChips(s.result ? s.lastPot : s.pot, chipScratch);
+      for (let i = 0; i < 3; i++) {
+        if (chipScratch[i] === chipHeights[i]) continue;
+        chipHeights[i] = chipScratch[i];
+        for (let j = 0; j < 8; j++) chipStacks[i].children[j].hidden = j >= chipHeights[i];
+      }
       const community = s.board.slice(); while (community.length < 5) community.push(null);
       cards(board, community, true, fresh); cards(hand, own?.cards.length ? own.cards : [null, null], !own?.cards.length, fresh);
       by("street").textContent = streetName[s.phase];
@@ -205,6 +228,8 @@
         node.wrapper.classList.toggle("folded", !!p?.folded);
         node.wrapper.classList.toggle("winner", winner);
         node.wrapper.classList.toggle("empty", !p);
+        const f = faceFor(i, p);
+        if ((f ? f.key : "") !== node.faceKey) { node.faceKey = f ? f.key : ""; node.face.hidden = !f; if (f) f.paint(node.face); }
         node.name.textContent = p ? `${p.name}${p.bot ? " · Bot" : ""}` : `Seat ${i + 1}`;
         node.stack.textContent = p ? chips(p.stack) : idle && !viewer ? "Sit here" : "Open";
         node.last.textContent = !p ? "" : winner ? `+${chips(s.result.awards[i])} collected` : p.folded ? "Folded" : p.inHand && !p.stack ? "All in" : p.lastAction || (i === s.turn ? "Thinking" : "");
@@ -254,6 +279,8 @@
       }
       auto.checked = autoDeal;
       by("pause").textContent = paused ? "Resume practice" : "Pause practice"; by("pause").setAttribute("aria-pressed", String(paused));
+      // A new hand at the table shown, not one met by switching tables or on the visit's first update: the dealer deals.
+      if (!switched && previous && s.hand !== lastHand) { clearTimeout(dealTimer); dealer.dataset.dealing = ""; dealTimer = setTimeout(endDeal, 700); }
       if (!paused && !switched && previous) {
         if (s.result && !previous.result) cue("win");
         else if (legal && !previous.legal) cue("turn");
@@ -267,6 +294,9 @@
       by("countdown").classList.toggle("urgent", !!live && seconds >= 0 && seconds <= 15);
     };
     const setLive = value => {
+      // Joining or leaving the live tables swaps every table's state, so the next update counts as a switch: no deal.
+      // So does coming back live after connecting, reconnecting or a stopped connection's retry, which brings a new session.
+      if (!value !== !live || value && value.connection === "live" && live?.connection !== "live") lastIndex = -1;
       live = value; by("fairness").hidden = !live;
       const connection = viewBusy ? "connecting" : live?.connection || "practice";
       el.dataset.connection = connection;
@@ -290,13 +320,16 @@
         by("verify").disabled = by("export").disabled = !live.exportable || live.busy || connection !== "live";
       }
     };
-    return { update, countdown, setFocused, setTheme, setLive, setConnecting(value) { viewBusy = !!value; setLive(live); }, notice: noticeText, get focused() { return focused; }, dispose() {
+    // The dealer's face, painted once a visit from the room's own gorilla (every table's dealer looks the same).
+    const setDealer = agent => BL.hud.renderFaceIcon(by("dealer-face"), null, agent, 144);
+    return { update, countdown, setFocused, setTheme, setLive, setDealer, setConnecting(value) { viewBusy = !!value; setLive(live); }, notice: noticeText, get focused() { return focused; }, dispose() {
+      clearTimeout(dealTimer); endDeal();
       el.removeEventListener("click", onClick); el.removeEventListener("input", onInput); el.removeEventListener("change", onChange);
-      by("tables").replaceChildren(); seatRoot.replaceChildren(); board.replaceChildren(); hand.replaceChildren(); by("history").replaceChildren();
+      by("tables").replaceChildren(); seatRoot.replaceChildren(); board.replaceChildren(); hand.replaceChildren(); potRoot.replaceChildren(); by("history").replaceChildren();
       by("theme-choices").replaceChildren(); for (const picker of themeSelects) picker.replaceChildren();
       tableSelect.replaceChildren(); el.removeAttribute("data-your-turn"); el.removeAttribute("data-connection");
       sound.checked = false; setFocused(false); soundChannel.release(); if (audio) { audio.close().catch(() => {}); audio = null; }
     } };
   };
-  BL.pokerHud = { create, betAmount, position, resultText };
+  BL.pokerHud = { create, betAmount, potChips, position, resultText };
 })();

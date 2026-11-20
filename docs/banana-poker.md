@@ -13,7 +13,9 @@ The existing ten-table floor and five cave themes remain. Read
 security assumptions and hosting requirements.
 
 The current interface revision adds a filtered table browser, a clearer betting
-dock and live connection feedback. See [poker-interface.md](poker-interface.md)
+dock and live connection feedback, and the table view now shows the room
+behind it, a face at every seat, the pot's chips and the dealer's own gorilla.
+See [poker-interface.md](poker-interface.md)
 for the interaction changes and remaining play-tests, and
 [poker-integration.md](poker-integration.md) for signed-in deployment and recovery.
 
@@ -54,10 +56,16 @@ add three bots at a time, and deal when ready. You can also run a bots-only tabl
 while spectating. Every table has nine player seats plus a suited gorilla
 dealer. Two funded seats suffice; there is no table owner or privileged host.
 
-Choosing a table opens a focused oval-table view over the room. Your seat stays
-at the bottom. Player stacks, round bets, dealer and blind markers, folds,
-all-ins and the acting player appear around the rail. Community cards and the
-pot sit in the center; your private cards and actions are in the lower dock.
+Choosing a table opens a focused oval-table view over the room. On desktop the
+room shows dimly through its backdrop and keeps moving; on phones the backdrop
+is solid. Your seat stays at the bottom. Every occupied seat shows its
+character's face, and player stacks, round bets, dealer and blind markers,
+folds, all-ins and the acting player appear around the stitched leather rail.
+Community cards and the pot sit in the center, with chip stacks that grow with
+the pot. The dealer shows the room's own gorilla and dips to deal each hand.
+Your private cards and actions are in the lower dock. See
+[poker-interface.md](poker-interface.md) for the table view's details and its
+remaining play-tests.
 Public showdown cards appear at the eligible players' seats. A winner banner
 shows chips collected, including returned contributions, rather than claiming
 that the full award is profit.
@@ -80,7 +88,7 @@ start only after opting in, with no audio downloads. The room's own music and
 sound play without opting in once the page has had a click or key (see Sound).
 The history keeps the last twelve completed public hand summaries per table
 during this floor visit; it never archives a player's private or folded cards.
-Card motion respects the reduced-motion preference.
+Card motion and the dealer's deal gesture respect the reduced-motion preference.
 
 WASD/sticks move the spectator; drag/look controls use the shared pilot. The
 central aisle and passages between table rows remain walkable. **Walk the floor**

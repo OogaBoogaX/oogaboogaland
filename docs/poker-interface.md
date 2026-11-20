@@ -34,6 +34,41 @@ visible keyboard focus; card motion respects reduced-motion preferences. Theme,
 history, verification and rules remain available without filling the action
 area. This is source-level implementation, not a claim of completed visual QA.
 
+## The table view
+
+The focused table view now reads as a table in the room rather than a panel
+over it:
+
+- **The pot you can see:** three chip stacks sit under the pot figure and grow
+  with it, eight chips high at most (`BL.pokerHud.potChips`). Their row keeps
+  the same height empty or full, so the board never moves as the pot grows or
+  as a result shrinks it to the amount collected.
+- **Rail and felt:** the rail is wider and stitched like leather, and a faint
+  weave lies over the felt in all five themes. The chips, rail, felt and stitch
+  take their colours from the room's theme variables, so they follow a theme
+  switch at once.
+- **Faces at the seats:** every occupied seat shows its character's face: the
+  visitor's own Ooga, a computer opponent's cast member, or a live player's
+  hashed stand-in. By default it is a 22px round badge on the seat's edge, on
+  the side away from that seat's cards and bet, so it covers no text; a seat
+  112px or wider shows two columns with a 48px face beside the name. The acting
+  seat's face ring glows and a folded seat's face dims. A face is painted only
+  when the character at that seat changes, and an emptied seat loses it.
+  Occupied seats are drawn solid; only folded and open seats are dimmed.
+- **The dealer:** the dealer shows the room's own gorilla's face over the
+  suited bust (48px, 40px on phones and short desktops). On each new hand at
+  the table shown, the dealer dips and a card swings out for 700 ms. Nothing
+  moves under reduced motion, and switching tables or joining or leaving live
+  play does not trigger it.
+- **The room behind the table:** on desktop the backdrop is a see-through veil
+  in the theme's colours, so the room shows dimly round the table. The table
+  head, status strip, information rail, dock and result banner each sit on a
+  solid surface so their text stays readable. On phones the backdrop stays
+  solid. The crowd keeps strolling behind the view. The visitor's own Ooga is
+  held in its chair while seated, and stands idle rather than frozen
+  mid-stride while watching a table unseated. Losing a live seat with the
+  view open closes the view.
+
 ## Live feedback and request handling
 
 The interface distinguishes initial connection, connected play, sending a move,
@@ -79,6 +114,17 @@ Found / maintainer play-tests before marking the PR ready:
   second action can be submitted while a move is uncertain.
 - Walk a spectator between floor and table voice, with an occupied seat
   walking and returning too. Check visual presence and private-card boundaries.
+- The table view: the browser suite now checks that every occupied seat shows
+  its own face and an emptied seat loses it, and that the dealer's face is
+  painted and the deal gesture shows and ends; the `poker` and `bifrost`
+  browser sessions pass with them. The view was looked at by eye on
+  desktop in Banana Club and Crystal Grotto and at phone size. Still to check:
+  reduced motion by eye (no deal gesture or card motion), 200% text zoom (the
+  pot, board and acting seat stay readable with the room behind), all five
+  themes switched while seated (felt, rail, chips and veil follow at once), a
+  20-character player name at 390px wide (it wraps and the seat stays on the
+  table), and a live table with two signed-in accounts (faces and the deal
+  gesture on live seats).
 
 Keep the existing browser STOP ledger in force. These are acceptance tasks for
 the maintainer, not authorization to retry a blocked browser session. Live
