@@ -28,7 +28,10 @@ five cave themes and free banana chips.
   waiting between hands. Walking never silently submits a poker action.
 
 The gold, emerald and ivory interface uses the room's existing theme variables
-and original vector cards. Smaller viewports stack the information rail below
+and original vector cards. Banana Club's room is now white marble (see the
+marble hall in [banana-poker.md](banana-poker.md)), but its table view keeps
+its dark green and gold on purpose, so its text stays readable; only the
+style's lobby swatch turned white and gold. Smaller viewports stack the information rail below
 the hand, with a scrollable panel and compact private-card layout. Buttons keep
 visible keyboard focus; card motion respects reduced-motion preferences. Theme,
 history, verification and rules remain available without filling the action

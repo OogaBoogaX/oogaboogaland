@@ -14,7 +14,8 @@
   const box = (w, h, d, color, x = 0, y = 0, z = 0) => M.bevelBox({ w, h, d, color, offset: { x, y, z } });
   const disk = (radius, bottom, top, color, segments = 48) => M.lathe({ segments, profile: [[0, bottom], [radius, bottom], [radius, top], [0, top]], color });
   const node = (geo, x = 0, y = 0, z = 0) => S.createNode({ geometry: geo, position: { x, y, z } });
-  const GOLD = "#c8a45f", EMERALD = "#245749";
+  // Banana Club is a white marble hall built from the marble kit; the caves never read these.
+  const K = BL.pokerMarble, GOLD = K.GOLD, GLAZE = "#f3e5c6";
   // Brass strips form the room's architectural fanlights. These are cached wall
   // finishes, kept outside the walkable floor rather than freestanding obstacles.
   const strip = (ax, ay, bx, by, width, color = GOLD, z = 0.17) => {
@@ -29,7 +30,8 @@
     return g;
   };
   const fanlight = () => {
-    const parts = [box(3.4, 4.3, 0.18, EMERALD, 0, 2.15)];
+    // Glazed warm white and faintly lit from behind, the arched lights of the marble walls.
+    const parts = [M.bevelBox({ w: 3.4, h: 4.3, d: 0.18, color: GLAZE, emissive: 0.3, offset: { y: 2.15 } })];
     for (const x of [-1.66, 1.66]) parts.push(box(0.055, 4.3, 0.06, GOLD, x, 2.15, 0.13));
     for (const y of [0.07, 4.23]) parts.push(box(3.32, 0.055, 0.06, GOLD, 0, y, 0.13));
     for (let i = 0; i <= 12; i++) {
@@ -88,8 +90,12 @@
   // faces small; the bottles' glow carries the dim room. Canvas 2D sorts and paints every face on the CPU, so there
   // `lite` (set by the scene from the renderer, before it builds) draws the same fittings with fewer faces.
   let lite = false;
-  const CARPET = ["#1f3b30", "#284a3c"], WOOD = "#3b2519", OXBLOOD = "#5c1a22", ROPE = "#7a1622", BOTTLES = ["#d9892c", "#4f9a4a", "#dfe8de"];
+  // Dark walnut stays for the back bar and the sofa frames, oxblood leather for the sofas and the table rails, a nero
+  // marble for the bar top and a rosso one for the high-roller inlay.
+  const WOOD = "#3b2519", OXBLOOD = "#5c1a22", ROPE = "#7a1622", BOTTLES = ["#d9892c", "#4f9a4a", "#dfe8de"], NERO = "#2e2a26", ROSSO = "#7d2e2b";
   const flat = (w, h, d, color, x = 0, y = 0, z = 0, emissive = 0) => M.box({ w, h, d, color, emissive, offset: { x, y, z } });
+  // A veined marble block at (x, y, z): a moved copy of the kit's cached slab, so a seed is built once however often it is placed.
+  const marble = (w, h, d, seed, veins, x, y, z, color = K.WHITE) => M.moved(M.merge(K.slab({ w, h, d, seed, veins, color })), x, y, z);
   // A cord slung along z between two posts, with overlapping links so bends stay closed.
   const cord = (x, za, zb, y, sag, r, color) => {
     const links = [];
@@ -121,21 +127,22 @@
             if (lite) { if (!(b & 1)) parts.push(flat(0.12, h + 0.1, 0.12, tint, bx, y + (h + 0.1) / 2, back + 0.18, 0.6)); continue; }
             parts.push(flat(0.12, h, 0.12, tint, bx, y + h / 2, back + 0.18, 0.6), flat(0.045, 0.1, 0.045, tint, bx, y + h + 0.05, back + 0.18, 0.6));
           }
-          parts.push(block(2.5, 1.02, 0.6, WOOD, x, 0.51, front - 0.75), block(2.5, 0.08, 0.7, "#24170f", x, 1.06, front - 0.72),
+          parts.push(marble(2.5, 1.02, 0.6, 60 + k, 4, x, 0.51, front - 0.75), block(2.5, 0.08, 0.7, NERO, x, 1.06, front - 0.72),
             flat(2.5, 0.05, 0.03, GOLD, x, 1.06, front - 0.355), flat(2.5, 0.045, 0.045, GOLD, x, 0.24, front - 0.42));
         }
       } else if (f.kind === "cage") {
-        // The cashier's booth: a counter facing the room under a brass grille with a teller's gap, panelled sides and a canopy.
+        // The cashier's booth: a marble counter facing the room under a brass grille with a teller's gap, marble sides and
+        // a cream canopy. The valance stays oxblood, so the lit CASHIER sign in front of it reads against dark.
         const x0 = f.x - f.hx, x1 = f.x + f.hx, z0 = f.z - f.hz, z1 = f.z + f.hz;
-        for (const z of [f.z - 1.2, f.z + 1.2]) parts.push(block(0.5, 1.1, 2.4, WOOD, x0 + 0.3, 0.55, z), flat(0.56, 0.04, 2.4, GOLD, x0 + 0.3, 1.12, z),
-          flat(0.05, 0.05, 2.4, GOLD, x0 + 0.3, 2.6, z), block(0.1, 3.4, 2.4, WOOD, x1 - 0.05, 1.7, z));
-        for (let n = 1; n < 25; n += lite ? 2 : 1) { const z = z0 + n * 0.2; if (Math.abs(z - f.z) > 0.45) parts.push(flat(0.03, 1.5, 0.03, GOLD, x0 + 0.3, 1.85, z)); }
-        for (const z of [z0 + 0.05, z1 - 0.05]) parts.push(block(1.9, 2.6, 0.1, WOOD, f.x, 1.3, z));
-        for (const z of [f.z - 1.25, f.z + 1.25]) parts.push(block(1.9, 0.15, 2.5, WOOD, f.x + 0.05, 2.675, z), block(0.06, 0.8, 2.5, OXBLOOD, x0 + 0.13, 3, z),
-          flat(0.04, 0.04, 2.5, GOLD, x0 + 0.09, 3.38, z), flat(0.04, 0.04, 2.5, GOLD, x0 + 0.09, 2.62, z));
+        for (const z of [f.z - 1.2, f.z + 1.2]) parts.push(marble(0.5, 1.1, 2.4, z < f.z ? 70 : 71, 4, x0 + 0.3, 0.55, z), flat(0.56, 0.04, 2.4, K.BRASS, x0 + 0.3, 1.12, z),
+          flat(0.05, 0.05, 2.4, K.BRASS, x0 + 0.3, 2.6, z), block(0.1, 3.4, 2.4, K.WHITE, x1 - 0.05, 1.7, z));
+        for (let n = 1; n < 25; n += lite ? 2 : 1) { const z = z0 + n * 0.2; if (Math.abs(z - f.z) > 0.45) parts.push(flat(0.03, 1.5, 0.03, K.BRASS, x0 + 0.3, 1.85, z)); }
+        for (const z of [z0 + 0.05, z1 - 0.05]) parts.push(block(1.9, 2.6, 0.1, K.WHITE, f.x, 1.3, z));
+        for (const z of [f.z - 1.25, f.z + 1.25]) parts.push(block(1.9, 0.15, 2.5, K.CREAM, f.x + 0.05, 2.675, z), block(0.06, 0.8, 2.5, OXBLOOD, x0 + 0.13, 3, z),
+          flat(0.04, 0.04, 2.5, K.BRASS, x0 + 0.09, 3.38, z), flat(0.04, 0.04, 2.5, K.BRASS, x0 + 0.09, 2.62, z));
       } else if (f.kind === "highRoller") {
-        // A deep red inlay round table 9 in 2 m squares, edged in brass.
-        for (let x = f.x - f.hx + 1; x < f.x + f.hx; x += 2) for (let z = f.z - f.hz + 1; z < f.z + f.hz; z += 2) parts.push(flat(2, 0.012, 2, OXBLOOD, x, 0.001, z));
+        // A rosso marble inlay round table 9 in 2 m squares, edged in gold.
+        for (let x = f.x - f.hx + 1; x < f.x + f.hx; x += 2) for (let z = f.z - f.hz + 1; z < f.z + f.hz; z += 2) parts.push(flat(2, 0.012, 2, ROSSO, x, 0.001, z));
         for (let x = f.x - f.hx + 1; x < f.x + f.hx; x += 2) for (const z of [f.z - f.hz + 0.08, f.z + f.hz - 0.08]) parts.push(flat(2, 0.012, 0.1, GOLD, x, 0.008, z));
         for (let z = f.z - f.hz + 1; z < f.z + f.hz; z += 2) for (const x of [f.x - f.hx + 0.08, f.x + f.hx - 0.08]) parts.push(flat(0.1, 0.012, 2, GOLD, x, 0.008, z));
       }
@@ -148,13 +155,14 @@
   // The repeated pieces, each built about its own origin to stand at its box's centre; the sofa's back is at +x.
   const stool = theme => M.merge(M.lathe({ segments: lite ? 4 : 12, profile: [[0, 0], [0.19, 0], [0.19, 0.03], [0.05, 0.06], [0.035, 0.08], [0.035, 0.66], [0.14, 0.68], [0, 0.68]], color: GOLD }),
     M.lathe({ segments: lite ? 4 : 12, profile: [[0, 0.68], [0.2, 0.68], [0.2, 0.77], [0.17, 0.8], [0, 0.8]], color: theme.felt }));
-  const sofa = theme => M.merge(box(1.1, 0.3, 3.9, theme.panel, 0, 0.25), box(0.25, 0.78, 3.9, theme.felt, 0.45, 0.64),
+  // Oxblood leather on a walnut frame.
+  const sofa = () => M.merge(box(1.1, 0.3, 3.9, WOOD, 0, 0.25), box(0.25, 0.78, 3.9, OXBLOOD, 0.45, 0.64),
     ...[-1, 1].flatMap(sz => [-1, 1].map(sx => flat(0.08, 0.1, 0.08, GOLD, sx * 0.45, 0.05, sz * 1.85))),
-    ...[-1.17, 0, 1.17].flatMap(z => [box(0.86, 0.16, 1.14, theme.felt, -0.1, 0.48, z), box(0.16, 0.5, 1.14, theme.felt, 0.27, 0.78, z)]),
-    ...[-1, 1].flatMap(s => [box(1.12, 0.36, 0.2, theme.felt, 0, 0.56, s * 1.87), flat(1.12, 0.03, 0.2, GOLD, 0, 0.755, s * 1.87)]));
-  const lowTable = () => M.merge(box(0.95, 0.06, 1.75, WOOD, 0, 0.42), flat(0.97, 0.025, 1.77, GOLD, 0, 0.385),
+    ...[-1.17, 0, 1.17].flatMap(z => [box(0.86, 0.16, 1.14, OXBLOOD, -0.1, 0.48, z), box(0.16, 0.5, 1.14, OXBLOOD, 0.27, 0.78, z)]),
+    ...[-1, 1].flatMap(s => [box(1.12, 0.36, 0.2, OXBLOOD, 0, 0.56, s * 1.87), flat(1.12, 0.03, 0.2, GOLD, 0, 0.755, s * 1.87)]));
+  const lowTable = () => M.merge(marble(0.95, 0.06, 1.75, 80, 2, 0, 0.42, 0), flat(0.97, 0.025, 1.77, GOLD, 0, 0.385),
     ...[-1, 1].flatMap(sz => [-1, 1].map(sx => flat(0.05, 0.37, 0.05, GOLD, sx * 0.4, 0.185, sz * 0.8))), flat(0.08, 0.1, 0.08, "#ffd28a", 0, 0.5, 0, 0.8));
-  const ropePost = () => M.lathe({ segments: lite ? 4 : 12, profile: [[0, 0], [0.17, 0], [0.17, 0.035], [0.06, 0.08], [0.035, 0.11], [0.035, 0.88], [0.06, 0.9], [0.075, 0.95], [0.05, 0.995], [0, 1]], color: GOLD });
+  const ropePost = () => M.lathe({ segments: lite ? 4 : 12, profile: [[0, 0], [0.17, 0], [0.17, 0.035], [0.06, 0.08], [0.035, 0.11], [0.035, 0.88], [0.06, 0.9], [0.075, 0.95], [0.05, 0.995], [0, 1]], color: K.BRASS });
   // The dressing kit's palm is a 4 m tree; a potted one grows hub leaf cards from a lathe pot, its crown pulled in to the box.
   const palm = () => {
     const H = BL.hubModels, rand = BL.math.mulberry32(41);
@@ -208,6 +216,65 @@
     for (const g of meshes) g.castShadow = false;
     return meshes;
   };
+  // Banana Club's ornate table, on the same footprint, felt height and seat spots as the stone one. Each part is built in
+  // the unit space its table node scales (top 4.75 by 3.15, rim 4.5 by 2.92, pinstripe 4.02 by 2.44; the base unscaled).
+  // A turned marble pedestal with gold bands, pulled into an oval under the top; it meets the top at y 1.02.
+  const pedestal = () => {
+    const segments = lite ? 12 : 24, g = M.shaded([
+      M.lathe({ segments, color: K.SHADE, profile: [[0, 0], [1.5, 0], [1.5, 0.12], [1.38, 0.18]] }),
+      M.lathe({ segments, color: GOLD, profile: [[1.38, 0.18], [1.41, 0.21], [1.38, 0.24], [1.2, 0.26]] }),
+      M.lathe({ segments, color: K.WHITE, profile: [[1.2, 0.26], [0.9, 0.4], [0.72, 0.6], [0.85, 0.8], [1.08, 0.9]] }),
+      M.lathe({ segments, color: GOLD, profile: [[1.08, 0.9], [1.14, 0.93], [1.12, 0.96]] }),
+      M.lathe({ segments, color: K.WHITE, profile: [[1.12, 0.96], [1.22, 0.98], [1.22, 1.02], [0, 1.02]] })
+    ]);
+    for (let i = 0; i < g.verts.length; i += 3) { g.verts[i] *= 1.7; g.verts[i + 2] *= 1.15; }
+    return g;
+  };
+  // A padded oxblood rail round the felt: a tube along an oval of 4.66 by 3.06 m, 0.22 m across and 0.17 m high, out on
+  // the top's edge (4.75 by 3.15, reaching 4.77 by 3.17) and clear of the felt (4.38 by 2.8), so the button, cards and chips lie inside it.
+  // Built at room size, then divided by the rim node's scale (4.5 by 2.92).
+  const rail = () => {
+    const A = 4.66, B = 3.06, SX = 4.5, SZ = 2.92, segments = lite ? 28 : 56, sides = lite ? 5 : 8, across = 0.11, high = 0.085, y = 1.43;
+    const geo = M.merge(), rgb = BL.math.hexToRgb(OXBLOOD), rows = [];
+    for (let k = 0; k < segments; k++) {
+      const t = k / segments * Math.PI * 2, c = Math.cos(t), s = Math.sin(t), l = Math.hypot(c / A, s / B), nx = c / A / l, nz = s / B / l, row = [];
+      for (let j = 0; j < sides; j++) {
+        const p = j / sides * Math.PI * 2, out = Math.cos(p) * across;
+        row.push(M.pushVert(geo, (A * c + nx * out) / SX, y + Math.sin(p) * high, (B * s + nz * out) / SZ));
+      }
+      rows.push(row);
+    }
+    const v = geo.verts, at = (i, k) => v[i * 3 + k];
+    for (let k = 0; k < segments; k++) for (let j = 0; j < sides; j++) {
+      const a = rows[k][j], b = rows[(k + 1) % segments][j], c = rows[(k + 1) % segments][(j + 1) % sides], d = rows[k][(j + 1) % sides];
+      // Wind each quad outward: its normal must point away from the tube's middle at that station.
+      const ux = at(b, 0) - at(a, 0), uy = at(b, 1) - at(a, 1), uz = at(b, 2) - at(a, 2), wx = at(d, 0) - at(a, 0), wy = at(d, 1) - at(a, 1), wz = at(d, 2) - at(a, 2);
+      const t = k / segments * Math.PI * 2, ox = at(a, 0) - A * Math.cos(t) / SX, oy = at(a, 1) - y, oz = at(a, 2) - B * Math.sin(t) / SZ;
+      const dot = (uy * wz - uz * wy) * ox + (uz * wx - ux * wz) * oy + (ux * wy - uy * wx) * oz;
+      M.face(geo, dot < 0 ? [a, d, c, b] : [a, b, c, d], rgb);
+    }
+    geo.smooth = true;
+    return geo;
+  };
+  // A gold inlay ring laid on the felt, a broad band and a fine one inside it.
+  const inlay = () => {
+    const segments = lite ? 32 : 64;
+    return M.merge(M.lathe({ segments, profile: [[1, 1.384], [0.985, 1.384]], color: GOLD, emissive: 0.2 }),
+      M.lathe({ segments, profile: [[0.958, 1.384], [0.952, 1.384]], color: GOLD, emissive: 0.2 }));
+  };
+  // A walnut chair with turned legs, an oxblood seat and back pad, a stepped carved crest and gold finials, on the stone
+  // chair's footprint and seat height (0.68), its back at -z.
+  const ornateChair = theme => {
+    const block = lite ? flat : box, segments = lite ? 4 : 6;
+    const leg = (x, z) => M.moved(M.lathe({ segments, profile: [[0.055, 0], [0.04, 0.25], [0.06, 0.47]], color: theme.wood }), x, 0, z);
+    const finial = x => M.moved(M.lathe({ segments, profile: [[0, 0], [0.06, 0.03], [0.07, 0.08], [0.03, 0.14], [0, 0.17]], color: GOLD, emissive: 0.15 }), x, 1.48, -0.4);
+    return M.merge(block(0.95, 0.14, 0.9, theme.wood, 0, 0.54), block(0.86, 0.1, 0.8, OXBLOOD, 0, 0.63, 0.03),
+      leg(-0.36, 0.33), leg(0.36, 0.33), leg(-0.36, -0.33), leg(0.36, -0.33),
+      block(0.1, 1, 0.12, theme.wood, -0.43, 0.98, -0.4), block(0.1, 1, 0.12, theme.wood, 0.43, 0.98, -0.4),
+      block(0.74, 0.66, 0.08, OXBLOOD, 0, 1.03, -0.35), flat(0.78, 0.05, 0.1, theme.wood, 0, 0.7, -0.4),
+      block(0.96, 0.1, 0.13, theme.wood, 0, 1.43, -0.4), flat(0.56, 0.08, 0.11, theme.wood, 0, 1.52, -0.4), flat(0.26, 0.07, 0.1, theme.wood, 0, 1.595, -0.4),
+      flat(0.5, 0.03, 0.02, GOLD, 0, 1.52, -0.34), finial(-0.43), finial(0.43));
+  };
   const cache = BL.models.scopedMap(), scoped = M.track(() => cache.clear());
   const geometry = (id = "gatsby") => {
     const theme = BL.pokerThemes.get(id), cave = theme.id !== "gatsby";
@@ -217,18 +284,21 @@
     const shell = [], dressed = BL.dressing.set(), lamps = BL.dressing.set();
     // The same floor footprint supports either the club or geological wall
     // finishes; kit lanterns and foliage follow the chosen cave palette.
-    for (let row = 0; row < 19; row++) for (let col = 0; col < 13; col++)
-      shell.push(box(3.98, 0.35, 3.98, cave ? ((col + row) % 3 ? theme.stone[0] : theme.stone[1]) : (col + row) % 2 ? CARPET[0] : CARPET[1], (col - 6) * 4, -0.19, (row - 9) * 4));
+    // Banana Club's marble floor tiles, wall panels and columns are a few cached geometries placed as nodes in `setTheme`.
+    if (cave) for (let row = 0; row < 19; row++) for (let col = 0; col < 13; col++)
+      shell.push(box(3.98, 0.35, 3.98, (col + row) % 3 ? theme.stone[0] : theme.stone[1], (col - 6) * 4, -0.19, (row - 9) * 4));
     if (!cave) shell.push(clubFurniture());
     for (let side = -1; side <= 1; side += 2) {
       shell.push(box(1.2, 10, 76, theme.stone[2], side * 25, 4.8));
       shell.push(box(0.1, 2.1, 73, theme.panel, side * 24.34, 1.05));
       shell.push(box(0.12, 0.08, 73, theme.accent, side * 24.27, 2.12));
       for (let z = -34; z <= 34; z += 8.5) {
-        shell.push(box(0.9, 8.8, 1, theme.wood, side * 23.8, 4.4, z));
-        shell.push(box(1.1, 0.3, 1.2, theme.accent, side * 23.8, 1.3, z));
-        shell.push(box(1.1, 0.3, 1.2, theme.accent, side * 23.8, 7.6, z));
-        if (!cave || theme.id === "jungle") for (let k = 0; k < (cave ? 6 : 3); k++)
+        if (cave) {
+          shell.push(box(0.9, 8.8, 1, theme.wood, side * 23.8, 4.4, z));
+          shell.push(box(1.1, 0.3, 1.2, theme.accent, side * 23.8, 1.3, z));
+          shell.push(box(1.1, 0.3, 1.2, theme.accent, side * 23.8, 7.6, z));
+        }
+        if (theme.id === "jungle") for (let k = 0; k < 6; k++)
           dressed.put("vine", side * 23.85, 6.1 + k * 0.24, z - 0.9 + k * 0.38, side > 0 ? 3 : 1, k % 3);
         if (theme.id === "jungle") dressed.put("runeStone", side * 24, 2.4, z, side > 0 ? 3 : 1);
       }
@@ -237,8 +307,17 @@
     shell.push(box(50, 10, 1, theme.stone[3], 0, 4.8, REAR_WALL_Z + 0.5));
     shell.push(box(50, 0.8, 76, theme.stone[4], 0, 9.5));
     for (let z = -30; z <= 30; z += 12) {
-      shell.push(box(48, 0.65, 0.8, theme.wood, 0, 8.9, z));
+      shell.push(box(48, 0.65, 0.8, cave ? theme.wood : K.CREAM, 0, 8.9, z));
       shell.push(box(48, 0.06, 0.86, theme.accent, 0, 8.54, z));
+      if (!cave) shell.push(box(48, 0.05, 0.9, theme.accent, 0, 9.08, z));
+    }
+    if (!cave) {
+      // The end walls' darker marble base and gold strip, the rear wall's kept clear of the ₿IFRÖST window; and a deep
+      // green marble field, framed in gold, behind the far wall's lettering, so gold letters never sit on white stone.
+      shell.push(box(48, 2.1, 0.1, theme.panel, 0, 1.05, -36.45), box(48, 0.08, 0.12, theme.accent, 0, 2.12, -36.38));
+      for (const sx of [-1, 1]) shell.push(box(19.4, 2.1, 0.1, theme.panel, sx * 14.3, 1.05, 36.45), box(19.4, 0.08, 0.12, theme.accent, sx * 14.3, 2.12, 36.38));
+      shell.push(box(13, 3.2, 0.06, "#1d4234", 0, 6.4, -36.45), box(13.2, 0.08, 0.06, theme.accent, 0, 8.04, -36.4), box(13.2, 0.08, 0.06, theme.accent, 0, 4.76, -36.4),
+        box(0.08, 3.36, 0.06, theme.accent, -6.6, 6.4, -36.4), box(0.08, 3.36, 0.06, theme.accent, 6.6, 6.4, -36.4));
     }
     // The central promenade is a flat inlay, leaving its whole width walkable.
     shell.push(box(6.7, 0.012, 68, theme.runner, 0, 0.001));
@@ -253,13 +332,13 @@
     }
     for (const p of TABLES) {
       lamps.cable(p.x, 8.8, p.z - 1.8, p.x, 8.8, p.z + 1.8, 3.1, [0.25, 0.5, 0.75], "hanging", theme.lamp);
-      if (!cave || theme.id === "jungle") for (const dx of [-3.6, 3.6]) dressed.put("vine", p.x + dx, 8.5, p.z - 4.8, 0, dx > 0 ? 1 : 2);
+      if (theme.id === "jungle") for (const dx of [-3.6, 3.6]) dressed.put("vine", p.x + dx, 8.5, p.z - 4.8, 0, dx > 0 ? 1 : 2);
     }
     if (cave) for (const z of [-24, 0, 24])
       lamps.cable(-2, 8.9, z, 2, 8.9, z, 2.2, [0.25, 0.5, 0.75], "hanging", theme.lamp);
     const rock = cave ? caveWalls(theme) : null;
     if (rock) shell.push(rock.stone);
-    const chair = M.merge(box(0.95, 0.22, 0.9, theme.panel, 0, 0.57), box(1.0, 1.1, 0.18, theme.wood, 0, 1, -0.4),
+    const chair = !cave ? ornateChair(theme) : M.merge(box(0.95, 0.22, 0.9, theme.panel, 0, 0.57), box(1.0, 1.1, 0.18, theme.wood, 0, 1, -0.4),
       box(0.79, 0.78, 0.12, theme.felt, 0, 1.03, -0.26), box(0.96, 0.06, 0.2, theme.accent, 0, 1.54, -0.4),
       box(0.18, 0.5, 0.18, "#373a35", -0.33, 0.25, 0.28), box(0.18, 0.5, 0.18, "#373a35", 0.33, 0.25, 0.28),
       box(0.18, 0.5, 0.18, "#373a35", -0.33, 0.25, -0.28), box(0.18, 0.5, 0.18, "#373a35", 0.33, 0.25, -0.28));
@@ -268,22 +347,32 @@
       box(0.1, 0.48, 0.09, "#e6b634", 0, 0.52, 0.42),
       box(0.18, 0.14, 0.1, "#f7d052", 0, 0.84, 0.42));
     const built = {
-      shell: M.merge(...shell), veins: rock?.veins || null, dressing: dressed.build(), lamps: lamps.build(), chair, jacket, fanlight: fanlight(),
+      shell: M.merge(...shell), veins: rock?.veins || null, dressing: dressed.build(), lamps: lamps.build(), chair, jacket,
       sleeve: box(0.4, 0.78, 0.43, "#292f33", 0, -0.29, 0.025),
       cuff: box(0.41, 0.12, 0.44, "#e6e1ce", 0, -0.73, 0.025),
-      base: M.merge(box(1.5, 1, 1.3, theme.stone[1], -2.5, 0.5), box(1.5, 1, 1.3, theme.stone[1], 2.5, 0.5)),
-      stone: disk(1, 1.02, 1.32, theme.stone[5]), rim: disk(1, 1.32, 1.36, theme.accent), felt: disk(1, 1.36, 1.38, theme.felt),
-      pinstripe: M.lathe({ segments: 64, profile: [[1, 1.384], [0.995, 1.384]], color: theme.accent }),
+      base: !cave ? pedestal() : M.merge(box(1.5, 1, 1.3, theme.stone[1], -2.5, 0.5), box(1.5, 1, 1.3, theme.stone[1], 2.5, 0.5)),
+      stone: disk(1, 1.02, 1.32, theme.stone[5]), rim: !cave ? rail() : disk(1, 1.32, 1.36, theme.accent), felt: disk(1, 1.36, 1.38, theme.felt),
+      pinstripe: !cave ? inlay() : M.lathe({ segments: 64, profile: [[1, 1.384], [0.995, 1.384]], color: theme.accent }),
       back: BL.pokerCards.geometry(null), chip: disk(0.17, 0, 0.055, "#e2b43c"),
       button: disk(0.16, 0, 0.055, "#ece3c7"),
       title: BL.poolModels.carve("BANANA POKER", { cell: 0.24, color: theme.accent }),
       welcome: BL.poolModels.carve(cave ? theme.name.toUpperCase() : "GOOD HANDS GOOD COMPANY", { cell: 0.1, color: theme.mineral, emissive: 0.1 })
     };
     if (!cave) {
-      Object.assign(built, { stool: stool(theme), sofa: sofa(theme), lowTable: lowTable(), palm: palm(), post: ropePost(), chandelier: chandelierFrame(theme), crystals: crystals(),
+      Object.assign(built, { fanlight: fanlight(), stool: stool(theme), sofa: sofa(), lowTable: lowTable(),
+        // Floor tiles: six veined white seeds and two darker ones for the border ring. Wall panels: three seeds a tier.
+        tiles: { field: [0, 1, 2, 3, 4, 5].map(i => K.slab({ w: 3.98, h: 0.35, d: 3.98, seed: 11 + i, color: theme.stone[0], veins: 3 })),
+          border: [0, 1].map(i => K.slab({ w: 3.98, h: 0.35, d: 3.98, seed: 21 + i, color: K.SHADE, veins: 3 })) },
+        panels: { low: [0, 1, 2].map(i => K.slab({ w: 3.1, h: 0.08, d: 7.3, seed: 31 + i, color: theme.stone[1], veins: 6 })),
+          high: [0, 1, 2].map(i => K.slab({ w: 3, h: 0.08, d: 7.3, seed: 34 + i, color: theme.stone[1], veins: 6 })) },
+        column: K.column({ h: 8.8 }), palm: palm(), post: ropePost(), chandelier: chandelierFrame(theme), crystals: crystals(),
         pinstripeGold: M.lathe({ segments: 64, profile: [[1, 1.385], [0.993, 1.385]], color: "#f2cf6e", emissive: 0.45 }),
-        cashier: BL.poolModels.carve("CASHIER", { cell: 0.12, color: "#ffe1a0", emissive: 1 }) });
-      built.cashier.geometry.castShadow = false;
+        cashier: BL.poolModels.carve("CASHIER", { cell: 0.12, color: "#ffe1a0", emissive: 1 }),
+        // A dark green marble plate framed in gold behind each floating table name, wide enough for TABLE 10, so the light
+        // letters never read against white stone or the cream ceiling.
+        plate: M.merge(box(3.4, 0.85, 0.04, "#1d4234", 0, -0.2, 0.08), box(3.48, 0.05, 0.05, theme.accent, 0, 0.245, 0.09), box(3.48, 0.05, 0.05, theme.accent, 0, -0.645, 0.09),
+          box(0.05, 0.94, 0.05, theme.accent, -1.74, -0.2, 0.09), box(0.05, 0.94, 0.05, theme.accent, 1.74, -0.2, 0.09)) });
+      built.cashier.geometry.castShadow = false; built.plate.castShadow = false;
     }
     cache.set(key, built); return built;
   };
@@ -324,10 +413,14 @@
       S.addChild(group, agent.root);
       const dealCard = node(g.back, 0, 1.5, -2.4); dealCard.visible = false; S.addChild(group, dealCard);
       S.addChild(root, group);
-      tables.push({ root: group, base, top, rim, felt, pinstripe, chairs, chips, backs, board, button, label, agent, dealCard, actors: new Array(SEATS.length).fill(null), version: -1, pulse: 0 });
+      tables.push({ root: group, base, top, rim, felt, pinstripe, chairs, chips, backs, board, button, label, plate: null, agent, dealCard, actors: new Array(SEATS.length).fill(null), version: -1, pulse: 0 });
     }
     let current = null;
     const sparkle = [];
+    // Banana Club's fountain and statues, built once a room on the set `setLite` chose and stood in the hall whenever it
+    // is the theme; the fountain moves only when its scene calls its `update`.
+    const fountain = BL.pokerFountain.build(lite), statues = BL.pokerStatues.build(lite);
+    fountain.root.position.x = BL.pokerFountain.X; fountain.root.position.z = BL.pokerFountain.Z;
     const setTheme = id => {
       const next = BL.pokerThemes.get(id); if (current === next.id) return;
       const geo = geometry(next.id);
@@ -337,7 +430,23 @@
       S.addChild(environment, node(geo.shell), ...BL.dressing.nodes(geo.dressing, { glow: 1 }));
       S.addChild(fixtures, ...BL.dressing.nodes(geo.lamps, { glow: 1 }));
       if (geo.veins) { const n = node(geo.veins); n.glow = 1; S.addChild(environment, n); }
+      // Hidden as well as taken off the graph in a cave, so the plaques the scene registered never pick there.
+      fountain.root.visible = statues.root.visible = next.id === "gatsby";
       if (next.id === "gatsby") {
+        // Marble tiles a quarter turn apart for variety, darker round the edge; round columns; two tiers of wall panels a
+        // bay, their veined faces turned to the room.
+        for (let row = 0; row < 19; row++) for (let col = 0; col < 13; col++) {
+          const edge = !row || row === 18 || !col || col === 12;
+          const tile = node(edge ? geo.tiles.border[(row + col) & 1] : geo.tiles.field[(row * 7 + col * 3) % 6], (col - 6) * 4, -0.19, (row - 9) * 4);
+          tile.rotation.y = ((row * 5 + col * 3) & 3) * Math.PI / 2; S.addChild(environment, tile);
+        }
+        for (const side of [-1, 1]) {
+          for (let z = -34; z <= 34; z += 8.5) S.addChild(environment, node(geo.column, side * 23.8, 0, z));
+          for (let bay = 0; bay < 8; bay++) for (let tier = 0; tier < 2; tier++) {
+            const panel = node((tier ? geo.panels.high : geo.panels.low)[(bay + tier + (side > 0 ? 1 : 0)) % 3], side * 24.36, tier ? 6.95 : 3.8, -29.75 + bay * 8.5);
+            panel.rotation.z = side * Math.PI / 2; S.addChild(environment, panel);
+          }
+        }
         for (const side of [-1, 1]) for (const z of [-29.75, -12.75, 4.25, 21.25]) {
           const panel = node(geo.fanlight, side * 24.27, 2.65, z);
           panel.rotation.y = -side * Math.PI / 2; S.addChild(environment, panel);
@@ -359,6 +468,7 @@
             sign.rotation.y = -Math.PI / 2; S.addChild(environment, sign);
           }
         }
+        S.addChild(environment, fountain.root, statues.root);
       }
       const title = geo.title;
       S.addChild(environment, node(title.geometry, -title.width / 2, 6.4, -36.15));
@@ -368,12 +478,15 @@
         table.base.geometry = geo.base; table.top.geometry = geo.stone;
         table.rim.geometry = geo.rim; table.felt.geometry = geo.felt; table.pinstripe.geometry = geo.pinstripe;
         for (const chair of table.chairs) chair.geometry = geo.chair;
+        // Banana Club's name plates are added and taken away with the theme, so a cave's labels stay as they were.
+        if (geo.plate) { if (!table.plate) S.addChild(table.label, table.plate = node(geo.plate)); table.plate.geometry = geo.plate; }
+        else if (table.plate) { S.removeChild(table.label, table.plate); table.plate = null; }
       }
       if (geo.pinstripeGold) tables[HIGH_ROLLER].pinstripe.geometry = geo.pinstripeGold;
       current = next.id;
     };
     setTheme(theme.id);
-    return { root, tables, fixtures, sparkle, setTheme, get theme() { return current; } };
+    return { root, tables, fixtures, sparkle, fountain, statues, setTheme, get theme() { return current; } };
   };
   // Banana Club's fittings as axis-aligned boxes (centre, half-extents) in room coordinates; the geometry is built from
   // the same table. `solid` ones stop walkers, while the high-roller corner is only a mark round table 9.
@@ -386,15 +499,22 @@
     { kind: "ropePost", x: 5.0, z: -28.4, hx: 0.2, hz: 0.2, solid: true }, { kind: "ropePost", x: 5.0, z: -26.8, hx: 0.2, hz: 0.2, solid: true },
     { kind: "ropePost", x: 5.0, z: -21.8, hx: 0.2, hz: 0.2, solid: true }, { kind: "ropePost", x: 5.0, z: -20.2, hx: 0.2, hz: 0.2, solid: true },
     { kind: "rope", x: 5.0, z: -27.6, hx: 0.1, hz: 0.8, solid: true }, { kind: "rope", x: 5.0, z: -21.0, hx: 0.1, hz: 0.8, solid: true },
-    { kind: "highRoller", x: 11, z: -24, hx: 7.0, hz: 5.0, solid: false }
+    { kind: "highRoller", x: 11, z: -24, hx: 7.0, hz: 5.0, solid: false },
+    // Each statue from its plinth's back edge to as far as it reaches toward the room, and as wide as it reaches, so no
+    // head meets a held piece above the plinth.
+    ...BL.pokerStatues.SLOTS.map(s => {
+      const P = BL.pokerStatues.PLINTH, hx = (P.w / 2 + P.reach) / 2, out = Math.sign(s.x);
+      return { kind: "plinth", x: s.x + out * (P.w / 2 - hx), z: s.z, hx, hz: Math.max(P.w / 2, P.side), solid: true };
+    })
   ].map(f => Object.freeze(f)));
   const HIGH_ROLLER = 9;
   const CLUB_SOLIDS = FURNITURE.filter(f => f.solid), NO_SOLIDS = [];
   // The room is rebuilt per visit but this module lives for the page, so the scene puts it back on "gatsby" in `leave`.
-  let solids = CLUB_SOLIDS;
+  let solids = CLUB_SOLIDS, pool = true;
   // As with the floor, the scene puts lite back off in `leave`; a cave theme ignores it.
-  const setLite = on => { lite = on; };
-  const setFloor = themeId => { solids = themeId === "gatsby" ? CLUB_SOLIDS : NO_SOLIDS; };
+  const setLite = on => { lite = on; K.setLite(on); };
+  const setFloor = themeId => { pool = themeId === "gatsby"; solids = pool ? CLUB_SOLIDS : NO_SOLIDS; };
+  const F = BL.pokerFountain;
   // Whether the segment, grown by r, crosses box f: a slab test on t in [0, 1], so a zero-length step tests its point.
   const crosses = (ax, az, bx, bz, r, f) => {
     let lo = 0, hi = 1;
@@ -426,6 +546,11 @@
       }
     }
     for (let i = 0; i < solids.length; i++) if (crosses(ax, az, bx, bz, r, solids[i])) return false;
+    // Banana Club's fountain: the swept step's nearest point to the pool's centre stays outside its rim grown by r.
+    if (pool) {
+      const vx = bx - ax, vz = bz - az, dd = vx * vx + vz * vz, k = dd ? Math.max(0, Math.min(1, ((F.X - ax) * vx + (F.Z - az) * vz) / dd)) : 0;
+      if ((ax + k * vx - F.X) ** 2 + (az + k * vz - F.Z) ** 2 < (F.RADIUS + r) ** 2) return false;
+    }
     return true;
   };
   /** Writes into `out` the nearest point, on rings 0.5 m apart out to 4 m in sixteen directions, where a body may stand. */
@@ -450,8 +575,8 @@
   const spots = themeId => {
     const club = themeId === "gatsby", key = club ? "gatsby" : "cave";
     if (spotCache.has(key)) return spotCache.get(key);
-    const was = solids, list = [], clear = { x: 0, z: 0 };
-    solids = club ? CLUB_SOLIDS : NO_SOLIDS;
+    const was = solids, wasPool = pool, list = [], clear = { x: 0, z: 0 };
+    solids = club ? CLUB_SOLIDS : NO_SOLIDS; pool = club;
     const add = (kind, x, z, yaw, table = -1) => list.push(Object.freeze({ kind, x, z, yaw, table }));
     const stand = (kind, x, z, yaw) => { nearestClear(x, z, STAND, clear); add(kind, clear.x, clear.z, yaw); };
     TABLES.forEach((t, i) => {
@@ -472,13 +597,15 @@
       else if (f.kind === "cage") add("cage", f.x + side * 1.6, f.z, -side * Math.PI / 2);
       else if (f.kind === "rope") add("rope", f.x + side, f.z, side * Math.PI / 2);
     }
-    solids = was;
+    solids = was; pool = wasPool;
     const frozen = Object.freeze(list);
     spotCache.set(key, frozen);
     return frozen;
   };
-  // The bar wings' and the cage's warm lights, eight floats each (x, y, z, range, r, g, b, 0), after the room's thirteen.
-  const CLUB_LIGHTS = Float32Array.from([-10, 3, -35.6, 9, 1, 0.7, 0.4, 0, 10, 3, -35.6, 9, 1, 0.7, 0.4, 0, 20.6, 2.4, 31, 7, 1, 0.85, 0.55, 0]), NO_LIGHTS = new Float32Array(0);
+  // The bar wings', the cage's and the fountain's soft warm lights, eight floats each (x, y, z, range, r, g, b, 0), after
+  // the room's thirteen.
+  const CLUB_LIGHTS = Float32Array.from([-10, 3, -35.6, 9, 1, 0.7, 0.4, 0, 10, 3, -35.6, 9, 1, 0.7, 0.4, 0, 20.6, 2.4, 31, 7, 1, 0.85, 0.55, 0,
+    BL.pokerFountain.X, 3.6, BL.pokerFountain.Z, 6, 0.8, 0.72, 0.56, 0]), NO_LIGHTS = new Float32Array(0);
   const lights = themeId => BL.pokerThemes.get(themeId).id === "gatsby" ? CLUB_LIGHTS : NO_LIGHTS;
   // The one sitting pose for a caveman at a table, the same for every figure: the legs forward over the chair and both
   // arms brought forward to the rail. `standPose` sets back exactly these four rotations to the crew's standing values.

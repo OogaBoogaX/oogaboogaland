@@ -10668,7 +10668,8 @@ body[data-poker-table-view="true"] #joy-move, body[data-poker-table-view="true"]
 #poker .poker-theme-choice:hover { background: var(--pk-surface); }
 .poker-theme-swatch { display: block; position: relative; width: 36px; height: 29px; border-radius: 6px; overflow: hidden; background: linear-gradient(135deg, #315b46, #162c23); border: 1px solid #dbd9bd55; }
 .poker-theme-swatch::before, .poker-theme-swatch::after { content: ""; position: absolute; }
-.poker-theme-swatch[data-theme-swatch="gatsby"]::before { inset: 6px 4px -10px; border: 2px solid #dcc18c; border-radius: 50%; background: repeating-conic-gradient(from 0deg, #dbb96b 0deg 3deg, transparent 3deg 23deg); }
+.poker-theme-swatch[data-theme-swatch="gatsby"] { background: linear-gradient(120deg, transparent 40%, #a29c9499 43%, transparent 47%), linear-gradient(135deg, #f1ede6, #cbc4b8); }
+.poker-theme-swatch[data-theme-swatch="gatsby"]::before { inset: 6px 4px -10px; border: 2px solid #c8a45f; border-radius: 50%; background: repeating-conic-gradient(from 0deg, #b8924a 0deg 3deg, transparent 3deg 23deg); }
 .poker-theme-swatch[data-theme-swatch="crystal"] { background: linear-gradient(125deg, #644e86, #20334d); }
 .poker-theme-swatch[data-theme-swatch="crystal"]::before { inset: 3px 15px 2px 4px; background: linear-gradient(90deg, #63a9cb, #a6f4f1); clip-path: polygon(50% 0, 100% 30%, 80% 100%, 20% 100%, 0 30%); }
 .poker-theme-swatch[data-theme-swatch="crystal"]::after { inset: 8px 3px 2px 21px; background: #b9a0ee; clip-path: polygon(50% 0, 100% 40%, 80% 100%, 10% 100%, 0 35%); }

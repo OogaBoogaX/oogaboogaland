@@ -81,9 +81,9 @@
     BL.pokerModels.setFloor(theme.id);
     if (crowd) crowd.refloor(BL.pokerModels.spots(theme.id));
     audio.setTheme(theme.id);
-    // A theme's own lights (Banana Club's bar and cage) follow the room's thirteen, in slots no tier keeps first.
+    // A theme's own lights (Banana Club's bar, cage and fountain) follow the room's thirteen, in slots no tier keeps first.
     extraLights = BL.pokerModels.lights(theme.id); renderOpts.lightCount = 13 + extraLights.length / 8;
-    const p = avatar && (seatTable < 0 || pendingStand) ? avatar.root.position : null;
+    const p = avatar && !seated ? avatar.root.position : null;
     if (p && !BL.pokerModels.walkable(p.x, p.z, p.x, p.z, 0, avatar.bodyHeight, avatar)) { BL.pokerModels.nearestClear(p.x, p.z, avatar, CLEAR); p.x = CLEAR.x; p.z = CLEAR.z; }
   };
   const leaveFloor = () => { if (leaving) return; if (session.live && seatTable >= 0) { panel.notice("Stand between hands before leaving. You can walk the floor while connected."); return; } if (go("bifrost", null, true)) leaving = true; };
@@ -96,11 +96,22 @@
   const placeInAisle = () => {
     if (!avatar) return;
     BL.pokerModels.standPose(avatar);
-    const p = BL.pokerModels.TABLES[selected];
-    avatar.root.position.x = 0; avatar.root.position.y = avatar.baseY; avatar.root.position.z = p.z;
+    // Today's spot in the aisle beside the table, or the open floor nearest it (Banana Club's fountain fills the middle).
+    const p = BL.pokerModels.nearestClear(0, BL.pokerModels.TABLES[selected].z, avatar, CLEAR);
+    avatar.root.position.x = p.x; avatar.root.position.y = avatar.baseY; avatar.root.position.z = p.z;
     avatar.root.rotation.y = Math.PI; avatar.root.visible = true;
     pilot.setActive(true); pilot.controls.reset(); seated = false;
     document.body.removeAttribute("data-poker-seated");
+  };
+  // Banana Club's placards: a tap, or the act button within 2 m of a plinth off the tables, opens the one board at that
+  // figure's page, and its arrows page through all eight.
+  const openPlacard = i => { const board = BL.pokerStatues.board(); board.go(i); hud.openBoard(board); };
+  const nearPlacard = () => {
+    if (theme.id !== "gatsby" || seated || !avatar) return -1;
+    const p = avatar.root.position, half = BL.pokerStatues.PLINTH.w / 2;
+    let best = -1, bestD = 2;
+    BL.pokerStatues.SLOTS.forEach((s, i) => { const d = Math.hypot(Math.max(0, Math.abs(p.x - s.x) - half), Math.max(0, Math.abs(p.z - s.z) - half)); if (d <= bestD) { bestD = d; best = i; } });
+    return best;
   };
   const sit = index => {
     const p = BL.pokerModels.TABLES[selected], s = BL.pokerModels.SEATS[index];
@@ -313,8 +324,8 @@
       clampTarget, clampCamera, observeOrbit: keepCameraInside, ceilingAt: () => 8.5, coarse: matchMedia("(pointer: coarse)").matches, mayPossess,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: () => 0 } });
     Object.assign(hooks, pilot.hooks, {
-      onHover: (hit, p) => { if (hit?.owner.kind === "poker") hud.tooltip.show(`Table ${hit.owner.index + 1} · select to play or watch`, p.x, p.y); else hud.tooltip.hide(); },
-      onTap: hit => { if (hit?.owner.kind === "poker") select(hit.owner.index); else if (hit?.owner.kind === "poker-exit") leaveFloor(); }
+      onHover: (hit, p) => { if (hit?.owner.kind === "poker") hud.tooltip.show(`Table ${hit.owner.index + 1} · select to play or watch`, p.x, p.y); else if (hit?.owner.kind === "placard" && theme.id === "gatsby") hud.tooltip.show(BL.pokerStatues.tip(hit.owner.index), p.x, p.y); else hud.tooltip.hide(); },
+      onTap: hit => { if (hit?.owner.kind === "poker") select(hit.owner.index); else if (hit?.owner.kind === "placard" && theme.id === "gatsby") openPlacard(hit.owner.index); else if (hit?.owner.kind === "poker-exit") leaveFloor(); }
     });
     hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
     hud.setAreaLabel("Ember Den");
@@ -333,6 +344,7 @@
     BL.pokerModels.setLite(ctx.renderer.kind === "canvas2d");
     room = BL.pokerModels.build(theme.id); S.addChild(root, room.root);
     for (let i = 0; i < 10; i++) { input.add(room.tables[i].top, { kind: "poker", index: i }); targets.push(room.tables[i].top); }
+    for (const p of room.statues.plaques) { input.add(p.node, { kind: "placard", index: p.index }); targets.push(p.node); }
     // The return mirror is set into the far wall, facing down the central aisle.
     const BM = BL.bifrostModels, face = BM.mirror(4), portalZ = BL.pokerModels.PORTAL_Z;
     const frame = S.createNode({ position: { x: 0, y: 0, z: portalZ }, rotation: { x: 0, y: Math.PI, z: 0 } });
@@ -354,7 +366,7 @@
     const name = [world.pilot, requested, BL.net.preferredCharacter()?.handle].find(n => BL.contributors.activeRoster.some(c => c.name === n && mayPick(c))) || (BL.contributors.activeRoster.find(mayPick) || BL.contributors.activeRoster[0]).name;
     world.pilot = null;
     const playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
-    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: false, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => select(selected), residentPose: cave => { if (!seated || cave !== avatar) return false; BL.pokerModels.sitPose(avatar); return true; } };
+    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: false, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => { const i = nearPlacard(); if (i >= 0) openPlacard(i); else select(selected); }, residentPose: cave => { if (!seated || cave !== avatar) return false; BL.pokerModels.sitPose(avatar); return true; } };
     people = shared.crew = BL.crew.create(shared);
     for (const cave of people.cavemen.values()) {
       cave.weapon.primaryOwned = cave.weapon.secondaryOwned = false;
@@ -467,6 +479,8 @@
     }
     // The chandeliers' crystals glint, each ring on its own beat.
     for (let i = 0; i < room.sparkle.length; i++) { const n = room.sparkle[i]; n.glow = 0.7 + 0.3 * Math.sin(elapsed * 1.3 + n.ring * 1.1 + n.fixture * 2.1); }
+    if (room.theme === "gatsby") room.fountain.update(dt, elapsed);
+    hud.updateBoard(elapsed);
     for (let i = 0; i < extraLights.length; i++) lights[104 + i] = extraLights[i];
     if (!session.live && !session.paused) {
       timer += dt;
@@ -509,6 +523,7 @@
     world.pilot = pilot.player ? pilot.player.traits.name : null;
     unsubscribeAccount(); unsubscribeAccount = null; BL.net.setBody(null);
     for (const t of room.tables) t.agent.dispose();
+    hud.closeBoard(); room.fountain.dispose(); room.statues.dispose();
     BL.pokerModels.setFloor("gatsby"); BL.pokerModels.setLite(false);
     remotes.dispose(); remotes = null; footsteps.dispose(); footsteps = null;
     crowd.dispose(); crowd = null; crowdBodies.length = 0; renderer = null;
@@ -529,7 +544,9 @@
     for (const f of faces) { f.cave = f.tag = null; f.key = ""; }
     return { targets: count };
   };
-  const liveGeometry = set => { if (room) for (const t of room.tables) t.agent.liveGeometry(set); if (avatar) set.add(avatar.headOpen).add(avatar.headClosed); if (remotes) remotes.liveGeometry(set); if (crowd) crowd.liveGeometry(set); };
+  const liveGeometry = set => { if (room) for (const t of room.tables) t.agent.liveGeometry(set); if (avatar) set.add(avatar.headOpen).add(avatar.headClosed); if (remotes) remotes.liveGeometry(set); if (crowd) crowd.liveGeometry(set);
+    // Banana Club's fountain and statues stay on the GPU through a cave theme, so switching back uploads nothing.
+    if (room) { const keep = n => { if (n.geometry) set.add(n.geometry); for (const c of n.children) keep(c); }; keep(room.fountain.root); keep(room.statues.root); } };
   const stats = () => { let allNodes = 0, visibleNodes = 0; const walk = n => { allNodes++; for (const c of n.children) walk(c); }; walk(root); S.traverseVisible(root, () => visibleNodes++); return { allNodes, visibleNodes, targets: input.targetCount, tweens: S.tweenCount(), ...fx.stats(), ...(remotes ? remotes.stats() : {}), ...(crowd ? crowd.stats() : {}) }; };
   // Voice zone: the Ember Den, a portal of its own off the Bifrost chamber.
   const scene = { id: "poker", voiceZone: "ember-den", micKey: true, enter, update, overlay: dt => fx.drawOverlay(dt, extra), onKey, leave, liveGeometry, stats, renderOpts,
