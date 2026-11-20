@@ -205,23 +205,25 @@
   let carried = null;
   // The visitor's last choice of view in this browser (localStorage VIEW_KEY): carry or combat, the view, the look from
   // the Ooga's heading, pitch, zoom, overhead height, shoulder side and the weapon in hand, never its rounds or a captured
-  // cursor. `remember` keeps it in `chosen`, but not while a game forces combat (`combatOnly`), and it is written when the
-  // page hides or closes. A page's first arrival, before anything is carried, comes back in it (`arrive`). Debug pages
-  // neither read nor write it, so fixtures and the suite always start from the default view.
+  // cursor, and whether the jetpack was worn where the scene has one (`jetpackStatus`). `remember` keeps it in `chosen`,
+  // but not while a game forces combat (`combatOnly`), and it is written when the page hides or closes. A page's first
+  // arrival, before anything is carried, comes back in it (`arrive`), the jetpack put back on through the scene's
+  // `wearJetpack`. Debug pages neither read nor write it, so fixtures and the suite always start from the default view.
   const VIEW_KEY = "ooga-view", VIEWS = ["first-person", "shoulder", "birds-eye", "orbit"];
   const KEEP_VIEW = !new URLSearchParams(location.search).has("debug");
   // Bird's-eye combat is a game's to offer (`birdsEye`, the ghost hunt's). A debug page's `birdseye=1` offers it in every
   // scene that does not keep it out, for the checks of the overhead camera and the island's cutaway.
   const BIRDS_EYE_FIXTURE = !KEEP_VIEW && new URLSearchParams(location.search).get("birdseye") === "1";
-  const chosen = { view: "", combat: false, relYaw: 0, pitch: 0, distance: 0, height: 0, side: 1, held: 0 };
+  const chosen = { view: "", combat: false, relYaw: 0, pitch: 0, distance: 0, height: 0, side: 1, held: 0, jet: null };
   const readView = () => {
     let v = null;
     try { v = JSON.parse(localStorage.getItem(VIEW_KEY)); } catch { return null; }
     if (!v || !VIEWS.includes(v.view) || typeof v.combat !== "boolean" || ![v.relYaw, v.pitch, v.distance, v.height].every(Number.isFinite)
       || Math.abs(v.pitch) > Math.PI / 2 || !(v.distance > 0 && v.distance < 1e3) || Math.abs(v.height) > 1e3 || (v.side !== 1 && v.side !== -1) || ![0, 1, 2].includes(v.held)) return null;
-    return { name: "", view: v.view, combat: v.combat, focused: false, relYaw: v.relYaw, pitch: v.pitch, distance: v.distance, height: v.height, side: v.side, held: v.held, ammo: NaN };
+    return { name: "", view: v.view, combat: v.combat, focused: false, relYaw: v.relYaw, pitch: v.pitch, distance: v.distance, height: v.height, side: v.side, held: v.held, ammo: NaN, jet: v.jet === true };
   };
   const saved = KEEP_VIEW ? readView() : null;
+  if (saved) chosen.jet = saved.jet;
   const saveView = () => {
     if (!chosen.view) return;
     const relYaw = Math.atan2(Math.sin(chosen.relYaw), Math.cos(chosen.relYaw));
@@ -2342,6 +2344,8 @@
       if (!KEEP_VIEW || ctx.combatOnly?.()) return;
       chosen.view = c.view; chosen.combat = c.combat; chosen.relYaw = c.relYaw; chosen.pitch = c.pitch;
       chosen.distance = c.distance; chosen.height = c.height; chosen.side = c.side; chosen.held = c.held;
+      // Only a scene with jetpacks has a say: one without leaves the choice made where it could be.
+      if (ctx.jetpackStatus && cave.jetpackOwned) chosen.jet = !!cave.jet;
     };
     // The next `navigate`, in this same tick, keeps this look, pitch and zoom from the Ooga's new heading.
     let arriving = null;
@@ -2372,6 +2376,8 @@
       const w = cave.weapon, now = w.equipped ? 2 : w.primaryEquipped ? 1 : 0, slot = held === 2 && w.secondaryOwned ? 2 : held && w.primaryOwned ? 1 : 0;
       if (Number.isFinite(ammo)) w.ammo = ammo;
       if (crew.weaponsEnabled && slot !== now && (slot || !w.aiming)) crew.selectWeapon(slot, cave);
+      // The jetpack this browser last wore, on the page's first arrival.
+      if (c === saved && c.jet && !cave.jet && ctx.wearJetpack) ctx.wearJetpack(cave);
       arriving = arrivalKeep;
       return true;
     };

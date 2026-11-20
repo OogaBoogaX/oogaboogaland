@@ -1015,7 +1015,15 @@
   const housekeepTimer = window.setInterval(housekeep, 6e4);
   // EntropyLab currently lives in its island cave; retain the isolated scene for debug checks only.
   // The character studio (scene-studio.js) is a debug page too.
-  const routed = router.current();
+  // The bare address goes back to the place the visitor last stood in this browser (visit-spot.js), as its own route
+  // would: a Timechain room by its number, any other scene as a whole. The island stands its Ooga at its own spot.
+  const resumeRoute = () => {
+    const was = DEBUG || params.has("scene") || WIP ? null : window.BL.visitSpot.resume();
+    if (!was || was.scene === "hub" || !Object.hasOwn(scenes, was.scene)) return null;
+    const list = window.BL.routes.list;
+    return list.find((e) => e.scene === was.scene && (e.place || "") === was.place) || list.find((e) => e.scene === was.scene && !e.place) || { scene: was.scene, place: null };
+  };
+  const routed = router.current() || resumeRoute();
   const requestedScene = (routed && routed.scene) || params.get("scene") || (WIP !== "1" ? WIP : null);
   const sceneId = requestedScene === "race" && !RALLY_TEST ? "arcade" : (requestedScene === "lab" || requestedScene === "studio") && !DEBUG ? null : requestedScene;
   // Building the first scene holds the main thread with nothing painted yet.

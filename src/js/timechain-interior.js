@@ -878,8 +878,11 @@
       if (e) arrive({ x: e.x + Math.sin(e.heading) * eyeForward(avatar, e.pitch), z: L.entry.z + e.dz + Math.cos(e.heading) * eyeForward(avatar, e.pitch) }, e.heading, -e.pitch);
       else {
         const back = !guide.stage && ctx.from === null ? BL.visitSpot.take("timechain", SPOT_PLACE) : null;
-        if (back && Math.abs(groundAt(back.x, back.z, back.y, back.y, avatar) - back.y) < 0.05 && BL.visitSpot.holds(back, walkable, avatar)) arrive(back, back.yaw - Math.PI, 0.04, back.y);
-        else arrive(guide.stage ? L.threshold : L.arrival);
+        if (back && Math.abs(groundAt(back.x, back.z, back.y, back.y, avatar) - back.y) < 0.05 && BL.visitSpot.holds(back, walkable, avatar)) {
+          arrive(back, back.yaw - Math.PI, 0.04, back.y);
+          // In the view it was seen in when the page last hid.
+          if (back.view) pilot.adopt(back.view);
+        } else arrive(guide.stage ? L.threshold : L.arrival);
       }
     }
     keepCameraInside();
@@ -924,8 +927,8 @@
     }) : null;
     let leaving = false;
     // Leaving: the same Ooga goes back out to the island's passage behind the sphere's doors.
-    const exitNote = (signedOut) => ({ room: room.id, mode: signedOut ? "solo" : visit.mode, character: avatar ? avatar.traits.name : null,
-      jetpack: kind.jetpack && avatar ? { equipped: !!avatar.jet, fuel: avatar.jetFuel } : visit.jetpack || null });
+    const jetpackNow = () => kind.jetpack && avatar ? { equipped: !!avatar.jet, fuel: avatar.jetFuel } : visit.jetpack || null;
+    const exitNote = (signedOut) => ({ room: room.id, mode: signedOut ? "solo" : visit.mode, character: avatar ? avatar.traits.name : null, jetpack: jetpackNow() });
     // The view and mode the room was in when the visitor pressed Exit, which the island gives back once the walk out
     // is done.
     let exitView = null;
@@ -1285,7 +1288,7 @@
       }
       if (remotes) remotes.update(dt);
       footsteps.update(driven);
-      if (driven && !guide.stage && !leaving) BL.visitSpot.note("timechain", SPOT_PLACE, driven);
+      if (driven && !guide.stage && !leaving) BL.visitSpot.note("timechain", SPOT_PLACE, driven, pilot);
       lockUpdate(dt);
       if (avatar && !guide.stage) {
         let action = null;
@@ -1454,7 +1457,7 @@
       const count = (node) => 1 + node.children.reduce((sum, c) => sum + count(c), 0);
       return { visibleNodes: visible, allNodes: count(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...(remotes ? remotes.stats() : {}), requests: reader.pending, timers: reader.timers };
     };
-    return { update, overlay, onKey, onDonation, stay, leave, liveGeometry, stats, renderOpts: RENDER_OPTS, get inMotion() { return true; } };
+    return { update, overlay, onKey, onDonation, stay, leave, liveGeometry, stats, jetpack: jetpackNow, renderOpts: RENDER_OPTS, get inMotion() { return true; } };
   };
 
   // A room readied at the island's doorway once Enter commits to it, so that arriving costs no build, paint or upload:
