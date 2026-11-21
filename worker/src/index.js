@@ -11,6 +11,7 @@ import { handleCharacterCatalog } from "./character-catalog-http.js";
 import { handleCharacterPortrait } from "./character-portraits.js";
 import { handleConnectionReports, pruneConnectionReports } from "./connection-reports.js";
 import { handleApi } from "./api.js";
+import { handleEquipment, handleEquipmentCatalog, handleEquipmentHat } from "./equipment.js";
 import { handleAuth } from "./auth.js";
 import { purgeExpiredSessions } from "./db.js";
 import { handleDonations } from "./donations.js";
@@ -72,7 +73,8 @@ const handleRoom = async (request, env, ctx) => {
     inspectEdge(env, ctx, "limited", found.player, { which: "room" });
     return text("Too many reconnects", 429);
   }
-  return env.ROOM.getByName(ROOM_NAME).fetch(asPlayer(request, found));
+  return env.ROOM.getByName(ROOM_NAME).fetch(asPlayer(request, found,
+    env.EQUIPMENT_ENABLED === "1" ? { "x-player-equipment-session": found.session.token_hash } : null));
 };
 
 // A hosted game's socket, `/game/<kind>/<venue>` (game-host.js): only a game and venue the registry names (games.js)
@@ -135,6 +137,9 @@ export default {
     if (url.pathname.startsWith("/api/cloud-hopper-replays/")) return handleCloudHopperReplays(request, env, ctx);
     if (url.pathname === "/api/connection-reports") return handleConnectionReports(request, env);
     if (url.pathname.startsWith("/api/avatar/")) return handleAvatar(request, env, url, ctx);
+    if (url.pathname === "/api/equipment") return handleEquipment(request, env);
+    if (url.pathname === "/api/equipment/catalog") return handleEquipmentCatalog(request);
+    if (url.pathname.startsWith("/api/equipment/hats/")) return handleEquipmentHat(request, env, url);
     if (url.pathname === "/api/characters/catalog") return handleCharacterCatalog(request, env);
     if (url.pathname.startsWith("/api/characters/portraits/")) return handleCharacterPortrait(request, env);
     if (url.pathname === "/api/world") return handleWorld(request, env, ctx);

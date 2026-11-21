@@ -20,6 +20,8 @@
   },
   "vars": {
     "ENVIRONMENT": "staging",
+    // Account hats are enabled explicitly for staging acceptance; production remains off.
+    "EQUIPMENT_ENABLED": "1",
     // Independent character catalogs stay off until the runtime and publisher acceptance checks pass.
     // Enabling also requires CHARACTER_CATALOGS, CHARACTER_CATALOG_ENGINE and CHARACTER_CATALOG_BASELINE.
     "CHARACTER_CATALOG_ENABLED": "0",
@@ -89,6 +91,8 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }, { "tag": "v2", "new_sqlite_classes": ["GameHost"] }, { "tag": "v3", "new_sqlite_classes": ["Inspector"] }, { "tag": "v4", "new_sqlite_classes": ["Audience"] }, { "tag": "v5", "new_sqlite_classes": ["WorldWatch"] }],
   // Namespaces are per account: staging counts in 2001-2008, production in 1001-1008.
   "ratelimits": [
+    // Equipment reads and saves per signed-in account, counted on separate method keys.
+    { "name": "EQUIPMENT_LIMITER", "namespace_id": "2017", "simple": { "limit": 30, "period": 60 } },
     // Opt-in dropout reports per signed-in account, with additional D1 retention and volume caps.
     { "name": "CONNECTION_REPORT_LIMITER", "namespace_id": "2008", "simple": { "limit": 6, "period": 60 } },
     // Poker API and worker delivery per signed-in account.

@@ -12482,6 +12482,24 @@ body[data-active-scene] #environment-sound { display: flex; align-items: center;
   gap: 5px;
 }
 .studio-side button { flex: 0 0 auto; padding: 0 10px; }
+.studio-wardrobe { display: grid; gap: 7px; margin: 12px 0; }
+.studio-wardrobe select { width: 100%; min-width: 0; min-height: 44px; padding: 7px; font-size: 12px; color: var(--paper); cursor: pointer; }
+.studio-wardrobe :is(select, input[type="range"]):focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.studio-hat-size-label { display: flex; justify-content: space-between; gap: 8px; }
+.studio-hat-size-label output { color: var(--accent-text); font-variant-numeric: tabular-nums; }
+.studio-wardrobe input[type="range"] { width: 100%; min-width: 0; height: 44px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.studio-wardrobe input[type="range"]:disabled { opacity: 0.5; cursor: default; }
+.studio-wardrobe button { white-space: normal; min-height: 44px; padding: 6px 10px; font-size: 11px; }
+.studio-wardrobe p { margin: 0; }
+.studio-wardrobe a { color: var(--accent-text); line-height: 1.5; }
+.studio-wardrobe .studio-note { line-height: 1.4; }
+.equipment-update { position: absolute; z-index: 50; top: calc(var(--banner-controls-bottom, 68px) + 12px); left: 50%; transform: translateX(-50%); width: min(360px, calc(100vw - 24px)); box-sizing: border-box; padding: 12px; border: 2px solid var(--wood-edge); border-radius: var(--radius); color: var(--paper); background: var(--planks); box-shadow: 0 4px 12px #0008; }
+.equipment-update p { margin: 0 0 8px; }
+.equipment-update div { display: flex; gap: 8px; flex-wrap: wrap; }
+.equipment-update button { flex: 1 1 auto; min-height: 44px; padding: 6px 10px; font-size: 11px; white-space: normal; }
+.studio-wardrobe .foot-primary:disabled,
+.equipment-update .foot-primary:disabled { background: linear-gradient(#e2a04a, var(--accent)); }
+.equipment-update [role="status"]:empty { display: none; }
 /* Its quick pick of every Ooga, in the banner where the controls button stands elsewhere, in the equipment buttons' look. */
 .studio-pick {
   position: absolute;
@@ -12574,6 +12592,7 @@ body[data-active-scene="studio"] :is(.world-clock, .world-block) { visibility: h
 .studio-note[data-state="bad"] { color: #ffb08a; }
 /* Its text sits on a dark inset, so the planks' seams never run through a line. */
 .studio-file,
+.studio-wardrobe .studio-note,
 #studio-groups .studio-list { padding: 6px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.62); }
 .studio-list { margin: 0; padding: 0; list-style: none; }
 .studio-list li { display: flex; flex-direction: column; gap: 1px; padding: 4px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.07); }

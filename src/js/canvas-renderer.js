@@ -198,7 +198,7 @@
     }
     const acquire = (vertices = 16) => {
       if (poolUsed === pool.length) {
-        pool.push({ pts: new Float32Array(32), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1, mirror: false, mirrorNode: null, imageNode: null, imageA: 0, imageB: 0, imageC: 0, imageD: 0, canvasR: 1, canvasG: 1, canvasB: 1, canvasAddR: 0, canvasAddG: 0, canvasAddB: 0, mirrorMinX: 0, mirrorMaxX: 0, mirrorMinY: 0, mirrorMaxY: 0, portal: false, matrix: 0, matrixGlyph: false, matrixGlyphOpacity: 1, matrixWall: 0, matrixNx: 0, matrixNy: 0, matrixNz: 0, matrixPlane: 0, matrixCenterDepth: 0, matrixMinX: 0, matrixMaxX: 0, matrixMinY: 0, matrixMaxY: 0, matrixRed: 0, matrixGreen: 0, matrixBlue: 0, matrixCave: 0, matrixLocal: false, matrixLiving: false, matrixDynamic: false, matrixPermanentOnly: false, matrixPartial: false, matrixBacking: false, matrixFaceNx: 0, matrixFaceNy: 0, matrixFaceNz: 0, matrixFacePlane: 0, scrMinX: 0, scrMinY: 0, scrMaxX: 0, scrMaxY: 0 });
+        pool.push({ pts: new Float32Array(32), n: 0, depth: 0, depthOffset: false, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1, mirror: false, mirrorNode: null, imageNode: null, imageA: 0, imageB: 0, imageC: 0, imageD: 0, canvasR: 1, canvasG: 1, canvasB: 1, canvasAddR: 0, canvasAddG: 0, canvasAddB: 0, mirrorMinX: 0, mirrorMaxX: 0, mirrorMinY: 0, mirrorMaxY: 0, portal: false, matrix: 0, matrixGlyph: false, matrixGlyphOpacity: 1, matrixWall: 0, matrixNx: 0, matrixNy: 0, matrixNz: 0, matrixPlane: 0, matrixCenterDepth: 0, matrixMinX: 0, matrixMaxX: 0, matrixMinY: 0, matrixMaxY: 0, matrixRed: 0, matrixGreen: 0, matrixBlue: 0, matrixCave: 0, matrixLocal: false, matrixLiving: false, matrixDynamic: false, matrixPermanentOnly: false, matrixPartial: false, matrixBacking: false, matrixFaceNx: 0, matrixFaceNy: 0, matrixFaceNz: 0, matrixFacePlane: 0, scrMinX: 0, scrMinY: 0, scrMaxX: 0, scrMaxY: 0 });
       }
       const rec = pool[poolUsed++];
       if (rec.pts.length < vertices * 2) rec.pts = new Float32Array(CLIP_VERTICES * 2);
@@ -872,6 +872,7 @@
               }
               rec.n = clipped;
               rec.depth = zsum / clipped - (node.depthBias || 0);
+              rec.depthOffset = !!node.geometry.depthOffset;
               rec.line = false;
               rec.smokeOpacity = faceOpacity;
               rec.mirror = mirrorFace;
@@ -1129,6 +1130,7 @@
             rec.n = 2;
             rec.depth = (CLIP_OUT[2] + CLIP_OUT[5]) / 2 - (node.depthBias || 0);
             rec.line = true;
+            rec.depthOffset = false;
             rec.smokeOpacity = opacity;
             rec.imageNode = null;
             rec.mirror = false;
@@ -2061,7 +2063,9 @@
           if (plane < 0) plane = matrixPlaneSlot(rec.matrixNx, rec.matrixNy, rec.matrixNz, rec.matrixPlane + 0.015, false, 0);
           if (plane >= 0 && rec.depth <= matrixPlaneDepths[plane]) rec.depth = matrixPlaneDepths[plane] + 0.0001 + (rec.depth - rec.matrixCenterDepth) * 0.001;
         }
-        sortIds[i] = i; sortKeys[i] = rec.depth;
+        // Painter fallback for the GL surface bias: near-equal face depths favor the overlay, without
+        // changing projection, fog or genuinely nearer occluders. Lines never inherit a pooled face's bias.
+        sortIds[i] = i; sortKeys[i] = rec.depth + (rec.depthOffset ? 0.0001 : 0);
       }
       sortByKey(sortIds, 0, poolUsed, sortKeys, 1, 0, sortWork);
       for (let i = 0; i < poolUsed; i++) active[i] = pool[sortIds[i]];

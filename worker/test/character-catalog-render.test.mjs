@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSyn
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import vm from "node:vm";
-import { prepareCatalogRenderer, portraitResponse, portraitResult, rendererArguments, renderCatalog } from "../../scripts/character-catalog-render.mjs";
+import { prepareCatalogRenderer, portraitResponse, portraitResult, portraitConsoleError, rendererArguments, renderCatalog } from "../../scripts/character-catalog-render.mjs";
 import { seedCatalog, encodeCatalog } from "../../scripts/character-catalog.mjs";
 import { safeCharacterSource } from "../../scripts/character-safety.mjs";
 import { encode } from "../../scripts/distribution-icons.mjs";
@@ -101,4 +101,16 @@ test("renderer CLI requires explicit inputs and cannot write artifacts into the 
     const result = rendererArguments(["--baseline-dir", f.root, "--catalog", input, "--output", "/tmp/catalog-portraits-test"]);
     assert.equal(result.catalogFile, input);
   } finally { f.close(); }
+});
+
+test("console failures retain bounded actionable diagnostics without allowing warnings", () => {
+  const logs = ["[log.warning] blocked by content policy\u001b[31m", ...Array(20).fill("x".repeat(1000))];
+  const error = portraitConsoleError(logs, "after drawing");
+  assert.ok(error instanceof Error);
+  assert.match(error.message, /after drawing \(21 entries\)/);
+  assert.match(error.message, /blocked by content policy/);
+  assert.equal(error.message.includes("\u001b"), false);
+  assert.equal(error.message.split("\n").length, 9);
+  assert.ok(error.message.length < 4100);
+  assert.equal(logs.length, 21);
 });

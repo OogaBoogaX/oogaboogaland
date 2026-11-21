@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeCharacters } from "./characters.mjs";
+import { writeEquipmentHats } from "./equipment-hats.mjs";
 import { catalogBaseline, catalogContinuation } from "./character-catalog-build.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -18,6 +19,7 @@ const sha256 = (text) => `'sha256-${createHash("sha256").update(text, "utf8").di
 runInNewContext(read("js/cave-directory.js"), { window: {}, URL });
 
 writeCharacters();
+writeEquipmentHats();
 let html = read("index.html");
 
 // The source links its touch icon beside index.html; the single-file page has no file beside it (opened from disk it

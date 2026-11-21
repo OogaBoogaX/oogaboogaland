@@ -44,9 +44,9 @@ const unchanged = (f) => {
   assert.equal(f.run("BL.characters.all().length"), 2); assert.equal(f.ctx.booted, true);
 };
 
-test("source, offline, studio and unconfigured deployed pages retain synchronous embedded boot", () => {
+test("source, offline studio and unconfigured deployed pages retain synchronous embedded boot", () => {
   for (const options of [{ dataset: {} }, { dataset: { workerPage: "1" } }, { protocol: "file:" },
-    { search: "?scene=studio" }, { search: "?nosim" }, { search: "?net=0" }]) {
+    { search: "?scene=studio&net=0" }, { search: "?scene=studio&nosim" }, { search: "?nosim" }, { search: "?net=0" }]) {
     const f = fixture(options); f.start(); unchanged(f); assert.equal(f.calls.length, 0);
     assert.equal(f.run("BL.characterCatalog.current.status"), "embedded");
   }
@@ -55,8 +55,9 @@ test("source, offline, studio and unconfigured deployed pages retain synchronous
   assert.equal(partial.run("BL.characterCatalog.current.status"), "incompatible");
 });
 
-test("hosted boot applies the entire catalog before consumers and pins custom hooks and the NPC order", async () => {
-  const f = fixture(), waiting = f.start(); assert.equal(f.ctx.booted, undefined); await waiting;
+test("hosted island and studio boot apply the entire catalog before consumers and pin custom hooks and NPC order", async () => {
+  for (const search of ["", "?scene=studio"]) {
+  const f = fixture({ search }), waiting = f.start(); assert.equal(f.ctx.booted, undefined); await waiting;
   assert.deepEqual([...f.ctx.seen], ["Artist", "Alice", "NewArt"]);
   assert.equal(f.run("BL.characters.get('Alice').look.hair"), "#abcdef");
   assert.equal(f.run("BL.characters.get('Artist') === originalArtist"), true);
@@ -67,6 +68,7 @@ test("hosted boot applies the entire catalog before consumers and pins custom ho
   assert.equal(f.calls[0][0], `/api/characters/catalog?baseline=${BASELINE}&engine=${ENGINE}`);
   assert.equal(f.calls[0][1].credentials, "omit"); assert.equal(f.calls[0][1].redirect, "error");
   await f.start(); assert.equal(f.calls.length, 1, "a page never changes its catalog after boot");
+  }
 });
 
 test("invalid authority and incompatible custom code leave both registry indices unchanged", async () => {

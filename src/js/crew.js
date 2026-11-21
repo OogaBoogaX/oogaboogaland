@@ -246,21 +246,26 @@
   // the jetpack goes on, grounded or not, it leaps up over `leap` seconds, trots a loop round the crown at `speed`
   // radians a second (turning back each lap) while the jetpack is worn, and hops down over `hop` seconds with `hopUp`
   // lift when it comes off (the maintainer's call on #520: other pages see the same from the shared jetpack state).
-  // The loop is measured once per head geometry (`HAT_SEATS`): `ring` angles round the top of the head and all it
+  // The loop is measured per head and equipment appearance (`HAT_SEATS`): `ring` angles round the top of the head and all it
   // wears, each with the radius and height a pet of its width stands at, the middle of the outermost run of surface
   // within a pet's width of the lowest there (a brim round a crown; on a bare head, its top). Under Calm it sits still.
   const HAT_RIDE = Object.freeze({ ring: 16, steps: 24, leap: 0.5, hop: 0.4, hopUp: 2.5, speed: 1.4, bob: 0.04 });
-  const HAT_SEATS = new WeakMap();
+  const HAT_SEATS = new WeakMap(), HAT_SEAT_LIMIT = 64;
   // Read live; a context without matchMedia (the suite's bare loaders) is never Calm.
   const CALM = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
   const RIDE_HEAD = math.quat.create(), RIDE_TURN = math.quat.create(), RIDE_SPIN = math.quat.create(), RIDE_MATRIX = math.mat4.create();
-  const hatSeatOf = (head, dog) => {
-    let seat = HAT_SEATS.get(head.geometry);
+  const hatSeatOf = (cave) => {
+    const head = cave.parts.head, dog = cave.parts.dog, equipment = BL.characterEquipment;
+    const selected = equipment?.selection(cave), key = !selected ? "authored" : selected.item === "none" ? "none"
+      : selected.item + ":" + selected.version + ":" + equipment.size(cave);
+    let seats = HAT_SEATS.get(cave.headOpen);
+    if (!seats) HAT_SEATS.set(cave.headOpen, seats = new Map());
+    let seat = seats.get(key);
     if (seat) return seat;
     // Every shown vertex under the head, in the head's own frame; measured once, so plain arrays.
     const points = [];
     const gather = (node, m) => {
-      const verts = node.geometry ? node.geometry.verts : null;
+      const geometry = node === head ? cave.headOpen : node.geometry, verts = geometry ? geometry.verts : null;
       if (verts) for (let i = 0; i < verts.length; i += 3) {
         const x = verts[i], y = verts[i + 1], z = verts[i + 2];
         points.push(m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14]);
@@ -308,7 +313,8 @@
       seat.r[a] = reach * mid / steps;
       seat.y[a] = heights[mid];
     }
-    HAT_SEATS.set(head.geometry, seat);
+    if (seats.size >= HAT_SEAT_LIMIT) seats.delete(seats.keys().next().value);
+    seats.set(key, seat);
     return seat;
   };
   // A pet's ride state for `poseHatRide`: its owner's measured seat, where on the loop it is and which way it trots,
@@ -318,8 +324,11 @@
     return { x: (b.min[0] + b.max[0]) / 2, y: (b.min[1] + b.max[1]) / 2,
       z: b.max[2] + 0.015 - BL.scene.boundsOf(dog.geometry).min[1] * dog.scale.y };
   };
-  const hatRide = (cave) => ({ stomach: stomachSeatOf(cave), kind: 0, yaw: 0, seat: hatSeatOf(cave.parts.head, cave.parts.dog), q: math.quat.create(), angle: Math.PI, dir: 1, run: 0, step: 0,
+  const hatRide = (cave) => ({ stomach: stomachSeatOf(cave), kind: 0, yaw: 0, seat: hatSeatOf(cave), q: math.quat.create(), angle: Math.PI, dir: 1, run: 0, step: 0,
     t: 1, sx: 0, sy: 0, sz: 0, ex: 0, ez: 0, vy: 0, free: false });
+  // Equipment changes are events, not frame work. Keep the pet's loop phase, quaternion and leap state while
+  // measuring the newly visible headwear; clones with the same version and size share the bounded cached seat.
+  const refreshHatRide = (cave) => { if (cave.pet?.ride) cave.pet.ride.seat = hatSeatOf(cave); };
   // Trots the pet `dt` along its loop (not under Calm) and stands `node` there: `m` is the head's matrix in the node's
   // parent frame, so the pet keeps to the hat through every turn and tilt of the head. Writes in place; allocates nothing.
   const poseHatRide = (ride, node, m, dt) => {
@@ -7360,6 +7369,7 @@
       if (player) clearHeadLook(player);
       if (!player) return;
       const cave = player;
+      BL.equipment?.clear(cave);
       if (passiveNpcs && !ctx.playerName) clearCombatEffects(cave);
       clearGunBashThrust(cave);
       cave.humanControlled = false;
@@ -8235,5 +8245,5 @@
       }
     };
   };
-  BL.crew = { create, createPets, hatRide, poseHatRide, poseStomachRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, VISUAL_BODY, GAIT, poseGait, poseCloseWalk, poseGroundSit, seatJetpack, jetSparks, preparePresentation, poseEquipment, poseReload, reachArm, strikeTime, bodyHeightOf, bodyRadiusOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, COMPANION_FOLLOW, QUAD_GAIT, poseQuadruped, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_PUFF, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
+  BL.crew = { create, createPets, hatRide, refreshHatRide, poseHatRide, poseStomachRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, VISUAL_BODY, GAIT, poseGait, poseCloseWalk, poseGroundSit, seatJetpack, jetSparks, preparePresentation, poseEquipment, poseReload, reachArm, strikeTime, bodyHeightOf, bodyRadiusOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, COMPANION_FOLLOW, QUAD_GAIT, poseQuadruped, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_PUFF, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
 })();

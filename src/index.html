@@ -414,6 +414,18 @@
       </div>
       <div class="studio-scroll" id="studio-scroll">
         <p class="studio-who" id="studio-who"></p>
+        <div class="studio-wardrobe">
+          <label class="roster-sort-label" for="studio-hat">Try a hat</label>
+          <select class="slab" id="studio-hat" aria-label="Hat" aria-describedby="studio-hat-status"></select>
+          <label class="roster-sort-label studio-hat-size-label" for="studio-hat-size">Hat size <output id="studio-hat-size-value" for="studio-hat-size">100%</output></label>
+          <input type="range" id="studio-hat-size" min="80" max="120" step="1" value="100" aria-valuetext="100%" aria-describedby="studio-hat-status" disabled>
+          <button type="button" class="foot-button" id="studio-hat-size-reset" disabled>Reset fitted size</button>
+          <button type="button" class="foot-button foot-primary" id="studio-hat-save" aria-describedby="studio-hat-status">Save hat for my Ooga</button>
+          <button type="button" class="foot-button" id="studio-hat-own" hidden>Show my Ooga</button>
+          <p class="studio-note" id="studio-hat-status" role="status"></p>
+          <a class="link" href="/auth/login?next=%2F%3Fscene%3Dstudio" id="studio-hat-signin" hidden>Sign in with GitHub to save</a>
+          <a class="link" href="/?scene=studio" id="studio-hat-link" hidden>Open the hosted studio to save</a>
+        </div>
         <h3 class="section-head">File</h3>
         <div class="studio-file">
           <div class="studio-bar" id="studio-size-bar"><span id="studio-size-fill"></span></div>
@@ -425,6 +437,13 @@
       </div>
     </section>
     <button type="button" class="panel-edge panel-edge-right studio-features-edge" data-fold="studio-features" data-scene="studio" hidden>This Ooga</button>
+
+    <section id="equipment-update" class="equipment-update" aria-label="Hat update" hidden>
+      <p id="equipment-update-text"></p>
+      <div><button type="button" class="foot-button foot-primary" id="equipment-accept">Accept update</button>
+      <button type="button" class="foot-button" id="equipment-decline">Keep my version</button></div>
+      <p id="equipment-update-status" role="status"></p>
+    </section>
 
     <aside class="sheet" id="sheet" data-open="false" data-dock="side" data-paired="false">
       <nav class="sheet-panels" role="tablist" aria-label="Island panels">
@@ -2494,6 +2513,10 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
   <script src="js/character-catalog.js"></script>
   <script src="js/roster-panel.js"></script>
   <script src="js/contributors.js"></script>
+  <script src="js/equipment-hats.js"></script>
+  <script src="js/equipment-hats.gen.js"></script>
+  <script src="js/character-equipment.js"></script>
+  <script src="js/equipment-hat-data.gen.js"></script>
   <script src="js/donations.js"></script>
   <script src="js/donation-rate.js"></script>
   <script src="js/mempool.js"></script>
@@ -2534,6 +2557,7 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
   <script src="js/duel-rules.js"></script>
   <script src="js/duel-listening.js"></script>
   <script src="js/net.js"></script>
+  <script src="js/equipment.js"></script>
   <script src="js/game-net.js"></script>
   <script src="js/highscores.js"></script>
   <script src="js/cloud-hopper-replays.js"></script>

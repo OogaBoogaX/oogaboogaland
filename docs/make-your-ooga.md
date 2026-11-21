@@ -207,6 +207,18 @@ body wears as bands of colour; `crown`, `skull`, `eyes` and `mark` build the hea
 blocks; `club`, `headgear` and `extras` add pieces; `model(k, wear)` builds what blocks
 cannot say and lifts it off the body with `BL.heroBody.trunk(slim)`.
 
+Put removable headwear in `dress.hat(k, v)` (hat voxels on the authored head grid)
+or `dress.hatNodes(k)` (hat nodes attached to `k.parts.head`). Keep hair, glasses,
+facial features and anatomy in their existing head hooks so taking a hat off
+preserves the character underneath. These hooks still belong in your one file.
+
+If your hat is already available in the shared wardrobe, submit changes only to
+your character file. Normal builds use the committed wearable archives; changes
+to your voice, body or hat do not require you to edit the shared catalog. Your
+authored Ooga changes with the reviewed character release. A maintainer separately
+reviews and publishes any shared hat update, retaining older wearable versions
+for players who keep them; see [Live character hats](character-equipment.md).
+
 The limits a maintainer cannot waive:
 
 - **One file, 32,768 bytes**, comments included. The check prints how full it is.

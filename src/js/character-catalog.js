@@ -10,7 +10,7 @@
   };
   const metadata = () => {
     const page = document.documentElement.dataset, params = new URLSearchParams(location.search);
-    if (page.workerPage !== "1" || !/^https?:$/.test(location.protocol) || params.has("nosim") || params.get("net") === "0" || params.get("scene") === "studio") return null;
+    if (page.workerPage !== "1" || !/^https?:$/.test(location.protocol) || params.has("nosim") || params.get("net") === "0") return null;
     const { characterCatalogBaseline: base, characterCatalogEngine: engine, characterCatalogEnvironment: environment } = page;
     if (!base && !engine && !environment) return null;
     if (!/^[a-f0-9]{40}$/.test(base || "") || engine !== ENGINE || !["staging", "production"].includes(environment) || !baseline) return false;

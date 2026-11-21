@@ -580,7 +580,9 @@
     } catch {
       return;
     }
-    if (msg.t === "cabinets") {
+    if (msg.t === "equipment") {
+      BL.equipment?.receive(msg);
+    } else if (msg.t === "cabinets") {
       cabinetSeats.clear();
       if (Array.isArray(msg.seats)) for (const seat of msg.seats) if (BL.arcadeCabinets.get(seat.id)) cabinetSeats.set(seat.id, seat);
       if (cabinetSeat && cabinetSeats.get(cabinetSeat.id)?.player !== state.selfId) { cabinetSeat = null; emit(); }
@@ -990,7 +992,7 @@
 
   const connect = () => {
     retryTimer = 0;
-    if (stopped || ws || !state.me) return;
+    if (stopped || ws || !state.me || new URLSearchParams(location.search).get("scene") === "studio") return;
     setRoom("connecting");
     observedMessage = observedPong = -1;
     if (diagnostic) diagnostic.lastMessage = diagnostic.lastPong = -1;
@@ -1079,6 +1081,7 @@
       state.highscoreSnapshots = data.highscoreSnapshots === true;
       state.arcadePlays = data.arcadePlays === true;
       state.connectionReports = data.connectionReports === true;
+      state.equipment = data.equipment === true;
       // The games the Worker hosts itself (worker/src/games.js), each followed over its own socket (game-net.js).
       state.games = Array.isArray(data.games) ? data.games.filter((g) => typeof g === "string").slice(0, 8) : [];
       state.resolved = data.player === null || !!state.me;
@@ -1224,6 +1227,8 @@
   };
   // Hidden long enough, the tab leaves the room; shown again, it rejoins as a fresh connection.
   const onVisibility = () => {
+    // The wardrobe may share this account with an island tab; it owns no room or voice connection.
+    if (new URLSearchParams(location.search).get("scene") === "studio") return;
     traceConnection("visibility");
     sendHub();
     sendVisible();

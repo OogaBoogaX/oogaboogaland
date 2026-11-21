@@ -41,7 +41,7 @@ import {
   PM_FEATURE, PM_HZ, PM_BURST, PM_INVITE_HZ, PM_INVITE_BURST, PM_CONTROL_HZ, PM_CONTROL_BURST, PM_INVITES, PM_BLOCKS, PM_ACCOUNT_KEEP,
   LINK_FEATURE, LINK_HZ, LINK_BURST, LINK_WANTS, LINK_ACCOUNTS, voiceLinked, restoreLinks, storedLinks, linkView, inVoice,
   chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
-  BLEND, BLEND_HZ, seenTogether, inspectReporter, INSPECT_FEATURE, worldReporter, audienceRoom, commonsRoom, roomCatalog, sessionGone, cleanupPass,
+  BLEND, BLEND_HZ, seenTogether, inspectReporter, INSPECT_FEATURE, worldReporter, audienceRoom, commonsRoom, roomCatalog, equipmentRoom, sessionGone, cleanupPass,
 } from "./protocol.js";
 import { sha256Hex } from "./crypto.js";
 import { getPlayer } from "./db.js";
@@ -191,6 +191,7 @@ export class Room extends DurableObject {
       await this.restoring(null, () => {
         if (this.studio.hostId && (!this.players.has(this.studio.hostId) || this.players.get(this.studio.hostId).zone !== STUDIO_ZONE || !studioHostAllowed(env, this.studio.hostId))) this.suspendStudio();
       });
+      if (env.EQUIPMENT_ENABLED === "1") await this.restoring(null, () => equipmentRoom.refreshAll(this, true));
       // Stored cleanup retries from an alarm due now, never inside this block: several bounded SFU calls can accumulate, and a
       // block past 30 s resets the island's only room, presence and voice with it.
       if (this.sfu && this.cleanupJobs.length) {
@@ -228,6 +229,7 @@ export class Room extends DurableObject {
   }
 
   record(ws, a) {
+    if (this.env?.EQUIPMENT_ENABLED === "1") a = { ...a, equipment: equipmentRoom.saved(this, a.equipment, a.login, a.id), equipmentReady: !!a.equipment };
     return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], roomLock: null, blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, savedAt: 0, posePending: false, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: a.joinedAt || Date.now() };
   }
 
@@ -285,7 +287,8 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, block: p.block || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, resumeKey: p.resumeKey, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, d: p.d, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, props: !!p.props, ...(p.catalogRoster ? { catalogRoster: p.catalogRoster } : {}), visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm, audienceZone: p.audienceZone || null, outdoor: p.outdoor || null, ...duel.saved(p) };
+    const equipment = this.env?.EQUIPMENT_ENABLED === "1" ? { equipment: p.equipment || null, equipmentSession: p.equipmentSession || null } : {};
+    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, block: p.block || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, resumeKey: p.resumeKey, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, d: p.d, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, props: !!p.props, ...(p.catalogRoster ? { catalogRoster: p.catalogRoster } : {}), visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm, audienceZone: p.audienceZone || null, outdoor: p.outdoor || null, ...equipment, ...duel.saved(p) };
   }
 
   view(p) {
@@ -605,6 +608,21 @@ export class Room extends DurableObject {
     }, game);
   }
 
+  // Binding-only account API. Saving in the hosted Studio never opens or replaces a room socket.
+  equipmentFor(id, tokenHash, command = null) { return equipmentRoom.request(this, id, tokenHash, command); }
+  equipmentCharacter(login, id) {
+    const cast = this.catalog.current();
+    if (!cast) throw Object.assign(new Error("Equipment character authority unavailable"), { code: "catalog_unavailable" });
+    return ownedBody(cast, login, true, id);
+  }
+  equipmentVisible(a, b) { return seenTogether(a, b); }
+  async forgetEquipment(id) {
+    // Deletion committed first. Even if the account was immediately recreated, its old socket
+    // must not keep the deleted choice. A newer socket caught by delayed cleanup reconnects.
+    const p = this.players.get(id);
+    if (p) this.evict(p, "revoked");
+  }
+
   async fetch(request) {
     const path = new URL(request.url).pathname;
     const cleanup = ["/voice/leave", "/voice/unpublish", "/voice/close"].includes(path);
@@ -617,6 +635,11 @@ export class Room extends DurableObject {
     if (request.headers.get("upgrade") !== "websocket") return new Response("Expected WebSocket", { status: 426 });
     const who = playerFromHeaders(request.headers);
     if (!who || !ownedBody(cast, who.login, who.contributor, who.id)) return new Response("Contributors with an Ooga only", { status: 403 });
+    if (this.env.EQUIPMENT_ENABLED === "1") {
+      const session = request.headers.get("x-player-equipment-session");
+      if (!/^[a-f0-9]{64}$/.test(session || "")) return new Response("Session required", { status: 403 });
+      who.equipmentSession = session;
+    }
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
@@ -636,6 +659,11 @@ export class Room extends DurableObject {
       return new Response(null, { status: 101, webSocket: client });
     }
     if (back && this.players.get(who.id) === older) {
+      if (this.env.EQUIPMENT_ENABLED === "1") {
+        try { if (!await equipmentRoom.refresh(this, older)) { server.close(CLOSE_KICK, "revoked"); return new Response(null, { status: 101, webSocket: client }); } }
+        catch { server.close(CLOSE_ERROR, "equipment-unavailable"); return new Response(null, { status: 101, webSocket: client }); }
+        if (this.players.get(who.id) !== older) { server.close(CLOSE_KICK, "replaced"); return new Response(null, { status: 101, webSocket: client }); }
+      }
       this.resume(older, server, who);
       await this.ensureSweep();
       return new Response(null, { status: 101, webSocket: client });
@@ -657,10 +685,16 @@ export class Room extends DurableObject {
     if (own) for (const o of this.players.values()) if (o.body && bodyName(o.body).toLowerCase() === own) this.release(o, "owner-here");
     this.players.set(p.id, p);
     this.sockets.set(server, p);
+    if (this.env.EQUIPMENT_ENABLED === "1") {
+      try { if (!await equipmentRoom.refresh(this, p, false)) return new Response(null, { status: 101, webSocket: client }); }
+      catch { this.evict(p, "equipment-unavailable"); return new Response(null, { status: 101, webSocket: client }); }
+      if (this.players.get(p.id) !== p) { server.close(CLOSE_KICK, "replaced"); return new Response(null, { status: 101, webSocket: client }); }
+    }
     this.world.changed();
     if (this.inspect.on) this.inspect.event("join", p, { replaced: !!older });
     this.welcome(p, false);
     this.broadcast({ t: "join", p: this.view(p) }, server);
+    if (this.env.EQUIPMENT_ENABLED === "1") equipmentRoom.changed(this, p);
     this.sendStudio(p);
     this.updateVoice();
     await this.ensureSweep();
@@ -672,7 +706,7 @@ export class Room extends DurableObject {
     const server = p.ws, others = [];
     const catalog = this.catalog.metadata();
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, resume: p.resumeKey, ...(resumed ? { resumed: true } : {}), tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [PROP_FEATURE, tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, DANCE_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, duel.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...audienceRoom.features(this), ...(this.catalog.enabled ? ["character-catalog-v1"] : []), ...(this.inspect.on ? [INSPECT_FEATURE] : [])],
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, resume: p.resumeKey, ...(resumed ? { resumed: true } : {}), tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [PROP_FEATURE, tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, DANCE_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, duel.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...audienceRoom.features(this), ...(this.env?.EQUIPMENT_ENABLED === "1" ? ["equipment-v1"] : []), ...(this.catalog.enabled ? ["character-catalog-v1"] : []), ...(this.inspect.on ? [INSPECT_FEATURE] : [])],
       // The account speaks from Ooga Chat on another device: this page's own voice waits for the visitor's word.
       ...(audienceRoom.elsewhere(this, p.id) ? { voiceElsewhere: true } : {}), ...(catalog ? { catalog } : {}) });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
@@ -682,6 +716,7 @@ export class Room extends DurableObject {
     this.send(server, { t: "chalk-board", marks: this.chalk.marks, editor: this.chalkEditor ? this.chalkEditor.id : 0 });
     audienceRoom.welcome(this, p);
     duel.welcome(this, p);
+    if (this.env.EQUIPMENT_ENABLED === "1") equipmentRoom.welcome(this, p);
   }
 
   // A socket lost without a word, or closed by its page to come straight back (CLOSE_RECONNECT): the player stays HOLD_MS,
@@ -731,6 +766,7 @@ export class Room extends DurableObject {
     p.held = null;
     p.ws = server;
     p.login = who.login; p.display = who.display; p.contributor = who.contributor;
+    if (this.env.EQUIPMENT_ENABLED === "1") p.equipmentSession = who.equipmentSession;
     p.connectionToken = crypto.randomUUID();
     p.resumeKey = crypto.randomUUID();
     p.seenAt = Date.now();
@@ -744,6 +780,7 @@ export class Room extends DurableObject {
     this.sockets.set(server, p);
     if (this.inspect.on) this.inspect.event("resume", p, { away });
     this.welcome(p, true);
+    if (this.env.EQUIPMENT_ENABLED === "1") equipmentRoom.changed(this, p);
     this.rearrive(p);
     tessQueue.presence(this, p);
     this.sendStudio(p);
@@ -933,6 +970,7 @@ export class Room extends DurableObject {
       this.walletsArrive(p);
       if (p.zone === STUDIO_ZONE) { this.enforceStudio(); this.sendStudio(p); }
       this.broadcast({ t: "zone", id: p.id, name: p.zone });
+      if (this.env.EQUIPMENT_ENABLED === "1") equipmentRoom.moved(this, p, from);
       if (p.blendTo) this.broadcast({ t: "blend", id: p.id, to: p.blendTo, k: p.blendK }, p.ws);
       // A page that moved groups let go of every voice, so it always hears where it is now, changed list or not.
       p.sent = null;
@@ -1048,6 +1086,7 @@ export class Room extends DurableObject {
       p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined; p.d = undefined;
       if (!p.body) this.leaveStudio(p);
       this.broadcast({ t: "body", id: p.id, name: p.body });
+      if (this.env.EQUIPMENT_ENABLED === "1") equipmentRoom.changed(this, p);
       this.enforceStudio(); this.updateVoice();
     }
     // A zone, body or crossing that no longer matches an open outdoor grant takes it back (#667).
@@ -1160,6 +1199,7 @@ export class Room extends DurableObject {
     step("pm", () => this.privateLeave(p));
     this.players.delete(p.id);
     this.sockets.delete(p.ws);
+    if (this.env?.EQUIPMENT_ENABLED === "1") step("equipment", () => equipmentRoom.left(this, p));
     step("world", () => this.world.changed());
     step("audience", () => audienceRoom.leave(this, p));
     step("tess", () => tessQueue.presence(this, p, true, reason === "revoked"));
@@ -1198,6 +1238,7 @@ export class Room extends DurableObject {
     audienceRoom.check(this, p);
     p.ws.serializeAttachment(this.attachment(p));
     this.broadcast({ t: "body", id: p.id, name: null });
+    if (this.env?.EQUIPMENT_ENABLED === "1") equipmentRoom.changed(this, p);
     this.updateVoice();
   }
 
@@ -2304,6 +2345,9 @@ export class Room extends DurableObject {
       if (this.catalog.enabled) { await this.restoring(null, () => this.catalog.refresh(this.ctx.storage)); this.catalogChanged(); }
       const cast = this.catalog.current();
       try { await this.refreshHighscores(); } catch { /* Pending D1 revisions survive until the next sweep. */ }
+      if (this.env.EQUIPMENT_ENABLED === "1") {
+        try { await equipmentRoom.refreshAll(this); } catch { /* Durable choices survive a failed read; retry at the next sweep. */ }
+      }
       for (const p of [...this.players.values()]) {
         if (cast && !ownedBody(cast, p.login, p.contributor, p.id)) { this.evict(p, "revoked"); continue; }
         // The existing operator D1 ban also ends active presence at the next successful sweep.

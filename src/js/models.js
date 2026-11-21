@@ -2184,6 +2184,7 @@
   // Traits hash from the handle, so one handle always builds the same voxels.
   // Callers get fresh nodes over shared geometry: one build per contributor, GPU records survive a scene swap.
   const cavemen = scopedMap();
+  const bareHeads = scopedMap();
   const cloneNode = (node, copies) => {
     const copy = createNode({ ...node, position: { ...node.position }, rotation: { ...node.rotation }, scale: { ...node.scale }, parent: null, children: [], world: new Float32Array(node.world), local: new Float32Array(node.local) });
     if (node.quaternion) copy.quaternion = new Float32Array(node.quaternion);
@@ -2192,8 +2193,9 @@
     return copy;
   };
   const caveman = (traits) => {
-    let template = cavemen.get(traits.name);
-    if (!template) cavemen.set(traits.name, template = buildCaveman(traits));
+    const key = traits.name + (traits.equipmentBare ? "\0bare-head" : "");
+    let template = cavemen.get(key);
+    if (!template) cavemen.set(key, template = buildCaveman(traits));
     const copies = new Map(), root = cloneNode(template.root, copies), parts = {};
     // A legged companion names its own limbs (`legs`, `tail`); the clone's must be its own nodes, not the template's.
     for (const [node, copy] of copies) {
@@ -2209,7 +2211,17 @@
     let face;
     return { root, parts, traits, modelled: template.modelled, elbow: template.elbow, back: template.back, armScale: template.armScale, fist: template.fist, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed,
       get portraitHead() { return face === undefined ? template.portraitHead : face; }, set portraitHead(geometry) { face = geometry; },
-      skins, clubRest: template.clubRest, clubCarry: template.clubCarry, tint: template.tint, gunHeadBounds: template.gunHeadBounds };
+      skins, clubRest: template.clubRest, clubCarry: template.clubCarry, tint: template.tint, gunHeadBounds: template.gunHeadBounds,
+      // Only the same character's approved builder runs here; borrowed hats are archived geometry, never hooks.
+      bareHead: () => {
+        let bare = bareHeads.get(traits.name);
+        if (!bare) {
+          const body = buildCaveman({ ...BL.contributors.traitsFor(traits.name), equipmentBare: true });
+          bare = { headOpen: body.headOpen, headClosed: body.headClosed, portraitHead: body.portraitHead };
+          bareHeads.set(traits.name, bare);
+        }
+        return bare;
+      } };
   };
   // A real die: opposite faces sum to seven. Round pip faces sit just above the
   // voxel shell so even the smallest die does not render them as square cells.

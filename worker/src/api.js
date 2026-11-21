@@ -10,6 +10,7 @@ import { deletePlayer, getPlayer, publicPlayer, sanitizeDisplay, updateDisplay }
 import { fromSite, getSessionForRemoval, getSessionFromRequest, json, text } from "./http.js";
 import { turnConfigured } from "./sfu.js";
 import { GAME_KINDS } from "./games.js";
+import { equipmentEnabled } from "./equipment-model.js";
 
 const BODY_MAX = 1024;
 
@@ -19,7 +20,7 @@ const me = async (request, env) => {
   catch { return json({ error: "unavailable" }, 503, { "retry-after": "5" }); }
   if (request.method === "GET") return json({ player: found ? publicPlayer(found.player) : null,
     character: found ? found.character : null, donations: !!env.DONATIONS, tess: !!env.ANTHROPIC_API_KEY, highscores: !!env.DB, highscoreSnapshots: !!env.DB, arcadePlays: !!env.DB, connectionReports: !!env.DB && !!env.CONNECTION_REPORT_LIMITER,
-    games: env.GAMES ? [...GAME_KINDS.keys()] : [],
+    games: env.GAMES ? [...GAME_KINDS.keys()] : [], equipment: equipmentEnabled(env),
     ...(found && turnConfigured(env) ? { voiceTurn: true } : {}) });
   if (!fromSite(request, env.SITE_ORIGIN)) return json({ error: "forbidden" }, 403);
   if (!found) return json({ error: "unauthenticated" }, 401);
@@ -43,6 +44,7 @@ const me = async (request, env) => {
     await deletePlayer(env.DB, found.player.id);
     // The room's voice links are by account; one that cannot be reached now must not undo the deletion.
     await Promise.resolve().then(() => env.ROOM.getByName("island").forgetVoiceLinks(found.player.id)).catch(() => {});
+    if (equipmentEnabled(env)) await Promise.resolve().then(() => env.ROOM.getByName("island").forgetEquipment(found.player.id)).catch(() => {});
     const clear = serializeCookie(cookieNames(env.SITE_ORIGIN).session, "", { maxAge: 0, secure: isSecureOrigin(env.SITE_ORIGIN) });
     return new Response(null, { status: 204, headers: { "set-cookie": clear, "cache-control": "no-store" } });
   }

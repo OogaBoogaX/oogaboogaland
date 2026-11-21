@@ -571,6 +571,7 @@
           if (bodies.size >= MAX) continue;
           entry = build(rec);
         }
+        if (!entry.gorilla) BL.equipment?.applyRemote(entry.cave, rec.id);
         // A copy this page drove when the body arrived (another tab's takeover) becomes its ghost once let go.
         if (ghost && crew && !entry.gorilla && !entry.ghosted) {
           const cave = crew.cavemen.get(entry.name);
