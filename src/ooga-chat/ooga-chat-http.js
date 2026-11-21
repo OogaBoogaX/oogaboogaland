@@ -279,8 +279,10 @@
     // The public panel data as the server answers it, or null when it can't be read (the view says so, never zeros).
     const contributors = async () => {
       try {
-        const response = await ask(PUBLIC_PATH, { headers: { accept: "application/json" } });
-        return response.ok ? await json(response) : null;
+        const { response, data } = await ask(PUBLIC_PATH, { headers: { accept: "application/json" } }, TIMEOUT_MS, json);
+        const body = response.ok ? data : null;
+        BL.oogaChatPortraits?.apply(body);
+        return body;
       } catch {
         return null;
       }

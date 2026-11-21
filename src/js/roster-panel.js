@@ -445,7 +445,8 @@
       if (own.sort === "most") sortRoster();
     };
     // Faces that arrived after a strip opened.
-    const faceChanged = () => {
+    const faceChanged = (reset = false) => {
+      if (reset) own.faces.clear();
       for (const row of rosterRows.values()) if (row.open) paintFace(row);
     };
     const dispose = () => listeners.abort();

@@ -103,6 +103,9 @@ export class Room extends DurableObject {
     this.hostId = 0;
     this.followers = 0;
     this.lastNpc = null;
+    this.catalogRevision = null;
+    this.catalogGeneration = 0;
+    this.catalogRoster = null;
     this.chat = chatLog();
     this.chatId = 0;
     this.chatAccepted = new Map();
@@ -132,6 +135,7 @@ export class Room extends DurableObject {
         await this.restoring(null, () => this.catalog.refresh(ctx.storage));
         // A catalog outage is not a revocation. Never compare restored players
         // to an embedded cast that predates their accepted characters.
+        this.catalogChanged();
         const cast = this.catalog.current();
         if (cast) for (const p of this.players.values()) if (!ownedBody(cast, p.login, p.contributor, p.id)) this.evict(p, "revoked");
       }
@@ -216,8 +220,8 @@ export class Room extends DurableObject {
     }
     for (const p of this.players.values()) if (p.pm.open && this.players.get(p.pm.open).pm.open !== p.id) p.pm.open = 0;
     this.restoreDoor();
-    this.hostId = electHost(this.players.values());
-    this.followers = npcFollowers(this.players.values(), this.hostId);
+    this.hostId = electHost(this.players.values(), 0, (p) => this.npcEligible(p));
+    this.followers = npcFollowers(this.players.values(), this.hostId, (p) => this.npcEligible(p));
     // Outdoor grants held over a wake or a redeploy are checked again, and taken back if the switch is now off.
     audienceRoom.restore(this);
     this.inspect.woke(this.players.size);
@@ -281,7 +285,7 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, block: p.block || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, resumeKey: p.resumeKey, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, d: p.d, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, props: !!p.props, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm, audienceZone: p.audienceZone || null, outdoor: p.outdoor || null, ...duel.saved(p) };
+    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, block: p.block || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, resumeKey: p.resumeKey, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, d: p.d, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, props: !!p.props, ...(p.catalogRoster ? { catalogRoster: p.catalogRoster } : {}), visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm, audienceZone: p.audienceZone || null, outdoor: p.outdoor || null, ...duel.saved(p) };
   }
 
   view(p) {
@@ -604,7 +608,7 @@ export class Room extends DurableObject {
   async fetch(request) {
     const path = new URL(request.url).pathname;
     const cleanup = ["/voice/leave", "/voice/unpublish", "/voice/close"].includes(path);
-    if (this.catalog.enabled && !cleanup) await this.catalog.refresh(this.ctx.storage);
+    if (this.catalog.enabled && !cleanup) { await this.catalog.refresh(this.ctx.storage); this.catalogChanged(); }
     if (path.startsWith("/voice/")) return this.voiceRequest(path.slice("/voice/".length), request);
     const cast = this.catalog.current();
     if (!cast) return new Response("Character catalog unavailable", { status: 503, headers: { "cache-control": "no-store", "retry-after": "60" } });
@@ -668,7 +672,7 @@ export class Room extends DurableObject {
     const server = p.ws, others = [];
     const catalog = this.catalog.metadata();
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, resume: p.resumeKey, ...(resumed ? { resumed: true } : {}), tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [PROP_FEATURE, tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, DANCE_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, duel.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...audienceRoom.features(this), ...(this.inspect.on ? [INSPECT_FEATURE] : [])],
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, resume: p.resumeKey, ...(resumed ? { resumed: true } : {}), tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [PROP_FEATURE, tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, DANCE_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, duel.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...audienceRoom.features(this), ...(this.catalog.enabled ? ["character-catalog-v1"] : []), ...(this.inspect.on ? [INSPECT_FEATURE] : [])],
       // The account speaks from Ooga Chat on another device: this page's own voice waits for the visitor's word.
       ...(audienceRoom.elsewhere(this, p.id) ? { voiceElsewhere: true } : {}), ...(catalog ? { catalog } : {}) });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
@@ -734,6 +738,8 @@ export class Room extends DurableObject {
     // connection does.
     p.sent = null;
     p.outdoor = null;
+    // A resumed socket must report the roster its page actually booted before hosting again.
+    if (this.catalog.enabled) p.catalogRoster = null;
     server.serializeAttachment(this.attachment(p));
     this.sockets.set(server, p);
     if (this.inspect.on) this.inspect.event("resume", p, { away });
@@ -812,6 +818,7 @@ export class Room extends DurableObject {
     this.countLoad(p.zone, true);
     this.inspect.count("in");
     this.inspect.count("inBytes", typeof message === "string" ? message.length : message.byteLength);
+    if (this.catalog.enabled && this.catalogRoster !== this.catalog.roster()) this.catalogChanged();
     const cast = this.catalog.current();
     if (cast && !ownedBody(cast, p.login, p.contributor, p.id)) { this.evict(p, "revoked"); return; }
     if (typeof message !== "string") {
@@ -873,18 +880,20 @@ export class Room extends DurableObject {
       // A follower's own round, blow or poke at a loose prop, for the island's host alone, which simulates the props
       // (src/js/prop-sync.js); nothing says who sent it and nothing is kept.
       const host = this.players.get(this.hostId);
-      if (!p.inHub || !p.props || !host || host === p || !host.inHub || !host.props) return;
+      if (!this.npcEligible(p) || !p.props || !host || host === p || !this.npcEligible(host) || !host.props) return;
       if (!takeToken(p.propInBucket || (p.propInBucket = { tokens: SHOT_BURST, at: p.seenAt }), SHOT_HZ, p.seenAt, SHOT_BURST)) return;
       this.send(host.ws, JSON.stringify({ t: "prop", k: msg.k, a: msg.a }));
       return;
     } else if (msg.t === "hub") {
       p.props = msg.on && msg.props === true;
-      if (msg.on === p.inHub) return;
+      const roster = msg.on ? msg.roster || null : null;
+      if (msg.on === p.inHub && roster === p.catalogRoster) return;
+      p.catalogRoster = roster;
       p.inHub = msg.on;
       tessQueue.presence(this, p);
       this.electHost();
       // A page arriving on the island catches up with the NPCs at once rather than at the next frame.
-      if (p.inHub && p.id !== this.hostId && this.lastNpc && this.send(p.ws, this.lastNpc)) { this.inspect.count("npcOut"); this.inspect.count("npcBytes", this.lastNpc.byteLength); }
+      if (this.npcEligible(p) && p.id !== this.hostId && this.lastNpc && this.send(p.ws, this.lastNpc)) { this.inspect.count("npcOut"); this.inspect.count("npcBytes", this.lastNpc.byteLength); }
     } else if (msg.t === "visible") {
       // A page hidden in a Block Frenzy match hands its hosting on; shown again, it comes back a guest (block.js).
       if (msg.on === p.visible) return;
@@ -1462,15 +1471,35 @@ export class Room extends DurableObject {
 
   // Also after any page's `hub` flag changes: the host sends frames only while someone follows.
   // A player held over a lost socket (`hold`) neither hosts nor follows until its page is back.
+  npcEligible(p) {
+    if (!p.inHub || p.held) return false;
+    return !this.catalog.enabled || !!p.catalogRoster && p.catalogRoster === this.catalog.roster();
+  }
+
+  // Called only when an accepted catalog changes or expires. Cosmetics may change the
+  // revision without changing binary NPC indices; only the roster discards cached frames.
+  catalogChanged() {
+    if (!this.catalog.enabled) return;
+    const catalog = this.catalog.metadata(), roster = catalog?.roster || null;
+    if (this.catalogRevision === (catalog?.revision || null) && this.catalogGeneration === (catalog?.generation || 0) && this.catalogRoster === roster) return;
+    if (this.catalogRoster !== roster) this.lastNpc = null;
+    this.catalogRevision = catalog?.revision || null;
+    this.catalogGeneration = catalog?.generation || 0;
+    this.catalogRoster = roster;
+    this.broadcast({ t: "catalog", catalog });
+    this.electHost();
+  }
+
   electHost() {
-    const here = [...this.players.values()].filter((p) => !p.held);
-    const id = electHost(here, this.hostId);
-    const followers = npcFollowers(here, id);
+    const here = [...this.players.values()];
+    const eligible = (p) => this.npcEligible(p);
+    const id = electHost(here, this.hostId, eligible);
+    const followers = npcFollowers(here, id, eligible);
     if (id === this.hostId && followers === this.followers) return;
     if (this.inspect.on && id !== this.hostId) this.inspect.event("host", null, { login: id ? this.players.get(id).login : "", followers });
+    if (id !== this.hostId) this.lastNpc = null;
     this.hostId = id;
     this.followers = followers;
-    if (!id) this.lastNpc = null;
     this.broadcast({ t: "host", id, followers });
   }
 
@@ -1478,17 +1507,17 @@ export class Room extends DurableObject {
   // capped in size and rate, and relayed unchanged to the other pages showing the island that read them. Nothing is
   // kept: the host says where everything is whenever its followers change.
   propFrame(p, data) {
-    if (p.id !== this.hostId || !p.inHub || data.byteLength > PROP_FRAME_MAX) return;
+    if (p.id !== this.hostId || !this.npcEligible(p) || data.byteLength > PROP_FRAME_MAX) return;
     const now = Date.now();
     if (!takeToken(p.propBucket || (p.propBucket = { tokens: PROP_HZ, at: now }), PROP_HZ, now)) return;
     p.seenAt = now;
-    for (const q of this.players.values()) if (q !== p && q.inHub && q.props) this.send(q.ws, data);
+    for (const q of this.players.values()) if (q !== p && this.npcEligible(q) && q.props) this.send(q.ws, data);
   }
 
   // A binary frame is the NPC host's poses: taken only from the current host, capped in size and rate,
   // and relayed unchanged to every other page showing the island.
   npcFrame(p, data) {
-    if (p.id !== this.hostId || !p.inHub) return;
+    if (p.id !== this.hostId || !this.npcEligible(p)) return;
     if (!(data instanceof ArrayBuffer) || data.byteLength > NPC_FRAME_MAX) return;
     if (!takeToken(p.npcBucket, NPC_HZ, Date.now())) return;
     p.seenAt = Date.now();
@@ -1496,7 +1525,7 @@ export class Room extends DurableObject {
     // The largest outbound stream at a full room, so its frames and bytes are also counted on their own.
     this.inspect.count("npc");
     let relayed = 0;
-    for (const q of this.players.values()) if (q !== p && q.inHub && this.send(q.ws, data)) relayed++;
+    for (const q of this.players.values()) if (q !== p && this.npcEligible(q) && this.send(q.ws, data)) relayed++;
     this.inspect.count("npcOut", relayed);
     this.inspect.count("npcBytes", relayed * data.byteLength);
   }
@@ -2272,7 +2301,7 @@ export class Room extends DurableObject {
     // A cancelled lease can leave its earlier alarm in place. Before the recorded sweep deadline that wake only
     // expires door state and reschedules; it must not turn account reads and stale checks into a high-frequency poll.
     if (sweepDue) {
-      if (this.catalog.enabled) await this.restoring(null, () => this.catalog.refresh(this.ctx.storage));
+      if (this.catalog.enabled) { await this.restoring(null, () => this.catalog.refresh(this.ctx.storage)); this.catalogChanged(); }
       const cast = this.catalog.current();
       try { await this.refreshHighscores(); } catch { /* Pending D1 revisions survive until the next sweep. */ }
       for (const p of [...this.players.values()]) {

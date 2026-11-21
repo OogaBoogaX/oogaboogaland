@@ -15,7 +15,7 @@
 // what happens once: speech, sleep marks, dust, every shot's flight, and the gorillas' plan and hit, so each
 // page's gorillas react to the host's crew. A host from before the jetpack's burn rode the record still sends
 // its sparks as events, which a follower replays.
-// Pages built from a different cast, work-site order (signature) or format ignore each other's frames.
+// Pages built from a different cast, work-site order (signature) or format hold their NPCs without running another simulation.
 // Cost: the host sends only while the room reports followers (`net.state.followers`), and a frame whose
 // records match the last one sent, with no events, waits up to KEEP_S before it goes again.
 // One sync per hub visit: `create` after the crew, `update` after crew.update each frame, `dispose` in leave.
@@ -96,7 +96,7 @@
     // Each puppet's own quaternions: the crew's are never written from here.
     const quats = list.map(() => ({ root: quat.create(), armL: quat.create(), armR: quat.create(), head: quat.create(), club: quat.create(), gun: quat.create() }));
     const TQ = quat.create();
-    let role = "solo", hostId = null, sendIn = 0, sinceSent = 0, sentFloats = -1, seen = -1, frames = 0, events = [], elapsed = 0, incompatible = false;
+    let role = "solo", hostId = null, sendIn = 0, sinceSent = 0, sentFloats = -1, seen = -1, frames = 0, events = [], elapsed = 0, incompatible = false, catalogNotice = false;
     const poseFlags = new Int32Array(n).fill(-1);
 
     const driven = (cave) => cave === crew.player || !!cave.remoteControlled;
@@ -303,7 +303,7 @@
       const header = new Uint32Array(buffer, 0, HEADER);
       const count = header[2], eventBytes = header[3], recordBytes = (HEADER + count * RECORD) * 4;
       // Another format from the elected host: hold, never run a second track (see FORMAT).
-      if (header[0] !== FORMAT) {
+      if (header[0] !== FORMAT || header[1] !== signature) {
         if (!incompatible) { incompatible = true; if (onIncompatible) onIncompatible(header[0]); }
         // Every frame kept goes, played or not, with its events: the puppets hold where they stand, and a
         // matching frame starts afresh rather than play poses and events from before the interruption.
@@ -313,7 +313,6 @@
       // Back from frames of another format: the puppets were held, and nothing kept is older than this frame.
       if (incompatible) fresh.set(have);
       incompatible = false;
-      if (header[1] !== signature) { release(); return; }
       if (count > n || buffer.byteLength !== recordBytes + eventBytes) return;
       const f = new Float32Array(buffer, 0, recordBytes / 4);
       // Where the frame goes in playback (see Playback). `update` has already dropped every frame but the
@@ -539,15 +538,15 @@
       clearFrames();
     };
 
-    /** Once a frame, after crew.update: host sends, follower poses its puppets, solo does nothing. */
-    const update = (dt) => {
-      elapsed += dt;
+    // Before crew.update: a catalog mismatch/no authority must hold even with no host,
+    // and a bad cached binary frame must never give the local AI one update in between.
+    const prepare = () => {
       const st = net.state;
-      const next = st.room !== "live" || !st.hostId ? "solo" : st.hostId === st.selfId ? "host" : "follow";
+      const next = st.npcHold ? "hold" : st.room !== "live" || !st.hostId ? "solo" : st.hostId === st.selfId ? "host" : "follow";
       const hostChanged = hostId !== null && st.hostId !== hostId;
       if (next !== role || hostChanged) {
         // A new host or leaving follow hands the Oogas back to their own AI where they stand.
-        if (role === "follow") release();
+        if (role === "follow" || role === "hold") release();
         role = next; hostId = st.hostId;
         sendIn = 0;
         sentFloats = -1;
@@ -555,6 +554,31 @@
         seen = hostChanged ? st.npcVersion : -1;
         resetEvents();
       }
+      if (role !== "hold") catalogNotice = false;
+      if (role === "hold") {
+        incompatible = true;
+        if (!catalogNotice && st.room === "live" && !st.catalogMatch) {
+          catalogNotice = true;
+          if (onIncompatible) onIncompatible("catalog");
+        }
+        clearFrames();
+        for (const cave of list) cave.puppet = !driven(cave);
+      } else if (role === "follow" && st.npcVersion !== seen && net.npcFrame?.byteLength >= HEADER * 4) {
+        const header = new Uint32Array(net.npcFrame, 0, HEADER);
+        if (header[0] !== FORMAT || header[1] !== signature) {
+          if (!incompatible) { incompatible = true; if (onIncompatible) onIncompatible(header[0]); }
+          clearFrames();
+          for (const cave of list) cave.puppet = !driven(cave);
+        }
+      }
+      if (role === "follow" && st.catalogRequired) for (const cave of list) cave.puppet = !driven(cave);
+    };
+
+    /** Once a frame, after crew.update: host sends, follower poses its puppets, solo does nothing. */
+    const update = (dt) => {
+      elapsed += dt;
+      prepare();
+      const st = net.state;
       if (role === "host") {
         // Nobody follows: nothing to send, and nothing saved up for later.
         if (!st.followers) {
@@ -596,7 +620,7 @@
         }
         // Held where it stands: the host's format can't be followed and this page must not run its own.
         if (incompatible) { cave.puppet = true; continue; }
-        cave.puppet = !!have[i];
+        cave.puppet = !!have[i] || st.catalogRequired === true;
         if (have[i]) apply(i, cave, dt, play);
       }
       if (incompatible) due.length = 0;
@@ -612,7 +636,7 @@
       resetEvents();
     };
 
-    return { update, dispose, fx: recordingFx, recordShot, recordPlan, recordHit, get role() { return role; }, get frames() { return frames; },
+    return { prepare, update, dispose, fx: recordingFx, recordShot, recordPlan, recordHit, get role() { return role; }, get frames() { return frames; },
       get buffered() { return kept; }, get droppedEvents() { return droppedEvents; },
       get incompatible() { return incompatible; } };
   };

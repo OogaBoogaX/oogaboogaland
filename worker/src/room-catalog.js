@@ -18,9 +18,10 @@ export const roomCatalog = {
     return {
       enabled,
       current,
+      roster: () => enabled && current() ? accepted.roster : null,
       metadata() {
         if (!enabled || !current()) return null;
-        return { revision: accepted.revision, generation: accepted.generation, baseline: accepted.baseline, engine: accepted.engine };
+        return { revision: accepted.revision, generation: accepted.generation, baseline: accepted.baseline, engine: accepted.engine, roster: accepted.roster };
       },
       async restore(saved) {
         if (!enabled) return;

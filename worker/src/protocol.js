@@ -423,7 +423,10 @@ export const parseClientMessage = (text) => {
     if (msg.name === null) return { t: "body", name: null };
     return typeof msg.name === "string" && BODY_NAME.test(msg.name) ? { t: "body", name: msg.name } : null;
   }
-  if (msg.t === "hub") return typeof msg.on === "boolean" ? (msg.props === true ? { t: "hub", on: msg.on, props: true } : { t: "hub", on: msg.on }) : null;
+  if (msg.t === "hub") {
+    if (typeof msg.on !== "boolean" || msg.roster !== undefined && (typeof msg.roster !== "string" || !/^[a-f0-9]{64}$/.test(msg.roster))) return null;
+    return { t: "hub", on: msg.on, ...(msg.props === true ? { props: true } : {}), ...(msg.roster !== undefined ? { roster: msg.roster } : {}) };
+  }
   if (msg.t === "prop") return PROP_KINDS.has(msg.k) && Array.isArray(msg.a) && msg.a.length === 6 && msg.a.every((n) => typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= PROP_RANGE) ? { t: "prop", k: msg.k, a: msg.a } : null;
   if (msg.t === "visible") return typeof msg.on === "boolean" ? { t: "visible", on: msg.on } : null;
   if (msg.t === "mute") return typeof msg.on === "boolean" ? { t: "mute", on: msg.on } : null;

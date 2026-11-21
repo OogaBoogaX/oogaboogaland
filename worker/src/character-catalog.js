@@ -1,7 +1,7 @@
 // A bounded, environment-scoped authority snapshot. Only admission/revalidation boundaries await read();
 // high-frequency room messages use current(). An enabled but unavailable catalog never falls back to old authority.
 import CAST_ROWS from "./characters.gen.json" with { type: "json" };
-import { CATALOG_MAX_BYTES, canonicalJSON, parseActivation, parseCatalog, prefixEvents, sameContext, sha256 } from "./character-catalog-schema.js";
+import { CATALOG_MAX_BYTES, catalogRoster, canonicalJSON, parseActivation, parseCatalog, prefixEvents, sameContext, sha256 } from "./character-catalog-schema.js";
 
 export const CATALOG_REFRESH_MS = 60000;
 export const CATALOG_MAX_STALE_MS = 15 * 60000;
@@ -67,8 +67,10 @@ export const createCatalogLoader = (env, { rows = CAST_ROWS, now = Date.now, tim
     const catalog = parseCatalog(catalogJSON, now());
     if (!sameContext(catalog, expected) || !prefixEvents(catalog.events, activation.events)
       || await sha256(catalogJSON) !== activation.revision) fail();
+    const rows = rowsFor(catalog, compiled);
+    const roster = await catalogRoster(catalog.engine, catalog.baseline, rows.map((row) => row.handle));
     return freeze({ revision: activation.revision, generation: activation.generation, baseline: catalog.baseline,
-      engine: catalog.engine, rows: rowsFor(catalog, compiled), catalog, activation, checkedAt });
+      engine: catalog.engine, roster, rows, catalog, activation, checkedAt });
   };
   const restore = async (saved) => {
     if (!configured || !saved || Object.keys(saved).sort().join(",") !== "activation,catalog,checkedAt") return false;

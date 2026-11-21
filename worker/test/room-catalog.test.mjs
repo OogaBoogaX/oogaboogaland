@@ -1,6 +1,7 @@
 // The Room's catalog boundary: adoption and hibernation use storage; messages do not.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import * as protocol from "../src/protocol.js";
@@ -10,6 +11,7 @@ import { CATALOG_MAX_STALE_MS } from "../src/character-catalog.js";
 
 const START = 1800000000000, KEY = "characterCatalogV1";
 const snapshot = (at, generation = 1, rows = [{ handle: "New-Ooga", github_login: "owner" }]) => ({
+  roster: createHash("sha256").update(JSON.stringify([1, "v1", "a".repeat(40), rows.map((row) => row.handle)])).digest("hex"),
   revision: String(generation).repeat(64), generation, baseline: "a".repeat(40), engine: "v1", rows, checkedAt: at,
   catalog: { rows }, activation: { revision: String(generation).repeat(64), generation },
 });
@@ -35,7 +37,7 @@ const host = async ({ enabled = true, rows = [] } = {}) => {
   let ready, nextTimer = 0;
   class Clock extends Date { constructor(...args) { super(...(args.length ? args : [state.now])); } static now() { return state.now; } }
   const socket = () => ({ readyState: 1, sent: [], attachment: null, closed: null,
-    send(text) { this.sent.push(JSON.parse(text)); }, close(code, reason) { this.closed = { code, reason }; this.readyState = 3; },
+    send(text) { this.sent.push(typeof text === "string" ? JSON.parse(text) : text); }, close(code, reason) { this.closed = { code, reason }; this.readyState = 3; },
     serializeAttachment(value) { this.attachment = structuredClone(value); }, deserializeAttachment() { return this.attachment; } });
   class Response { constructor(body, options = {}) { this.body = body; this.status = options.status || 200; this.webSocket = options.webSocket; } async json() { return JSON.parse(this.body); } }
   const env = enabled ? { CHARACTER_CATALOG_ENABLED: "1" } : {};
@@ -57,9 +59,9 @@ const host = async ({ enabled = true, rows = [] } = {}) => {
   };
   const h = { state, stored, writes, sockets, ctx, env, socket };
   h.wake = async () => { h.room = new context.Room(ctx, env); await ready; return h.room; };
-  h.join = async (id = 1, login = "owner") => {
+  h.join = async (id = 1, login = "owner", resume = null) => {
     const count = sockets.length;
-    const response = await h.room.fetch({ url: "https://island.invalid/room", headers: new Headers({ upgrade: "websocket",
+    const response = await h.room.fetch({ url: `https://island.invalid/room${resume ? "?resume=" + resume : ""}`, headers: new Headers({ upgrade: "websocket",
       "x-player-id": String(id), "x-player-login": login, "x-player-contributor": "0" }) });
     return { response, ws: sockets[count] };
   };
@@ -170,4 +172,53 @@ test("catalog helpers persist renewed validation and cannot adopt before a succe
   await assert.rejects(local.refresh({ put: async () => { throw new Error("storage failed"); } }));
   assert.equal(local.metadata().generation, 1, "failed persistence does not replace the accepted index");
   assert.equal(local.current().handleOf.get("owner"), "new-ooga");
+});
+
+
+test("catalog NPC hosting excludes legacy/mismatched pages and cosmetic updates retain shared indices", async () => {
+  const h = await host();
+  const rows = [{ handle: "New-Ooga", github_login: "owner" }, { handle: "Second", github_login: "two" }, { handle: "Third", github_login: "three" }];
+  h.state.remote = snapshot(START, 2, rows);
+  const legacy = (await h.join()).ws, second = (await h.join(2, "two")).ws, third = (await h.join(3, "three")).ws;
+  const roster = h.room.catalog.roster();
+  h.send(legacy, { t: "hub", on: true, props: true });
+  assert.equal(h.room.hostId, 0, "a pre-catalog tab cannot host");
+  h.send(second, { t: "hub", on: true, props: true, roster });
+  h.send(third, { t: "hub", on: true, props: true, roster });
+  assert.equal(h.room.hostId, 2); assert.equal(h.room.followers, 1);
+  const frame = new Uint32Array([3, 10, 0, 0]).buffer;
+  h.room.webSocketMessage(second, frame);
+  assert.equal(third.sent.at(-1), frame);
+  assert.ok(!legacy.sent.includes(frame), "the old tab receives no catalog NPC binary frames");
+  h.state.remote = snapshot(START + 60000, 3, rows); h.state.now += 60000;
+  await h.room.catalog.refresh(h.ctx.storage); h.room.catalogChanged();
+  assert.equal(h.room.hostId, 2); assert.equal(h.room.lastNpc, frame, "cosmetics retain the compatible host and cached pose");
+  h.state.remote = snapshot(h.state.now, 4, [...rows, { handle: "Fourth" }]);
+  await h.room.catalog.refresh(h.ctx.storage); h.room.catalogChanged();
+  assert.equal(h.room.hostId, 0); assert.equal(h.room.followers, 0); assert.equal(h.room.lastNpc, null);
+  const count = third.sent.length;
+  h.room.webSocketMessage(second, frame);
+  assert.equal(third.sent.length, count, "an old host cannot publish after a roster change");
+  assert.equal(h.room.players.size, 3); assert.equal(second.closed, null, "presence and voice sockets remain connected");
+  assert.equal(third.sent.findLast((msg) => msg.t === "catalog").catalog.generation, 4);
+  h.send(third, { t: "hub", on: true, props: true, roster: h.room.catalog.roster() });
+  assert.equal(h.room.hostId, 3, "a matching report can join without toggling the hub off and on");
+  const resume = h.room.players.get(3).resumeKey, resumed = (await h.join(3, "three", resume)).ws;
+  assert.equal(h.room.hostId, 0, "a resumed connection must report its pinned roster again");
+  h.send(resumed, { t: "hub", on: true, props: true, roster: h.room.catalog.roster() });
+  assert.equal(h.room.hostId, 3);
+  await h.wake();
+  assert.equal(h.room.hostId, 3, "a hibernation wake keeps the validated socket report");
+});
+
+test("catalog expiry stops NPC authority in memory while keeping connected players", async () => {
+  const h = await host(), { ws } = await h.join();
+  h.send(ws, { t: "hub", on: true, roster: h.room.catalog.roster() });
+  assert.equal(h.room.hostId, 1);
+  h.state.now += CATALOG_MAX_STALE_MS; h.state.remote = null;
+  const reads = h.state.reads;
+  h.send(ws, { t: "hub", on: true, roster: h.room.catalogRoster });
+  assert.equal(h.room.hostId, 0); assert.equal(ws.closed, null);
+  assert.equal(ws.sent.findLast((msg) => msg.t === "catalog").catalog, null);
+  assert.equal(h.state.reads, reads, "expiry detection never reads storage from a message");
 });

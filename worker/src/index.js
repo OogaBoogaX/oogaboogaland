@@ -8,6 +8,7 @@
 
 import { handleAvatar } from "./avatar.js";
 import { handleCharacterCatalog } from "./character-catalog-http.js";
+import { handleCharacterPortrait } from "./character-portraits.js";
 import { handleConnectionReports, pruneConnectionReports } from "./connection-reports.js";
 import { handleApi } from "./api.js";
 import { handleAuth } from "./auth.js";
@@ -135,6 +136,7 @@ export default {
     if (url.pathname === "/api/connection-reports") return handleConnectionReports(request, env);
     if (url.pathname.startsWith("/api/avatar/")) return handleAvatar(request, env, url, ctx);
     if (url.pathname === "/api/characters/catalog") return handleCharacterCatalog(request, env);
+    if (url.pathname.startsWith("/api/characters/portraits/")) return handleCharacterPortrait(request, env);
     if (url.pathname === "/api/world") return handleWorld(request, env, ctx);
     if (url.pathname === "/api/world/live") return handleWorldLive(request, env);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);

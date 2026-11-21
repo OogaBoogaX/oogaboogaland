@@ -26,6 +26,7 @@ import { MAP_ENTRY, stageMap } from "./distribution-map.mjs";
 import { PICTURE_MODULES, externalizeModules, externalizePage, externalizePictures } from "./distribution-modules.mjs";
 import { writeTerrainWorker } from "./distribution-terrain.mjs";
 import { writeMicFilter } from "./distribution-mic.mjs";
+import { catalogPageAttributes } from "./character-catalog-build.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const out = resolve(root, process.argv[2] || "untracked/site");
@@ -60,7 +61,7 @@ shell = stageIcons(shell, out);
 if (process.argv.includes("--worker-page")) {
   const tag = '<html lang="en">';
   if (!shell.includes(tag)) throw new Error("oogaboogaland.html: expected <html lang=\"en\">");
-  shell = shell.replace(tag, '<html lang="en" data-worker-page="1">');
+  shell = shell.replace(tag, `<html lang="en" data-worker-page="1"${catalogPageAttributes(process.env)}>`);
 }
 if (process.argv.includes("--audio-assets")) shell = externalizeAudio(shell, root, out);
 const pictures = process.argv.includes("--image-assets");

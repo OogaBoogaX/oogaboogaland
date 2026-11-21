@@ -379,3 +379,13 @@ test("numeric owner retains the same Ooga and gorilla while a reused login canno
   for (const body of ["Bitcoin-Bill", "gorilla:Bitcoin-Bill"])
     assert.equal(claimRefusal(index, "Bitcoin-Bill", body, [], true, 99), "not-yours");
 });
+
+
+test("hub roster handshake accepts only a bounded SHA256 digest while preserving legacy messages", () => {
+  const roster = "a".repeat(64);
+  assert.deepEqual(parseClientMessage(JSON.stringify({ t: "hub", on: true, props: true, roster })), { t: "hub", on: true, props: true, roster });
+  assert.deepEqual(parseClientMessage('{"t":"hub","on":true}'), { t: "hub", on: true });
+  for (const roster of [null, false, "A".repeat(64), "a".repeat(63), "a".repeat(65), []]) {
+    assert.equal(parseClientMessage(JSON.stringify({ t: "hub", on: true, roster })), null);
+  }
+});

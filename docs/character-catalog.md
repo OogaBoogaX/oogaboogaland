@@ -125,16 +125,33 @@ as a retryable service failure. ChatBridge's cast cache follows catalog revision
 and activation generation; capability decisions and Audience checks use the
 same environment-scoped ownership policy.
 
-The island must finish catalog loading before the contributor roster and models
-are initialized. A page initially pins its appearance catalog for its lifetime;
-refresh adopts new visuals. Offline, source, studio and preview pages retain the
-embedded cast. Unsupported shared NPC roster revisions need an explicit hold
-and refresh path, not independent simulation of the same shared crew.
+The staged island pauses its remaining classic modules after the compiled cast
+and before contributors or models initialize. Explicit build variables
+`CHARACTER_CATALOG_BASELINE`, `CHARACTER_CATALOG_ENGINE` (currently
+`island-character-data-v1`) and `CHARACTER_CATALOG_ENVIRONMENT` opt Worker pages
+into the loader. All three are required together; a build never infers its
+approved release identity from a branch name. Browser and Worker share the same
+schema validator. Complete validation precedes an atomic registry replacement;
+compiled custom source hashes and identities must match the page's baseline.
 
-Ooga Chat needs revision-matched portrait metadata and atlas bytes as well as
-the cast rows. Generate those with the approved deployed renderer in a separate
-job without publication credentials, and serve them through the app's own
-origin. The app does not load the island's renderer.
+A page pins its appearance catalog for its lifetime; refresh adopts new visuals.
+Offline, source, studio and preview pages retain the embedded cast. Shared NPC
+compatibility uses engine, baseline and ordered handles rather than cosmetic
+revision. Incompatible readers hold the crew and cannot host or relay NPC frames;
+voice and presence remain independent. Deploy these readers before enablement
+and refresh older pre-reader tabs: code already running in those tabs cannot
+understand the new hold protocol.
+
+Ooga Chat receives revision-matched portrait metadata with its cast. The index
+and PNG switch together, with immutable bytes served through the app's own
+origin. The app does not load the island's renderer. `scripts/character-catalog-render.mjs`
+reads an approved baseline checkout, overlays serialized validated data rows and
+unchanged custom source, and draws the atlas with that baseline's renderer. It
+never writes the checkout or runs submitted source. Run it in a separate job
+without publication credentials. Portrait objects live under
+`portraits/<catalog-revision>/manifest.json` and
+`portraits/<catalog-revision>/<image-sha256>.png`; every object must be verified
+before the catalog's active pointer advances.
 
 ## Planned publication
 

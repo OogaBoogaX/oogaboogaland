@@ -24,7 +24,7 @@ const hex = async (text) => {
   return out;
 };
 
-export const publicOps = ({ cast, catalogFor }) => {
+export const publicOps = ({ cast, catalogFor, portraitsFor }) => {
   let answer = null;
   const environments = new WeakMap();
   return {
@@ -38,7 +38,10 @@ export const publicOps = ({ cast, catalogFor }) => {
           const cached = environments.get(env);
           if (cached && cached.catalogRevision === snapshot.revision && cached.catalogGeneration === snapshot.generation) return cached;
           const rows = castRows(snapshot.rows), metadata = { catalogRevision: snapshot.revision, catalogGeneration: snapshot.generation };
-          const result = { rows, revision: (await hex(JSON.stringify({ rows, ...metadata }))).slice(0, 16), count: rows.length, ...metadata };
+          const portraits = snapshot.catalog && portraitsFor ? await portraitsFor(env, snapshot).catch(() => null) : null;
+          if (snapshot.catalog && portraitsFor && !portraits) throw new BridgeRefusal("unavailable", true);
+          const result = { rows, revision: (await hex(JSON.stringify({ rows, ...metadata }))).slice(0, 16), count: rows.length, ...metadata,
+            ...(portraits ? { portraits } : {}) };
           environments.set(env, result);
           return result;
         }
