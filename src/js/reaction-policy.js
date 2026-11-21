@@ -8,15 +8,17 @@
   "use strict";
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
-  const DATA = BL.emojiData;
   const DEFAULTS = Object.freeze(["😂", "😲", "😢", "❤️", "💯", "👏", "✊", "👍", "👎", "👋"]);
   const HAND = "✋", LIGHT = "\u{1F3FB}", TONE = ["", LIGHT, "\u{1F3FC}", "\u{1F3FD}", "\u{1F3FE}", "\u{1F3FF}"];
   const HANDS = Object.freeze(TONE.map((t) => HAND + t));
   // The longest emoji in the data is well under this many UTF-16 units; anything longer is refused unread.
   const MAX = 32;
   let lights = null, accepted = null;
-  // Built once, on the first question: every emoji's light-skin form by the emoji, and every form the room accepts.
+  // Built once, on the first question: every emoji's light-skin form by the emoji, and every form the room accepts. The
+  // list is read then, not at load, so Ooga Chat can bring it in a chunk of its own (`DEFAULTS`, `HANDS` and the rest
+  // need none of it).
   const index = () => {
+    const DATA = BL.emojiData;
     lights = new Map();
     accepted = new Set();
     for (const group of DATA.groups) for (const [emoji, , light] of group.emoji) {

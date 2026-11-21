@@ -1,7 +1,9 @@
 // Ooga Chat's startup, loaded last. It picks the adapter (the production one; the fixture one only on fixture.html,
 // whose root says `data-adapter="fixture"` and which alone loads it), letters the title, builds the shell with the
 // public tabs (Ooga Chat, Bananas, Contributing Oogas) and the contributor tabs (Online Oogas, The Commons), each the
-// island's own panel with its account controls where the island keeps them, and moves through loading, then live, unavailable or stale. The account is
+// island's own panel with its account controls where the island keeps them (every tab but Ooga Chat in a chunk of its
+// own, ooga-chat-chunks.js, fetched once the first view has painted and the page is idle), and moves through loading,
+// then live, unavailable or stale. The account is
 // ooga-chat-auth.js's: a sign-in return (`?signin=`) is read once and dropped from the address, the session is checked
 // before any control shows, and again on the session's own deadlines, on a return to the page and on reconnecting.
 // Unavailable is never a dead end: Try again asks the service again, and so does coming back online or to the page.
@@ -18,7 +20,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { storageKey, sweep, parseReturn, withoutReturn, parseZone, appBuild } = BL.oogaChatConfig, { chat, device: deviceBar, bananas, roster: contributingOogas, commons, online } = BL.oogaChatViews;
+  const { storageKey, sweep, parseReturn, withoutReturn, parseZone, appBuild } = BL.oogaChatConfig, { chat, device: deviceBar, deferred } = BL.oogaChatViews;
   const { gates } = BL.oogaChatAuth;
   const root = document.getElementById("ooga-chat");
   const fixture = root.dataset.adapter === "fixture";
@@ -39,8 +41,6 @@
   let adapter = null, shell = null, auth = null, feed = null, device = null, bar = null, relisten = 0, donating = null, feeding = null, member = null;
   const page = new AbortController();
   try {
-    // Donations here are the service's or nothing: donations.js never plays its simulated tips in the app.
-    BL.donations.config.simulate = false;
     // A sign-in return is a result code only; it leaves the address before anything else runs.
     const back = parseReturn(location.search);
     if (back) history.replaceState(history.state, "", `${location.pathname}${withoutReturn(location.search)}${location.hash}`);
@@ -87,7 +87,14 @@
     // Main Island alone for now, whatever an earlier visit chose: the space has no zone buttons to change it back.
     zone = parseZone(null);
     const roster = BL.oogaChatRoster.create();
-    const donor = BL.oogaChatDonor.create({ key: storageKey(adapter.kind, "donor") });
+    // The Bananas tab's code (donations.js, Feed the Oogas and Ooga Chat's donor) comes in its own chunk; here once the
+    // page is idle or the tab is chosen. Donations here are the service's or nothing: donations.js never plays its
+    // simulated tips in the app.
+    let donor = null;
+    BL.oogaChatChunks.ready("bananas", () => {
+      BL.donations.config.simulate = false;
+      donor = BL.oogaChatDonor.create({ key: storageKey(adapter.kind, "donor") });
+    });
     const town = BL.oogaChatCommons.create();
     let listening = null, heard = 0, refused = 0;
     let state = { mode: "loading", boot: null, session: null, auth: "checking", notice: null, busy: false, zone, voice: media.state,
@@ -96,7 +103,15 @@
     // signed in, working while the feed is live), its hand follows the visitor's own row as the server keeps it, and
     // what it sends goes over the audience socket as a request (#668). A hand the server refuses goes back to the row's.
     // Every reaction the server sends to the zone, the visitor's own included, pops over that participant's circle.
-    const linkSubs = new Set(), pops = new Set();
+    // The bar and the emoji list it checks against come in the `emoji` chunk, asked for once signed in: until it is
+    // here a view's bar waits in `mounts`, and a reaction heard is let go (it would be gone in a moment anyway).
+    const linkSubs = new Set(), pops = new Set(), mounts = [];
+    let reactionBars = null, emojiAsked = 0;
+    const bars = { refresh: () => reactionBars?.refresh(), mount(host, options) {
+      if (reactionBars) return reactionBars.mount(host, options);
+      host.hidden = true;
+      mounts.push([host, options]);
+    } };
     let handRequest = 0;
     const link = { state: { me: null, reactions: false, room: "off", hand: false, handTone: 0, handEmoji: "", customHand: true },
       sendReaction: (emoji) => !!feed && feed.request("reaction", { emoji }) > 0,
@@ -108,12 +123,22 @@
         return true;
       },
       subscribe(fn) { linkSubs.add(fn); return () => linkSubs.delete(fn); } };
+    // After `link`: from source the bar is on the page already, and this runs at once.
+    BL.oogaChatChunks.ready("emoji", () => {
+      reactionBars = BL.reactionBar.create(link);
+      for (const [host, options] of mounts.splice(0)) reactionBars.mount(host, options);
+    });
     const ownHand = () => {
       const id = state.session?.identity.participant, me = id ? state.audience.list.find((p) => p.id === id) : null;
       return me ? me.hand : "";
     };
     const syncLink = (force = false) => {
       const s = link.state, who = state.mode === "live" && state.session ? state.session.identity : null, room = who ? state.audience.status : "off";
+      // Signed in, the bar is wanted now: its chunk is asked for at once (again at most every 30 s after a failure).
+      if (who && !reactionBars && Date.now() - emojiAsked > 30000) {
+        emojiAsked = Date.now();
+        BL.oogaChatChunks.load("emoji")?.catch(() => {});
+      }
       const hand = ownHand(), next = { me: who, reactions: !!who, room, hand: !!hand, handEmoji: hand };
       if (!force && s.me === next.me && s.reactions === next.reactions && s.room === next.room && (handRequest || s.hand === next.hand && s.handEmoji === next.handEmoji)) return;
       Object.assign(s, handRequest ? { me: next.me, reactions: next.reactions, room } : next);
@@ -165,7 +190,7 @@
       feed = adapter.audience(state.boot, {
         message(msg) {
           if (msg && msg.type === "reaction") {
-            if (msg.zone === state.zone && typeof msg.participantId === "string" && typeof msg.emoji === "string" && BL.reactionPolicy.valid(msg.emoji))
+            if (reactionBars && msg.zone === state.zone && typeof msg.participantId === "string" && typeof msg.emoji === "string" && BL.reactionPolicy.valid(msg.emoji))
               for (const fn of pops) fn(msg.participantId, msg.emoji);
             return;
           }
@@ -245,16 +270,17 @@
         return;
       }
       root.dataset.mode = "live";
-      // The Bananas panel's figures: the island's donation socket over this origin's /donations relay (#664).
-      // A paid tip this page asked for teaches the popup its name, and every donation and on-chain sighting goes to
-      // the popup, which takes only its own invoice's.
-      if (boot.features.feed === "live" && !donating) {
+      // The Bananas panel's figures: the island's donation socket over this origin's /donations relay (#664), opened once
+      // the Bananas chunk is here. A paid tip this page asked for teaches the popup its name, and every donation and
+      // on-chain sighting goes to the popup, which takes only its own invoice's.
+      if (boot.features.feed === "live") BL.oogaChatChunks.ready("bananas", () => {
+        if (donating || page.signal.aborted) return;
         BL.donations.useOrigin();
         donating = BL.donations.subscribe((donation, bananas) => {
           if (BL.donations.receivedOwnInvoice(donation.id)) donor.rememberHandle(donation.handle);
           feeding?.receive(donation, bananas);
         }, { onSeen: (id, sats, due, left, pricing) => feeding?.seen(id, sats, due, left, pricing) });
-      }
+      });
       set({ mode: "live", boot });
       const once = returned;
       returned = null;
@@ -317,15 +343,15 @@
           return result;
         } },
       contributors: () => adapter.contributors(),
-      reactions: { bars: BL.reactionBar.create(link), onPop(fn) { pops.add(fn); return () => pops.delete(fn); } } };
+      reactions: { bars, onPop(fn) { pops.add(fn); return () => pops.delete(fn); } } };
     shell = BL.oogaChatShell.create({ root, ctx, selected: back ? "chat" : remembered, onSelect(id) {
       try { localStorage.setItem(tabKey, id); } catch { /* Storage may be unavailable. */ }
     }, tabs: [
       { id: "chat", label: "Ooga Chat", icon: "cloud", visible: () => true, view: chat },
-      { id: "bananas", label: "Bananas", icon: "bananas", visible: () => true, view: bananas },
-      { id: "roster", label: "Contributing Oogas", icon: "roster", visible: () => true, view: contributingOogas },
-      { id: "players", label: "Online Oogas", icon: "players", visible: contributor, view: online },
-      { id: "commons", label: "The Commons", icon: "chat", visible: contributor, view: commons }
+      { id: "bananas", label: "Bananas", icon: "bananas", visible: () => true, view: deferred("Bananas", "bananas", "bananas") },
+      { id: "roster", label: "Contributing Oogas", icon: "roster", visible: () => true, view: deferred("Contributing Oogas", "panels", "roster") },
+      { id: "players", label: "Online Oogas", icon: "players", visible: contributor, view: deferred("Online Oogas", "panels", "online") },
+      { id: "commons", label: "The Commons", icon: "chat", visible: contributor, view: deferred("The Commons", "panels", "commons") }
     ] });
     bar = deviceBar(ctx);
     root.querySelector(".oc-frame").after(bar.node);
@@ -339,6 +365,8 @@
     BL.signGlyphs.letter(root.querySelector(".oc-title [data-sign]"));
     root.dataset.mode = "loading";
     set({});
+    // The other tabs' code, once this first view has painted and the page is idle, so a tab click finds it here.
+    BL.oogaChatChunks.prefetch();
     // Back to the page, or back online: the service is asked again if it could not be reached, else the session and its
     // role are checked again before anything acts on them.
     // The audience feed is woken too: a socket that died while the page was away is found and opened again at once, so
