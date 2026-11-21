@@ -3521,7 +3521,7 @@
   // to bake into src/js/island-layout.js: everything static the passive crew's choices depend on, each spot with
   // whether it passes the checks that never change (`ok`); what moves with the pile, the workers and the bodies about
   // is left to the sim. Debug only.
-  // The island's world (island-world.js), where the page asks for it.
+  // The island's world (island-world.js), on unless `?islandworld=0`.
   const startIslandWorld = () => {
     if (!BL.islandWorld.enabled()) return;
     // A plan goes to this page's gorilla and, while this page is the room's crew host, into its frames for the rest.
@@ -8285,7 +8285,7 @@
       // The doorway's walks steer the Ooga before the crew moves it.
       if (!cloudPlaying()) timechainIsland.gate.update(dt);
     }
-    // The island's world (island-world.js, behind `islandworld=1` for now) places the Oogas it follows before they move;
+    // The island's world (island-world.js, off only with `islandworld=0`) places the Oogas it follows before they move;
     // without it, the room's crew host decides whether they follow it or hold (npc-sync.js `prepare`).
     if (islandWorld && !cloudPlaying()) islandWorld.update(dt);
     else if (!cloudPlaying()) npcSync.prepare();

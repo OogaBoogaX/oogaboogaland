@@ -11,8 +11,8 @@
 // bed is beamed to its routine (`refreshStates`) before it is followed. Each working Ooga's gorilla is told the cave
 // it goes ahead to when that changes (`clankers.plan`).
 //
-// For now only behind `?islandworld=1`: the room's browser host (npc-sync.js) carries the crew everywhere else, and
-// the hub leaves it be while this runs.
+// On for every visit; `?islandworld=0` turns it off, and then the room's browser host (npc-sync.js) carries the crew
+// as before. While it runs, the hub leaves that host's crew be.
 (() => {
   "use strict";
   const BL = window.BL;
@@ -21,7 +21,11 @@
   // A row in the timeline: the Ooga's id, x, z, its heading's cosine and sine, its gorilla's cave plus one, flags.
   const WIDTH = 7, DELAY_MS = 150, DEPTH = 24, LOCAL_DELAY_MS = 2 * SIM.STEP * 1000, ACTIVITY_S = 1, REFRESH_S = 0.5, SEED_S = 2;
 
-  const enabled = () => /(?:^|[?&])islandworld=1(?:&|$)/.test(location.search.slice(1));
+  const enabled = () => !/(?:^|[?&])islandworld=0(?:&|$)/.test(location.search.slice(1));
+  // The account this page was kicked from the server's world as, if it was, for the page's life: it stays on its own
+  // world, however often the hub builds its world again, until the account changes, or two tabs of one account would
+  // keep taking the world from each other.
+  let kickedAs = null;
 
   const create = ({ crew, clankers = null, contributors = BL.contributors, platform = null, net = BL.net }) => {
     // The cast the world runs: every roster Ooga but a guest's own likeness, in the crew's order.
@@ -69,13 +73,30 @@
       seededAt.fill(Infinity); unseeded = n; age = 0; activityIn = 0;
     };
 
-    if (BL.gameNet && BL.gameNet.offers("island")) {
+    // The server's world, for a signed-in page the Worker offers it to.
+    const startServer = () => {
       stats.mode = "server";
+      sim = null;
+      timeline.clear(); live = false;
       link = BL.gameNet.open("island", "main", {
         state: (msg) => { if (msg.s && Array.isArray(msg.s.cast)) cast(msg.s.cast); },
         motion: (f) => { if (f.kind === SIM.KIND && slots.some(Boolean)) take(f, f.serverMs); }
       });
-    } else startLocal();
+    };
+    const offered = () => {
+      const id = net.state.me ? net.state.me.id : null;
+      if (kickedAs !== null && id !== kickedAs) kickedAs = null;
+      return !!BL.gameNet && BL.gameNet.offers("island") && id !== kickedAs;
+    };
+    // On every account change: signed out, the page runs the world itself from where the crew stands; signed in (or
+    // in late, after a failed first look), it follows the server's.
+    const reconcile = () => {
+      const want = offered();
+      if (want && !link) startServer();
+      else if (!want && link) { link.close(); link = null; startLocal(); }
+    };
+    if (offered()) startServer(); else startLocal();
+    const unsubscribe = net.subscribe(reconcile);
     // A local world's states and caves, as the page's own crew reads them (contributors.js `stateFor`, crew.js
     // `siteActive`, whose caves are the layout's in the same order), once a second. An Ooga the crew shows goes to the
     // world only once the crew has placed it, with where it stands (`place`), so the world takes it up from there
@@ -104,7 +125,10 @@
     const update = (dt) => {
       // Kicked for good (another tab of this account took the world, or it is full): the page runs it itself from here,
       // as it would signed out, rather than holding the crew where the last frame left it.
-      if (link && link.state === "refused") { stats.refused = link.refused; link.close(); link = null; startLocal(); }
+      if (link && link.state === "refused") {
+        stats.refused = link.refused; kickedAs = net.state.me ? net.state.me.id : null;
+        link.close(); link = null; startLocal();
+      }
       if (sim) {
         age += dt;
         // Every frame until each Ooga has gone to the world, then once a second.
@@ -139,6 +163,7 @@
       if ((refreshIn -= dt) <= 0 && refresh) { refresh = false; refreshIn = REFRESH_S; crew.refreshStates(true); }
     };
     const dispose = () => {
+      unsubscribe();
       if (link) link.close();
       link = sim = null;
       for (const cave of caves) { unfollow(cave); cave.worldState = null; }

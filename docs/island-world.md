@@ -19,7 +19,7 @@ the way.
 | `src/js/island-layout.js` | page and Worker, baked | The hub's routine tables: the meadow's paths, fire seats, stroll spots, each work cave's fan of places that every Ooga may shoot from, and the sealed caves' fronts. `scripts/island-layout.mjs` bakes it from the real hub in the suite's Chrome, because those tables depend on props and geometry only the page builds. The hub's "island layout" check fails when the hub and the file disagree. |
 | `src/js/island-sim.js` | page and Worker | The passive routine (below) over those tables, with no terrain, props or collision. It runs fixed 50 ms steps, is seeded and allocates nothing per step. Its output is one `game-wire.js` row per Ooga. |
 | `worker/src/games/island.js` | Worker | Kind `island`, venue `main`, on `game-host.js`. It takes the cast from `characters.gen.json`, and states and caves from Oogatron's stats through the `OOGATRON` binding, read every minute while it runs, as a page polls them. Until the first reading it starts from the snapshot every deploy bakes into the page (`jumbotron-data.js`), as a page does, so a world that cannot reach Oogatron shows what a page would. The snapshot stays the page script the bot rebakes; the Worker lends it a `window` for its evaluation alone (`lend-window.js`, `return-window.js`). It sends motion at 10 Hz, skips frames while nothing moves (at most 2 s apart), and sends the cast's names as its state. It runs only while a page follows it, and keeps no record: a restart starts the routine afresh. |
-| `src/js/island-world.js` | page | Follows the world on the island, behind `?islandworld=1` for now (next section). |
+| `src/js/island-world.js` | page | Follows the world on the island, on every visit unless `?islandworld=0` (next section). |
 
 ### The routine
 
@@ -63,7 +63,7 @@ three. A frame for 60 Oogas is about 750 bytes.
 
 ## The page
 
-`island-world.js` runs in the hub while `?islandworld=1` is set:
+`island-world.js` runs in the hub on every visit (`?islandworld=0` turns it off, leaving the crew to the room's browser host as before):
 
 - **Signed in, with the Worker offering `island`.** It follows the server's world over `game-net.js`.
 - **Otherwise.** It runs `island-sim.js` itself, from the page's own contributors (`stateFor`) and the crew's own
@@ -94,7 +94,8 @@ see the same crew. The props still sync through the room's host (`prop-sync.js`)
 
 ### Left to do
 
-- **Turning it on.** Make it the default, and retire `npc-sync.js` for the Oogas, once play-testing says so.
+- **Retiring the host's Oogas.** A host page still sends its crew as the world moves it, for tabs opened before this
+  change. Once those are gone, `npc-sync.js` can stop carrying the Oogas.
 
 ## Cost
 

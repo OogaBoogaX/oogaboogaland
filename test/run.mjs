@@ -20222,7 +20222,7 @@ if (!ONLY || onlyMatches(signedInArrival.name)) tasks.push({ name: "hub signed-i
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   try {
     // Sign-in returns to the bare page; a `view=` and a saved login view must not put the owner back below.
-    for (const mode of ["working", "chilling", "sleeping", "away"]) await fold(`http://127.0.0.1:${server.address().port}/?debug=1&view=basement&mempool=0&chain=0&oogatron=0&totems=0&hour=12&day=80`,
+    for (const mode of ["working", "chilling", "sleeping", "away"]) await fold(`http://127.0.0.1:${server.address().port}/?debug=1&view=basement&mempool=0&chain=0&oogatron=0&totems=0&islandworld=0&hour=12&day=80`,
       [[signedInArrival.name, signedInArrival.run]], { initScript: `(${signedInArrivalWire.toString()})(${JSON.stringify(mode)})` });
     await fold(`http://127.0.0.1:${server.address().port}/sphere-3?debug=1&mempool=0&chain=0&oogatron=0&totems=0&hour=12&day=80`,
       [[signedInRouted.name, signedInRouted.run]], { initScript: `(${signedInArrivalWire.toString()})("sleeping", false)` });
@@ -29165,12 +29165,22 @@ scene("hub", { label: "island layout", query: "pos=0&net=0", steps: [{
     const same = await b.evaluate(`JSON.stringify(BL.scenes.hub.debug.routineLayout()) === JSON.stringify(BL.islandLayout)`);
     record("island layout: src/js/island-layout.js matches the hub it was baked from (run node scripts/island-layout.mjs when it does not)", same);
   }
+}, {
+  name: "island world on", why: "rule: the island world runs on every visit, so every Ooga the crew shows working or chilling is the world's", run: async (b) => {
+    const r = JSON.parse(await b.evaluate(`(async () => {
+      const B = __ooga, w = BL.scenes.hub.debug.islandWorld;
+      for (let i = 0; i < 90; i++) B.advance(1 / 30, 1 / 30);
+      const shown = B.crew.list.filter(c => !c.avatar && c.root.visible && (c.state === "working" || c.state === "chilling"));
+      return JSON.stringify({ mode: w && w.stats.mode, followed: w ? w.stats.followed : 0, shown: shown.length, unfollowed: shown.filter(c => !c.follow).map(c => c.traits.name) });
+    })()`));
+    record("island world on: with no flag the hub runs the island world, which follows every Ooga it shows working or chilling", r.mode === "local" && r.shown > 0 && r.followed === r.shown && !r.unfollowed.length, JSON.stringify(r));
+  }
 }] });
 
 // No other session's cast holds the default local Ooga or a server-vouched contributor: both join the roster before
 // the crew is built, as on a real arrival.
 scene("hub", { label: "guest likeness", query: "pos=0", opts: { initScript: GUEST_LIKENESS_INIT }, steps: [hubGuestLikeness] });
-scene("hub", { label: "outdoor travel", opts: { initScript: `window.BL={};let outdoorCrew;Object.defineProperty(BL,"crew",{configurable:true,get:()=>outdoorCrew,set:value=>{outdoorCrew=value;const create=value.create;value.create=ctx=>{window.__outdoorTravelContext=ctx;return create(ctx);};}});` }, steps: [hubOutdoorTravel] });
+scene("hub", { label: "outdoor travel", query: "islandworld=0", opts: { initScript: `window.BL={};let outdoorCrew;Object.defineProperty(BL,"crew",{configurable:true,get:()=>outdoorCrew,set:value=>{outdoorCrew=value;const create=value.create;value.create=ctx=>{window.__outdoorTravelContext=ctx;return create(ctx);};}});` }, steps: [hubOutdoorTravel] });
 scene("hub", { label: "walk-through totems", query: "pos=0&totemglow=1&repospin=0", steps: [{
   name: "walk-through totems: first-person overlap hides one carving and its effects, restores it on exit, and distant views keep all eye fires",
   why: "regression: solid totems blocked walkers, the eye could enter their carving, and distance extinguished their effects",
@@ -29462,7 +29472,10 @@ scene("hub", { label: "Merge Rock", query: "hour=0&pos=0", steps: [{
       JSON.stringify(result));
   }
 }] });
-scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubKeptDelivery, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, hubCloudCamera, hubCloudFraming, hubKeypadRedirect, trip("hub"), factoryActivityRouting, hubLiveWake, hubSeparateBodies] });
+scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubKeptDelivery, hubMapNavigation, hubRainforestSteps, hubRoutes, hubGrounding, hubCloudCamera, hubCloudFraming, hubKeypadRedirect, trip("hub")] });
+// These steps set Oogas' states or activity by hand and expect the crew to show them at once: the page crew's own
+// routine, which runs with `islandworld=0` (and in tabs from before the island world), not the world's.
+scene("hub", { label: "crew by hand", query: "islandworld=0", steps: [hubSeparateBodies, hubFall, trip("hub"), factoryActivityRouting, hubLiveWake] });
 // The same ownership contract exercises complete destruction on memory-limited devices.
 // A released hub's return enters in slices (`enterSteps`), one at boot or with no slicing in one go (`enter`): the same
 // statements in the same order, so the island it builds, its targets, rock guides and outline registry must be equal.
@@ -29786,7 +29799,7 @@ const hubHandBack = { name: "hub host hand-back", why: "regression: a work index
   })()`);
   record("hub host hand-back: Oogas handed back mid-route with their index off either end walk on without a throw", r.workers > 0 && r.threw === null && r.after === 0, JSON.stringify(r));
 } };
-scene("hub", { label: "host hand-back", query: "status=clankin", steps: [hubHandBack] });
+scene("hub", { label: "host hand-back", query: "status=clankin&islandworld=0", steps: [hubHandBack] });
 // A per-frame throw stops the picture while the panels and voice go on: the director reports it once and offers Reload.
 const frameFailure = { name: "frame failure", why: "regression: an exception in per-frame code froze the picture silently, with no way out but a reload nobody was told to do", run: async (b) => {
   const r = await b.evaluate(`(async () => {
@@ -29900,7 +29913,7 @@ scene("hub", { label: "black loading", query: "hubcache=keep", steps: [{ name: "
     rows.length === 4 && rows.every(row => row.frames > 100 && row.arcs === 0 && row.black === row.frames
       && row.fade === (row.label.startsWith("instant") ? 0 : 1)), JSON.stringify(rows));
 } }] });
-scene("hub", { query: "ooga=portlandhodl:clank:lab,obl,lf&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=bc1gui:clank:lab,obl,lf&ooga=DrNeski:clank:lab,obl,lf&ooga=2140data:clank:lab,obl,lf", steps: [{ name: "work movement cave trips", why: "regression: cave traffic aimed through obstacles, started backwards detours and got trapped behind players by short lane hints", run: workCaveTrips }] });
+scene("hub", { query: "ooga=portlandhodl:clank:lab,obl,lf&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=bc1gui:clank:lab,obl,lf&ooga=DrNeski:clank:lab,obl,lf&ooga=2140data:clank:lab,obl,lf&islandworld=0", steps: [{ name: "work movement cave trips", why: "regression: cave traffic aimed through obstacles, started backwards detours and got trapped behind players by short lane hints", run: workCaveTrips }] });
 scene("hub", { label: "hammock", query: "solo=1&character=portlandhodl&pos=0", steps: [hubHammockEntry, hubHammockGetUp, hubHammockRopes, hubHammockEnds, hubHammock, hubHammockCamera, hubHammockRemoval] });
 scene("hub", { label: "pet rides", opts: !ONLY || onlyMatches(hubPetRides.name) ? { initScript: `(${petOptInWire.toString()})()` } : {}, query: "character=Bitcoin-Bill&jetpack=1&pos=0", steps: [hubPetOptIn, hubPetRides] });
 scene("hub", { label: "hammock exit", query: "solo=1&character=portlandhodl&pos=0&hubcache=release", steps: [hubHammockExit, trip("hub")] });
@@ -31666,7 +31679,7 @@ scene("timechain", {
   steps: [timechainLectureAudio]
 });
 
-scene("hub", { label: "chilling", query: "status=chillin&pos=0",
+scene("hub", { label: "chilling", query: "status=chillin&pos=0&islandworld=0",
   // This placement order exhausted the old 36-point pool before the last Ooga could settle.
   opts: { initScript: `Math.random = (() => { let a = 3; return () => { let t = a += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();` },
   steps: [{ name: "chilling Ooga placement", why: "regression: chilling Oogas must load in separate campfire rings when the inner ring fills, and 2140data must not spin his nunchaku as a permanent idle stance", run: async (b) => {
@@ -32019,7 +32032,7 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
 scene("hub", { label: "player stacking", query: "ooga=portlandhodl:clank:lab,obl,lf&solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking, hubChalkboardReach, hubChalkboardEraser, hubVoiceLevels] });
 // A fresh page, as the phone run has: after the steps above, the peer tooltip this check measures can read as hidden.
 scene("hub", { label: "live nameplates", query: "ooga=portlandhodl:clank:lab,obl,lf&solo=1&character=portlandhodl&pos=0", steps: [hubNameplates] });
-scene("hub", { label: "lab flask approach", query: "solo=1&character=portlandhodl&status=clankin", steps: [{ name: "gorilla lab exit through Oogas", why: "regression: Ooga occupancy, body sweeps and head support blocked gorillas leaving the lab", run: async (b) => {
+scene("hub", { label: "lab flask approach", query: "solo=1&character=portlandhodl&status=clankin&islandworld=0", steps: [{ name: "gorilla lab exit through Oogas", why: "regression: Ooga occupancy, body sweeps and head support blocked gorillas leaving the lab", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, C = B.clankers, e = C.list[0], owner = e.owner, m = B.headquarters.entropyLab.mouth;
     const site = B.crew.workSites.findIndex(site => site.mouth === m), sx = Math.sin(m.ry), sz = Math.cos(m.ry);
@@ -32167,7 +32180,7 @@ scene("hub", { label: "lab flask approach", query: "solo=1&character=portlandhod
     state.entered && !state.retreated && !state.queued && state.inside && state.phase === "work"
     && state.station === -1 && state.settled && !state.lateRecoveries, JSON.stringify(state));
 } }] });
-scene("hub", { label: "lab work rotation", query: "status=clankin", steps: [hubWorkingArrival, { name: "lab work rotation", why: "regression: interior waiting bodies blocked equipment, permanent claims left coworkers idle, and rear departures held the doorway before reaching it", run: async (b) => {
+scene("hub", { label: "lab work rotation", query: "status=clankin&islandworld=0", steps: [hubWorkingArrival, { name: "lab work rotation", why: "regression: interior waiting bodies blocked equipment, permanent claims left coworkers idle, and rear departures held the doorway before reaching it", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, C = B.clankers, lab = B.headquarters.entropyLab, m = lab.mouth, group = C.list.slice(0, 2);
     B.pilot.release(true); C.release();
@@ -32703,7 +32716,7 @@ scene("hub", { label: "gorilla lab carry jump", exclusive: true, query: "charact
       && state.smashUnchanged,
     JSON.stringify(state));
 } }].map(gameCombat) });
-scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1", steps: [{ name: "gorilla prop traversal", why: "regression: a box lost its supporting contact before the collision body cleared its side, low props interrupted the gallop, and a stale motion envelope trapped gorillas beneath trees", run: async (b) => {
+scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&islandworld=0", steps: [{ name: "gorilla prop traversal", why: "regression: a box lost its supporting contact before the collision body cleared its side, low props interrupted the gallop, and a stale motion envelope trapped gorillas beneath trees", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, root = BL.scenes.hub.root, C = B.clankers, npc = C.list.find(e => e.owner.traits.name === "portlandhodl"), solids = B.headquarters.solids.props;
     // \`e\` is the gorilla in hand: the driven body while one is taken (clankers.js separateBodies builds it where the NPC
