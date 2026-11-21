@@ -30675,6 +30675,24 @@ const sphereBridgeKeypad = { name: "timechain bridge keypad", why: "rule: the ke
   record("timechain bridge keypad: walked back out in first person the view stays in the Ooga's head to the end and after",
     out.done && out.frames > 60 && out.worst < 0.45 && out.view === "first-person" && out.state === "idle" && out.along > 17, JSON.stringify(out));
 } };
+// Walked in and back out in combat, the pilot's camera at the shoulder hid the head while the doorway still held it
+// hidden, and put it back hidden for good.
+const sphereCombatHead = { name: "timechain combat head", why: "regression: an Ooga that crossed the Sphere's doorway in combat came back out with its head hidden from the camera for good", run: async (b) => {
+  await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.7", "13.8")} B.pilot.exitClose(false); B.advance(0.3, 1 / 60); if (!B.pilot.aiming) B.pilot.modeAction("mode-toggle"); B.advance(0.6, 1 / 60); })()`);
+  const before = await b.evaluate(`({ aiming: __ooga.pilot.aiming, view: __ooga.pilot.mode })`);
+  await b.key(" ");
+  await b.key("3");
+  await b.key("Enter");
+  const inside = await untilPage(b, 'B.scene === "timechain" && !B.transitioning && B.timechain.guide.stage === null', 20000);
+  await b.evaluate(`(() => { const B = __ooga, L = B.timechain.layout; B.advance(1.2, 1 / 60); B.pilot.navigate({ position: { x: L.exitButton.x + 0.6, y: 0, z: L.doorZ - 1 }, yaw: Math.PI, pitch: 0.05, dist: 4 }); B.advance(0.3, 1 / 60); })()`);
+  await b.key(" ");
+  const out = await untilPage(b, 'B.scene === "hub" && !B.transitioning && BL.scenes.hub.debug.timechainIsland.gate.debug.state === "idle"', 25000);
+  const read = `({ aiming: __ooga.pilot.aiming, view: __ooga.pilot.mode, hidden: __ooga.pilot.player.parts.head.cameraHidden })`;
+  const back = await b.evaluate(`(() => { __ooga.advance(1.2, 1 / 60); return ${read}; })()`);
+  const carried = await b.evaluate(`(() => { const B = __ooga; if (B.pilot.aiming) B.pilot.modeAction("mode-toggle"); B.advance(1.5, 1 / 60); return ${read}; })()`);
+  record("timechain combat head: walked through the doorway in combat and back out, the Ooga's head shows at the shoulder and after leaving combat",
+    before.aiming && before.view === "shoulder" && inside && out && back.view !== "first-person" && !back.hidden && !carried.aiming && carried.view !== "first-person" && !carried.hidden, JSON.stringify({ before, back, carried }));
+} };
 const sphereAccount = { name: "timechain account", why: "regression: account Retry must keep the owned Ooga at the keypad; an unanswered account still offers a solo visit without guessing", run: async (b) => {
   await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; BL.net.state.resolved = false; ${sphereStand("0.7", "13.8")} })()`);
   await b.key(" ");
@@ -30739,7 +30757,7 @@ const sphereAccount = { name: "timechain account", why: "regression: account Ret
       && retry.before.selected && retry.after.selected && retry.before.held && retry.after.held && retry.before.mode === retry.after.mode && retry.after.lens === "eyes"
       && released.state === "idle" && released.selected === "portlandhodl" && released.refusal === null && released.near < 2, JSON.stringify({ retry, released }));
 } };
-scene("hub", { label: "timechain doorway", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: { motion: true }, steps: [sphereApproach, sphereThreshold, sphereKeypad, sphereCrossing, sphereBridgeKeypad, sphereAccount, trip("hub")] });
+scene("hub", { label: "timechain doorway", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: { motion: true }, steps: [sphereApproach, sphereThreshold, sphereKeypad, sphereCrossing, sphereCombatHead, sphereBridgeKeypad, sphereAccount, trip("hub")] });
 // The released hub (phones under 8 GB): the walk-out rebuilds the hub behind the room's held frame.
 scene("hub", { label: "timechain doorway release", query: "solo=1&character=portlandhodl&view=timechain&pos=0&hubcache=release", opts: { motion: true }, steps: [sphereApproach, sphereCrossing] });
 scene("hub", { label: "timechain doorway canvas2d", exclusive: true, query: "solo=1&character=portlandhodl&view=timechain&pos=0&canvas2d=1", steps: [sphereApproach, sphereCrossing] });
