@@ -187,8 +187,9 @@ voice-blend.js `WORLD` (which folds HQ and the caves into the surface) are no pr
 | a DSB room, known or not | none | `interior` |
 | a DSB entry or exit, from its request (before the fade) to its end | none | `entering` |
 | DSB Land's arrival | none | `transit` |
+| a cave cabinet's seat (`<id>@out`) for its whole game, whatever scene draws it (Cloud Hopper's run included), the Room holding the body at its slot in zone `outside` | `main` | `outdoor` |
 | any other scene, and every scene change from the moment it starts | none | `scene` |
-| Cloud Hopper | none | `game` |
+| Cloud Hopper from the hall's cabinet | none | `game` |
 | no driven Ooga | none | `no-body` |
 | any other hub zone | none | `unknown` |
 

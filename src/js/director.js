@@ -703,6 +703,12 @@
     // eaten since it arrived, in whole bananas.
     if (pileFeed.at) world.level = Math.min(pileMod.MAX_BANANAS, Math.max(0, Math.floor(pileFeed.bananas - pileFeed.eatPerHour * (performance.now() - pileFeed.at) / 36e5)));
     if (!panelHolds) active.update(sceneDt, sceneTime);
+    // The island and DSB Land report their own outdoor scope; any other scene is out of it, unless a cave cabinet's
+    // seat holds the body on the island's surface for its game.
+    if (active.id !== "hub" && active.id !== "dsb") {
+      const reason = window.BL.outdoorScope.seatReason("scene");
+      window.BL.outdoorScope.report(reason === "outdoor" ? "main" : null, reason);
+    }
     if (active.id !== "studio") BL.equipment.applyLocal(active.debug?.pilot?.player || active.debug?.crew?.player);
     showZoneLine();
     cabinetView.update(dt, active, !!openIntro() || !!active.cabinetMenu, !!transition);

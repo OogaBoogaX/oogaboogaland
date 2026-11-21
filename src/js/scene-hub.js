@@ -8901,7 +8901,12 @@
     else BL.net.setBlend(null, 0);
   };
   const shareDrivenActor = (dt) => {
-    if (cloudHopper?.active) { BL.outdoorScope.report(null, "game"); BL.net.setBlend(null, 0); return; }
+    if (cloudHopper?.active) {
+      const reason = BL.outdoorScope.seatReason("game");
+      BL.outdoorScope.report(reason === "outdoor" ? "main" : null, reason);
+      BL.net.setBlend(null, 0);
+      return;
+    }
     const gorilla = clankerPlay && clankerPlay.player, driven = gorilla || crew.player;
     BL.net.setBody(gorilla ? gorilla.netBody : driven ? driven.traits.name : null);
     if (!driven) { BL.outdoorScope.report(null, "no-body"); BL.net.setBlend(null, 0); return; }
