@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' https://stream.noderunnersradio.com https://s2.radio.co https://ice1.somafm.com; connect-src 'self' https: wss:; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' https://stream.noderunnersradio.com https://s2.radio.co; connect-src 'self' https: wss:; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -188,6 +188,7 @@
         <p data-scene="breaker" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Rock Breaker</p>
         <p data-scene="dash" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Dino Dash</p>
         <p data-scene="stacker" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Stone Stacker</p>
+        <p data-scene="raid" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Ooga Raid</p>
       </div>
       <time class="world-clock" id="world-clock"></time>
       <div class="world-block" id="world-block" aria-live="polite" aria-label="Bitcoin block height unavailable">
@@ -316,11 +317,20 @@
         </svg>
       </button>
       <button type="button" class="mode-hud environment-sound" id="environment-sound"
-        aria-label="Mute environment sounds" title="Mute environment sounds · M" aria-pressed="false">
+        aria-label="Sound levels" title="Sound levels · M mutes game sounds" data-muted="false"
+        aria-haspopup="dialog" aria-controls="sound-mixer" aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path fill="currentColor" d="M3 9h4l5-4v14l-5-4H3z"/>
           <path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>
           <path class="sound-muted" d="m16 9 6 6m0-6-6 6"/>
+        </svg>
+      </button>
+      <!-- Sign in with GitHub, and out again, left of the controls button wherever the page has a backend (hud.js
+           showAccount, which sets its action): the same two actions as the Contributing Oogas panel's account row. -->
+      <button type="button" class="mode-hud account-top" id="account-top" data-action="account-login" data-signed="false" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+          <path class="account-in" d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M3 12h11m-4-4 4 4-4 4"/>
+          <path class="account-out" d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M9 12h12m-4-4 4 4-4 4"/>
         </svg>
       </button>
       <nav class="presets" aria-label="Timechain Sphere room" data-scene="timechain" hidden>
@@ -353,6 +363,11 @@
         <button type="button" data-action="block-view" id="block-view-btn" aria-pressed="false">View</button>
         <button type="button" data-action="block-sound" id="block-sound-btn" aria-pressed="true">Sound</button>
         <button type="button" data-action="block-drop" id="block-drop" disabled>Drop<span> block</span></button>
+        <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
+      </nav>
+      <nav class="presets" aria-label="Ooga Raid" data-scene="raid" hidden>
+        <button type="button" data-action="raid-pause" id="raid-pause-btn" aria-pressed="false" hidden>Pause</button>
+        <button type="button" data-action="mute" id="raid-mute" aria-label="Mute sound" aria-pressed="false">Sound</button>
         <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
       </nav>
       <nav class="presets" aria-label="Mine" data-scene="mine" hidden>
@@ -399,6 +414,20 @@
       </div>
       <div class="studio-scroll" id="studio-scroll">
         <p class="studio-who" id="studio-who"></p>
+        <div class="studio-wardrobe">
+          <fieldset class="studio-hats" id="studio-hat" aria-describedby="studio-hat-status">
+            <legend class="roster-sort-label">Try a hat</legend>
+            <div id="studio-hat-choices"></div>
+          </fieldset>
+          <label class="roster-sort-label studio-hat-size-label" for="studio-hat-size">Hat size <output id="studio-hat-size-value" for="studio-hat-size">100%</output></label>
+          <input type="range" id="studio-hat-size" min="80" max="120" step="1" value="100" aria-valuetext="100%" aria-describedby="studio-hat-status" disabled>
+          <button type="button" class="foot-button" id="studio-hat-size-reset" disabled>Reset fitted size</button>
+          <button type="button" class="foot-button foot-primary" id="studio-hat-save" aria-describedby="studio-hat-status">Save hat for my Ooga</button>
+          <button type="button" class="foot-button" id="studio-hat-own" hidden>Show my Ooga</button>
+          <p class="studio-note" id="studio-hat-status" role="status"></p>
+          <a class="link" href="/auth/login?next=%2F%3Fscene%3Dstudio" id="studio-hat-signin" hidden>Sign in with GitHub to save</a>
+          <a class="link" href="/?scene=studio" id="studio-hat-link" hidden>Open the hosted studio to save</a>
+        </div>
         <h3 class="section-head">File</h3>
         <div class="studio-file">
           <div class="studio-bar" id="studio-size-bar"><span id="studio-size-fill"></span></div>
@@ -410,6 +439,13 @@
       </div>
     </section>
     <button type="button" class="panel-edge panel-edge-right studio-features-edge" data-fold="studio-features" data-scene="studio" hidden>This Ooga</button>
+
+    <section id="equipment-update" class="equipment-update" aria-label="Hat update" hidden>
+      <p id="equipment-update-text"></p>
+      <div><button type="button" class="foot-button foot-primary" id="equipment-accept">Accept update</button>
+      <button type="button" class="foot-button" id="equipment-decline">Keep my version</button></div>
+      <p id="equipment-update-status" role="status"></p>
+    </section>
 
     <aside class="sheet" id="sheet" data-open="false" data-dock="side" data-paired="false">
       <nav class="sheet-panels" role="tablist" aria-label="Island panels">
@@ -454,8 +490,9 @@
             </span>
             <span class="account-actions">
               <button type="button" class="foot-button foot-primary" data-action="account-rejoin" id="account-rejoin" hidden>Play here</button>
-              <button type="button" class="foot-button" data-action="account-voice" id="account-voice" aria-pressed="false" hidden>Join voice</button>
-              <button type="button" class="foot-button" data-action="account-voice-leave" id="account-voice-leave" hidden>Leave voice</button>
+              <button type="button" class="foot-button account-mute" data-action="account-mute" id="account-mute" aria-pressed="false" data-mic="" disabled hidden>Unmute</button>
+              <button type="button" class="foot-button account-voice" data-action="account-voice" id="account-voice" hidden>Join voice</button>
+              <button type="button" class="foot-button account-leave" data-action="account-voice-leave" id="account-voice-leave" hidden>Leave voice</button>
               <button type="button" class="link" data-action="account-logout" id="account-logout" hidden>Sign out</button>
             </span>
           </div>
@@ -484,6 +521,7 @@
               <p class="help" id="players-diagnostics-status">Off</p>
             </div>
             <label class="players-speak" id="players-speak" hidden><input type="checkbox" id="players-speak-input"> Read joins aloud</label>
+            <label class="players-speak" id="players-keys" title="Keeps your microphone shut on key and mouse clicks between your words. Adds a short delay to your voice." hidden><input type="checkbox" id="players-keys-input"> Keyboard noise filter</label>
             <label class="players-speak"><input type="checkbox" id="players-mute-duels" aria-describedby="players-mute-duels-help"> Automatically mute duelists</label>
             <p class="help" id="players-mute-duels-help">Until their duel ends. Your own duel pair is exempt.<br>Manual mute and volume choices stay unchanged.</p>
           </div>
@@ -598,7 +636,7 @@
           <svg viewBox="0 0.25 16 16" aria-hidden="true" focusable="false"><path d="M3 11h10l-1.5-2V6a3.5 3.5 0 0 0-7 0v3L3 11Zm3.5 2a1.6 1.6 0 0 0 3 0" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>
           <span class="tab-count" aria-hidden="true" hidden></span>
         </button>
-        <div class="sheet-unread" hidden></div>
+        <ul class="sheet-unread" hidden></ul>
       </div>
     </template>
 
@@ -688,6 +726,16 @@
           </span>
         </span>
       </button>
+      <div class="dance-hud" id="dance-hud" role="group" aria-label="Dance level" data-level="1" hidden>
+        <button type="button" class="dance-step" data-action="dance-down" aria-label="Dance calmer" title="Dance calmer (-)">&minus;</button>
+        <span class="dance-read" aria-live="polite">
+          <svg class="dance-icon" viewBox="0 0 9 11" shape-rendering="crispEdges" aria-hidden="true">
+            <path fill="#ffcf5a" d="M3 0h2v2H3zM2 2h4v1H2zM6 1h1v1H6zM7 0h1v1H7zM1 3h1v1H1zM0 4h1v1H0zM3 3h3v3H3zM3 6h1v2H3zM5 6h1v1H5zM6 7h1v2H6zM2 8h1v2H2zM7 9h1v1H7zM1 10h2v1H1z"/>
+          </svg>
+          <span class="dance-num" id="dance-level">1</span>
+        </span>
+        <button type="button" class="dance-step" data-action="dance-up" aria-label="Dance harder" title="Dance harder (=)">+</button>
+      </div>
       <button type="button" class="gorilla-hud" id="gorilla-smash-hud" data-action="gorilla-smash"
         aria-label="Ground smash; hold for double damage" title="Ground smash · hold for double damage (1)" hidden>
         <span class="weapon-toggle">
@@ -1240,6 +1288,104 @@
             <button type="button" data-action="block-board" data-role="choose">Main menu</button>
             <button type="button" data-action="leave" data-role="leave">Back to the island</button>
           </div>
+        </div>
+      </section>
+    </div>
+    <div class="race raid" id="raid" data-scene="raid" hidden>
+      <div class="race-strip raid-strip" id="raid-strip" hidden>
+        <div class="race-hud race-hud-left raid-hud">
+          <div class="raid-stat"><span id="raid-lives-label">Lives</span><b id="raid-lives">3</b></div>
+          <div class="raid-stat"><span>Continues</span><b id="raid-continues">3</b><small class="raid-cheat-mark" id="raid-cheat-mark" hidden>Secrets on</small></div>
+          <div class="raid-stat raid-p2" hidden><span>P2 lives</span><b id="raid-lives2">3</b></div>
+        </div>
+        <div class="race-hud race-hud-right raid-hud">
+          <div class="raid-stat"><span id="raid-score-label">Score</span><b id="raid-score">0</b><small id="raid-best">Best 0</small></div>
+          <div class="raid-stat raid-weapon"><span>Shot</span><b id="raid-weapon">Rifle</b><small id="raid-rapid" data-on="false">&nbsp;</small></div>
+          <div class="raid-stat raid-p2" hidden><span>P2 score</span><b id="raid-score2">0</b><small id="raid-weapon2">Rifle</small></div>
+        </div>
+      </div>
+      <div class="raid-boss" id="raid-boss" role="meter" aria-label="Boss" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" hidden>
+        <span class="raid-boss-name">Boss</span>
+        <span class="raid-boss-track"><i class="raid-boss-fill" id="raid-boss-fill"></i></span>
+      </div>
+      <div class="race-center raid-center" id="raid-center" hidden>&nbsp;</div>
+      <div class="race-notice raid-notice" id="raid-notice" hidden>&nbsp;</div>
+      <button type="button" class="act raid-fire" id="raid-fire" data-action="raid-fire" hidden>Fire</button>
+      <section class="raid-card" id="raid-card" hidden aria-live="polite">
+        <p class="raid-card-kicker" id="raid-card-kicker">Stage 2</p>
+        <h2><span data-sign id="raid-card-sign">Next stage</span></h2>
+      </section>
+      <section class="raid-card raid-bosscard" id="raid-bosscard" hidden aria-live="assertive">
+        <p class="raid-card-kicker">Boss</p>
+        <h2><span data-sign id="raid-bosscard-sign">Boss</span></h2>
+      </section>
+      <div class="raid-call" id="raid-call" hidden aria-live="polite">&nbsp;</div>
+      <section class="race-pause raid-pause" id="raid-pause" hidden aria-label="Paused">
+        <h2><span data-sign>Paused</span></h2>
+        <p class="help raid-pause-help" data-coarse="Resume plays on. Exit Game ends the run." data-pad="A or Start resumes. Exit Game ends the run.">P or Escape resumes. Exit Game ends the run.</p>
+        <div class="actions">
+          <button type="button" data-action="raid-resume">Resume</button>
+          <button type="button" data-action="leave">Exit Game</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="raid-intro" data-intro="raid" hidden aria-label="Ooga Raid">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">A run and gun in eight stages</p>
+        <h2 class="game-intro-title"><span data-sign>Ooga Raid</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3a2410" d="M10 0h4v1H10zM9 1h1v1H9zM14 1h1v1H14zM8 2h1v1H8zM15 2h1v1H15zM8 3h1v1H8zM15 3h1v1H15zM8 4h1v1H8zM15 4h1v1H15zM8 5h1v1H8zM14 5h1v1H14zM8 6h2v1H8zM13 6h1v1H13zM8 7h1v1H8zM11 7h2v1H11zM10 8h1v1H10zM6 9h1v1H6zM5 10h1v1H5zM7 10h1v1H7zM4 11h1v1H4zM7 11h1v1H7zM3 12h1v1H3zM6 12h1v1H6zM2 13h1v1H2zM5 13h1v1H5zM1 14h1v1H1zM4 14h1v1H4zM1 15h3v1H1z" /><path fill="#d29a5c" d="M10 1h2v1H10zM9 2h2v1H9zM9 3h1v1H9z" /><path fill="#a06a34" d="M12 1h2v1H12zM12 2h3v1H12zM10 3h3v1H10zM9 4h1v1H9zM11 4h2v1H11zM9 5h3v1H9zM9 7h1v1H9zM6 10h1v1H6zM5 11h1v1H5zM4 12h1v1H4zM3 13h1v1H3z" /><path fill="#6e4420" d="M14 3h1v1H14zM13 4h2v1H13zM12 5h2v1H12zM10 6h3v1H10zM10 7h1v1H10zM9 8h1v1H9zM6 11h1v1H6zM5 12h1v1H5zM4 13h1v1H4z" /><path fill="#c9c2b0" d="M11 2h1v1H11zM13 3h1v1H13zM10 4h1v1H10z" /><path fill="#2a1a0c" d="M2 14h2v1H2z" /><path fill="#ffd84a" d="M4 2h1v1H4zM3 3h2v1H3zM3 4h2v1H3zM4 5h2v1H4zM4 6h2v1H4zM5 7h2v1H5zM5 8h3v1H5zM7 9h3v1H7zM8 10h3v1H8zM9 11h3v1H9zM10 12h4v1H10z" /><path fill="#e0a228" d="M5 3h1v1H5zM5 4h1v1H5zM6 5h1v1H6zM6 6h1v1H6zM7 7h1v1H7zM8 8h1v1H8zM10 9h1v1H10zM11 10h1v1H11zM12 11h2v1H12zM11 13h2v1H11z" /><path fill="#5a3a12" d="M3 1h1v1H3zM3 2h1v1H3zM14 12h1v1H14zM13 13h1v1H13z" /></svg>
+        <p class="game-intro-goal">Drive the <b>Fiat Legion</b> out of the island, stage by stage.</p>
+        <p class="game-intro-who" id="raid-intro-best">No best score yet</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#e0a878" d="M5 0h2v1H5zM5 1h2v1H5z" /><path fill="#8a5a2c" d="M3 2h5v1H3zM5 3h2v1H5zM5 4h2v1H5zM4 5h1v1H4zM7 5h1v1H7zM3 6h1v1H3zM8 6h1v1H8z" /><path fill="#f3efe4" d="M0 3h1v1H0zM0 5h1v1H0zM0 7h1v1H0z" /><path fill="#789a3b" d="M0 8h9v1H0z" /></svg><b>Run and jump</b><small data-coarse="The stick runs, Jump! jumps. Down with Jump! drops off a ledge.">A and D run, Space jumps. S with Space drops off a ledge.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff8a73" d="M4 0h1v1H4zM4 1h1v1H4zM4 2h1v1H4zM3 3h3v1H3zM0 4h4v1H0zM5 4h4v1H5zM3 5h3v1H3zM4 6h1v1H4zM4 7h1v1H4zM4 8h1v1H4z" /><path fill="#ffd84a" d="M0 0h1v1H0zM8 0h1v1H8zM1 1h1v1H1zM7 1h1v1H7zM2 2h1v1H2zM6 2h1v1H6zM2 6h1v1H2zM6 6h1v1H6zM1 7h1v1H1zM7 7h1v1H7zM0 8h1v1H0zM8 8h1v1H8z" /><path fill="#f3efe4" d="M4 4h1v1H4z" /></svg><b>Aim eight ways</b><small data-coarse="Tilt the stick to aim; down on the ground lies prone. Hold Fire.">W and S tilt your aim; S on the ground lies prone. J or a click fires.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M1 0h2v1H1zM0 1h4v1H0zM1 2h4v1H1zM2 3h4v1H2zM3 4h4v1H3zM4 5h4v1H4zM5 6h4v1H5zM6 7h2v1H6z" /></svg><b>One hit and you are down</b><small>Three lives and three continues. More lives from 20,000 points.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3a2410" d="M0 0h9v1H0zM0 1h1v1H0zM8 1h1v1H8zM0 2h1v1H0zM8 2h1v1H8zM0 3h1v1H0zM8 3h1v1H8zM0 4h1v1H0zM8 4h1v1H8zM0 5h1v1H0zM8 5h1v1H8zM0 6h1v1H0zM8 6h1v1H8zM0 7h1v1H0zM8 7h1v1H8zM0 8h9v1H0z" /><path fill="#a06a34" d="M1 1h7v1H1zM1 2h1v1H1zM3 2h3v1H3zM7 2h1v1H7zM1 6h1v1H1zM3 6h3v1H3zM7 6h1v1H7zM1 7h7v1H1z" /><path fill="#6e4420" d="M2 2h1v1H2zM6 2h1v1H6zM2 6h1v1H2zM6 6h1v1H6z" /><path fill="#d8a330" d="M1 3h7v1H1zM1 4h2v1H1zM4 4h1v1H4zM6 4h2v1H6zM1 5h7v1H1z" /><path fill="#fff3a0" d="M3 4h1v1H3zM5 4h1v1H5z" /></svg><b>Pickups change your shot</b><small>Shoot the carriers and grab what falls. Going down loses it.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c08a50" d="M3 0h3v1H3zM2 1h5v1H2zM2 2h1v1H2zM4 2h1v1H4zM6 2h1v1H6z" /><path fill="#1b1410" d="M3 2h1v1H3zM5 2h1v1H5z" /><path fill="#7fe0ff" d="M0 3h1v1H0zM2 3h1v1H2zM4 3h1v1H4zM6 3h1v1H6zM8 3h1v1H8zM1 4h1v1H1zM3 4h1v1H3zM5 4h1v1H5zM7 4h1v1H7zM0 6h1v1H0zM3 6h1v1H3zM6 6h1v1H6zM0 8h2v1H0zM5 8h2v1H5z" /><path fill="#2f7fb8" d="M0 5h9v1H0zM1 6h2v1H1zM4 6h2v1H4zM7 6h2v1H7zM0 7h9v1H0zM2 8h3v1H2zM7 8h2v1H7z" /></svg><b>Duck under water</b><small data-coarse="Wading, pull the stick down to duck. Nothing hits you under.">Wading, S ducks under. Nothing hits you there.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c9c2b0" d="M2 0h5v1H2zM1 1h1v1H1zM7 1h1v1H7zM0 2h1v1H0zM8 2h1v1H8zM0 3h1v1H0zM8 3h1v1H8zM0 4h1v1H0zM8 4h1v1H8zM0 5h1v1H0zM8 5h1v1H8zM0 6h1v1H0zM8 6h1v1H8zM1 7h1v1H1zM7 7h1v1H7zM2 8h5v1H2z" /><path fill="#6f7480" d="M2 1h5v1H2zM1 2h2v1H1zM4 2h1v1H4zM6 2h2v1H6zM1 3h3v1H1zM5 3h3v1H5zM1 4h1v1H1zM7 4h1v1H7zM1 5h3v1H1zM5 5h3v1H5zM1 6h2v1H1zM4 6h1v1H4zM6 6h2v1H6zM2 7h5v1H2z" /><path fill="#d8a330" d="M3 2h1v1H3zM5 2h1v1H5zM4 3h1v1H4zM2 4h2v1H2zM5 4h2v1H5zM4 5h1v1H4zM3 6h1v1H3zM5 6h1v1H5z" /><path fill="#fff3a0" d="M4 4h1v1H4z" /></svg><b>Beat each boss</b><small>Every stage ends on one. Break what guards it, then shoot it down.</small></li>
+        </ul>
+        <div class="raid-start" id="raid-start" hidden>
+          <button type="button" class="raid-start-step" data-action="raid-start-prev" aria-label="Earlier stage">&lsaquo;</button>
+          <p class="raid-start-pick"><span>Start at</span><b id="raid-start-name">Stage 1</b></p>
+          <button type="button" class="raid-start-step" data-action="raid-start-next" aria-label="Later stage">&rsaquo;</button>
+          <p class="help raid-start-help" data-coarse="Tap an arrow for another stage." data-pad="D-pad up and down change the stage.">Up and down change the stage.</p>
+        </div>
+        <div class="actions raid-players" role="group" aria-label="Players">
+          <button type="button" id="raid-1p" data-action="raid-1p" aria-pressed="true">1 Player</button>
+          <button type="button" id="raid-2p" data-action="raid-2p" aria-pressed="false">2 Players</button>
+        </div>
+        <p class="help raid-players-help" data-coarse="Player 2 plays on a keyboard or gamepad." data-pad="Pads: d-pad marks 1 or 2 players, A or Start plays.&#10;X or B fires.">1 or 2 picks the players.&#10;Player 2: arrows run and aim, comma jumps, full stop fires.</p>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Raid!</button>
+          <button type="button" data-action="leave">Exit Game</button>
+        </div>
+      </section>
+      <section class="race-results raid-secrets" id="raid-secrets" hidden aria-label="Shaman's Secrets">
+        <p class="game-intro-kicker">Carved under the island</p>
+        <h2><span data-sign>Shaman's Secrets</span></h2>
+        <ul class="raid-secret-list" role="group" aria-label="Secrets">
+          <li><button type="button" class="raid-secret" data-action="raid-secret:lives" data-secret="lives" aria-pressed="false" data-name="30 lives" data-note="Every Ooga starts with thirty."><b>30 lives</b><small>Every Ooga starts with thirty.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:continues" data-secret="continues" aria-pressed="false" data-name="Endless continues" data-note="Game over never runs out."><b>Endless continues</b><small>Game over never runs out.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:spread" data-secret="spread" aria-pressed="false" data-name="Start with spread" data-note="The fan shot from every drop-in."><b>Start with spread</b><small>The fan shot from every drop-in.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:rapid" data-secret="rapid" aria-pressed="false" data-name="Always rapid" data-note="Rapid fire that never goes."><b>Always rapid</b><small>Rapid fire that never goes.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:slow" data-secret="slow" aria-pressed="false" data-name="Slow bullets" data-note="The Legion's shots at half speed."><b>Slow bullets</b><small>The Legion's shots at half speed.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:barrier" data-secret="barrier" aria-pressed="false" data-name="Everlasting barrier" data-note="The barrier never wears off."><b>Everlasting barrier</b><small>The barrier never wears off.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:heads" data-secret="heads" aria-pressed="false" data-name="Big heads" data-note="Oogas with heads twice the size."><b>Big heads</b><small>Oogas with heads twice the size.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:peels" data-secret="peels" aria-pressed="false" data-name="Banana peels" data-note="Your shots fly as banana peels."><b>Banana peels</b><small>Your shots fly as banana peels.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:stages" data-secret="stages" aria-pressed="false" data-name="Stage select" data-note="Pick the stage on the title card." data-locked-note="Clear stage 4 to learn it."><b>Stage select</b><small>Pick the stage on the title card.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:mirror" data-secret="mirror" aria-pressed="false" data-name="Mirror mode" data-note="The raid flipped left to right." data-locked-note="Finish the loop to learn it."><b>Mirror mode</b><small>The raid flipped left to right.</small><i>Off</i></button></li>
+        </ul>
+        <p class="help raid-secrets-help" data-coarse="Tap a secret to turn it on or off.&#10;Secrets that ease the raid cost the best and tickets." data-pad="D-pad picks, A turns on or off, B closes.&#10;Secrets that ease the raid cost the best and tickets.">Up and down pick, Enter turns on or off, Escape closes.&#10;Secrets that ease the raid cost the best and tickets.</p>
+        <div class="actions">
+          <button type="button" data-action="raid-secrets-close">Done</button>
+        </div>
+      </section>
+      <section class="race-results raid-results" id="raid-results" hidden aria-label="Raid results">
+        <h2><span data-sign id="raid-results-sign">Raid over</span></h2>
+        <ol class="race-podium drop-rows" id="raid-rows"></ol>
+        <p class="help" id="raid-summary"></p>
+        <div class="actions">
+          <button type="button" data-action="raid-again">Again</button>
+          <button type="button" data-action="leave">Exit Game</button>
         </div>
       </section>
     </div>
@@ -1859,16 +2005,17 @@
       <section class="poker-focus" data-poker="focus" hidden aria-label="Poker table">
         <header class="poker-table-head">
           <div><p class="poker-kicker">THE EMBER DEN <span aria-hidden="true">/</span> <span data-poker="theme-name">THE BANANA CLUB</span></p><div class="poker-table-title"><h3 data-poker="title" tabindex="-1">Table 01</h3><span class="poker-mode-badge" data-poker="mode-badge">PRACTICE</span></div><p data-poker="status">No-limit Hold’em · blinds 5 / 10</p></div>
-          <div class="poker-table-tools"><span class="poker-free">FREE PLAY</span><label class="poker-table-switch">Table <select data-poker="table-select" aria-label="Watch another table"></select></label><button type="button" data-poker-action="walk">Walk the floor</button></div>
+          <div class="poker-table-tools"><span class="poker-free">FREE PLAY</span><label class="poker-table-switch">Table <select data-poker="table-select" aria-label="Watch another table"></select></label><button class="poker-emote-button" type="button" data-poker="emote" aria-expanded="false" hidden>Emote</button><button type="button" data-poker-action="walk">Walk the floor</button><div class="poker-emote-menu" data-poker="emote-menu" role="group" aria-label="Emotes" hidden></div></div>
         </header>
-        <div class="poker-status-strip"><span class="poker-connection" data-poker="connection">Practice · on your device</span><span data-poker="voice-label">Table voice</span><span class="poker-timer" data-poker="countdown" aria-label="Hand timing"></span><button type="button" data-poker="reconnect" data-poker-action="reconnect" hidden>Reconnect</button></div>
+        <div class="poker-status-strip"><span class="poker-connection" data-poker="connection">Practice · on your device</span><span data-poker="voice-label">Table voice</span><span class="poker-timer" data-poker="countdown" aria-label="Hand timing"></span><button type="button" data-poker="reconnect" data-poker-action="reconnect" hidden>Reconnect</button><button class="poker-emote-button" type="button" data-poker="emote" aria-expanded="false" hidden>Emote</button></div>
         <div class="poker-table-layout">
           <div class="poker-play">
             <div class="poker-arena" aria-label="Nine-seat poker table">
               <div class="poker-felt" aria-hidden="true"></div>
               <div class="poker-center">
-                <div class="poker-dealer" aria-label="Suited gorilla dealer"><svg viewBox="0 0 80 80" aria-hidden="true"><path fill="#161f20" d="M6 78V62Q9 49 29 49H51Q71 49 74 62V78Z"/><path fill="#faf0d1" d="M28 49H52L44 78H36Z"/><path fill="#cda75d" d="M35 53L40 57L45 53L43 50H37ZM38 58H42L45 70L40 75L35 70Z"/><path fill="#394542" d="M27 49L15 60L26 62L23 67L36 78ZM53 49L65 60L54 62L57 67L44 78Z"/><path fill="#27332e" d="M17 20L22 10L32 4H48L58 10L63 20V41L53 51H27L17 41Z"/><path fill="#898b73" d="M23 20L32 17L40 21L48 17L57 20V32L60 38L52 46H28L20 38L23 32Z"/><path fill="#18251e" d="M25 23H36V28H25ZM44 23H55V28H44ZM34 31H46L48 36H32ZM30 40H50V42H30Z"/><path fill="#d9bc7b" d="M27 24H30V26H27ZM47 24H50V26H47Z"/></svg><span>THE HOUSE GORILLA</span></div>
+                <div class="poker-dealer" aria-label="Suited gorilla dealer"><canvas class="poker-dealer-face" data-poker="dealer-face" width="144" height="144" aria-hidden="true"></canvas><svg viewBox="0 0 80 80" aria-hidden="true"><path fill="#161f20" d="M6 78V62Q9 49 29 49H51Q71 49 74 62V78Z"/><path fill="#faf0d1" d="M28 49H52L44 78H36Z"/><path fill="#cda75d" d="M35 53L40 57L45 53L43 50H37ZM38 58H42L45 70L40 75L35 70Z"/><path fill="#394542" d="M27 49L15 60L26 62L23 67L36 78ZM53 49L65 60L54 62L57 67L44 78Z"/></svg><span>THE HOUSE GORILLA</span></div>
                 <p class="poker-pot"><span data-poker="pot-label">TOTAL POT</span><strong data-poker="pot">0</strong><small>banana chips</small></p>
+                <div class="poker-pot-chips" data-poker="pot-chips" aria-hidden="true"></div>
                 <div class="poker-board" data-poker="board" aria-label="Community cards"></div>
                 <p class="poker-street" data-poker="street"></p>
               </div>
@@ -1922,8 +2069,10 @@
           <li><b>Walk and watch</b><small data-coarse="Move with the sticks; tap a table to watch.">WASD and drag to explore; click a table to watch.</small></li>
           <li><b>Local or live</b><small>Local practice with computer opponents. Live poker when connected to the poker service.</small></li>
         </ul>
-        <button type="button" class="game-intro-go" data-action="intro-go">Enter The Ember Den</button>
-        <button type="button" data-action="leave">Exit Game</button>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Enter The Ember Den</button>
+          <button type="button" data-action="leave">Exit Game</button>
+        </div>
       </section>
     </div>
     <!-- The donation dialog (#donation-popup) is built here by donation-popup.js, shared with Ooga Chat. -->
@@ -1934,11 +2083,12 @@
         <h2 id="controls-help-title">Controls</h2>
         <button type="button" class="modal-close" id="controls-help-close" aria-label="Close controls">&times;</button>
       </div>
-      <p id="controls-help-context"></p>
-      <p id="controls-help-note">Try the keys here. Your character stays still while this panel is open.</p>
+      <div class="slab controls-help-about">
+        <p id="controls-help-context"></p>
+        <p id="controls-help-note">Try the keys here. Your character stays still while this panel is open.</p>
+      </div>
       <button type="button" class="controls-help-pad" id="controls-help-pad">Controller settings</button>
       <div class="controls-list" id="controls-help-list"></div>
-      <button type="button" id="controls-learn" hidden>Learn by exploring</button>
     </dialog>
     <dialog class="modal destination-map" id="destination-map" aria-labelledby="destination-map-title">
       <div class="panel-head"><h2 id="destination-map-title">Explore the island</h2><button type="button" class="modal-close" id="destination-map-close" aria-label="Close map">&times;</button></div>
@@ -1954,8 +2104,10 @@
             <svg id="destination-atlas-overlay" viewBox="0 0 720 600" aria-hidden="true"></svg>
             <div id="destination-atlas-pins" role="group" aria-label="Preview a zone on the map"></div>
           </div>
-          <p class="destination-map-key"><span id="destination-map-origin">◉ Your position</span><span>◎ Selected zone</span><span>North up · Landmark numbers match the list</span></p>
-          <p class="destination-map-mapnote" id="destination-map-mapnote"></p>
+          <div class="slab destination-map-legend">
+            <p class="destination-map-key"><span id="destination-map-origin">◉ Your position</span><span>◎ Selected zone</span><span>North up · Landmark numbers match the list</span></p>
+            <p class="destination-map-mapnote" id="destination-map-mapnote"></p>
+          </div>
         </section>
         <div id="destination-map-list" aria-label="All destinations"></div>
       </div>
@@ -1969,10 +2121,6 @@
     <aside id="destination-map-receipt" class="destination-map-receipt" role="status" aria-live="polite" aria-atomic="true" hidden></aside>
     <button type="button" id="destination-return" hidden>Return to my Ooga</button>
     <aside id="destination-waypoint" aria-label="Walking directions" hidden><span id="destination-waypoint-arrow" aria-hidden="true">↑</span><span id="destination-waypoint-text"></span><button type="button" id="destination-waypoint-stop" aria-label="Stop walking directions">×</button></aside>
-    <aside id="explore-coach" class="explore-coach" aria-label="Learn to explore" hidden>
-      <p id="explore-coach-text" role="status"></p>
-      <div><button type="button" id="explore-coach-start">Learn the controls</button><button type="button" id="explore-coach-skip">Not now</button></div>
-    </aside>
     <dialog class="modal pad-settings" id="pad-settings" aria-labelledby="pad-settings-title">
       <div class="panel-head">
         <h2 id="pad-settings-title">Controller</h2>
@@ -2033,7 +2181,8 @@
         <h2><span data-sign>Add an Ooga</span></h2>
         <button type="button" class="modal-close" data-action="recipe-close" aria-label="Close">&times;</button>
       </div>
-      <p class="help">2140data hands you the prompt. Paste it to an AI coding agent on your computer: it signs you in with GitHub, asks what you want, and shows you your Ooga as it builds it.</p>
+      <p class="help" id="recipe-note" hidden>Signing in needs an Ooga of your own, and the island has none for this GitHub account yet. A new Ooga arrives once it is merged and the island next deploys. Here is how to make one.</p>
+      <p class="help">2140data hands you the prompt. Paste it to an AI coding agent on your computer: it signs you in with GitHub, asks what you want, and shows you your Ooga as it builds it. Once your Ooga is on the island, the sign-in button at the top right hands it to you.</p>
       <pre class="recipe" id="recipe-text">Make me a character in Ooga Booga Land. Read docs/make-your-ooga.md in https://github.com/OogaBoogaX/oogaboogaland first, and follow it in order.
 
 Get me set up first: check I have a GitHub account, sign me in on this computer with gh (I will approve it in my browser), fork the repository, and make the clone's commits mine with my GitHub no-reply address. Ask me before installing anything or opening my browser.
@@ -2044,7 +2193,9 @@ Do not write the file yet. Ask me for a picture or two to work from, then interv
 
 Build it in one file, src/characters/&lt;my GitHub login&gt;.js, and change nothing else. After each round take my notes one at a time. Before the pull request, run npm run character:check, npm run build and npm run test:unit, and ask me before pushing.
 
-Open the pull request from my fork as a draft and keep it draft while building or debugging. Mark it ready for review only when the work and authorized checks are complete and its description records validation and any remaining acceptance work. Return it to draft for substantial new work, and batch related fixes before pushing.</pre>
+Open the pull request from my fork as a draft and keep it draft while building or debugging. Mark it ready for review only when the work and authorized checks are complete and its description records validation and any remaining acceptance work. Return it to draft for substantial new work. While it is draft, push each round I approve; once it is ready, batch related fixes before pushing.
+
+When it is sent, tell me what happens next and when I can sign in at oogabooga.land.</pre>
       <div class="actions recipe-actions">
         <button type="button" data-action="recipe-copy">Copy prompt</button>
       </div>
@@ -2125,6 +2276,27 @@ Open the pull request from my fork as a draft and keep it draft while building o
           <p class="board-note" id="model-note" hidden></p>
           <div class="board-links" id="model-links" hidden></div>
         </div>
+      </div>
+    </dialog>
+    <aside class="genesis-portal" id="genesis-portal" aria-label="Proof of Knowledge" hidden>
+      <div class="gp-head"><span class="gp-kicker">MINING MUSEUM · PROOF OF KNOWLEDGE</span><button type="button" class="gp-x" data-action="genesis-portal-close" aria-label="Hide">&times;</button></div>
+      <div class="gp-body" id="genesis-portal-body"></div>
+    </aside>
+    <dialog class="wp-reader" id="wp-reader" aria-label="The Bitcoin whitepaper">
+      <div class="wpr-panel">
+        <div class="wpr-view" id="wp-reader-view" tabindex="0" aria-label="The pages: drag, swipe or scroll to read"><img class="wpr-strip" id="wp-reader-strip" alt="The whitepaper's nine pages, one below the other" draggable="false"><i class="wpr-thumb" id="wp-reader-thumb"></i></div>
+        <button type="button" class="wpr-close" data-action="reader-close" aria-label="Close the reader">&times;</button>
+      </div>
+      <div class="wpr-foot"><button type="button" class="wpr-about" id="wp-reader-about">ABOUT THIS PAPER</button><b class="wpr-page" id="wp-reader-page">PAGE 1 / 9</b><span class="wpr-credit">Source: bitcoin.org · MIT licence · <a class="wpr-site" href="https://bitcoin.org/en/bitcoin-paper" target="_blank" rel="noopener noreferrer">Read it on bitcoin.org</a></span></div>
+    </dialog>
+    <dialog class="modal" id="sphere-exit" aria-labelledby="sphere-exit-title" aria-describedby="sphere-exit-note">
+      <div class="panel-head">
+        <h2 id="sphere-exit-title">Leave this room?</h2>
+      </div>
+      <p class="help" id="sphere-exit-note">Your Ooga walks back out through the doors to the Timechain Sphere's bridge.</p>
+      <div class="actions">
+        <button type="button" data-sphere-exit="stay">Stay</button>
+        <button type="button" data-sphere-exit="leave" autofocus>Leave</button>
       </div>
     </dialog>
     <dialog class="modal" id="ooga-portal-menu" aria-labelledby="ooga-portal-title" aria-describedby="ooga-portal-status">
@@ -2215,13 +2387,33 @@ Open the pull request from my fork as a draft and keep it draft while building o
         <button type="button" class="ghost-spectate-next" id="ghost-spectate-next" aria-label="Next player">Next ▶</button>
       </div>
     </div>
+    <!-- The speaker button's panel (sound-panel.js): a level for all game sounds, all players' voices and each sound this place holds. -->
+    <section class="sound-mixer" id="sound-mixer" role="dialog" aria-labelledby="sound-mixer-title" tabindex="-1" hidden>
+      <div class="sound-mixer-head">
+        <h2 id="sound-mixer-title">Sound</h2>
+        <button type="button" class="sound-mixer-toggle" id="sound-mixer-toggle" aria-pressed="true">Sound on</button>
+        <button type="button" class="sound-mixer-close" id="sound-mixer-close" aria-label="Close sound levels">&times;</button>
+      </div>
+      <div class="slab sound-mixer-slab">
+        <div id="sound-mixer-all"></div>
+        <h3 class="sound-mixer-here">Around you</h3>
+        <div id="sound-mixer-list"></div>
+        <p class="sound-mixer-empty" id="sound-mixer-empty" hidden>Nothing here has a level of its own.</p>
+      </div>
+      <div class="sound-mixer-foot">
+        <p>Saved in this browser</p>
+        <button type="button" class="sound-mixer-reset" id="sound-mixer-reset">Reset all</button>
+      </div>
+    </section>
     <section class="hangar-sound" id="hangar-sound" aria-label="Hangar sound" hidden>
       <div class="hangar-sound-head">
         <h3>Sound</h3>
         <button type="button" class="hangar-sound-toggle" id="hangar-sound-toggle" aria-pressed="true">Sound on</button>
       </div>
-      <label class="hangar-sound-row" for="hangar-volume"><span>Volume</span><input type="range" id="hangar-volume" min="0" max="100" step="5" value="100"></label>
-      <label class="hangar-sound-row" for="hangar-vibration"><span>Vibration</span><input type="range" id="hangar-vibration" min="0" max="100" step="5" value="100"></label>
+      <div class="slab hangar-sound-slab">
+        <label class="hangar-sound-row" for="hangar-volume"><span>Volume</span><input type="range" id="hangar-volume" min="0" max="100" step="5" value="100"></label>
+        <label class="hangar-sound-row" for="hangar-vibration"><span>Vibration</span><input type="range" id="hangar-vibration" min="0" max="100" step="5" value="100"></label>
+      </div>
       <p class="hangar-sound-note">Pad vibration: Chrome and Edge</p>
     </section>
     <dialog class="hangar-keypad" id="hangar-keypad" aria-label="Door keypad" data-state="idle" tabindex="-1">
@@ -2281,6 +2473,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
     <footer>Curated from the official homepage · checked 4 October 2026. The headquarters is in-world satire; market screens are decorative.</footer>
   </section>
   <script src="js/sound.js"></script>
+  <script src="js/room-acoustics.js"></script>
   <script src="js/math.js"></script>
   <script src="js/daylight.js"></script>
   <script src="js/scene.js"></script>
@@ -2327,10 +2520,16 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/object-guides.js"></script>
   <script src="js/sight-guides.js"></script>
   <script src="js/caves.js"></script>
+  <script src="js/character-catalog-schema.js"></script>
   <script src="js/characters.js"></script>
   <script src="js/characters.gen.js"></script>
+  <script src="js/character-catalog.js"></script>
   <script src="js/roster-panel.js"></script>
   <script src="js/contributors.js"></script>
+  <script src="js/equipment-hats.js"></script>
+  <script src="js/equipment-hats.gen.js"></script>
+  <script src="js/character-equipment.js"></script>
+  <script src="js/equipment-hat-data.gen.js"></script>
   <script src="js/donations.js"></script>
   <script src="js/donation-rate.js"></script>
   <script src="js/mempool.js"></script>
@@ -2345,6 +2544,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/controls.js"></script>
   <script src="js/cursor.js"></script>
   <script src="js/pilot.js"></script>
+  <script src="js/visit-spot.js"></script>
   <script src="js/rocket-parts.js"></script>
   <script src="js/mine-rigs.js"></script>
   <script src="js/highscore-rules.js"></script>
@@ -2370,6 +2570,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/duel-rules.js"></script>
   <script src="js/duel-listening.js"></script>
   <script src="js/net.js"></script>
+  <script src="js/equipment.js"></script>
   <script src="js/game-net.js"></script>
   <script src="js/highscores.js"></script>
   <script src="js/cloud-hopper-replays.js"></script>
@@ -2393,6 +2594,8 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/camera-cover.js"></script>
   <script src="js/crew.js"></script>
   <script src="js/npc-paths.js"></script>
+  <script src="js/island-layout.js"></script>
+  <script src="js/island-sim.js"></script>
   <script src="js/pile.js"></script>
   <script src="js/pile-guides.js"></script>
   <script src="js/banana-cover.js"></script>
@@ -2423,6 +2626,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/remote-players.js"></script>
   <script src="js/duel.js"></script>
   <script src="js/npc-sync.js"></script>
+  <script src="js/island-world.js"></script>
   <script src="js/prop-sync.js"></script>
   <script src="js/footsteps.js"></script>
   <script src="js/pet-reactions.js"></script>
@@ -2455,6 +2659,14 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/cloud-hopper-gust.js" data-defer="cloud-hopper"></script>
   <script src="js/cloud-hopper.js" data-defer="cloud-hopper"></script>
   <script src="js/npc-ghosts.js"></script>
+  <script src="js/architect-audio.js"></script>
+  <script src="js/observatory-visitors.js"></script>
+  <script src="js/observatory-bifrost.js"></script>
+  <script src="js/observatory-timechain.js"></script>
+  <script src="js/observatory-workshops.js"></script>
+  <script src="js/observatory-detail.js"></script>
+  <script src="js/observatory-cameras.js"></script>
+  <script src="js/architect-cave.js"></script>
   <script src="js/scene-hub.js"></script>
   <script src="js/scene-lab.js"></script>
   <script src="js/factory-feed.js"></script>
@@ -2507,7 +2719,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/retro-games.js" data-defer="arcade"></script>
   <script src="js/scene-arcade.js" data-defer="arcade-scene"></script>
   <script src="js/carnival-audio.js" data-defer="arcade"></script>
-  <script src="js/scene-carnival.js"></script>
+  <script src="js/scene-carnival.js" data-defer="carnival-scene"></script>
   <script src="js/race-track.js" data-defer="race"></script>
   <script src="js/racers.js" data-defer="race"></script>
   <script src="js/race-items.js" data-defer="race"></script>
@@ -2524,16 +2736,42 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/block-sim.js"></script>
   <script src="js/block-live.js"></script>
   <script src="js/block-viewer.js" data-defer="block-viewer"></script>
-  <script src="js/block-trivia.js"></script>
+  <script src="js/block-trivia.js" data-defer="block-scene"></script>
   <script src="js/block-models.js"></script>
-  <script src="js/block-audio.js"></script>
-  <script src="js/scene-block.js"></script>
+  <script src="js/block-audio.js" data-defer="block-scene"></script>
+  <script src="js/scene-block.js" data-defer="block-scene"></script>
   <script src="js/mine-models.js"></script>
   <script src="js/mine-sim.js"></script>
   <script src="js/mine-hud.js" data-defer="mine"></script>
   <script src="js/mine-audio.js" data-defer="mine"></script>
   <script src="js/mine-crew.js" data-defer="mine"></script>
   <script src="js/scene-mine.js" data-defer="mine-scene"></script>
+  <script src="js/raid-stages.js" data-defer="raid-scene"></script>
+  <script src="js/raid-enemies.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-counting.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-tower.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-treasury.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-field.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-factory.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-lake.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-pass.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-reserve.js" data-defer="raid-scene"></script>
+  <script src="js/raid-terrain.js" data-defer="raid-scene"></script>
+  <script src="js/raid-sim.js" data-defer="raid-scene"></script>
+  <script src="js/raid-autopilot.js" data-defer="raid-scene"></script>
+  <script src="js/raid-campaign.js" data-defer="raid-scene"></script>
+  <script src="js/raid-models.js" data-defer="raid-scene"></script>
+  <script src="js/raid-art-bank.js" data-defer="raid-scene"></script>
+  <script src="js/raid-art-tower.js" data-defer="raid-scene"></script>
+  <script src="js/raid-art-field.js" data-defer="raid-scene"></script>
+  <script src="js/raid-art-factory.js" data-defer="raid-scene"></script>
+  <script src="js/raid-art-lake.js" data-defer="raid-scene"></script>
+  <script src="js/raid-art-pass.js" data-defer="raid-scene"></script>
+  <script src="js/raid-art-reserve.js" data-defer="raid-scene"></script>
+  <script src="js/raid-crew.js" data-defer="raid-scene"></script>
+  <script src="js/raid-hud.js" data-defer="raid-scene"></script>
+  <script src="js/raid-audio.js" data-defer="raid-scene"></script>
+  <script src="js/scene-raid.js" data-defer="raid-scene"></script>
   <script src="js/rocket-hud.js" data-defer="orbit"></script>
   <script src="js/rocket-audio.js" data-defer="orbit"></script>
   <script src="js/scene-orbit.js" data-defer="orbit-scene"></script>
@@ -2628,7 +2866,8 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/timechain-room-planetarium.js" data-defer="timechain"></script>
   <script src="js/timechain-room-conference.js" data-defer="timechain"></script>
   <script src="js/timechain-room-temple.js" data-defer="timechain"></script>
-  <script src="js/timechain-party-radio.js" data-defer="timechain"></script>
+  <script src="js/timechain-party-radio.js" data-defer="party-radio"></script>
+  <script src="js/timechain-party-dance.js" data-defer="timechain"></script>
   <script src="js/timechain-room-party.js" data-defer="timechain"></script>
   <script src="js/timechain-room-workout.js" data-defer="timechain"></script>
   <script src="js/timechain-room-mining.js" data-defer="timechain"></script>
@@ -2640,6 +2879,11 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/timechain-room-lecture.js" data-defer="timechain"></script>
   <script src="js/timechain-room-theater.js" data-defer="timechain"></script>
   <script src="js/timechain-interior.js" data-defer="timechain"></script>
+  <script src="js/whitepaper-pages.js" data-defer="timechain-genesis"></script>
+  <script src="js/timechain-genesis-first.js" data-defer="timechain-genesis"></script>
+  <script src="js/timechain-genesis-map.js" data-defer="timechain-genesis"></script>
+  <script src="js/timechain-genesis-models.js" data-defer="timechain-genesis"></script>
+  <script src="js/timechain-room-genesis.js" data-defer="timechain-genesis"></script>
   <script src="js/lecture-btc-01.js" data-defer="lecture-btc-a"></script>
   <script src="js/lecture-btc-01.timing.js" data-defer="lecture-btc-a"></script>
   <script src="js/lecture-btc-02.js" data-defer="lecture-btc-b"></script>
@@ -2661,12 +2905,21 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/poker-live.js" data-defer="poker"></script>
   <script src="js/poker-cards.js" data-defer="poker"></script>
   <script src="js/poker-themes.js"></script>
+  <script src="js/poker-marble.js" data-defer="poker"></script>
+  <script src="js/poker-fountain.js" data-defer="poker"></script>
+  <script src="js/poker-statues.js" data-defer="poker"></script>
   <script src="js/poker-models.js" data-defer="poker"></script>
+  <script src="js/poker-presence.js" data-defer="poker"></script>
+  <script src="js/poker-emotes.js" data-defer="poker"></script>
+  <script src="js/poker-tells.js" data-defer="poker"></script>
+  <script src="js/poker-crowd-models.js" data-defer="poker"></script>
+  <script src="js/poker-crowd.js" data-defer="poker"></script>
+  <script src="js/poker-audio.js" data-defer="poker"></script>
   <script src="js/poker-hud.js" data-defer="poker"></script>
   <script src="js/scene-poker.js"></script>
   <!-- HALLOWEEN: only the herald is present at entry; the hunt loads when a player starts or joins. -->
-  <script src="js/ghost-herald-data.js"></script>
-  <script src="js/ghost-entry.js"></script>
+  <script src="js/ghost-herald-data.js" data-defer="arcade-scene"></script>
+  <script src="js/ghost-entry.js" data-defer="arcade-scene"></script>
   <script src="js/ghost-sim.js" data-defer="halloween"></script>
   <script src="js/ghost-art-data.js" data-defer="halloween"></script>
   <script src="js/ghost-models.js" data-defer="halloween"></script>
@@ -2685,6 +2938,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/controls-help.js"></script>
   <script src="js/destination-atlas.js"></script>
   <script src="js/destination-map.js"></script>
+  <script src="js/sound-panel.js"></script>
   <script src="js/pad-focus.js"></script>
   <script src="js/pad-settings.js"></script>
   <script src="js/arcade-view.js"></script>

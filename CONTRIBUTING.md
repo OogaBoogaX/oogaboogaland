@@ -39,6 +39,14 @@ contributor's thumbs-up, or a comment from an automated reviewer.
   cabinet or game, an island.
 - **Shared controls and screens:** HUD panels, key bindings, the camera,
   movement, anything every scene inherits.
+- **A new tab in the panels**, on the island or in Ooga Chat. Every visitor
+  sees these tabs, so there are few of them on purpose, and few more will be
+  added. Improving a tab that is already there is welcome. A tab of your own
+  belongs with your character, off by default for visitors to add: that system
+  is planned, not built, and [docs/custom-tabs.md](docs/custom-tabs.md) says
+  what you can prepare now. An idea that needs a tab to *do* something often
+  fits better as a place in the world, such as a Timechain Sphere room; say so
+  in the issue and a maintainer will help find its home.
 - **Anything on the backend:** Worker routes, Durable Objects, storage, paid
   APIs, secrets. These cost money to run and someone has to operate them.
 - **Anything that reaches outside the page:** a new network origin, a

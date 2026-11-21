@@ -31,7 +31,7 @@
     list.unshift(handle);
     if (list.length > RECENT_HANDLES) list.length = RECENT_HANDLES;
   };
-  const defaults = () => ({ handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, cloudHopper: { unlocked: 1, last: 0, players: [] }, block: { wins: 0, games: 0, best: 0, mined: 0, home: 0, splats: 0, splatted: 0, mvps: 0 }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, machines: {}, tickets: 0, prizes: [] } });
+  const defaults = () => ({ handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, raid: { best: null, cheats: [], start: 0 }, cloudHopper: { unlocked: 1, last: 0, players: [] }, block: { wins: 0, games: 0, best: 0, mined: 0, home: 0, splats: 0, splatted: 0, mvps: 0 }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, machines: {}, tickets: 0, prizes: [] } });
   // Ooga Arcade's carnival bests, each capped past the most its game can score (nine doubled 100s; the round games
   // run on), the retro cabinets' bests (`retro-games.js`, capped past any run), the ticket balance, and the prizes
   // (`ARCADE_PRIZES` ids) redeemed at the counter.
@@ -48,6 +48,27 @@
   // recently played first, at most CLOUD_PLAYERS of them.
   const CLOUD_LEVELS = 8, CLOUD_PLAYERS = 8, CLOUD_LOGIN = /^(?:github:[1-9][0-9]{0,15}|[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?)?$/i;
   const isTime = (v) => Number.isFinite(v) && v > 0 && v < 36e5;
+  // An Ooga Raid record: the best score, under RAID_SCORE_MAX (far past any run), the furthest stage reached, by its
+  // index into the run's RAID_STAGES, and whether a run completed the loop; anything else is none. A save from before
+  // the loop was kept has no `looped` and loads as false. Read when a save loads, after every script has.
+  // The run's stage count (`raid-stages.js`'s STAGES, which loads with the raid's own code, not here; a unit check holds
+  // the two equal).
+  const RAID_SCORE_MAX = 1e7, RAID_STAGES = 8;
+  const raidBest = (b) => b && typeof b === "object" && Number.isFinite(b.score) && b.score >= 0 && b.score < RAID_SCORE_MAX
+    && Number.isInteger(b.stage) && b.stage >= 0 && b.stage < RAID_STAGES && (b.looped === undefined || typeof b.looped === "boolean")
+    ? { score: Math.floor(b.score), stage: b.stage, looped: b.looped === true } : null;
+  // Ooga Raid's secrets (the title card's tablet, "Shaman's Secrets"), by the ids the save keeps, in the tablet's order:
+  // six change the rules (raid-sim's CHEAT bits), three the view, and the stage select starts a run at `start`. The stage
+  // select is earned by clearing stage 4 (the record's furthest stage reached is the fifth, index RAID_STAGES_AT, or
+  // past it) and mirror mode by completing the loop; the rest are open from the start. A run with any that changes the
+  // rules on (every one but RAID_LOOKS, the three that only change how the run looks: big heads, banana peels and mirror
+  // mode; and the stage select only when the run starts past stage 1, `start` its index, as a run from stage 1 is a fair
+  // one) saves no record and pays no tickets (`settleRaid`, `raidCheated`). A saved secret that is no known id, or one
+  // not yet earned, loads off.
+  const RAID_CHEATS = Object.freeze(["lives", "continues", "spread", "rapid", "slow", "barrier", "heads", "peels", "stages", "mirror"]), RAID_STAGES_AT = 4;
+  const RAID_LOOKS = Object.freeze(["heads", "peels", "mirror"]);
+  const raidCheated = (cheats, start) => cheats.some((id) => id === "stages" ? start > 0 : !RAID_LOOKS.includes(id));
+  const raidEarned = (id, best) => id === "stages" ? !!best && best.stage >= RAID_STAGES_AT : id === "mirror" ? !!best && best.looped : RAID_CHEATS.includes(id);
   // A save from before the loot crates were removed carries an inventory and who wore what; neither is read, and the
   // next save leaves them out.
   const load = () => {
@@ -120,6 +141,10 @@
         && MINE_ENDINGS.includes(m.ending) && typeof m.won === "boolean" && Number.isFinite(m.score) && m.score >= 0 && m.score < 1e7) {
         state.mine.best = { sats: Math.floor(m.sats), seconds: Math.floor(m.seconds), ending: m.ending, won: m.won, score: Math.floor(m.score), continued: m.continued === true };
       }
+      if (parsed.raid) state.raid.best = raidBest(parsed.raid.best);
+      if (parsed.raid && Array.isArray(parsed.raid.cheats)) state.raid.cheats = RAID_CHEATS.filter((id) => parsed.raid.cheats.includes(id) && raidEarned(id, state.raid.best));
+      const start = parsed.raid && parsed.raid.start;
+      if (Number.isInteger(start) && start >= 0 && start < RAID_STAGES) state.raid.start = start;
       const c = parsed.cloudHopper, playableLevels = BL.cloudHopperLevels.LEVELS.length;
       // Keep future personal bests, but never select an unavailable level or its dock music.
       if (c && Number.isSafeInteger(c.unlocked) && c.unlocked >= 1 && c.unlocked <= CLOUD_LEVELS) state.cloudHopper.unlocked = Math.min(c.unlocked, playableLevels);
@@ -279,6 +304,46 @@
       save(state);
       return true;
     };
+    // An Ooga Raid run's record, each part kept on its own: a higher score replaces the best, a further stage the
+    // furthest (whatever the run scored), and a completed loop marks the loop done for good. A score at or over
+    // RAID_SCORE_MAX (the campaign loops without end) is kept just under it rather than refused, as a loaded one is not.
+    // A run that is no sane score on a known stage, or improves nothing, changes nothing. True only for a new best score.
+    const recordRaid = ({ score, stage, looped }) => {
+      const capped = Number.isFinite(score) ? Math.min(score, RAID_SCORE_MAX - 1) : score;
+      const entry = raidBest({ score: capped, stage, looped }), b = state.raid.best;
+      if (!entry) return false;
+      const better = entry.score > (b ? b.score : 0), further = entry.stage > (b ? b.stage : 0), loop = entry.looped && !(b && b.looped);
+      if (!better && !further && !loop) return false;
+      state.raid.best = { score: better || !b ? entry.score : b.score, stage: further || !b ? entry.stage : b.stage, looped: entry.looped || !!(b && b.looped) };
+      save(state);
+      return better;
+    };
+    // A raid secret earned (open from the start, or won by the record), and one turned on or off: false, and nothing
+    // saved, for an unknown id or one not yet earned. The stage a run with the stage select begins on, by its index into
+    // STAGES: false for none.
+    const raidUnlocked = (id) => raidEarned(id, state.raid.best);
+    const setRaidCheat = (id, on) => {
+      if (!raidUnlocked(id)) return false;
+      state.raid.cheats = RAID_CHEATS.filter((c) => c === id ? on : state.raid.cheats.includes(c));
+      save(state);
+      return true;
+    };
+    const setRaidStart = (i) => {
+      if (!Number.isInteger(i) || i < 0 || i >= RAID_STAGES) return false;
+      state.raid.start = i;
+      save(state);
+      return true;
+    };
+    // A raid run's end, settled once: its record (`recordRaid`) and its `tickets`, paid through the game's own
+    // `addTickets`, unless it ran with a secret on that changes the rules (`cheats`, the ids it ran under, and `start`,
+    // the stage index it began on; see `raidCheated`), when nothing is saved and nothing paid. `{ best, paid, cheated }`:
+    // best true for a new best score, paid the tickets paid.
+    const settleRaid = ({ score, stage, looped, tickets, cheats, start }) => {
+      if (raidCheated(cheats, start)) return { best: false, paid: 0, cheated: true };
+      const best = api.recordRaid({ score, stage, looped }), paid = Math.max(0, Math.floor(tickets));
+      api.addTickets(paid);
+      return { best, paid, cheated: false };
+    };
     // A clean Cloud Hopper finish, signed in or out, online or not: the player's best for the level and, when
     // it was the highest level unlocked, the next one of `levels`. Says whether either changed.
     const recordCloudHopper = (login, level, ms, levels) => {
@@ -378,7 +443,8 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordBlock, recordMine, recordCloudHopper, playCloudHopper, cloudHopperBest, cloudHopperPlayer, recordArcade, arcadeBest, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
+    const api = { state, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordBlock, recordMine, recordRaid, raidUnlocked, setRaidCheat, setRaidStart, settleRaid, recordCloudHopper, playCloudHopper, cloudHopperBest, cloudHopperPlayer, recordArcade, arcadeBest, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
+    return api;
   };
-  BL.game = { create, ARCADE_KINDS: Object.keys(ARCADE_MAX), SATS_PER_BANANA, bananasFor, formatLarge, formatThree, formatFeeRate };
+  BL.game = { create, RAID_CHEATS, RAID_LOOKS, RAID_STAGES, raidCheated, ARCADE_KINDS: Object.keys(ARCADE_MAX), SATS_PER_BANANA, bananasFor, formatLarge, formatThree, formatFeeRate };
 })();

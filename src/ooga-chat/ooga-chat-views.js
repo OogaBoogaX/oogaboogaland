@@ -105,8 +105,24 @@
     const node = make("section", "panel oc-panel oc-chat", head.header, line, alert.el, signedOut, ...space.nodes);
     node.dataset.panel = "cloud";
     node.dataset.space = "off";
-    let principal = null, refocus = false;
+    let principal = null, refocus = false, portraitTimer = 0, portraitWatch = null;
+    // A quiet Listen view can keep the same cached speaker tiles indefinitely. Refresh their source even with no
+    // audience/voice changes, only while this signed-in tab and document show; the portrait reader shares its throttle.
+    const watchPortraits = () => {
+      if (document.hidden || !principal || node.closest("[hidden]")) {
+        clearInterval(portraitTimer); portraitTimer = 0; return;
+      }
+      if (!portraitTimer) {
+        BL.oogaChatPortraits.refresh();
+        portraitTimer = setInterval(() => BL.oogaChatPortraits.refresh(), 120000);
+      }
+    };
+    document.addEventListener("visibilitychange", watchPortraits, { signal });
     const update = (state) => {
+      if (!portraitWatch && node.parentElement) {
+        portraitWatch = new MutationObserver(watchPortraits);
+        portraitWatch.observe(node.parentElement, { attributes: true, attributeFilter: ["hidden"] });
+      }
       const { mode, boot, session, auth, notice: shown, busy } = state;
       const live = mode === "live", who = live && session;
       // Sign-in shows once signed out is known: loading and the session check show only the title and status. Signing
@@ -137,6 +153,7 @@
       if (!who) {
         if (was) refocus = true;
         principal = null;
+        watchPortraits();
         const first = Object.values(providers).find((el) => !el.disabled);
         if (refocus && first) {
           refocus = false;
@@ -146,10 +163,13 @@
       }
       refocus = false;
       principal = session.identity.principal;
+      watchPortraits();
       if (was !== principal && lost) space.focus();
     };
     const dispose = () => {
       listeners.abort();
+      clearInterval(portraitTimer);
+      portraitWatch?.disconnect();
       space.dispose();
       node.remove();
     };
@@ -296,24 +316,20 @@
     // An Ooga's face from the face sheet (art/ooga-faces.png, ooga-chat-faces.js), cut once a handle and kept as a
     // data URL, for anyone the server names a character for and gives no picture: an island speaker's own Ooga. The
     // tiles draw again once the sheet has loaded.
-    const faces = BL.oogaChatFaces, sheetFaces = new Map();
-    let sheet = null;
+    const sheetFaces = new Map();
+    const changedFaces = BL.oogaChatPortraits.onChange(() => {
+      sheetFaces.clear();
+      if (!frame) frame = requestAnimationFrame(render);
+    });
+    listeners.signal.addEventListener("abort", changedFaces, { once: true });
     const sheetFace = (handle) => {
       if (!handle) return "";
       const key = handle.toLowerCase();
       if (sheetFaces.has(key)) return sheetFaces.get(key);
-      if (!sheet) {
-        sheet = new Image();
-        sheet.addEventListener("load", () => { if (!frame) frame = requestAnimationFrame(render); }, { once: true, signal: listeners.signal });
-        sheet.src = "art/ooga-faces.png";
-      }
-      if (!sheet.complete || !sheet.naturalWidth) return "";
-      const i = faces.cells[key] ?? faces.fallback, size = faces.size, canvas = document.createElement("canvas");
-      canvas.width = canvas.height = size;
-      canvas.getContext("2d").drawImage(sheet, (i % faces.columns) * size, Math.floor(i / faces.columns) * size, size, size, 0, 0, size, size);
+      const canvas = BL.oogaChatPortraits.canvas(key);
+      if (!canvas) return "";
       const url = canvas.toDataURL("image/png");
-      sheetFaces.set(key, url);
-      return url;
+      sheetFaces.set(key, url); return url;
     };
     const describe = (p, t) => {
       // A speaker's mark lights while this page hears them speak, as Online Oogas does on the island: the visitor's own
@@ -444,7 +460,8 @@
   // The account row the island keeps at the foot of Contributing Oogas, Online Oogas and The Commons (hud.js
   // `showAccount`): while signed out, the sign-in screen's own Continue with GitHub (the design's sign-in button, in
   // place of the island's Contributor sign-in), else the name (a green dot while The Commons is live, with how many are
-  // on the island), Join voice (Mute or Unmute once speaking), Leave voice and Sign out.
+  // on the island), and as the cloud tab's footer: the microphone, shown and off until speaking, Join voice (Leave voice
+  // once speaking) and Sign out.
   const accountRow = ({ actions, media, commons: { model } }) => {
     const listeners = new AbortController(), { signal } = listeners;
     const login = button("oc-provider oc-account-signin", PROVIDERS.github[0]);
@@ -452,17 +469,20 @@
     login.title = "Contributors can sign in with GitHub to speak from a cloud.";
     login.addEventListener("click", () => actions.signIn("github"), { signal });
     const name = make("span", "account-name"), room = make("span", "account-room");
-    const voice = button("foot-button", "Join voice"), leave = button("foot-button", "Leave voice"), out = button("link", "Sign out");
+    const mute = button("foot-button account-mute", "Unmute"), voice = button("foot-button account-voice", "Join voice"), out = button("link", "Sign out");
     const voiceWhy = explain(voice);
-    voice.setAttribute("aria-pressed", "false");
+    mute.setAttribute("aria-pressed", "false");
+    mute.addEventListener("click", (event) => {
+      if (event.detail) mute.blur();
+      actions.mute();
+    }, { signal });
     voice.addEventListener("click", (event) => {
       if (event.detail) voice.blur();
-      if (last?.voice.role === "speaker") actions.mute();
+      if (last?.voice.role === "speaker") actions.leaveVoice();
       else actions.joinVoice();
     }, { signal });
-    leave.addEventListener("click", () => actions.leaveVoice(), { signal });
     out.addEventListener("click", () => actions.signOut(), { signal });
-    const node = make("div", "account", login, make("span", "account-who", name, room), make("span", "account-actions", voice, leave, out), voiceWhy);
+    const node = make("div", "account", login, make("span", "account-who", name, room), make("span", "account-actions", mute, voice, out), voiceWhy);
     let last = null;
     const update = (state) => {
       last = state;
@@ -481,21 +501,23 @@
       set(room, "hidden", !here);
       if (node.dataset.live !== String(here)) node.dataset.live = String(here);
       if (!who) {
+        set(mute, "hidden", true);
         set(voice, "hidden", true);
-        set(leave, "hidden", true);
         return;
       }
       set(name, "textContent", who.identity.display);
       const speaker = state.voice.role === "speaker", allowed = gates(state, Date.now()), join = joining(state, allowed, media);
+      set(mute, "hidden", false);
+      set(mute, "disabled", !speaker || !!state.busy || state.voice.busy);
+      set(mute, "textContent", speaker && !state.voice.muted ? "Mute" : "Unmute");
+      attr(mute, "aria-pressed", String(speaker && state.voice.muted));
+      micLook(mute, !mute.disabled && speaker, state.voice.muted);
       set(voice, "hidden", false);
-      set(voice, "textContent", speaker ? state.voice.muted ? "Unmute" : "Mute" : join.words || "Join voice");
+      set(voice, "textContent", speaker ? "Leave voice" : join.words || "Join voice");
       set(voice, "disabled", speaker ? !!state.busy : join.disabled);
-      attr(voice, "aria-pressed", String(speaker && !state.voice.muted));
-      micLook(voice, !voice.disabled && speaker, state.voice.muted);
       const why = speaker ? "" : join.why;
       set(voiceWhy, "textContent", why);
       set(voice, "title", why);
-      set(leave, "hidden", !speaker);
     };
     const off = model.subscribe((kind) => { if (last && (kind === "players" || kind === "welcome")) update(last); });
     const dispose = () => {
@@ -594,11 +616,11 @@
     const reactions = make("div", "reactions");
     node.append(note, make("div", "panel-foot", reactions, account.node));
     ctx.reactions.bars.mount(reactions, { handAllowed: () => ctx.media.state.role === "speaker" });
-    const { stateAt, ageAt } = BL.rosterPanel, faces = BL.oogaChatFaces, town = ctx.commons.model;
+    const { stateAt, ageAt } = BL.rosterPanel, town = ctx.commons.model;
     // Who speaks from Ooga Chat now, by login, from the audience's list: their dots are Ooga Chat's purple.
     let speakers = new Set(), heard = -1, audience = [], me = "", voice = null;
     const people = new Map(), voices = new Map();
-    let panel = null, names = "", reading = null, fetchedAt = 0, loading = false, timer = 0, sheet = null;
+    let panel = null, names = "", reading = null, fetchedAt = 0, loading = false, timer = 0;
     const paintVoices = () => {
       if (!panel) return;
       for (const row of panel.rows.values()) {
@@ -612,18 +634,8 @@
       for (const p of audience) if (p.role === "speaker" && p.id.startsWith("gh:")) voices.set(p.login.toLowerCase(), p);
       paintVoices();
     };
-    const face = (contributor) => {
-      if (!sheet) {
-        sheet = new Image();
-        sheet.addEventListener("load", () => panel?.faceChanged(), { once: true });
-        sheet.src = "art/ooga-faces.png";
-      }
-      if (!sheet.complete || !sheet.naturalWidth) return null;
-      const i = faces.cells[contributor.name.toLowerCase()] ?? faces.fallback, size = faces.size, canvas = document.createElement("canvas");
-      canvas.width = canvas.height = size;
-      canvas.getContext("2d").drawImage(sheet, (i % faces.columns) * size, Math.floor(i / faces.columns) * size, size, size, 0, 0, size, size);
-      return canvas;
-    };
+    const stopPortraits = BL.oogaChatPortraits.onChange(() => panel?.faceChanged(true));
+    const face = (contributor) => BL.oogaChatPortraits.canvas(contributor.name);
     const stampOf = (c) => c.lastContributionAt || c.lastCommitAt;
     const online = (row) => {
       if (speakers.has(row.contributor.login)) return "cloud";
@@ -714,6 +726,7 @@
     const dispose = () => {
       clearInterval(timer);
       off();
+      stopPortraits();
       panel?.dispose();
       account.dispose();
       node.remove();

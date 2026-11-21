@@ -31,6 +31,8 @@ Each kind and venue is one Durable Object, `GAMES.idFromName("<kind>:<venue>:v<v
 The ghost hunt is kind `ghost-hunt` at the venue `arena`: one arena, one hunt at a time, as the arcade has. More arenas
 or private hunts would be more venues, or match tickets a matchmaker signs; neither exists yet.
 
+The island's world is kind `island` at the venue `main` (`docs/island-world.md`). Every signed-in page on the island can follow it, it runs while one does, and it keeps no record: its `save` gives null, and the host writes nothing for a kind that has nothing stored.
+
 A kind, in `games.js`:
 
 | Member | What it is |
@@ -41,7 +43,7 @@ A kind, in `games.js`:
 | `limits` | `sockets` an instance takes, `chars` a message may be |
 | `buckets`, `bucketOf(t)` | each message type's token bucket (`rate` a second, `burst`) |
 | `parse(message)` | a page's message as the kind reads it: false closes the socket, null ignores the message |
-| `create(now)` | one instance's game: `join`, `leave`, `message` (true when the state should go out now), `step(now)` (true on a change), `running`, `state`, `motion(frame, now)`, `save` (null once it has run down), `restore(data, now)` |
+| `create(now, env)` | one instance's game (`env`, the Worker's bindings, for a kind that reads a feed): `join`, `leave`, `message` (true when the state should go out now), `step(now)` (true on a change), `running`, `state`, `motion(frame, now)`, `save` (null once it has run down), `restore(data, now)` |
 
 ## The route
 

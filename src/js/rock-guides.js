@@ -21,11 +21,13 @@
   const BUILDS = new WeakMap(), round = (n) => Math.round(n / EPS);
   // STATION_ORDERS: room, ramp and common walls in station order, keyed by the shared sample order.
   const STATION_ORDERS = new WeakMap();
-  // A generator so a released hub's return can build it in slices behind the fade (`prepareSteps`); `build` drains it.
+  // A generator so a released hub's return can build it in slices behind the fade (`prepareSteps`), and the hub's boot
+  // after its first paint (`createSteps`); `create` drains it.
   const buildSteps = function* (island, slice = null) {
     const H = island.headquarters, contexts = [], windowOwners = new Map();
-    const slopes = BL.slopeGuides.create({ island }), slopeSample = { side: 0, sector: 0 };
+    const slopes = yield* BL.slopeGuides.createSteps({ island }, slice), slopeSample = { side: 0, sector: 0 };
     const probe = { distance: Infinity, floor: 0, side: 0, station: 0 };
+    yield* pause(slice);
     // Ramp routes are immutable: keep each segment's exact measures instead of rebuilding per point query.
     // Floor clipping revisits these grid vertices many times; block bounds only reject strictly farther spans.
     const rampSegments = new Map(), rampBlocks = new Map();
@@ -139,6 +141,7 @@
     for (let i = 0; i < H.basement.ramps.length; i++) add("ramp", H.basement.ramps[i], true, i);
     add("common", { ...H.room, floor: H.floor, ceiling: H.ceiling }, false, -1);
     add("common", { ...H.basement.room, floor: H.basement.floor, ceiling: H.basement.ceiling }, true, -1);
+    yield* pause(slice);
     const outdoorContexts = [], outdoorMap = new Map();
     for (const window of H.windows) {
       let owner = null, distance = Infinity;
@@ -749,14 +752,17 @@
     context.apertures = context.windows.length ? BL.wallApertures.create({ windows: context.windows, island }) : null;
     return context;
   };
-  const build = (island) => { const steps = buildSteps(island); let step; do { step = steps.next(); } while (!step.done); return step.value; };
-  const create = ({ island, sealed = [] }) => {
+  const drain = (steps) => { let step; do { step = steps.next(); } while (!step.done); return step.value; };
+  // A generator so the hub can build its cue in slices after its first paint (`createSteps`); `create` drains it.
+  const createSteps = function* ({ island, sealed = [] }, slice = null) {
     let built = BUILDS.get(island);
-    if (!built) BUILDS.set(island, built = build(island));
+    if (!built) BUILDS.set(island, built = yield* buildSteps(island, slice));
+    yield* pause(slice);
     const { rampAt, probe, splitFace, appendOutdoor, finish } = built;
     const contexts = built.contexts.map((template) => arm({ ...template, walls: template.walls.map((wall) => ({ ...wall })) }, island));
     let total = built.total;
     const caves = BL.caveGuides.create({ island, sealed });
+    yield* pause(slice);
     for (const descriptor of caves.contexts) {
       const context = { kind: descriptor.kind, index: descriptor.index, basement: false, source: descriptor.source, floor: descriptor.floor, ceiling: descriptor.ceiling, height: descriptor.ceiling - descriptor.floor,
         windows: [], groups: new Map(), surfaceFaces: [], surfaceGroupMap: new Map(), surfaceGroups: [], surfaceGroupSums: [], surfaceColumns: [], surfaceColumnMap: new Map(), surfaceWallGroups: [], surfaceSamples: [], walls: [], wallMap: new Map(),
@@ -773,8 +779,10 @@
       contexts.push(context);
       total += finish(context);
       arm(context, island);
+      yield* pause(slice);
     }
     contexts.push(BL.holeGuides.create({ island }));
+    yield* pause(slice);
     for (const context of contexts) {
       context.surfaceVoxelWitness = new Int32Array(context.surfaceGroupCount).fill(-1);
       context.surfacePerception = -1;
@@ -1087,9 +1095,10 @@
     const dispose = () => { for (const context of contexts) context.surfaceVoxelWitness = null; stats.surfaceWitnessBytes = 0; contexts.length = 0; all.count = stats.contexts = stats.surfaceContexts = stats.frontageContexts = stats.caveContexts = stats.lines = stats.uniqueLines = stats.surfaces = stats.surfacePatches = stats.windowReveals = 0; };
     return { select, updateSurface, updateSurfaces, resetSurface, dispose, stats, contexts, all };
   };
+  const create = (options) => drain(createSteps(options));
   // The shared wall build alone, ahead of `create`: a released hub's return builds it in slices behind the fade.
   const prepareSteps = function* (island, slice) {
     if (!BUILDS.has(island)) BUILDS.set(island, yield* buildSteps(island, slice));
   };
-  BL.rockGuides = { create, prepareSteps };
+  BL.rockGuides = { create, createSteps, prepareSteps, built: (island) => BUILDS.has(island) };
 })();

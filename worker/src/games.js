@@ -8,11 +8,11 @@
 // names it: off, /api/me does not offer it and its route answers 404, so every page plays it on its own as before.
 import { ghostHunt } from "./games/ghost-hunt.js"; // HALLOWEEN
 import { hangar } from "./games/hangar.js";
+import { island } from "./games/island.js";
 
-export const GAME_KINDS = new Map([
-  [ghostHunt.id, ghostHunt], // HALLOWEEN
-  [hangar.id, hangar]
-]);
+export const GAME_KINDS = new Map([[island.id, island]]);
+GAME_KINDS.set(ghostHunt.id, ghostHunt); // HALLOWEEN
+GAME_KINDS.set(hangar.id, hangar);
 
 const switchedOn = (env) => new Set(String((env && env.GAME_FEATURES) || "").split(",").map((s) => s.trim()).filter(Boolean));
 const on = (k, names) => !k.optional || names.has(k.id);

@@ -538,9 +538,15 @@
     const alike = (a, b) => a.faces.length === b.faces.length && a.faces.every((f, i) => { const c = b.faces[i].color; return f.color[0] === c[0] && f.color[1] === c[1] && f.color[2] === c[2]; });
     const pair = (make, sided = false) => { const right = scaled(make(0), u), left = paint || sided ? scaled(make(1), u) : right; return [right, !sided && alike(right, left) ? right : left]; };
     const [armR, armL] = pair(arm), [forearmR, forearmL] = pair(forearm), [legR, legL] = pair(leg, !o.boot), hands = o.hands || [skin, skin];
-    const handR = scaled(hand(-1, hands[0], hs, wristOf), u);
+    const handR = scaled(hand(-1, hands[0], hs, wristOf), u), handL = scaled(hand(1, hands[1], hs, wristOf), u);
+    // Each hand's twin with its first finger out straight (`hand`'s `point`), made only when something first asks for
+    // it (the Block Party's disco point) and kept with the hand from then on.
+    for (const [g, side, tone] of [[handR, -1, hands[0]], [handL, 1, hands[1]]]) {
+      let made = null;
+      g.pointing = () => made || (made = scaled(hand(side, tone, hs, wristOf, true), u), made.characterPart = true, made);
+    }
     return { torso: scaled(torso, u), arm: armR, armL, forearm: forearmR, forearmL, leg: legR, legL,
-      handR, handL: scaled(hand(1, hands[1], hs, wristOf), u), armX: B.armX * u, armDrop: (B.armDrop || 0) * u, armScale: armK,
+      handR, handL, armX: B.armX * u, armDrop: (B.armDrop || 0) * u, armScale: armK,
       // The fist's measures from its middle: to the face of its palm and to the end of its thumb's side, and the end
       // of the thumb lying across the fingers on the palm's side, seen from the hand's side.
       fist: { palm: 1.1 * B.handScale * u, span: 2.17 * B.handScale * u, tip: thumbEnd(handR, 1.12 * hs * u) },

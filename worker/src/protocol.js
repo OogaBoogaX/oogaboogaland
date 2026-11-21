@@ -13,9 +13,15 @@ import { audienceRoom, overhearing } from "./room-audience.js";
 export { audienceRoom, overhearing };
 import { commonsRoom } from "./room-commons.js";
 export { commonsRoom };
+export { roomCatalog } from "./room-catalog.js";
+export { equipmentRoom } from "./equipment-room.js";
 // The Durable Object inspector's reporter (inspect-report.js), here so the room and game host take it with the rest.
 export { inspectReporter, INSPECT_FEATURE } from "./inspect-report.js";
+// The World Map's reporter (world-report.js), likewise.
+export { worldReporter } from "./world-report.js";
 import { BACK_WHY } from "./inspect-report.js";
+// The voice cleanup queue's rules (sfu.js), here so the room takes them with the rest.
+export { sessionGone, cleanupPass } from "./sfu.js";
 import "../../src/js/block-wire.js";
 export const BLOCK = globalThis.BL.blockWire;
 import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy.js";
@@ -158,6 +164,10 @@ export const MESSAGE_MAX = 256;
 // room, so it runs once a minute; three missed 10 s pings make a socket stale.
 export const STALE_MS = 90000;
 export const SWEEP_MS = 60000;
+// With only Ooga Chat's Commons members connected (no island players), whose sweep checks only a dead socket, a ban and
+// the hourly re-authentication, it runs every four minutes: one idle chat tab no longer wakes the room every minute.
+// Kept under the Inspector's STALE_MS and RECENT_MS (five minutes), since the room's report rides its sweep.
+export const MEMBER_SWEEP_MS = 240000;
 // Voice cleanup the SFU keeps refusing is given up after an hour, so a room nobody is in stops waking for it.
 export const CLEANUP_MS = 3600000;
 // Generous bounds around the hub: jetpack flight reaches about 140 out and 72 up, falls end at -120.
@@ -178,6 +188,12 @@ export const BLEND_HZ = 8;
 // whose handling threw, which ends that socket alone and leaves the page free to reconnect.
 export const CLOSE_KICK = 4000;
 export const CLOSE_ERROR = 1011;
+// A page that closes its own socket to come straight back (net.js: a heartbeat or a network change) says so with 4001.
+// That, or a socket lost without a close frame (1006: a network blip, an edge restart), holds the player's record
+// HOLD_MS, standing and heard as they were, for the same page to take back with the `resume` key its welcome gave, so
+// nobody else sees them leave and come back. A clean close (1000, 1001) is a leave, at once.
+export const CLOSE_RECONNECT = 4001;
+export const HOLD_MS = 10000;
 // NPC frames: the host sends about 4 a second, only while a page follows; a frame of every Ooga's pose is a few kilobytes.
 // Up to 128 bundled Oogas (112 floats each), plus the bounded event tail.
 // The former 16 KiB cap could not carry the org-wide roster after reconciliation.
@@ -260,6 +276,11 @@ export const ROOM_PIN = /^[0-9]{4}$/;
 export const PIN_PASS_MS = 60000;
 export const PIN_TRIES = 5;
 export const PIN_WAIT_MS = 60000;
+// An Ooga's dance number (the Block Party's, src/js/timechain-party-dance.js: 0 standing still, 1 to 9 a move each),
+// 0 to DANCE_MAX, on its pose as `d` from pages the welcome's DANCE_FEATURE tells to send it; relayed as `ds`, drawing
+// only.
+export const DANCE_FEATURE = "dance-v1";
+export const DANCE_MAX = 9;
 // A driven Ooga's own shots and strikes, relayed for drawing only (nothing is hit and nothing is kept): a burst is
 // three bananas 0.09 s apart, every 0.44 s at most, and a shot never flies past SHOT_RANGE.
 export const SHOT_HZ = 12;
@@ -393,13 +414,20 @@ export const parseClientMessage = (text) => {
       if (!validRest(msg.r)) return null;
       pose.r = msg.r;
     }
+    if (msg.d !== undefined) {
+      if (!Number.isInteger(msg.d) || msg.d < 0 || msg.d > DANCE_MAX) return null;
+      pose.d = msg.d;
+    }
     return pose;
   }
   if (msg.t === "body") {
     if (msg.name === null) return { t: "body", name: null };
     return typeof msg.name === "string" && BODY_NAME.test(msg.name) ? { t: "body", name: msg.name } : null;
   }
-  if (msg.t === "hub") return typeof msg.on === "boolean" ? (msg.props === true ? { t: "hub", on: msg.on, props: true } : { t: "hub", on: msg.on }) : null;
+  if (msg.t === "hub") {
+    if (typeof msg.on !== "boolean" || msg.roster !== undefined && (typeof msg.roster !== "string" || !/^[a-f0-9]{64}$/.test(msg.roster))) return null;
+    return { t: "hub", on: msg.on, ...(msg.props === true ? { props: true } : {}), ...(msg.roster !== undefined ? { roster: msg.roster } : {}) };
+  }
   if (msg.t === "prop") return PROP_KINDS.has(msg.k) && Array.isArray(msg.a) && msg.a.length === 6 && msg.a.every((n) => typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= PROP_RANGE) ? { t: "prop", k: msg.k, a: msg.a } : null;
   if (msg.t === "visible") return typeof msg.on === "boolean" ? { t: "visible", on: msg.on } : null;
   if (msg.t === "mute") return typeof msg.on === "boolean" ? { t: "mute", on: msg.on } : null;

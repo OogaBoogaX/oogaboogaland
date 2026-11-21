@@ -85,10 +85,20 @@ export class Inspector extends DurableObject {
     // Ask every object heard from lately for its detail now, rather than at its next report.
     for (const row of this.rows.values()) {
       if (now - row.lastSeen > RECENT_MS) continue;
-      const stub = row.cls === "Room" ? this.env.ROOM.getByName(row.name) : row.cls === "GameHost" ? this.env.GAMES.getByName(row.name) : null;
+      const stub = row.cls === "Room" ? this.env.ROOM.getByName(row.name) : row.cls === "GameHost" ? this.env.GAMES.getByName(row.name)
+        : row.cls === "Audience" && this.env.AUDIENCE ? this.env.AUDIENCE.getByName(row.name) : null;
       if (stub) this.ctx.waitUntil(stub.inspectWatch(now + WATCH_MS).catch(() => {}));
     }
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  // The World Map's object list for an Inspector account (/api/world, world.js): each object's class, name, status,
+  // sockets and cap from its last report, its messages in and out a second, and when that was. Never its rows.
+  objects() {
+    const count = (v) => Number.isSafeInteger(v) ? v : null, rate = (v) => Number.isFinite(v) ? v : 0;
+    return [...this.rows.values()].map((row) => ({ cls: row.cls, name: row.name, status: row.status, lastSeen: row.lastSeen,
+      sockets: count(row.state && row.state.sockets), maxSockets: count(row.state && (row.state.maxSockets ?? row.state.maxPlayers)),
+      rates: { in: rate(row.rates && row.rates.in), out: rate(row.rates && row.rates.out) } }));
   }
 
   // Viewers only listen; their pings are answered without waking this.

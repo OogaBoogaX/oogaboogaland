@@ -47,6 +47,7 @@
 
   const create = () => {
     let ctx = null, master = null, buffer = null, ready = false, muted = BL.sound.muted, disposed = false;
+    const soundChannel = BL.sound.channel("bifrost");
     const tones = [], noises = [], bed = {}, sig = [];
     let toneNext = 0, noiseNext = 0, since = 0, nextBeat = 0, chimeIn = 4, sweepIn = 7, shimmerIn = 5, gaze = 0;
     let charge = 0, world = undefined, sweepSide = 1;
@@ -96,7 +97,7 @@
 
     const init = () => {
       ctx = new AudioContext();
-      master = gain(muted ? 0 : MASTER, ctx.destination);
+      master = gain(muted ? 0 : MASTER, soundChannel.node(ctx));
       buffer = ctx.createBuffer(1, ctx.sampleRate * NOISE_SECONDS, ctx.sampleRate);
       const data = buffer.getChannelData(0);
       for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
@@ -398,7 +399,7 @@
     const offSound = BL.sound.subscribe(setMuted);
 
     const dispose = () => {
-      offSound();
+      offSound(); soundChannel.release();
       disposed = true;
       window.removeEventListener("pointerdown", activate, true);
       window.removeEventListener("keydown", activate, true);

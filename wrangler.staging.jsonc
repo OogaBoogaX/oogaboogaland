@@ -16,10 +16,15 @@
     "html_handling": "drop-trailing-slash",
     "not_found_handling": "404-page",
     // Only these paths run the Worker (worker/src/index.js); every other path is served straight from _site.
-    "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/game/*", "/donations/*", "/inspect"]
+    "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/game/*", "/donations/*", "/inspect", "/media/lectures/*"]
   },
   "vars": {
     "ENVIRONMENT": "staging",
+    // Account hats are enabled explicitly for staging acceptance; production remains off.
+    "EQUIPMENT_ENABLED": "1",
+    // Independent character catalogs stay off until the runtime and publisher acceptance checks pass.
+    // Enabling also requires CHARACTER_CATALOGS, CHARACTER_CATALOG_ENGINE and CHARACTER_CATALOG_BASELINE.
+    "CHARACTER_CATALOG_ENABLED": "0",
     // Ooga Chat's private bridge (worker/src/chat-bridge.js), comma-separated: bridge (every operation but hello),
     // outdoor (island voices heard by Ooga Chat's audience), cloud (Ooga Chat speakers on clouds), commons (The Commons
     // from Ooga Chat, read; commons-send lets its members send too). Empty: the bridge answers hello alone. Deploying with
@@ -55,7 +60,12 @@
   },
   // Private staging replay storage; public reads are served through the Worker.
   // See docs/cloud-hopper-replays.md for validation and bounded retention.
-  "r2_buckets": [{ "binding": "CLOUD_HOPPER_REPLAYS", "bucket_name": "oogaboogaland-staging-replays" }],
+  // Lecture recordings, private, served at /media/lectures/* through the Worker (worker/src/lecture-audio.js) and
+  // uploaded by hand before a deploy that names them (`npm --prefix worker run lectures:staging`, docs/lectures.md).
+  "r2_buckets": [
+    { "binding": "CLOUD_HOPPER_REPLAYS", "bucket_name": "oogaboogaland-staging-replays" },
+    { "binding": "LECTURE_AUDIO", "bucket_name": "oogaboogaland-staging-lectures" }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
@@ -73,7 +83,7 @@
     { "binding": "OOGATRON", "service": "oogatron" }
   ],
   "durable_objects": {
-    "bindings": [{ "name": "ROOM", "class_name": "Room" }, { "name": "GAMES", "class_name": "GameHost" }, { "name": "INSPECTOR", "class_name": "Inspector" }, { "name": "AUDIENCE", "class_name": "Audience" }],
+    "bindings": [{ "name": "ROOM", "class_name": "Room" }, { "name": "GAMES", "class_name": "GameHost" }, { "name": "INSPECTOR", "class_name": "Inspector" }, { "name": "AUDIENCE", "class_name": "Audience" }, { "name": "WORLD", "class_name": "WorldWatch" }],
     // Every active object takes new code the moment a deploy lands, dropping its sockets (pages reconnect on their own),
     // rather than Cloudflare's default of running old code for up to 5 minutes while it waits to hibernate: a fix reaches
     // the room at once, and no Worker on new code talks to a Room, GameHost, Inspector or Audience still on the old.
@@ -81,9 +91,12 @@
   },
   // v2: one GameHost a hosted game's instance (worker/src/games.js names them), apart from the island's Room.
   // v4: Ooga Chat's Audience (worker/src/audience.js), one named `audience`, reached only through ChatBridge and the Room.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }, { "tag": "v2", "new_sqlite_classes": ["GameHost"] }, { "tag": "v3", "new_sqlite_classes": ["Inspector"] }, { "tag": "v4", "new_sqlite_classes": ["Audience"] }],
+  // v5: the World Map's WorldWatch (worker/src/world-watch.js), one named `world`, which map pages listen to.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }, { "tag": "v2", "new_sqlite_classes": ["GameHost"] }, { "tag": "v3", "new_sqlite_classes": ["Inspector"] }, { "tag": "v4", "new_sqlite_classes": ["Audience"] }, { "tag": "v5", "new_sqlite_classes": ["WorldWatch"] }],
   // Namespaces are per account: staging counts in 2001-2008, production in 1001-1008.
   "ratelimits": [
+    // Equipment reads and saves per signed-in account, counted on separate method keys.
+    { "name": "EQUIPMENT_LIMITER", "namespace_id": "2017", "simple": { "limit": 30, "period": 60 } },
     // Opt-in dropout reports per signed-in account, with additional D1 retention and volume caps.
     { "name": "CONNECTION_REPORT_LIMITER", "namespace_id": "2008", "simple": { "limit": 6, "period": 60 } },
     // Poker API and worker delivery per signed-in account.
@@ -103,7 +116,10 @@
     // Hosted games' socket connections per player: a page's reconnect backoff stays far under it.
     { "name": "GAME_LIMITER", "namespace_id": "2007", "simple": { "limit": 20, "period": 60 } },
     // GitHub profile pictures served from this origin (worker/src/avatar.js), per IP, counted only on an edge miss.
-    { "name": "AVATAR_LIMITER", "namespace_id": "2015", "simple": { "limit": 240, "period": 60 } }
+    { "name": "AVATAR_LIMITER", "namespace_id": "2015", "simple": { "limit": 240, "period": 60 } },
+    // The World Map's live layer (worker/src/world.js), per IP: a page asks every 2 s while it shows, so a few tabs
+    // behind one address fit.
+    { "name": "WORLD_LIMITER", "namespace_id": "2016", "simple": { "limit": 120, "period": 60 } }
   ],
   // Daily: purge expired sessions and Tess's questions not asked for 90 days.
   "triggers": { "crons": ["0 4 * * *"] }

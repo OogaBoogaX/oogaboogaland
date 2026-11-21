@@ -24,7 +24,7 @@
 // painted with the plaza's bed, the paths' grout and the ground, its `collisionGeometry` a closed turned shell whose top
 // is the island's top and the lip's, the lip's stonework (`lip`), the paths' cobbles, kerbs and the plaza's cobbles
 // (`pavement`), and the crystals hanging under every totem in place of a rock keel (`crystals`)), `bridge()` (stone in
-// island coordinates: a flagged deck whose end follows the lip's round edge, a stepped arch under it, parapets and pillars, and four lanterns
+// island coordinates: a flagged deck whose end follows the lip's round edge, a stepped arch under it, solid parapets and pillars of one height (`walls`: where they stand), and a lantern on each pillar
 // whose glass is `glass`, with their glow points in `lamps`), `signs()` (every section's sign laid flat in the lip, never
 // solid), and `chunkSteps(k, tier)`: a chunk's carvings merged at one of three details (`near`, `far`
 // for across the island, `distant` for across the water) as `mesh`, the carvings walk-through; the distant
@@ -42,10 +42,13 @@
 
   // The island: its radius to the lip's outer edge and its top, a half-metre lattice `soil` deep. The lip: its width, how far its top stands over the island's (a kerb's step), how far
   // its wall goes down, and its flags round. The bridge: its span from the rim to the lip, its width, the deck slab's
-  // depth, the parapets' height and thickness, pillars `pillar` square and `pillarH` high every `pillarStep` metres.
+  // depth, the parapets' height and thickness, pillars `pillar` square and `pillarH` high every `pillarStep` metres, and
+  // the threshold, the first `sill` metres of flags, which lie on the main island's terrace `proud` of it. The
+  // parapets run from `head` metres in, their first pillars standing on the terrace's edge clear of the Oogatron's
+  // posts, to `clear` off the lip's round edge, so neither end leaves a way off the deck's side.
   const ISLE = { R: 15.75, unit: 0.5, soil: 1.5 };
   const LIP = { width: 1.4, rise: 0.08, drop: 1.5, flags: 72, trim: 0.22 };
-  const BRIDGE = { span: 16, width: 4.6, slab: 0.6, parapet: 0.82, wall: 0.4, pillar: 0.66, pillarH: 1.3, pillarStep: 4 };
+  const BRIDGE = { span: 16, width: 4.6, slab: 0.6, parapet: 0.82, wall: 0.4, pillar: 0.66, pillarH: 1.3, pillarStep: 4, sill: 1.6, proud: 0.025, head: 1.1, clear: 0.1 };
   // The plan's radii: the plaza, the Core ring the rest of Core's section stands on, the ring path, the spokes' half
   // width, the least gap between two totems' reaches, the edge of the top, where the lip begins, and the middle of the
   // lip's flags, where the section plaques lie.
@@ -592,13 +595,16 @@
     // (`to`) and, a flag at a time, on toward it where the edge curves away, so no gap shows beside the turning lip.
     const end = ISLE.R + 0.06, from = -(ISLE.R + BRIDGE.span) - 0.6, to = -end, W = BRIDGE.width, rand = mulberry32(0x6b1d);
     const edgeAt = (x) => -Math.sqrt(end * end - x * x);
-    // The deck's flags, a row every 0.8 m, three across and staggered, flush at y 0 over the slab.
+    // The deck's flags, a row every 0.8 m, three across and staggered, flush at y 0 over the slab. The rows of the
+    // threshold lie on the terrace, whose top is at y 0 too: they stand a little proud of it, so no two faces share
+    // a plane there.
+    const sill = from + BRIDGE.sill;
     for (let z = from, row = 0; z < edgeAt(W / 2); z += 0.8, row++) {
-      const cuts = row % 2 ? [-W / 2, -W / 6, W / 6, W / 2] : [-W / 2, -0.4, 0.9, W / 2];
+      const cuts = row % 2 ? [-W / 2, -W / 6, W / 6, W / 2] : [-W / 2, -0.4, 0.9, W / 2], lift = z + 0.4 < sill ? BRIDGE.proud : 0;
       for (let k = 0; k < 3; k++) {
         const near = cuts[k] < 0 && cuts[k + 1] > 0 ? 0 : Math.min(Math.abs(cuts[k]), Math.abs(cuts[k + 1]));
         const depth = Math.min(0.8, edgeAt(near) - z);
-        if (depth > 0.05) parts.push(box({ w: cuts[k + 1] - cuts[k] - 0.03, h: 0.06, d: depth - 0.03, color: STONES[Math.floor(rand() * STONES.length)], offset: { x: (cuts[k] + cuts[k + 1]) / 2, y: -0.03, z: z + depth / 2 } }));
+        if (depth > 0.05) parts.push(box({ w: cuts[k + 1] - cuts[k] - 0.03, h: 0.06 + lift, d: depth - 0.03, color: STONES[Math.floor(rand() * STONES.length)], offset: { x: (cuts[k] + cuts[k + 1]) / 2, y: -0.03 + lift / 2, z: z + depth / 2 } }));
       }
     }
     // The slab and its stepped arch: deep where it meets each island, thin across the middle.
@@ -608,28 +614,36 @@
       parts.push(box({ w: W, h: drop, d: depth, color: k % 2 ? "#6b625a" : "#746b62", offset: { y: -0.06 - drop / 2, z: z + depth / 2 } }));
       parts.push(box({ w: W - 0.6, h: 0.18, d: depth, color: "#5d5650", offset: { y: -0.06 - drop - 0.09, z: z + depth / 2 } }));
     }
-    // Parapets with copings, from past the rim to short of the island's edge, and pillars along them.
-    const p0 = from + 1.6, p1 = to - 1.4, x = W / 2 - BRIDGE.wall / 2;
+    // Parapets with copings, from the terrace's edge to the lip's, and pillars of one height along them, a lantern on
+    // each: the first pillars stand on the terrace and the last end where their inner corners come `clear` of the
+    // turning lip. Both are solid: closed boxes to walk against, land on and walk off. A wall's box runs from its
+    // coping's outer edge in to the pillars' inner faces, end pillar to end pillar, so a walker slides along one
+    // straight face and never catches on a pillar.
+    const x = W / 2 - BRIDGE.wall / 2, h = BRIDGE.pillarH, walls = [];
+    const cap = BRIDGE.pillar + 0.12, inner = x - cap / 2, outer = x + BRIDGE.wall / 2 + 0.05;
+    const p0 = from + BRIDGE.head, p1 = -Math.sqrt((ISLE.R + BRIDGE.clear) ** 2 - inner * inner) - cap / 2;
+    const solid = (w, tall, d, at, z) => box({ w, h: tall, d, color: "#000000", offset: { x: at, y: tall / 2, z } });
     for (const side of [-1, 1]) {
       parts.push(box({ w: BRIDGE.wall, h: BRIDGE.parapet, d: p1 - p0, color: "#7a716a", offset: { x: side * x, y: BRIDGE.parapet / 2, z: (p0 + p1) / 2 } }));
       parts.push(box({ w: BRIDGE.wall + 0.1, h: 0.1, d: p1 - p0 + 0.1, color: "#958d84", offset: { x: side * x, y: BRIDGE.parapet + 0.05, z: (p0 + p1) / 2 } }));
+      walls.push(solid(outer - inner, BRIDGE.parapet + 0.1, p1 - p0 + cap, side * (inner + outer) / 2, (p0 + p1) / 2));
       const pillars = Math.round((p1 - p0) / BRIDGE.pillarStep);
       for (let k = 0; k <= pillars; k++) {
-        const z = p0 + (p1 - p0) * k / pillars, end = k === 0 || k === pillars, h = end ? BRIDGE.pillarH + 0.2 : BRIDGE.pillarH;
+        const z = p0 + (p1 - p0) * k / pillars;
         parts.push(bevelBox({ w: BRIDGE.pillar, h, d: BRIDGE.pillar, color: "#857c74", offset: { x: side * x, y: h / 2, z } }));
-        parts.push(box({ w: BRIDGE.pillar + 0.12, h: 0.12, d: BRIDGE.pillar + 0.12, color: "#958d84", offset: { x: side * x, y: h + 0.06, z } }));
-        if (end) {
-          models.lanternParts(1.1, side * x, h + 0.12, z, frame, glass);
-          lamps.push({ x: side * x, y: h + 0.5, z });
-        }
+        parts.push(box({ w: cap, h: 0.12, d: cap, color: "#958d84", offset: { x: side * x, y: h + 0.06, z } }));
+        walls.push(solid(cap, h + 0.12, cap, side * x, z));
+        models.lanternParts(1.1, side * x, h + 0.12, z, frame, glass);
+        lamps.push({ x: side * x, y: h + 0.5, z });
       }
     }
-    // One uninterrupted walking slab across the full deck. Decorative rails and posts never snag a
-    // walker; the slab reaches beneath the curved lip even at the outermost flagstones.
+    // One uninterrupted walking slab across the full deck, between the walls and past their ends; it reaches beneath
+    // the curved lip even at the outermost flagstones. The threshold's flags are stood on where they lie.
     const deckTo = edgeAt(W / 2) + 0.12;
     const stone = merge(...parts, ...frame);
-    stone.collisionGeometry = box({ w: W, h: BRIDGE.slab, d: deckTo - from, color: "#000000", offset: { y: -BRIDGE.slab / 2, z: (from + deckTo) / 2 } });
-    return { stone, glass: noShadow(merge(...glass)), lamps, from, to, width: W, walk: W / 2 };
+    stone.collisionGeometry = merge(box({ w: W, h: BRIDGE.slab, d: deckTo - from, color: "#000000", offset: { y: -BRIDGE.slab / 2, z: (from + deckTo) / 2 } }),
+      box({ w: W, h: BRIDGE.proud, d: BRIDGE.sill, color: "#000000", offset: { y: BRIDGE.proud / 2, z: from + BRIDGE.sill / 2 } }), ...walls);
+    return { stone, glass: noShadow(merge(...glass)), lamps, from, to, width: W, walk: W / 2, walls: { from: p0 - cap / 2, to: p1 + cap / 2, inner, top: BRIDGE.parapet + 0.1 } };
   });
 
   // ---- the section plaques ----

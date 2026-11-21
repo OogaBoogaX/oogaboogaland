@@ -124,6 +124,7 @@
   const create = (spots) => {
     let ctx = null, master = null, mix = null, muffle = null, buffer = null, ready = false, muted = false, disposed = false, since = 0, volume = 1;
     muted = BL.sound.muted;
+    const soundChannel = BL.sound.channel("hangar");
     try {
       const saved = localStorage.getItem(VOLUME_KEY), v = Number(saved);
       if (saved !== null && v >= 0 && v <= 1) volume = v;
@@ -198,7 +199,7 @@
       // through the limiter.
       const limiter = ctx.createDynamicsCompressor();
       limiter.threshold.value = -10; limiter.knee.value = 6; limiter.ratio.value = 12; limiter.attack.value = 0.003; limiter.release.value = 0.25;
-      limiter.connect(ctx.destination);
+      limiter.connect(soundChannel.node(ctx));
       master = gain(muted ? 0 : MASTER * volume, limiter);
       muffle = filter("lowpass", CLEAR, 0.7, master);
       mix = gain(1, muffle);
@@ -1463,7 +1464,7 @@
     };
 
     const dispose = () => {
-      offSound();
+      offSound(); soundChannel.release();
       disposed = true;
       window.removeEventListener("pointerdown", activate, true);
       window.removeEventListener("keydown", activate, true);

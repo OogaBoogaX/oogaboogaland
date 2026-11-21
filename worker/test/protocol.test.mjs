@@ -1,7 +1,7 @@
 // Pure checks on the room's wire format and limits: no Durable Object, no sockets.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { castIndex, claimRefusal, BOUND_XZ, BOUND_Y_MIN, BOUND_Y_MAX, CHALK, VISUAL_BODY, VISUAL_LIMITS, VISUAL_LOWS, MESSAGE_MAX, MOVE_HZ, parseClientMessage, playerFromHeaders, spawnPoint, takeToken } from "../src/protocol.js";
+import { castIndex, claimRefusal, DANCE_MAX, BOUND_XZ, BOUND_Y_MIN, BOUND_Y_MAX, CHALK, VISUAL_BODY, VISUAL_LIMITS, VISUAL_LOWS, MESSAGE_MAX, MOVE_HZ, parseClientMessage, playerFromHeaders, spawnPoint, takeToken } from "../src/protocol.js";
 
 test("poses inside the bounds are accepted, rounded and their yaw wrapped", () => {
   const m = parseClientMessage(JSON.stringify({ t: "pose", x: 1.23456, y: -7, z: 3, yaw: 7 }));
@@ -18,6 +18,14 @@ test("poses inside the bounds are accepted, rounded and their yaw wrapped", () =
   assert.equal("j" in parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, j: 0 })), false, "no jetpack adds nothing");
   assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, w: 255 })).w, 255, "the gun in hand, aimed, with every round, rides the pose");
   assert.equal("w" in parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, w: 0 })), false, "empty hands add nothing");
+});
+
+test("a dance number rides the pose from 0 to its most, and anything else drops the pose", () => {
+  const pose = (d) => parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0, d }));
+  assert.equal(pose(0).d, 0, "standing still is said too, so it differs from a page that says nothing");
+  assert.equal(pose(DANCE_MAX).d, DANCE_MAX);
+  assert.equal("d" in parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0 })), false, "an older page's pose has none");
+  for (const d of [-1, DANCE_MAX + 1, 2.5, "3", null]) assert.equal(pose(d), null, `level ${JSON.stringify(d)} is refused`);
 });
 
 test("presentation phases are bounded integers and fit the existing pose envelope", () => {
@@ -370,4 +378,14 @@ test("numeric owner retains the same Ooga and gorilla while a reused login canno
       assert.equal(claimRefusal(index, login, body, [], true, 185141343), null);
   for (const body of ["Bitcoin-Bill", "gorilla:Bitcoin-Bill"])
     assert.equal(claimRefusal(index, "Bitcoin-Bill", body, [], true, 99), "not-yours");
+});
+
+
+test("hub roster handshake accepts only a bounded SHA256 digest while preserving legacy messages", () => {
+  const roster = "a".repeat(64);
+  assert.deepEqual(parseClientMessage(JSON.stringify({ t: "hub", on: true, props: true, roster })), { t: "hub", on: true, props: true, roster });
+  assert.deepEqual(parseClientMessage('{"t":"hub","on":true}'), { t: "hub", on: true });
+  for (const roster of [null, false, "A".repeat(64), "a".repeat(63), "a".repeat(65), []]) {
+    assert.equal(parseClientMessage(JSON.stringify({ t: "hub", on: true, roster })), null);
+  }
 });

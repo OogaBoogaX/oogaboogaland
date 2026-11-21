@@ -15,7 +15,8 @@ const SHAPE = { x: 3, z: -4, mirror: 1, slow: 0.2, formed: 2, held: 9, gone: 11,
   catchOn: 0, close: 2, catchShare: 0.2, catchSeed: 9, stirOn: 1, stirReach: 4, stirPeak: 0.3 };
 
 test("the hangar is off unless GAME_FEATURES names it: not offered, and its route names no object", () => {
-  assert.deepEqual(gamesOn({}), ["ghost-hunt"]);
+  assert.equal(gamesOn({}).includes("hangar"), false);
+  assert.equal(gamesOn({ GAME_FEATURES: "hangar" }).includes("hangar"), true);
   assert.equal(gameName("hangar", "hall", {}), "");
   assert.equal(gameName("hangar", "hall", { GAME_FEATURES: "hangar" }), "hangar:hall:v1");
   assert.equal(gameName("hangar", "lobby", { GAME_FEATURES: "hangar" }), "", "only its own venue");

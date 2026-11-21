@@ -262,7 +262,7 @@
         const head = (shut) => BL.models.merge(blocks, H.scaled(face(shut), u));
         return { ...wear(), headOpen: head(false), headClosed: head(true) };
       },
-      headgear(k) {
+      hatNodes(k) {
         addChild(k.parts.head, createNode({ geometry: voxelGeometry(hatVox(), { unit: k.u / 2, palette: HAT_PALETTE, origin: { x: -3.5 * k.u, y: 0, z: -3 * k.u } }) }));
       },
       refine(k, part, v) {

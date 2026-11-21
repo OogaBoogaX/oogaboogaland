@@ -306,6 +306,7 @@
       });
       feeding.open(mode === "demo");
     };
+    BL.oogaChatPortraits?.configure(() => adapter.contributors());
     const ctx = { actions, media, install: () => device.install(), reload: () => device.reload(), storageKey: (name) => storageKey(adapter.kind, name),
       demo: fixture ? adapter.demo : null, feed: feedOogas, commons: { model: town, send: (data) => !!member && member.send(data),
         // The name field: saved as the island's display name, then the Commons is joined again so the Room's welcome,

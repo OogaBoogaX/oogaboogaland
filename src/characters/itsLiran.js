@@ -51,7 +51,7 @@
       idle: ["Nice weather for bananas.", "Ooga.", "Just strolling through.", "Someone left the pile full again."]
     },
     dress: {
-      crown(k, v) {
+      hat(k, v) {
         const cream = k.color("#ded4b8"), sand = k.color("#c9bb98"), khaki = k.color("#ab9d74");
         const olive = k.color("#8a7f5c"), brown = k.color("#6a5f44"), dark = k.color("#4a4234");
         const tones = [cream, sand, khaki, olive, brown, dark];
@@ -168,7 +168,7 @@
           scale: { x: BOARD_SCALE, y: BOARD_SCALE, z: BOARD_SCALE }
         }));
       },
-      headgear(k) {
+      hatNodes(k) {
         const v = makeVox(), ink = k.color("#4e3520");
         stamp(v, "TAPROOT", (x, r) => v.set(x, 4 - r, 0, ink));
         addChild(k.parts.head, createNode({

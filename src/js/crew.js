@@ -247,21 +247,26 @@
   // the jetpack goes on, grounded or not, it leaps up over `leap` seconds, trots a loop round the crown at `speed`
   // radians a second (turning back each lap) while the jetpack is worn, and hops down over `hop` seconds with `hopUp`
   // lift when it comes off (the maintainer's call on #520: other pages see the same from the shared jetpack state).
-  // The loop is measured once per head geometry (`HAT_SEATS`): `ring` angles round the top of the head and all it
+  // The loop is measured per head and equipment appearance (`HAT_SEATS`): `ring` angles round the top of the head and all it
   // wears, each with the radius and height a pet of its width stands at, the middle of the outermost run of surface
   // within a pet's width of the lowest there (a brim round a crown; on a bare head, its top). Under Calm it sits still.
   const HAT_RIDE = Object.freeze({ ring: 16, steps: 24, leap: 0.5, hop: 0.4, hopUp: 2.5, speed: 1.4, bob: 0.04 });
-  const HAT_SEATS = new WeakMap();
+  const HAT_SEATS = new WeakMap(), HAT_SEAT_LIMIT = 64;
   // Read live; a context without matchMedia (the suite's bare loaders) is never Calm.
   const CALM = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
   const RIDE_HEAD = math.quat.create(), RIDE_TURN = math.quat.create(), RIDE_SPIN = math.quat.create(), RIDE_MATRIX = math.mat4.create();
-  const hatSeatOf = (head, dog) => {
-    let seat = HAT_SEATS.get(head.geometry);
+  const hatSeatOf = (cave) => {
+    const head = cave.parts.head, dog = cave.parts.dog, equipment = BL.characterEquipment;
+    const selected = equipment?.selection(cave), key = !selected ? "authored" : selected.item === "none" ? "none"
+      : selected.item + ":" + selected.version + ":" + equipment.size(cave);
+    let seats = HAT_SEATS.get(cave.headOpen);
+    if (!seats) HAT_SEATS.set(cave.headOpen, seats = new Map());
+    let seat = seats.get(key);
     if (seat) return seat;
     // Every shown vertex under the head, in the head's own frame; measured once, so plain arrays.
     const points = [];
     const gather = (node, m) => {
-      const verts = node.geometry ? node.geometry.verts : null;
+      const geometry = node === head ? cave.headOpen : node.geometry, verts = geometry ? geometry.verts : null;
       if (verts) for (let i = 0; i < verts.length; i += 3) {
         const x = verts[i], y = verts[i + 1], z = verts[i + 2];
         points.push(m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14]);
@@ -309,7 +314,8 @@
       seat.r[a] = reach * mid / steps;
       seat.y[a] = heights[mid];
     }
-    HAT_SEATS.set(head.geometry, seat);
+    if (seats.size >= HAT_SEAT_LIMIT) seats.delete(seats.keys().next().value);
+    seats.set(key, seat);
     return seat;
   };
   // A pet's ride state for `poseHatRide`: its owner's measured seat, where on the loop it is and which way it trots,
@@ -319,8 +325,11 @@
     return { x: (b.min[0] + b.max[0]) / 2, y: (b.min[1] + b.max[1]) / 2,
       z: b.max[2] + 0.015 - BL.scene.boundsOf(dog.geometry).min[1] * dog.scale.y };
   };
-  const hatRide = (cave) => ({ stomach: stomachSeatOf(cave), kind: 0, yaw: 0, seat: hatSeatOf(cave.parts.head, cave.parts.dog), q: math.quat.create(), angle: Math.PI, dir: 1, run: 0, step: 0,
+  const hatRide = (cave) => ({ stomach: stomachSeatOf(cave), kind: 0, yaw: 0, seat: hatSeatOf(cave), q: math.quat.create(), angle: Math.PI, dir: 1, run: 0, step: 0,
     t: 1, sx: 0, sy: 0, sz: 0, ex: 0, ez: 0, vy: 0, free: false });
+  // Equipment changes are events, not frame work. Keep the pet's loop phase, quaternion and leap state while
+  // measuring the newly visible headwear; clones with the same version and size share the bounded cached seat.
+  const refreshHatRide = (cave) => { if (cave.pet?.ride) cave.pet.ride.seat = hatSeatOf(cave); };
   // Trots the pet `dt` along its loop (not under Calm) and stands `node` there: `m` is the head's matrix in the node's
   // parent frame, so the pet keeps to the hat through every turn and tilt of the head. Writes in place; allocates nothing.
   const poseHatRide = (ride, node, m, dt) => {
@@ -1217,6 +1226,10 @@
   math.quat.fromAxisAngle(SWING_TURN, 0, 1, 0, Math.PI / 2);
   math.quat.fromAxisAngle(SWING_CLUB, 0, 0, 1, Math.PI / 2);
   math.quat.multiply(SWING_CLUB, SWING_TURN, SWING_CLUB);
+  // A blade resting in the fist of a body sitting on the ground turns a quarter about its length, so its flat faces
+  // sideways and its edge forward, as it does in the hand standing or in a chair.
+  const SIT_BLADE = math.quat.create();
+  math.quat.fromAxisAngle(SIT_BLADE, 0, 1, 0, Math.PI / 2);
   // The arm hanging at rest, as the other one hangs, the turn the swing lifts from.
   math.quat.fromEuler(SWING_REST, -0.2, 0, -0.1);
   // The weapon in the right fist, at its middle, square to the forearm bent by `flex`, the hand turned on its forearm
@@ -1626,7 +1639,11 @@
         if (!parts.snack.visible) sitArm(cave, parts.armL, parts.forearmL, cave.reachL, ground);
         sitArm(cave, parts.armR, parts.forearmR, cave.reachR, ground);
         // The right arm mirrors the left, its hand unturned, and the weapon in it stands where that hand holds it.
-        if (parts.club.parent === parts.armR) { restInFist(cave, -parts.forearmR.rotation.x); restingClub = true; }
+        if (parts.club.parent === parts.armR) {
+          restInFist(cave, -parts.forearmR.rotation.x);
+          if (parts.club.geometry.slingTurn !== undefined) math.quat.multiply(cave.axeRotation, cave.axeRotation, SIT_BLADE);
+          restingClub = true;
+        }
       }
       parts.forearmR.highlight = parts.armR.highlight;
       parts.forearmL.highlight = parts.armL.highlight;
@@ -2217,7 +2234,8 @@
     // movement. A scene without a terrain-only floor gets none of this.
     const fixedTerrainAt = ctx.npcFixedTerrainAt || null;
     const fixedPaths = passiveNpcs && fixedTerrainAt && ctx.npcFixedPaths || null;
-    const fixedTrip = (cave) => !!fixedPaths && !!cave.pathing && cave.nonInteractive && !cave.bedTravel.mode
+    // A followed Ooga (`cave.follow`) walks where the island's world puts it, on terrain alone as a fixed leg does.
+    const fixedTrip = (cave) => !!cave.follow && !!fixedTerrainAt || !!fixedPaths && !!cave.pathing && cave.nonInteractive && !cave.bedTravel.mode
       && (cave.walk ? !!cave.walk.route : cave.state === "working"
         && (cave.work.phase === "outbound" || cave.work.phase === "station" || cave.work.phase === "return"));
     const meadowLeg = (cave) => fixedTrip(cave) && !cave.walk
@@ -2380,6 +2398,8 @@
         index: i,
         animation: { due: true, dt: 0, pending: 0, at: 0, interval: 0, state: "", kind: "", bed: "", updates: 0 },
         bedroll: null,
+        // Where the island's world puts it (island-world.js `follow`: x, z, heading, act, site) and the state it gives.
+        follow: null, followAct: -1, followGait: 0, worldState: null,
         bedTravel: { mode: "", route: null, plan: null, index: 0, surface: 0, toBed: false, bed: null, manual: false, pose: "left", roll: 1, phase: 0, blocked: 0, retry: 0, fromX: 0, fromY: 0, fromZ: 0, fromYaw: 0, fromHeadX: 0, fromHeadY: 0, fromHeadZ: 0, fromArmRX: 0, fromArmLX: 0, fromArmRZ: 0, fromArmLZ: 0, armRX: 0, armLX: 0, armRZ: 0, armLZ: 0, compression: SLEEP_COMPRESSION, fromCompression: SLEEP_COMPRESSION, restY: 0, restZ: 0, pitch: 0, headDrop: 0, headDropX: 0, headDropY: 0, headDropZ: 0 },
         sleepHead: { x: 0, y: 0, z: 0 },
         sleepWeapons: createNode({ visible: false }),
@@ -2518,6 +2538,8 @@
     const stateOf = (cave) => {
       // An avatar nobody drives is out of the world: no routine, seat, bed or work of its own.
       if (cave.avatar && cave !== player && !ctx.playerName) return "away";
+      // The island's world (island-world.js) decides an NPC's state where it runs.
+      if (cave.worldState && cave !== player) return cave.worldState;
       const activity = contributors.stateFor(cave.contributor);
       // A signed-in owner can arrive even after their activity expired; other away NPCs stay away.
       return activity === "away" && !ctx.playerName && !(cave.override && (cave === player || BL.net?.ownCharacter?.()?.handle === cave.traits.name))
@@ -3188,7 +3210,7 @@
     const refreshStates = (settle = false) => {
       if (ctx.playerName) return;
       const entries = [...cavemen.values()];
-      const next = new Map(entries.map((cave) => [cave, cave.puppet && cave !== player && !cave.remoteControlled ? cave.state : stateOf(cave)]));
+      const next = new Map(entries.map((cave) => [cave, (cave.puppet || cave.follow) && cave !== player && !cave.remoteControlled ? cave.state : stateOf(cave)]));
       fanRadius = wantedFanRadius();
       assignFanSlots(entries, (cave) => next.get(cave) === "working");
       // Waking/away actors release beds first; sleepers then claim newest-first.
@@ -3199,7 +3221,8 @@
         // poll may have older timestamps: do not start a second transition
         // (or settle it elsewhere) before the next host frame corrects it.
         // Taking local/remote control still wins before sync releases the puppet.
-        if (cave.puppet && cave !== player && !cave.remoteControlled) { refreshRosterRow(cave); continue; }
+        // A followed Ooga's activity is the island's world's, set with its pose (island-world.js).
+        if ((cave.puppet || cave.follow) && cave !== player && !cave.remoteControlled) { refreshRosterRow(cave); continue; }
         const target = next.get(cave);
         if (target === "away") { applyState(cave, target, settle); refreshRosterRow(cave); continue; }
         if (cave === player) {
@@ -6186,6 +6209,50 @@
         runReload(cave, dt);
       }
     };
+    // A followed Ooga (island-world.js): the island's world says where it stands, which way it faces and what it does,
+    // written into `cave.follow` each frame (`act` as island-sim.js `ACT` numbers it, `site` the cave it works or -1);
+    // the crew poses it as it poses its own: walking, idling and sitting (with its lines and the donation cheer), aiming
+    // into its cave and firing its bursts there, and eating its magazine back at the pile.
+    const FOLLOW_STAND = 1, FOLLOW_SIT = 2, FOLLOW_WALK = 3, FOLLOW_AIM = 4, FOLLOW_FIRE = 5, FOLLOW_RELOAD = 6;
+    const runFollow = (cave, dt) => {
+      const f = cave.follow, p = cave.root.position, w = cave.weapon, work = cave.work, a = cave.act;
+      const moved = Math.hypot(f.x - p.x, f.z - p.z), working = cave.state === "working";
+      p.x = f.x; p.z = f.z;
+      cave.root.rotation.y = f.heading;
+      work.site = f.site;
+      if (f.act !== cave.followAct) {
+        if (cave.followAct === FOLLOW_RELOAD && w.reloading) stopReload(cave, true);
+        if (f.act === FOLLOW_STAND || f.act === FOLLOW_SIT) { a.kind = "idle"; a.said = false; a.sayAt = elapsed + 0.8 + Math.random() * 2; a.until = Infinity; }
+        // A fresh magazine for each cave: the bananas on the rifle count down as it fires.
+        if (f.act === FOLLOW_AIM) w.ammo = AMMO_MAX;
+        cave.followAct = f.act;
+      }
+      a.spot.sit = f.act === FOLLOW_SIT && !working;
+      if (f.act === FOLLOW_WALK) {
+        work.phase = working && f.site >= 0 ? "outbound" : "";
+        a.kind = working ? "work" : "wander";
+        cave.followGait += moved * 5;
+        if (moved > 1e-5) walkPose(cave, cave.followGait); else { standPose(cave); p.y = groundY(cave) + cave.hop; }
+        return;
+      }
+      standPose(cave);
+      if (f.act === FOLLOW_STAND || f.act === FOLLOW_SIT || !working) { work.phase = ""; runIdle(cave, dt); return; }
+      p.y = groundY(cave) + cave.hop;
+      if (f.act === FOLLOW_AIM || f.act === FOLLOW_FIRE) {
+        const site = workSites && workSites[f.site];
+        work.phase = "shoot"; a.kind = "work"; w.equipped = true;
+        if (site && site.target) {
+          site.target(cave, work.target);
+          w.aimPitch = -Math.atan2(work.target.y - p.y - cave.traits.height * 0.45, Math.hypot(work.target.x - p.x, work.target.z - p.z));
+          if (f.act === FOLLOW_FIRE && canFire(cave)) fireWeapon(cave, work.target);
+        }
+        return;
+      }
+      work.phase = "reload"; a.kind = "reload";
+      cave.root.rotation.y = Math.atan2(-p.x, -p.z);
+      if (!w.reloading && canReload(cave)) startReload(cave);
+      runReload(cave, dt);
+    };
     const quoteFor = () => {
       const table = ctx.phase ? PHASE_QUOTES[ctx.phase()] : IDLE_QUOTES;
       return table[Math.floor(Math.random() * table.length)];
@@ -6246,6 +6313,8 @@
         a.said = true;
         if (Math.random() < 0.6) idleSay(cave);
       }
+      // A followed Ooga's next move is the island's world's, not this one's.
+      if (cave.follow) return;
       if (cave.state === "chilling" && ctx.npcRouteBlocked && ctx.npcRouteBlocked(cave, cave.root.position.x, cave.root.position.y - cave.baseY, cave.root.position.z)) { startWander(cave); return; }
       if (elapsed < a.until) return;
       parts.head.rotation.y = 0;
@@ -6319,6 +6388,7 @@
         ? flyable(fromX, fromZ, toX, toZ, y, height, cave) && groundAt(toX, toZ, y, y, cave) <= y
         : walkable(fromX, fromZ, toX, toZ, y, height, cave);
     };
+    const SLIDE = { x: 0, z: 0 };
     const movePlayer = (cave, flying, dx, dz) => {
       const p = cave.root.position, steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / PLAYER_STEP));
       dx /= steps;
@@ -6330,6 +6400,11 @@
         if (canStep(cave, flying, p.x, p.z, p.x + sx, p.z + sz)) {
           p.x += sx;
           p.z += sz;
+        } else if (ctx.slideStep && ctx.slideStep(cave, flying, p.x, p.z, p.x + sx, p.z + sz, SLIDE)
+          && canStep(cave, flying, p.x, p.z, SLIDE.x, SLIDE.z)) {
+          // A scene that knows its walls' faces turns a step into one along the face it ran into.
+          p.x = SLIDE.x;
+          p.z = SLIDE.z;
         } else {
           if (sx && canStep(cave, flying, p.x, p.z, p.x + sx, p.z)) p.x += sx;
           if (sz && canStep(cave, flying, p.x, p.z, p.x, p.z + sz)) p.z += sz;
@@ -6720,6 +6795,7 @@
         }
         return;
       }
+      if (cave.follow && cave !== player) { runFollow(cave, dt); return; }
       if (cave !== player && cave.ladder && cave.ladder.plane) { runLadder(cave, dt, false); return; }
       if (ctx.playerName && cave !== player) { standPose(cave); poseWeapon(cave); return; }
       if (cave === player) {
@@ -7353,6 +7429,7 @@
       if (player) clearHeadLook(player);
       if (!player) return;
       const cave = player;
+      BL.equipment?.clear(cave);
       if (passiveNpcs && !ctx.playerName) clearCombatEffects(cave);
       clearGunBashThrust(cave);
       cave.humanControlled = false;
@@ -8086,7 +8163,7 @@
       }
       // A puppet (`cave.puppet`, set by npc-sync.js on a page following the room's NPC host) is posed from the
       // network: no spacing and no AI of its own; everything else about it stays as it is.
-      for (let i = 0; i < members.length; i++) if (!members[i].puppet && (!npcPaused || members[i] === player)) spaceWalker(members[i]);
+      for (let i = 0; i < members.length; i++) if (!members[i].puppet && !members[i].follow && (!npcPaused || members[i] === player)) spaceWalker(members[i]);
       if (!npcPaused && dt > 0 && ctx.characterSupportAt) for (let i = 0; i < members.length; i++) {
         const cave = members[i];
         cave.riding.support = cave.nonInteractive ? null : ctx.characterSupportAt(cave);
@@ -8214,7 +8291,7 @@
     const stats = () => ({ built: builtEquipment.length, tomatoesThrown, projectiles: bulletPool.reduce((n, b) => n + (b.life > 0 ? 1 : 0), 0) });
     return {
       passiveNpcs, separateBodies, pets,
-      showShot, setTint, spotOccupied, setCombatEnabled,
+      showShot, setTint, spotOccupied, setCombatEnabled, siteActive,
       get combatEnabled() { return combatEnabled; },
       get weaponsEnabled() { return weaponsEnabled; },
       cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, refreshStates, resumeFromHost, sleepDiagnostics, refreshRosterRow, updateFan, rush, pokeCave, idleSay, drawDrops,
@@ -8228,5 +8305,5 @@
       }
     };
   };
-  BL.crew = { create, createPets, hatRide, poseHatRide, poseStomachRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, VISUAL_BODY, GAIT, poseGait, poseCloseWalk, poseGroundSit, seatJetpack, jetSparks, preparePresentation, poseEquipment, poseReload, reachArm, strikeTime, bodyHeightOf, bodyRadiusOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, COMPANION_FOLLOW, QUAD_GAIT, poseQuadruped, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_PUFF, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
+  BL.crew = { create, createPets, hatRide, refreshHatRide, poseHatRide, poseStomachRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, VISUAL_BODY, GAIT, poseGait, poseCloseWalk, poseGroundSit, seatJetpack, jetSparks, preparePresentation, poseEquipment, poseReload, reachArm, strikeTime, bodyHeightOf, bodyRadiusOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, COMPANION_FOLLOW, QUAD_GAIT, poseQuadruped, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_PUFF, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
 })();

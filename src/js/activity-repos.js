@@ -15,7 +15,7 @@
     if (/^(?:oogaboogax|drneski)\/lightning[-_]?(?:factory|foundry)$/.test(key)) return FOUNDRY;
     return /^oogaboogax\/[a-z0-9_.-]{1,100}$/.test(key) ? key : null;
   };
-  const COUNTS = ["commits", "prs", "reviews", "issues", "comments"];
+  const COUNTS = ["commits", "prs", "reviews", "issues", "comments", "merges"];
   const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
   const countOf = (value) => Number.isFinite(value) ? value : 0;
   const latest = (a, b) => typeof b === "string" && Number.isFinite(Date.parse(b))

@@ -40,6 +40,7 @@ export class GameHost extends DurableObject {
     this.timer = 0;
     this.ticks = 0;
     this.savedAt = 0;
+    this.stored = false;
     this.sweeping = false;
     this.frame = WIRE.frame();
     this.bytes = new ArrayBuffer(WIRE.size(WIRE.MAX_ROWS, WIRE.MAX_CONFIRMS));
@@ -53,6 +54,7 @@ export class GameHost extends DurableObject {
         this.sockets.set(a.id, this.record(ws, a));
       }
       const saved = await ctx.storage.get("game");
+      this.stored = !!saved;
       this.sweeping = (await ctx.storage.getAlarm()) !== null;
       if (saved && typeof saved === "object" && this.bind(saved.name) && Date.now() - saved.at < RESUME_MS) this.game.restore(saved.data, Date.now());
       else if (saved) await ctx.storage.delete("game");
@@ -87,7 +89,7 @@ export class GameHost extends DurableObject {
     if (!kind) return false;
     this.name = name;
     this.kind = kind;
-    this.game = kind.create(Date.now());
+    this.game = kind.create(Date.now(), this.env);
     // A game may speak to one page alone (the hangar's Tess queue, each page its own place in it).
     this.game.tell = (id, msg) => { const p = this.sockets.get(id); if (p) this.send(p.ws, msg); };
     return true;
@@ -245,6 +247,9 @@ export class GameHost extends DurableObject {
   save(now) {
     this.savedAt = now;
     const data = this.game.save();
+    // A game that keeps no record (the island's world) writes nothing.
+    if (data === null && !this.stored) return;
+    this.stored = data !== null;
     const done = data === null ? this.ctx.storage.delete("game") : this.ctx.storage.put("game", { name: this.name, at: now, data }, { allowUnconfirmed: true });
     Promise.resolve(done).catch(() => {});
     if (data !== null) this.sweep(now + RESUME_MS);

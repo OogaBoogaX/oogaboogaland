@@ -53,12 +53,13 @@
   // wave tint across that surface for the frame, an accepted Canvas quality trade-off. Light is keyed as the 8-bit values the
   // paint uses (`shade`), so a sun creeping across the sky repaints only when the pixels would change. Eight reusable
   // slots share a 2,097,152-pixel budget, so the largest board (1200x540) fits beside the smaller ones; an evicted
-  // slot of the same size keeps its backing store. Oversized surfaces keep a single grow-only scratch image.
+  // slot of the same size keeps its backing store. Oversized surfaces (a Timechain room's 4096x1024 dome) keep a single
+  // grow-only scratch image, shaded once a frame for the surface its first face asks for, then reused by its other faces.
   const createSurfaceShadeCache = (paint) => {
     const MAX_PIXELS = 2048 * 1024;
     const entries = Array.from({ length: 8 }, () => ({ canvas: null, context: null, geometry: null, source: null, pixels: 0, used: 0, frame: -1,
       version: 0, w: 0, h: 0, sourceW: 0, sourceH: 0, br: 0, bg: 0, bb: 0, r: 0, g: 0, b: 0, ar: 0, ag: 0, ab: 0 }));
-    const fallback = { canvas: null, context: null };
+    const fallback = { canvas: null, context: null, geometry: null, source: null, frame: -1, version: 0, w: 0, h: 0, sourceW: 0, sourceH: 0, br: 0, bg: 0, bb: 0 };
     const shade = { r: 0, g: 0, b: 0, ar: 0, ag: 0, ab: 0 };
     let pixels = 0, clock = 0, frame = 0;
     const clear = entry => {
@@ -68,6 +69,10 @@
     };
     const channel = value => value > 0 ? Math.round(value * 255) : 0;
     const added = value => value > 0 ? Math.min(255, Math.round(value)) : 0;
+    // What an entry was shaded from, light aside: the surface, its content version and every dimension it is drawn at.
+    const holds = (entry, geometry, surface, source, w, h, br, bg, bb) => entry.geometry === geometry && entry.source === source
+      && entry.version === surface.version && entry.w === w && entry.h === h && entry.sourceW === source.width && entry.sourceH === source.height
+      && entry.br === br && entry.bg === bg && entry.bb === bb;
     const get = (geometry, rec, coverage) => {
       const surface = geometry.imageSurface, source = surface.canvas, w = surface.width || source.width, h = surface.height || source.height;
       const background = surface.background, br = background ? background[0] : -1, bg = background ? background[1] : -1, bb = background ? background[2] : -1;
@@ -75,14 +80,13 @@
       shade.ar = added(rec.canvasAddR); shade.ag = added(rec.canvasAddG); shade.ab = added(rec.canvasAddB);
       for (let i = 0; i < entries.length; i++) {
         const entry = entries[i];
-        if (entry.geometry === geometry && entry.source === source && entry.version === surface.version && entry.w === w && entry.h === h
-          && entry.sourceW === source.width && entry.sourceH === source.height
-          && entry.br === br && entry.bg === bg && entry.bb === bb
+        if (holds(entry, geometry, surface, source, w, h, br, bg, bb)
           && (entry.frame === frame || entry.r === shade.r && entry.g === shade.g && entry.b === shade.b
             && entry.ar === shade.ar && entry.ag === shade.ag && entry.ab === shade.ab)) {
           entry.used = ++clock; entry.frame = frame; return entry.canvas;
         }
       }
+      if (fallback.frame === frame && holds(fallback, geometry, surface, source, w, h, br, bg, bb)) return fallback.canvas;
       let entry = fallback;
       if (w * h <= MAX_PIXELS) {
         // This surface's own slot first, else the least recently used: forgetting a key keeps its backing store.
@@ -111,21 +115,24 @@
         if (entry.canvas.height !== h) entry.canvas.height = h;
       }
       paint(entry.canvas, entry.context, surface, shade, coverage);
+      entry.geometry = geometry; entry.source = source; entry.version = surface.version; entry.w = w; entry.h = h;
+      entry.sourceW = source.width; entry.sourceH = source.height;
+      entry.br = br; entry.bg = bg; entry.bb = bb; entry.frame = frame;
       if (entry !== fallback) {
-        entry.geometry = geometry; entry.source = source; entry.version = surface.version; entry.w = w; entry.h = h;
-        entry.sourceW = source.width; entry.sourceH = source.height;
-        entry.br = br; entry.bg = bg; entry.bb = bb;
         entry.r = shade.r; entry.g = shade.g; entry.b = shade.b;
         entry.ar = shade.ar; entry.ag = shade.ag; entry.ab = shade.ab;
-        entry.pixels = w * h; pixels += entry.pixels; entry.used = ++clock; entry.frame = frame;
+        entry.pixels = w * h; pixels += entry.pixels; entry.used = ++clock;
       }
       return entry.canvas;
     };
     return { get,
       // Called once a frame before any surface draws.
       frame: () => { frame++; },
-      release: live => { for (const entry of entries) if (entry.geometry && !live.has(entry.geometry)) clear(entry); },
-      dispose: () => { for (const entry of entries) clear(entry); if (fallback.canvas) fallback.canvas.width = fallback.canvas.height = 0; },
+      release: live => {
+        for (const entry of entries) if (entry.geometry && !live.has(entry.geometry)) clear(entry);
+        if (fallback.geometry && !live.has(fallback.geometry)) fallback.geometry = fallback.source = null;
+      },
+      dispose: () => { for (const entry of entries) clear(entry); if (fallback.canvas) fallback.canvas.width = fallback.canvas.height = 0; fallback.geometry = fallback.source = null; },
       get pixels() { return pixels; }, get size() { let n = 0; for (const entry of entries) if (entry.geometry) n++; return n; } };
   };
   const createRenderer = (canvas, { width: fixedW = 0, height: fixedH = 0, transparent = false, environmentCapture = false } = {}) => {
@@ -191,7 +198,7 @@
     }
     const acquire = (vertices = 16) => {
       if (poolUsed === pool.length) {
-        pool.push({ pts: new Float32Array(32), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1, mirror: false, mirrorNode: null, imageNode: null, imageA: 0, imageB: 0, imageC: 0, imageD: 0, canvasR: 1, canvasG: 1, canvasB: 1, canvasAddR: 0, canvasAddG: 0, canvasAddB: 0, mirrorMinX: 0, mirrorMaxX: 0, mirrorMinY: 0, mirrorMaxY: 0, portal: false, matrix: 0, matrixGlyph: false, matrixGlyphOpacity: 1, matrixWall: 0, matrixNx: 0, matrixNy: 0, matrixNz: 0, matrixPlane: 0, matrixCenterDepth: 0, matrixMinX: 0, matrixMaxX: 0, matrixMinY: 0, matrixMaxY: 0, matrixRed: 0, matrixGreen: 0, matrixBlue: 0, matrixCave: 0, matrixLocal: false, matrixLiving: false, matrixDynamic: false, matrixPermanentOnly: false, matrixPartial: false, matrixBacking: false, matrixFaceNx: 0, matrixFaceNy: 0, matrixFaceNz: 0, matrixFacePlane: 0, scrMinX: 0, scrMinY: 0, scrMaxX: 0, scrMaxY: 0 });
+        pool.push({ pts: new Float32Array(32), n: 0, depth: 0, depthOffset: false, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1, mirror: false, mirrorNode: null, imageNode: null, imageA: 0, imageB: 0, imageC: 0, imageD: 0, canvasR: 1, canvasG: 1, canvasB: 1, canvasAddR: 0, canvasAddG: 0, canvasAddB: 0, mirrorMinX: 0, mirrorMaxX: 0, mirrorMinY: 0, mirrorMaxY: 0, portal: false, matrix: 0, matrixGlyph: false, matrixGlyphOpacity: 1, matrixWall: 0, matrixNx: 0, matrixNy: 0, matrixNz: 0, matrixPlane: 0, matrixCenterDepth: 0, matrixMinX: 0, matrixMaxX: 0, matrixMinY: 0, matrixMaxY: 0, matrixRed: 0, matrixGreen: 0, matrixBlue: 0, matrixCave: 0, matrixLocal: false, matrixLiving: false, matrixDynamic: false, matrixPermanentOnly: false, matrixPartial: false, matrixBacking: false, matrixFaceNx: 0, matrixFaceNy: 0, matrixFaceNz: 0, matrixFacePlane: 0, scrMinX: 0, scrMinY: 0, scrMaxX: 0, scrMaxY: 0 });
       }
       const rec = pool[poolUsed++];
       if (rec.pts.length < vertices * 2) rec.pts = new Float32Array(CLIP_VERTICES * 2);
@@ -865,6 +872,7 @@
               }
               rec.n = clipped;
               rec.depth = zsum / clipped - (node.depthBias || 0);
+              rec.depthOffset = !!node.geometry.depthOffset;
               rec.line = false;
               rec.smokeOpacity = faceOpacity;
               rec.mirror = mirrorFace;
@@ -1122,6 +1130,7 @@
             rec.n = 2;
             rec.depth = (CLIP_OUT[2] + CLIP_OUT[5]) / 2 - (node.depthBias || 0);
             rec.line = true;
+            rec.depthOffset = false;
             rec.smokeOpacity = opacity;
             rec.imageNode = null;
             rec.mirror = false;
@@ -1986,7 +1995,7 @@
       fogNear = 1e8;
       fogFar = 1e8 + 1;
       }
-      const gradientSky = !!(horizon && zenith);
+      const gradientSky = !!(horizon && zenith) && !opts.viewRoots;
       if (gradientSky) buildSky(horizon, zenith);
       if (clear !== clearRef) {
         clearRef = clear;
@@ -2030,8 +2039,12 @@
       gatheredMirror = null;
       mirrorComposeNode = null;
       const viewActor = !environmentCapture && opts.beforeView?.();
-      updateWorld(root, null);
-      traverseVisible(root, gatherNode);
+      if (opts.viewRoots) {
+        for (const node of opts.viewRoots) {
+          updateWorld(node, node.parent?.world || null);
+          traverseVisible(node, gatherNode);
+        }
+      } else { updateWorld(root, null); traverseVisible(root, gatherNode); }
       const mirrorNode = gatheredMirror;
       if (viewActor) { opts.afterView?.(); updateWorld(viewActor.root, viewActor.root.parent?.world || null); }
       if (!environmentCapture && mirrorNode && mirrorDebug.shardsDrawn) updateEnvironment(root, mirrorNode, camera, opts);
@@ -2050,7 +2063,9 @@
           if (plane < 0) plane = matrixPlaneSlot(rec.matrixNx, rec.matrixNy, rec.matrixNz, rec.matrixPlane + 0.015, false, 0);
           if (plane >= 0 && rec.depth <= matrixPlaneDepths[plane]) rec.depth = matrixPlaneDepths[plane] + 0.0001 + (rec.depth - rec.matrixCenterDepth) * 0.001;
         }
-        sortIds[i] = i; sortKeys[i] = rec.depth;
+        // Painter fallback for the GL surface bias: near-equal face depths favor the overlay, without
+        // changing projection, fog or genuinely nearer occluders. Lines never inherit a pooled face's bias.
+        sortIds[i] = i; sortKeys[i] = rec.depth + (rec.depthOffset ? 0.0001 : 0);
       }
       sortByKey(sortIds, 0, poolUsed, sortKeys, 1, 0, sortWork);
       for (let i = 0; i < poolUsed; i++) active[i] = pool[sortIds[i]];
@@ -2284,6 +2299,7 @@
       project,
       ray,
       setQuality: () => { },
+      setScale: () => { },
       releaseGeometry: () => { },
       prepareScene: () => { },
       prepareGeometry: () => true,

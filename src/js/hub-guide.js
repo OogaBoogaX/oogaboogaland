@@ -142,7 +142,7 @@
     { at: [7, 3, 5.6], aim: [8.8, 0.5, 7.4] },
     { at: [-2.8, 5.2, 17], aim: [-4.6, 4.2, 19.3] }
   ];
-  const NOTICE_AFTER = 2.5, OFFER_TIME = 12, GLIDE = 1.8, RETURN = 1.2, VISITS = "ooga-tess-visits", TOURED = "ooga-tess-tour";
+  const NOTICE_AFTER = 2.5, OFFER_TIME = 12, GLIDE = 1.8, RETURN = 1.2, VISITS = "ooga-tess-visits", TOURED = "ooga-tess-tour", QUEUE_DECLINED = "ooga-tess-queue";
   // How long she waits on the Worker's answer, and her line for each way it can say no.
   const ASK_TIME = 15000, FAILED = { refused: "refused", resting: "resting", busy: "slowDown" };
   // The view counts as moved past half a metre or about three degrees, after a second to settle on arrival and on an
@@ -319,13 +319,21 @@
     };
     const spot = { x: 0, y: 0, z: 0 }, home = pose(), from = pose(), to = pose();
     const net = channel || BL.net, sharedPose = new Array(12).fill(0);
-    let sharedToken = "", sharedConnection = "", queueShown = false, queueRoom = "", queueSeen = null, queueVisible = false, sharedDone = "", poseAt = 0, touchAt = 0, wasShared = false;
+    let sharedToken = "", sharedConnection = "", queueShown = false, queueRoom = "", queueSeen = null, queueVisible = false, queueHere = true, sharedDone = "", poseAt = 0, touchAt = 0, wasShared = false;
     const shared = () => (G === ISLAND_GUIDE || !!channel) && !!net.state.me && net.state.tessShared;
     // Whether this page flies her for everyone now: the channel's page that drives her, while nobody has a turn.
     const driving = () => shared() && !!net.drives && net.drives() && !active() && !(queue() && queue().busy);
     const queue = () => net.state.tessGuide;
     const active = () => shared() && net.state.room === "live" && queue()?.phase === "active" && queue().token !== sharedDone && queue().until > net.serverNow();
     const queueAction = op => net.sendTess({ op, token: queue()?.token || "" });
+    // The room takes a join or an accepted turn only from the island's own ground (tess-queue.js `eligible`), and says
+    // nothing to anyone else, so a panel open off it (a tap on her, or a visitor who walked off) says so itself rather
+    // than offer a button that does nothing.
+    // In a place with a channel of its own (the hangar's hall) every page stands where she is.
+    const onIsland = () => !!channel || net.state.zone === "outside";
+    // Not now on her greeting, kept for the account in this browser: she does not offer the queue unasked again, and a
+    // tap on her still opens it.
+    const declinedKey = () => `${channel ? G.toured + "-queue" : QUEUE_DECLINED}:${net.state.me.id}`;
     const touch = () => { if (active()) queueAction("touch"); };
     position.x = WORKS[0].at[0]; position.y = WORKS[0].at[1]; position.z = WORKS[0].at[2];
     // The offer and the tour's controls live on screen, in the HUD's wood, built for the visit and removed on leave.
@@ -370,7 +378,7 @@
       for (const chip of chips.children) chip.disabled = !!ask;
     };
     go.addEventListener("click", () => { go.blur(); forward(); });
-    skip.addEventListener("click", () => { skip.blur(); back(); });
+    skip.addEventListener("click", () => { skip.blur(); back(true); });
     // Asking blurs the box, so the keyboard folds away and her answer shows; Escape there only leaves the box. While she
     // thinks over one question, the box keeps the next as a draft.
     form.addEventListener("submit", (e) => {
@@ -461,7 +469,7 @@
     // for a signed-in one, what is new since their last visit here, or no greeting at all when nothing is.
     const greet = () => {
       world[G.greeted] = true;
-      if (shared()) { queueShown = true; queueRoom = ""; return; }
+      if (shared()) { if (!toured(declinedKey())) { queueShown = true; queueRoom = ""; } return; }
       const me = G.news ? account() : null;
       if (!me) { if (toured(G.toured)) return; state.kind = "island"; state.legs = TOUR; state.welcome = null; notice(); return; }
       if (newsOffer(me)) notice();
@@ -589,8 +597,11 @@
         else visit(state.stop + 1);
       }
     };
-    const back = () => {
+    const back = (said = false) => {
       if (shared() && !active()) {
+        // Not now, pressed with no place in the queue, answers her greeting for good; Leave queue only leaves.
+        const phase = queue()?.phase;
+        if (said && phase !== "wait" && phase !== "ready") markToured(declinedKey());
         queueAction("cancel"); queueShown = false; queueRoom = ""; show("work"); return;
       }
       if (state.phase === "offer") { answered(); say(state.asked ? "later" : "declined"); toWork(); }
@@ -735,7 +746,10 @@
         rig.mode = 1; rig.aim.x = w.aim[0]; rig.aim.y = w.aim[1]; rig.aim.z = w.aim[2]; rig.watching = rig.steady = false;
       }
       rig.calm = !!q?.busy;
-      if (!queueShown && !world[G.greeted] && state.still && !busy()) {
+      // She greets only a visitor who lands on the island's own ground: one who arrives off it could not join anyway,
+      // and taps her once there.
+      const here = onIsland();
+      if (!queueShown && !world[G.greeted] && state.still && here && !busy()) {
         watchStill(dt); state.seen += dt;
         if (state.still && state.seen > NOTICE_AFTER) greet();
       }
@@ -746,9 +760,9 @@
     // guide's phase with it (following the queue), else leaves her at what she does (the page that flies her).
     let queuePhase = "";
     const queuePanel = (own) => {
-      const q = queue();
-      if (q !== queueSeen || queueShown !== queueVisible || net.state.room !== queueRoom || !own && state.phase !== queuePhase) {
-        queueSeen = q; queueVisible = queueShown; queueRoom = net.state.room; queuePhase = state.phase;
+      const q = queue(), here = onIsland();
+      if (q !== queueSeen || queueShown !== queueVisible || net.state.room !== queueRoom || here !== queueHere || !own && state.phase !== queuePhase) {
+        queueSeen = q; queueVisible = queueShown; queueRoom = net.state.room; queueHere = here; queuePhase = state.phase;
         if (own) show("queue");
         else if (queueShown) { form.hidden = chips.hidden = true; panel.classList.remove("greeter-tour"); }
         if (!own && !queueShown) return;
@@ -756,10 +770,12 @@
         heading.textContent = channel ? `${NAME} · ${G.title}` : `${NAME} · island guide`;
         const ready = q?.phase === "ready", waiting = q?.phase === "wait", connected = net.state.room === "live";
         const full = !waiting && !ready && q?.count >= 32;
-        go.hidden = waiting; go.disabled = !connected || full;
+        go.hidden = waiting; go.disabled = !connected || full || !here;
         go.textContent = ready ? "Talk to Tess" : "Join queue";
         skip.textContent = waiting || ready ? "Leave queue" : "Not now";
         help.textContent = !connected ? "Reconnecting · your place is held for 15 seconds"
+          : !here ? waiting || ready ? "Away from the island · your place is held for 15 seconds"
+            : "Tess talks with visitors on the main island's ground. Walk onto it to join her queue."
           : ready ? "Your turn · choose Talk to Tess within 20 seconds. Your conversation stays private."
           : waiting ? `Your place: ${q.position} of ${q.count} · kept while you explore ${channel ? "here" : "this island"}. When ready, accept within 20 seconds.`
           : full ? "The queue is full. A place will open when another visitor finishes or leaves."

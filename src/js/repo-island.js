@@ -64,7 +64,7 @@
     const soil = createNode({ geometry: rock.soil, sightHidden: true, sightSolid: true }), lip = createNode({ geometry: rock.lip, sightHidden: true });
     const pavement = createNode({ geometry: rock.pavement, sightHidden: true }), crystals = createNode({ geometry: rock.crystals, sightHidden: true });
     const crystalBase = createNode({ geometry: rock.crystalBase, sightHidden: true }), carpet = createNode({ geometry: rock.carpet, sightHidden: true });
-    const stone = createNode({ geometry: bridge.stone, sightHidden: true, sightSolid: true }), glass = createNode({ geometry: bridge.glass, glow: 0, sightHidden: true });
+    const stone = createNode({ geometry: bridge.stone, sightHidden: true, sightSolid: true, noPass: true }), glass = createNode({ geometry: bridge.glass, glow: 0, sightHidden: true });
     const boards = createNode({ geometry: signs.geometry, sightHidden: true });
     // Canvas 2D sorts every face it draws each frame: it gets the island and its bridge, without the signs or totems.
     const canvas = renderer.kind !== "webgl2";
@@ -91,7 +91,7 @@
     target(world(0, 0.6, (bridge.from + bridge.to) / 2), { kind: "repo-bridge" }, bridge.width / 2 + 0.3, false);
     // The ground the main island's scatter keeps off: the bridge head on the south terrace.
     const claims = [[0, spot.rim - 0.5, bridge.width / 2 + 0.9], [0, spot.rim - 2, bridge.width / 2 + 0.6]];
-    // The lanterns at either end of the bridge, for the hub's dusk lamps.
+    // The lanterns on the bridge's pillars, for the hub's dusk lamps.
     const lamps = bridge.lamps.map((l) => world(l.x, l.y, l.z));
     // Arriving: on the lip at the bridge's end, facing in toward Bitcoin Core.
     const arrival = world(0, M.LIP.rise, -M.ISLE.R + M.LIP.width / 2);

@@ -146,7 +146,7 @@
         k.lid = k.P.skinDk;
         return true;
       },
-      headgear(k) {
+      hatNodes(k) {
         const h = k.h;
         addChild(k.parts.head, createNode({ position: { x: 0, y: 0.05 * h, z: -0.1 * h }, rotation: { x: -0.55, y: 0, z: 0 }, scale: { x: h, y: h, z: h }, geometry: helmetGeometry() }));
         if (BL.models.STYLE !== "R") return;

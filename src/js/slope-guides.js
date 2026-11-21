@@ -5,7 +5,9 @@
   const DIAGONAL = Math.SQRT1_2;
   const DX = new Float32Array([1, DIAGONAL, 0, -DIAGONAL, -1, -DIAGONAL, 0, DIAGONAL]);
   const DZ = new Float32Array([0, DIAGONAL, 1, DIAGONAL, 0, -DIAGONAL, -1, -DIAGONAL]);
-  const create = ({ island }) => {
+  // Construction checkpoints (see build-tasks.js), reached only when sliced: rock-guides.js builds this in its own slices.
+  const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
+  const createSteps = function* ({ island }, slice = null) {
     const cached = CACHE.get(island);
     if (cached) return cached;
     const unit = island.unit, grid = island.sightGrid;
@@ -18,13 +20,17 @@
       const ix = Math.floor((x - ox) / unit), iz = Math.floor((z - oz) / unit);
       return ix < 0 || ix >= width || iz < 0 || iz >= depth ? -1 : ix * depth + iz;
     };
-    for (let x = 0; x < width; x++) for (let z = 0; z < depth; z++) {
-      const i = x * depth + z, cx = ox + (x + 0.5) * unit, cz = oz + (z + 0.5) * unit;
-      heights[i] = Math.max(0, island.surfaceAt(cx, cz)); fronts[i] = island.frontageColumnAt(cx, cz);
+    for (let x = 0; x < width; x++) {
+      yield* pause(slice);
+      for (let z = 0; z < depth; z++) {
+        const i = x * depth + z, cx = ox + (x + 0.5) * unit, cz = oz + (z + 0.5) * unit;
+        heights[i] = Math.max(0, island.surfaceAt(cx, cz)); fronts[i] = island.frontageColumnAt(cx, cz);
+      }
     }
     // Average the height over several steps before taking the downhill direction.
     // Alternating X/Z voxel faces then share the diagonal hillside's aspect.
     for (let x = 0; x < width; x++) for (let z = 0; z < depth; z++) {
+      if (!z) yield* pause(slice);
       let total = 0;
       for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
         const sx = x + dx, sz = z + dz;
@@ -50,7 +56,9 @@
       if (neighbor < 0 || fronts[neighbor] || heights[i] <= heights[neighbor] + EPS) return;
       masks[i] |= 1 << sectorAt(i, nx, nz); riserCount++;
     };
+    yield* pause(slice);
     for (let x = 0; x < width; x++) for (let z = 0; z < depth; z++) {
+      if (!z) yield* pause(slice);
       const i = x * depth + z, height = heights[i];
       if (fronts[i] || height <= EPS) continue;
       markRiser(i, x + 1 < width ? i + depth : -1, 1, 0);
@@ -79,7 +87,9 @@
       if (lower && higher && lower + higher - stride <= TREAD_WIDTH + EPS) { masks[i] |= 1 << sector; treads[i] = sector; treadCount++; }
     }
     let sideCount = 0;
+    yield* pause(slice);
     for (let i = 0; i < cells; i++) for (let sector = 0; sector < 8; sector++) {
+      if (!sector && i % depth === 0) yield* pause(slice);
       const bit = 1 << sector;
       if (!(masks[i] & bit) || sides[i * 8 + sector] >= 0) continue;
       let first = 0, count = 1;
@@ -121,5 +131,6 @@
     CACHE.set(island, result);
     return result;
   };
-  BL.slopeGuides = { create };
+  const create = (options) => { const steps = createSteps(options); let step; do { step = steps.next(); } while (!step.done); return step.value; };
+  BL.slopeGuides = { create, createSteps };
 })();

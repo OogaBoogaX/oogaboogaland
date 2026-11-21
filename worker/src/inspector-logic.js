@@ -2,7 +2,7 @@
 // becomes an object's row and log lines, and when rows go stale or are dropped.
 
 export const CLASSES = ["Room", "GameHost", "Worker", "Audience"];
-export const KINDS = ["wake-lost", "join", "full", "leave", "zone", "visible", "host", "back", "kick",
+export const KINDS = ["wake-lost", "join", "full", "leave", "hold", "resume", "zone", "visible", "host", "back", "kick",
   "voice-fail", "voice-refused", "voice-restart", "limited", "dropped", "error"];
 // Statuses that mean someone is there: a row that says so and then goes quiet this long is marked stale. The room
 // sweeps once a minute while anyone is in it, so five minutes without a word means it stopped answering.
@@ -13,8 +13,9 @@ export const KEEP_MS = 24 * 3600000;
 export const LOG_KEEP = 500;
 // How long a report's answer says someone is watching; viewers keep it extended while they stay.
 export const WATCH_MS = 90000;
-// Objects heard from this recently are asked for detail when a viewer connects.
-export const RECENT_MS = 120000;
+// Objects heard from this recently are asked for detail when a viewer connects: an object reports every four minutes
+// unwatched (inspect-report.js), so this covers every object still awake.
+export const RECENT_MS = 300000;
 // The platform's limits the page sets load against (developers.cloudflare.com/durable-objects/platform/limits/).
 export const LIMITS = { requestsPerSecond: 1000, hibernatableSockets: 32768, attachmentBytes: 16384, memoryMB: 128, cpuSeconds: 30, sfuCallsPerSecond: 50 };
 

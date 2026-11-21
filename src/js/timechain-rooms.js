@@ -1,6 +1,6 @@
 // The Timechain Sphere's rooms, each its own kind of place, numbered on the keypad's 0–9: 0 the Conference Room, 1 the
-// Lecture Hall, 2 the Mining Museum, 3 Satoshi's Temple, 4 Proof of Work-out, 5 the Movie Theater, 6 the Block Party and
-// 7 the Planetarium. 8 and 9 are empty: on the keypad and in the directory, greyed out and never chosen. A room is an
+// Lecture Hall, 2 the Mining Museum, 3 Satoshi's Temple, 4 Proof of Work-out, 5 the Movie Theater, 6 the Block Party,
+// 7 the Planetarium and 8 the Genesis Museum. 9 is empty: on the keypad and in the directory, greyed out and never chosen. A room is an
 // integer `id`, validated wherever one comes in (`parse`, which refuses an empty number): the keypad, a route, a history
 // entry, a stored visit.
 // Signed in, a room's zone (`sphere-<id>`, never a dotted name, which would fold every room into one voice group)
@@ -34,9 +34,9 @@
     { kind: "temple", name: "Satoshi's Temple", tag: "A meditation temple; the bell rings every block", R: 15 },
     { kind: "workout", name: "Proof of Work-out", tag: "Pedal to find a fake block", R: 12 },
     { kind: "theater", name: "Movie Theater", tag: "The whole dome is the picture", R: 20 },
-    { kind: "party", name: "Block Party", tag: "The bass drops on every block", R: 13.5 },
+    { kind: "party", name: "Block Party", tag: "Dance under a dome of light", R: 20 },
     { kind: "planetarium", name: "Planetarium", tag: "Tonight's sky over London", R: 8 },
-    null,
+    { kind: "genesis", name: "Genesis Museum", tag: "The road to Bitcoin, 1974 to 2009", R: 21 },
     null
   ];
   // Every number on the keypad, an empty one (`empty`) named "Empty" with no kind. Only the Conference Room has a lock:
@@ -59,18 +59,21 @@
   };
   // The sphere and its screen for each kind. The raked halls step down from the doorway's landing toward a focus in
   // front (`rake`): rows `depth` deep round it, seats `pitch` apart along them as far round as `psiMax` degrees, either
-  // side of an aisle `aisle` wide each way; with `halfSteps` the aisle has a half step in every riser (the theater's,
-  // and the Lecture Hall's, whose four broad terraces stand a riser too tall for a walker apart), and with `dais` a
-  // round stage stands at the focus.
+  // side of an aisle `aisle` wide each way; with `aisleSteps` the aisle has that many steps in every riser, each an
+  // equal share of the row's depth and of its riser (the theater's one, a half step; the Lecture Hall's two, a third
+  // each, its four broad terraces standing a riser too tall for a walker apart), and with `dais` a round stage stands
+  // at the focus.
   const shapeOf = (kind, R) => {
     if (kind === "planetarium") return { c: 1.6, yMin: 0, P: 0, edge: { flat: 1.6 } };
+    // The Genesis Museum has no wall: its screen comes down to the floor, so the stars run from the glass's edge to the crown.
+    if (kind === "genesis") return { c: 0.3 * R, yMin: 0, P: 0, edge: { flat: 0.12 } };
     if (kind === "lecture") {
       const P = 0.26 * R;
-      return { c: 0.1 * R, yMin: -P, P, edge: { A: [-R, -P + 2.3], B: [R, 3.7] }, rake: { focus: -0.45 * R, front: 0.94, back: 10, depth: 3.02, pitch: 2.9, psiMax: 58, seatTop: 0.42, halfSteps: true, dais: true, aisle: 1.1 } };
+      return { c: 0.1 * R, yMin: -P, P, edge: { A: [-R, -P + 2.3], B: [R, 3.7] }, rake: { focus: -0.45 * R, front: 0.94, back: 10, depth: 3.02, pitch: 2.9, psiMax: 58, seatTop: 0.42, aisleSteps: 2, dais: true, aisle: 1.1 } };
     }
     if (kind === "theater") {
       const P = 0.38 * R;
-      return { c: -0.145 * R, yMin: -P, P, edge: { A: [-R, -P + 0.6], B: [R, 4.3] }, rake: { focus: -0.6 * R, front: 0.05 * R, back: 0.74 * R, depth: 1.3, pitch: 1.3, psiMax: 72, seatTop: 0.44, halfSteps: true, aisle: 0.6 } };
+      return { c: -0.145 * R, yMin: -P, P, edge: { A: [-R, -P + 0.6], B: [R, 4.3] }, rake: { focus: -0.6 * R, front: 0.05 * R, back: 0.74 * R, depth: 1.3, pitch: 1.3, psiMax: 72, seatTop: 0.44, aisleSteps: 1, aisle: 0.6 } };
     }
     return { c: 0.3 * R, yMin: 0, P: 0, edge: { flat: 3.75 } };
   };
@@ -156,7 +159,7 @@
     layouts.set(room.id, value);
     return value;
   };
-  // The floor under (x, z): the landing at 0, a raked hall's terrace or the stage, the theater aisle's half steps.
+  // The floor under (x, z): the landing at 0, a raked hall's terrace or the stage, an aisle's steps.
   const floorAt = (L, x, z) => {
     const K = L.rake;
     if (!K) return 0;
@@ -165,9 +168,16 @@
     if (d < rows[0].rIn) return K.stage && d < K.stage ? K.stageTop : L.yMin;
     // Rows stand a little closer than their depth, so each runs to the midpoint between its centre and the next's.
     const k = Math.min(rows.length - 1, Math.max(0, Math.round((d - rows[0].d) / (rows[1].d - rows[0].d)))), row = rows[k];
-    // In an aisle with half steps the outer half of every row is half a riser up, so no step there is over a walker's.
-    if (K.halfSteps && Math.abs(x) < K.aisle && d > row.d) return row.y + ((k + 1 < rows.length ? rows[k + 1].y : 0) - row.y) / 2;
+    // In an aisle with steps each row's depth is shared between its own level and the steps up to the next row, so no
+    // step there is over a walker's.
+    if (K.aisleSteps && Math.abs(x) < K.aisle) return aisleStep(K, k, Math.min(K.aisleSteps, Math.max(0, Math.floor((d - row.rIn) * (K.aisleSteps + 1) / K.depth))));
     return row.y;
+  };
+  // The height of row `k`'s aisle step `j` in a raked hall: 0 the row's own level, then each step an equal share of
+  // the riser up to the next row (or the landing).
+  const aisleStep = (K, k, j) => {
+    const y = K.rows[k].y;
+    return y + j * ((k + 1 < K.rows.length ? K.rows[k + 1].y : 0) - y) / (K.aisleSteps + 1);
   };
   // How far out a body may stand with its feet at `y` and stay inside the sphere from its feet to its head.
   const wallAt = (L, y) => Math.min(radiusAt(L, y + 0.05), radiusAt(L, y + 1.9)) - L.wallGap;
@@ -181,19 +191,33 @@
     const r = radius;
     // Reaching back a body's width, so it overlaps the room's own edge below whatever the walker's size.
     if (door && Math.abs(x) < DOOR.halfW - r && z >= L.doorZ - 0.6 - r && z <= L.doorZ + DOOR.vestibule - r) return true;
-    // Where the sphere widens over the floor a body in the air keeps to where it can stand, so no jump comes down held
-    // by the wall.
-    if (Math.hypot(x, z) > Math.min(wallAt(L, feet), wallAt(L, floorAt(L, x, z))) - r || z > L.doorZ - 0.12 - r) return false;
+    if (Math.hypot(x, z) > wallLimit(L, x, z, feet, solids) - r || z > L.doorZ - 0.12 - r) return false;
     if (solids) for (const o of solids) {
-      if (o.top !== undefined && feet >= o.top - STEP_UP) continue;
-      if (o.below !== undefined && feet + 1.8 <= o.below) continue;
-      if (o.r !== undefined) { if (Math.hypot(x - o.x, z - o.z) < o.r + r) return false; }
-      else {
-        const c = o.ry ? Math.cos(o.ry) : 1, s = o.ry ? Math.sin(o.ry) : 0, dx = x - o.x, dz = z - o.z;
-        if (Math.abs(dx * c - dz * s) < o.hx + r && Math.abs(dx * s + dz * c) < o.hz + r) return false;
-      }
+      if (!blocks(o, feet)) continue;
+      if (o.r !== undefined ? Math.hypot(x - o.x, z - o.z) < o.r + r : inBox(o, x, z, r)) return false;
     }
     return true;
+  };
+  // How far out from the middle a body's middle line may stand at (x, z) with its feet at `feet`, before its radius.
+  // Where the sphere widens over the floor a body in the air keeps to where it can stand, so no jump comes down held
+  // by the wall: the floor, or a solid's top under its feet (the Block Party's balcony).
+  const wallLimit = (L, x, z, feet, solids) => {
+    let ground = floorAt(L, x, z);
+    if (solids) for (const o of solids) {
+      if (o.top === undefined || o.top > feet + 1e-3 || o.top <= ground) continue;
+      if (o.r !== undefined ? Math.hypot(x - o.x, z - o.z) < o.r : inBox(o, x, z, 0)) ground = o.top;
+    }
+    return Math.min(wallAt(L, feet), wallAt(L, ground));
+  };
+  // Whether a solid stands in the way of a body with its feet at `feet`: one with a `top` only below it, less a step,
+  // and one with a `below` only for a head that reaches it.
+  const blocks = (o, feet) => !(o.top !== undefined && feet >= o.top - STEP_UP) && !(o.below !== undefined && feet + 1.8 <= o.below);
+  // Whether (x, z) is within `r` of a box solid, in its own turned frame: rounded at its corners, as a body meets one,
+  // so a walker going along a row of boxes (a balustrade round a curve) passes each joint rather than catching on it.
+  const inBox = (o, x, z, r) => {
+    const c = o.ry ? Math.cos(o.ry) : 1, s = o.ry ? Math.sin(o.ry) : 0, dx = x - o.x, dz = z - o.z;
+    const u = Math.abs(dx * c - dz * s) - o.hx, v = Math.abs(dx * s + dz * c) - o.hz;
+    return u < r && v < r && (u <= 0 || v <= 0 || u * u + v * v < r * r);
   };
   // The height of the ceiling over (x, z): the sphere's inner face as its flat facets lie, a little inside the curve.
   const ceilingAt = (L, x, z) => {
@@ -210,5 +234,5 @@
     const D = Math.max(0.3, Math.min(width / (2 * h), (eye - floor) / v, (ceiling - eye) / v, reach));
     return { D, w: 2 * D * h, h: 2 * D * v };
   };
-  BL.timechainRooms = { COUNT, ROOMS, LOCKABLE, OPEN, EXTERIOR_ZONE, DOOR, BODY, STEP_UP, DEG, TAU, parse, get, layout, radiusAt, onSphere, edgeY, edgeEl, floorAt, wallAt, clearAt, ceilingAt, fill };
+  BL.timechainRooms = { COUNT, ROOMS, LOCKABLE, OPEN, EXTERIOR_ZONE, DOOR, BODY, STEP_UP, DEG, TAU, parse, get, layout, radiusAt, onSphere, edgeY, edgeEl, floorAt, aisleStep, wallAt, wallLimit, blocks, clearAt, inBox, ceilingAt, fill };
 })();

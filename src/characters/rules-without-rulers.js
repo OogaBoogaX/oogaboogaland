@@ -95,7 +95,7 @@
         k.lid = k.color(PUMPKIN_DK);
         return true;
       },
-      headgear(k) {
+      hatNodes(k) {
         const h = k.h, u = k.u;
         addChild(k.parts.head, createNode({ position: { x: 0, y: 7.5 * u, z: 0 }, rotation: { x: 0, y: 0, z: 0.06 }, scale: { x: h, y: h, z: h }, geometry: topHatGeometry(), portraitHidden: true }));
       }

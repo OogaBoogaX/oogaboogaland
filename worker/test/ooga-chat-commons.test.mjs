@@ -166,6 +166,21 @@ test("access ends: signing out or losing eligibility closes the account's member
   assert.equal(d.ws.closed.code, 4429);
 });
 
+test("with only members here the sweep runs every four minutes, and a player arriving brings it back to one a minute", async () => {
+  const start = 1_800_000_000_000, h = await harness({ start });
+  await h.member(2, "bea");
+  h.room.sweepAt = 0;
+  await h.room.alarm();
+  assert.equal(h.room.sweepAt, start + protocol.MEMBER_SWEEP_MS, "an idle Ooga Chat tab wakes the room every four minutes, not every minute");
+  const { STALE_MS, RECENT_MS } = await import("../src/inspector-logic.js");
+  assert.ok(protocol.MEMBER_SWEEP_MS < Math.min(STALE_MS, RECENT_MS), "the room's report, riding its sweep, stays inside the Inspector's windows");
+  await h.player(1, "amy");
+  assert.equal(h.room.sweepAt, start + protocol.SWEEP_MS, "a player arriving pulls the next sweep in");
+  h.room.sweepAt = 0;
+  await h.room.alarm();
+  assert.equal(h.room.sweepAt, start + protocol.SWEEP_MS, "and keeps it at a minute while a player is here");
+});
+
 test("a woken Room keeps its members as members, never as players", async () => {
   const accepted = [];
   const first = await harness({ accepted });

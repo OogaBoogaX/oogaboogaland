@@ -58,6 +58,7 @@
   // Keep HTML audio, and accept the same synchronous gate that drives the exterior bus.
   const create=(context,master)=>{
     const radio=new Audio();radio.preload="none";radio.volume=0;radio.muted=true;
+    const soundChannel=window.BL.sound.channel("music");
     let fallback=null,disposed=false,enabled=false,distance=Infinity,target=0,level=0;
     let mode="idle",status="Press Play radio to enable sound",timer=0,watchdog=0,epoch=0,starts=0;
     const quiet=()=>{radio.muted=true;radio.volume=0;if(fallback)fallback.update(0,distance,false);};
@@ -68,7 +69,7 @@
     };
     const failed=()=>{
       if(disposed)return;stop();quiet();mode="fallback";status="Radio offline - local fallback; retrying";
-      if(!fallback)fallback=createFallback(context,master);
+      if(!fallback)fallback=createFallback(context,soundChannel.node(context,master));
       timer=setTimeout(()=>{timer=0;if(!disposed)start();},30000);
     };
     const start=()=>{
@@ -97,12 +98,12 @@
         if(disposed)return;distance=nextDistance;setEnabled(on);
         target=enabled ? .45*attenuation(distance) : 0;
         level+=(target-level)*(1-Math.exp(-Math.max(0,dt)*4));
-        radio.volume=mode==="live"?level*.3:0;radio.muted=!enabled||mode!=="live"||level<.00001;
+        radio.volume=mode==="live"?level*.3*soundChannel.gain:0;radio.muted=!enabled||mode!=="live"||level<.00001||soundChannel.gain<=0;
         if(fallback)fallback.update(dt,distance,enabled&&mode==="fallback");
       },
       get status(){return status;},
       get stats(){return {mode,target,level,starts,sources:disposed?0:1,liveSources:disposed?0:1,fallbackSources:fallback?fallback.stats.sources:0,liveAudible:!radio.muted&&radio.volume>0,fallbackLevel:fallback?fallback.stats.level:0,enabled,disposed,timers:Number(!!timer)+Number(!!watchdog)};},
-      dispose:()=>{if(disposed)return;offSound();disposed=true;stop();quiet();if(fallback)fallback.dispose();target=level=0;mode="disposed";}
+      dispose:()=>{if(disposed)return;offSound();soundChannel.release();disposed=true;stop();quiet();if(fallback)fallback.dispose();target=level=0;mode="disposed";}
     };
   };
   window.BL.dsbRadio={create,attenuation};

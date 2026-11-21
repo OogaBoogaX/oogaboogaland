@@ -1378,7 +1378,9 @@
   const SCENES = {};
   BL.scenes = BL.scenes || {};
   for (const id of Object.keys(KINDS)) {
-    SCENES[id] = BL.scenes[id] = {
+    // Each fills its shell from scene-deferred.js, which a hosted page needs to route the game before this code arrives.
+    if (!BL.scenes[id]) throw new Error(`Add ${id} to the carnival shells in scene-deferred.js`);
+    SCENES[id] = BL.deferred.scene(id, {
       id, padContext: "arcade", voiceZone: "arcade.hall", prepare: () => { const loading = BL.deferred.load("arcade"); return loading ? loading.then(() => null) : null; }, enter: (ctx) => enter(ctx, id), update, overlay, onDonation, onKey, renderOpts: RENDER_OPTS,
       leave: leaveScene, stats, liveGeometry, root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
       controlsHelp(touch) {
@@ -1392,6 +1394,6 @@
       },
       controlsHelpHold() { held.left = held.right = held.up = held.down = false; aim.hold = aim.steps = aim.y = aim.stepsY = 0; },
       get inMotion() { return phase === "play" || phase === "count"; }
-    };
+    });
   }
 })();

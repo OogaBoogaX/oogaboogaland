@@ -18,11 +18,12 @@ submission to a reused daily placeholder starts its UTC day.
 
 ## Intake and ownership
 
-Open human- and AI-authored source PRs as **drafts**, and keep them draft while
-implementation is in progress. Mark them ready only after the work and authorized
-local checks are finished and the description records validation and remaining
-acceptance work. Return to draft for substantial additional development; small
-review fixes can stay ready. Batch related fixes before pushing. This applies to
+Open human- and AI-authored source PRs as **drafts** once the work has its first
+commit, and keep them draft while implementation is in progress, committing and
+pushing at each working checkpoint. Mark them ready only after the work and
+authorized local checks are finished and the description records validation and
+remaining acceptance work. Return to draft for substantial additional development;
+small review fixes can stay ready. Once ready, batch related fixes before pushing. This applies to
 source submissions, not the automation-managed bundle placeholders above, whose
 review and merge gates follow their lane policy. Draft status does not disable
 all CI; it keeps unfinished submissions out of character intake and review.

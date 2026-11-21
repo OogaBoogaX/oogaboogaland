@@ -104,6 +104,8 @@ test("real Room sockets bind Tess turns to the account, reject replaced connecti
   runInNewContext(source, context);
   // Rooms built here without the constructor (Object.create) take the inspector's reporter switched off.
   context.Room.prototype.inspect = protocol.inspectReporter(null, {}, "Room", () => "", () => null);
+  context.Room.prototype.world = protocol.worldReporter(null, {}, () => null);
+  context.Room.prototype.catalog = protocol.roomCatalog.create({}, context.CAST_ROWS, protocol.castIndex);
   const room = Object.create(context.Room.prototype);
   room.sockets = new Map();
   let alarm = null;

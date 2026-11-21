@@ -30,7 +30,7 @@
 //   publish/close    stop publishing and go back to listening (the receive session stays)
 //   leave            give up everything
 
-import { sfuClient, turnCredentials } from "./sfu.js";
+import { sfuClient, turnCredentials, sessionGone, cleanupPass } from "./sfu.js";
 
 export const MEDIA_BODY_MAX = 256 * 1024;
 export const TRACKS_MAX = 64;
@@ -38,7 +38,6 @@ export const CLEANUP_MS = 60 * 60 * 1000;
 export const CLEANUP_RETRY_MS = 60 * 1000;
 export const CLEANUP_BACKLOG_MAX = 64;
 export const VOICE_TRACK = "mic";
-const sfuSessionGone = (err) => err.status === 404 || (err.status === 410 && err.code === "session_error");
 
 const answer = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 const refuse = (code, status, retryable = false) => answer({ error: { code, retryable } }, status);
@@ -88,31 +87,33 @@ export const createMediaBroker = (aud) => {
   // Two runs can hold the same job at once (the alarm's, and `queueClose`'s after a merge: an SFU call opens the object's
   // input gate), so a job leaves the queue only if it is still there, never by a stale index.
   const removeJob = (job) => { const i = cleanup.indexOf(job); if (i < 0) return false; cleanup.splice(i, 1); return true; };
-  const runCleanup = async (only = null) => {
-    for (const job of [...cleanup]) {
-      if (only && job !== only) continue;
-      if (!cleanup.includes(job)) continue;
-      // Given up after an hour: the one cleanup outcome that is an incident (docs/ooga-chat-operations.md, alerts).
-      if (Date.now() - job.at > CLEANUP_MS) { if (removeJob(job)) aud.inspect.count("cleanupExpired"); continue; }
-      job.tries++;
-      const v = job.v || 0;
-      try {
-        let mids = job.mids.slice();
-        if (job.all) {
-          const state = await sfu.getSession(job.session, true);
-          mids = [...new Set(mids.concat((state.tracks || []).filter((t) => t.status !== "inactive" && typeof t.mid === "string").map((t) => t.mid)))];
-        }
-        const res = mids.length ? await sfu.closeTracks(job.session, mids, true) : { tracks: [] };
-        // `close_track_error` confirms a track already gone; anything else unconfirmed is tried again, those `all` found
-        // included, and anything merged in meanwhile is kept.
-        const done = new Set((res.tracks || []).filter((t) => t && typeof t.mid === "string" && (!t.errorCode || t.errorCode === "close_track_error")).map((t) => t.mid));
-        job.mids = [...new Set(job.mids.concat(mids))].filter((mid) => !done.has(mid));
-        // Merged into meanwhile (its version moved): the run `queueClose` started finishes it, with `all` as asked.
-        if ((job.v || 0) === v) { if (!job.mids.length) { if (removeJob(job)) aud.inspect.count("cleanupDone"); } else job.all = false; }
-      } catch (err) {
-        if (sfuSessionGone(err) && removeJob(job)) aud.inspect.count("cleanupDone");
+  const cleanOne = async (job) => {
+    if (!cleanup.includes(job)) return;
+    // Given up after an hour: the one cleanup outcome that is an incident (docs/ooga-chat-operations.md, alerts).
+    if (Date.now() - job.at > CLEANUP_MS) { if (removeJob(job)) aud.inspect.count("cleanupExpired"); return; }
+    job.tries++;
+    const v = job.v || 0;
+    try {
+      let mids = job.mids.slice();
+      if (job.all) {
+        const state = await sfu.getSession(job.session, true);
+        mids = [...new Set(mids.concat((state.tracks || []).filter((t) => t.status !== "inactive" && typeof t.mid === "string").map((t) => t.mid)))];
       }
+      const res = mids.length ? await sfu.closeTracks(job.session, mids, true) : { tracks: [] };
+      // `close_track_error` confirms a track already gone; anything else unconfirmed is tried again, those `all` found
+      // included, and anything merged in meanwhile is kept.
+      const done = new Set((res.tracks || []).filter((t) => t && typeof t.mid === "string" && (!t.errorCode || t.errorCode === "close_track_error")).map((t) => t.mid));
+      job.mids = [...new Set(job.mids.concat(mids))].filter((mid) => !done.has(mid));
+      // Merged into meanwhile (its version moved): the run `queueClose` started finishes it, with `all` as asked.
+      if ((job.v || 0) === v) { if (!job.mids.length) { if (removeJob(job)) aud.inspect.count("cleanupDone"); } else job.all = false; }
+    } catch (err) {
+      if (sessionGone(err) && removeJob(job)) aud.inspect.count("cleanupDone");
     }
+  };
+  // One job (`queueClose`'s), or the alarm's pass over the queue, bounded in time and a few jobs at once (`cleanupPass`).
+  const runCleanup = async (only = null) => {
+    if (only) await cleanOne(only);
+    else await cleanupPass(cleanup, cleanOne);
     await persistCleanup();
   };
 
@@ -167,7 +168,7 @@ export const createMediaBroker = (aud) => {
    * nothing; one that lost some already heard `prune`'s word.
    */
   const announced = new Map();
-  const announce = () => {
+  const published = () => {
     const now = new Map();
     for (const s of aud.island.speakers) if (s.pub && s.pub.session && s.pub.track) now.set(s.zone, `${now.get(s.zone) || ""}|${s.id}:${s.pub.gen || 0}`);
     for (const c of aud.model.conns.values()) {
@@ -175,6 +176,16 @@ export const createMediaBroker = (aud) => {
       const m = states.get(c.connId);
       if (m && m.pub && m.track) now.set(c.zone, `${now.get(c.zone) || ""}|${c.id}:${-m.gen - 1}`);
     }
+    return now;
+  };
+  // A woken object starts from what its listeners heard before it hibernated: every change was announced as it happened,
+  // so the Room's first unchanged word after a wake tells nobody to sync again.
+  const settle = () => {
+    announced.clear();
+    for (const [zone, sig] of published()) announced.set(zone, sig);
+  };
+  const announce = () => {
+    const now = published();
     const changed = new Set();
     for (const zone of new Set([...now.keys(), ...announced.keys()])) if ((now.get(zone) || "") !== (announced.get(zone) || "")) changed.add(zone);
     announced.clear();
@@ -207,15 +218,38 @@ export const createMediaBroker = (aud) => {
     if (!s) return;
     const had = !!s.pub;
     await forget(connId);
+    // Its sessions are no longer held, so a retirement that waited on them is done now, not after the closes below,
+    // which wait on the SFU.
+    if (typeof aud.confirmRetired === "function") aud.confirmRetired();
     if (had) { aud.sourcesChanged(); await prune(); announce(); }
     if (s.sub) await queueClose(s.sub, Object.keys(s.mids), !Object.keys(s.mids).length);
     if (s.pub) await queueClose(s.pub, s.pubMid ? [s.pubMid] : [], !s.pubMid);
   };
 
+  // Sessions a live connection still holds: its page may still be receiving or sending on them. One no connection holds
+  // belongs to a page that closed it (Ooga Chat closes its media with its socket, on a leave and before opening another),
+  // so nothing flows on it, whether or not the SFU has confirmed the close yet.
+  const heldSessions = () => {
+    const held = new Set();
+    for (const s of states.values()) { if (s.sub) held.add(s.sub); if (s.pub) held.add(s.pub); }
+    return held;
+  };
+  // A full queue lets go of its oldest jobs for sessions nobody holds, rather than refuse every speaker and listener
+  // while the SFU stops answering; only a queue full of held sessions refuses. True when there is room.
+  const shed = async () => {
+    if (cleanup.length < CLEANUP_BACKLOG_MAX) return true;
+    const held = heldSessions();
+    const free = cleanup.filter((job) => !held.has(job.session)).sort((a, b) => a.at - b.at).slice(0, cleanup.length - CLEANUP_BACKLOG_MAX + 1);
+    if (!free.length) return false;
+    for (const job of free) if (removeJob(job)) aud.inspect.count("cleanupExpired");
+    await persistCleanup();
+    return true;
+  };
+
   // --- one op ---
   const operation = async (op, conn, body) => {
     if (!sfu) return refuse("voice_unavailable", 503, true);
-    if (cleanup.length >= CLEANUP_BACKLOG_MAX && !["leave", "publish/close", "receive/close"].includes(op)) return refuse("cleanup_pending", 503, true);
+    if (!["leave", "publish/close", "receive/close"].includes(op) && !(await shed())) return refuse("cleanup_pending", 503, true);
     const s = stateOf(conn.connId);
     const current = () => aud.model.conns.get(conn.connId) === conn;
     const leaseOk = () => !!conn.lease && conn.lease.generation === body.generation;
@@ -360,12 +394,19 @@ export const createMediaBroker = (aud) => {
   };
 
   return {
-    request, restore, retirePublication, releaseAll, prune, announce, chatSources, authorizedFor, runCleanup,
+    request, restore, retirePublication, releaseAll, prune, announce, settle, chatSources, authorizedFor, runCleanup,
     /** The cleanup queue as the owner sees it: how many jobs and the oldest one's age. */
     backlog: (now = Date.now()) => ({ jobs: cleanup.length, oldestMs: cleanup.reduce((age, job) => Math.max(age, now - job.at), 0) }),
     get cleanup() { return cleanup; }, get states() { return states; }, get configured() { return !!sfu; },
-    /** Speakers some outdoor subscription to whom is not yet confirmed closed at the SFU. */
-    pending: () => new Set(cleanup.flatMap((job) => job.participants || [])),
+    /**
+     * Speakers some outdoor subscription to whom is not yet confirmed closed at the SFU, on a session a live connection
+     * still holds. A job for a session nobody holds (its listener left) holds nobody's microphone: until it is given up,
+     * after an hour, it would otherwise keep the island's `closed` from coming and the speaker's microphone held off.
+     */
+    pending: () => {
+      const held = heldSessions();
+      return new Set(cleanup.flatMap((job) => (held.has(job.session) ? job.participants || [] : [])));
+    },
     nextCleanup: () => (cleanup.length ? Date.now() + CLEANUP_RETRY_MS : Infinity),
   };
 };

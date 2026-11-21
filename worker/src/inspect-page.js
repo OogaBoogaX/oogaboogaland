@@ -1,6 +1,9 @@
 // The Durable Object inspector's page (inspect.js serves it with a fresh nonce in place of __NONCE__). Plain HTML, one
 // style and one script, no requests but its socket to /api/inspect/ws: a snapshot of every object and the kept log,
-// then updates as objects report (inspector.js). Everything it shows arrived from the objects themselves.
+// then updates as objects report (inspector.js). Everything it shows arrived from the objects themselves, and its CPU
+// figures are the estimate cpu-model.js makes of their rates. Light or dark in the Hum app's palette, as /map is.
+import { CPU_MODEL } from "./cpu-model.js";
+
 export const PAGE = String.raw`<!doctype html>
 <html lang="en">
 <head>
@@ -8,53 +11,76 @@ export const PAGE = String.raw`<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>Object Inspector</title>
+<script nonce="__NONCE__">
+// The appearance this browser chose (System, Light or Dark; localStorage ooga-theme, which the World Map at /map
+// shares), on <html> before the page draws. No attribute follows the system.
+try { var chosen = localStorage.getItem("ooga-theme"); if (chosen === "light" || chosen === "dark") document.documentElement.setAttribute("data-theme", chosen); } catch (e) {}
+</script>
 <style nonce="__NONCE__">
-:root { --bg: #f4f2ec; --grid: #e6e2d8; --card: #faf9f5; --ink: #22211d; --soft: #6c695f; --line: #dcd8cc; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --ok: #3f8a4f; --okbg: #e3f0e4; --warn: #b07a14; --warnbg: #f6ecd4; --bad: #b8432f; --badbg: #f6e0da; --mute: #8a877d; --mutebg: #ebe8e0; --you: #fff4c2; }
-@media (prefers-color-scheme: dark) { :root { --bg: #171714; --grid: #22221e; --card: #1f1f1b; --ink: #ecebe5; --soft: #a19e94; --line: #34332d;
-  --ok: #7cc58a; --okbg: #1f3324; --warn: #e0b04f; --warnbg: #3a2f17; --bad: #ef8a75; --badbg: #3d221c; --mute: #9b988e; --mutebg: #2a2a25; --you: #3b3417; } }
+/* The Hum app's palette, light and dark: sand and cream with navy ink and one blue, or neutral greys. */
+:root { color-scheme: light; --card-img: none;
+  --bg: light-dark(#ede5d8, #1f1f1f); --grid: light-dark(color-mix(in srgb, #ddd2c1 55%, transparent), rgba(255, 255, 255, 0.05));
+  --card: light-dark(#faf6ef, #111111); --field: light-dark(#f1eadf, #2a2a2a); --ink: light-dark(#141b2d, #f2f2f0); --on-ink: light-dark(#ffffff, #111111);
+  --soft: light-dark(#675f52, #a3a3a0); --line: light-dark(#e8dfd1, #2e2e2e); --stroke: light-dark(#e2d8c8, #262626);
+  --accent: light-dark(#399fe3, #4fabe8); --accent-text: light-dark(#1a5f94, #8ccbf3); --accent-soft: light-dark(#d7e9f7, #15324a); --accent-halo: light-dark(#e8f2fa, #10243a);
+  --ok: light-dark(#1f8a4c, #2ea062); --okbg: light-dark(#dcefe3, #173323); --warn: light-dark(#9a5b00, #e0b04f); --warnbg: light-dark(#f6ecd4, #3a2f17);
+  --bad: light-dark(#b42318, #e0634f); --badbg: light-dark(#f6e0da, #3d221c); --mute: light-dark(#3d372d, #e2e2e0); --mutebg: light-dark(#e5dccd, #383838);
+  --you: var(--accent-halo); --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --shadow-card: 0 0 0 1px var(--stroke), 0 1px 2px light-dark(rgba(20, 27, 45, 0.03), rgba(0, 0, 0, 0.3)), 0 10px 28px -18px light-dark(rgba(20, 27, 45, 0.14), rgba(0, 0, 0, 0.5));
+  --shadow-pill: 0 0 0 1px var(--stroke), 0 1px 2px light-dark(rgba(20, 27, 45, 0.03), rgba(0, 0, 0, 0.3)); }
+:root[data-theme="dark"] { color-scheme: dark; --card-img: linear-gradient(180deg, #181818 0%, #0a0a0a 100%); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; --card-img: linear-gradient(180deg, #181818 0%, #0a0a0a 100%); } }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
-  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 28px 28px; }
-main { max-width: 1280px; margin: 0 auto; padding: 20px 16px 48px; }
-header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-h1 { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; margin: 0; color: var(--soft); }
-h2 { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; margin: 28px 0 10px; color: var(--soft); }
+body { margin: 0; background-color: var(--bg); color: var(--ink); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased;
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 32px 32px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+a { color: var(--accent-text); }
+main { max-width: 1280px; margin: 0 auto; padding: 24px 16px 48px; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.head { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+h1 { font-size: 20px; letter-spacing: -0.01em; margin: 0; color: var(--ink); }
+h2 { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin: 30px 0 10px; color: var(--accent-text); }
 .pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .ok { background: var(--okbg); color: var(--ok); } .warn { background: var(--warnbg); color: var(--warn); } .bad { background: var(--badbg); color: var(--bad); } .mute { background: var(--mutebg); color: var(--mute); }
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
-.tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
-.tile b { display: block; font-size: 22px; font-family: var(--mono); }
+.theme { display: inline-grid; grid-auto-flow: column; gap: 2px; padding: 3px; border-radius: 999px; background: var(--field); }
+.theme button { font: inherit; font-size: 13px; font-weight: 600; padding: 5px 12px; border: 0; border-radius: 999px; background: transparent; color: var(--soft); cursor: pointer; }
+.theme button:hover { color: var(--ink); }
+.theme button[aria-checked="true"] { background-color: var(--card); background-image: var(--card-img); color: var(--ink); box-shadow: var(--shadow-pill); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.tile { background-color: var(--card); background-image: var(--card-img); box-shadow: var(--shadow-card); border-radius: 16px; padding: 12px 16px; }
+.tile b { display: block; font-size: 24px; font-family: var(--mono); color: var(--ink); }
 .tile span { color: var(--soft); font-size: 12px; }
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-.card.busy { border-color: var(--ok); }
-.card.stale { border-color: var(--warn); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
+.card { background-color: var(--card); background-image: var(--card-img); box-shadow: var(--shadow-card); border-radius: 16px; overflow: hidden; }
+.card.busy { box-shadow: 0 0 0 1.5px var(--accent), 0 10px 28px -18px light-dark(rgba(20, 27, 45, 0.14), rgba(0, 0, 0, 0.5)); }
+.card.stale { box-shadow: 0 0 0 1.5px var(--warn), 0 10px 28px -18px light-dark(rgba(20, 27, 45, 0.14), rgba(0, 0, 0, 0.5)); }
 .card h3 { margin: 0; padding: 12px 16px; font: 600 15px var(--mono); display: flex; justify-content: space-between; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .fields { padding: 10px 16px; font-family: var(--mono); font-size: 13px; display: grid; grid-template-columns: auto 1fr; gap: 2px 14px; }
 .fields dt { color: var(--soft); } .fields dd { margin: 0; overflow-wrap: anywhere; }
-.bars { padding: 4px 16px 10px; display: grid; gap: 6px; }
+.bars { padding: 4px 16px 12px; display: grid; gap: 7px; }
 .bar { font-size: 12px; } .bar .t { display: flex; justify-content: space-between; color: var(--soft); font-family: var(--mono); gap: 8px; }
-.bar .track { height: 6px; background: var(--mutebg); border-radius: 3px; overflow: hidden; } .bar .fill { height: 100%; background: var(--ok); }
+.bar .track { height: 6px; background: var(--accent-soft); border-radius: 3px; overflow: hidden; } .bar .fill { height: 100%; background: var(--accent); }
 .bar .fill.warn { background: var(--warn); } .bar .fill.bad { background: var(--bad); }
+.bar.cpu .t span:first-child { color: var(--accent-text); font-weight: 600; }
 .foot { padding: 8px 16px; border-top: 1px solid var(--line); color: var(--soft); font-size: 12px; }
-.zones { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
-.zone { background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+.zones { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.zone { background-color: var(--card); background-image: var(--card-img); box-shadow: var(--shadow-card); border-radius: 16px; overflow: hidden; }
 .zone h4 { margin: 0; padding: 9px 14px; font: 600 13px var(--mono); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
 .sock { padding: 7px 14px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
 .sock:last-child { border-bottom: 0; }
 .sock.you { background: var(--you); }
 .sock.moved { animation: moved 3s ease-out; }
-@keyframes moved { from { background: var(--okbg); } }
+@keyframes moved { from { background: var(--accent-soft); } }
 .sock .who { font-weight: 600; font-family: var(--mono); }
 .sock .meta { color: var(--soft); }
 .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 10px; }
-input[type=search] { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); min-width: 220px; }
+input[type=search] { font: inherit; padding: 7px 14px; border-radius: 999px; border: 0; box-shadow: var(--shadow-pill); background: var(--field); color: var(--ink); min-width: 240px; }
+input[type=checkbox] { accent-color: var(--accent); }
 label { color: var(--soft); font-size: 13px; display: inline-flex; gap: 6px; align-items: center; }
-.log { background: var(--card); border: 1px solid var(--line); border-radius: 14px; font: 12.5px/1.5 var(--mono); }
+.log { background-color: var(--card); background-image: var(--card-img); box-shadow: var(--shadow-card); border-radius: 16px; font: 12.5px/1.5 var(--mono); overflow: hidden; }
 .line { padding: 4px 14px; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 72px 70px 1fr; gap: 10px; }
 .line:last-child { border-bottom: 0; }
-.line .k { font-weight: 600; } .line.drop .k, .line.system .k { color: var(--bad); } .line.back .k, .line.join .k { color: var(--ok); } .line.voice .k { color: var(--warn); }
+.line .k { font-weight: 600; } .line.drop .k, .line.system .k { color: var(--bad); } .line.back .k, .line.join .k { color: var(--ok); } .line.voice .k { color: var(--warn); } .line.zone .k { color: var(--accent-text); }
 .line .when { color: var(--soft); }
 .empty { padding: 14px; color: var(--soft); }
 .note { color: var(--soft); font-size: 13px; max-width: 920px; margin-top: 28px; }
@@ -63,7 +89,8 @@ label { color: var(--soft); font-size: 13px; display: inline-flex; gap: 6px; ali
 </head>
 <body>
 <main>
-  <header><h1>Durable Objects · Ooga Booga Land</h1><span id="feed" class="pill mute">Connecting</span></header>
+  <header><div class="head"><h1>Durable Objects · Ooga Booga Land</h1><span id="feed" class="pill mute">Connecting</span></div>
+    <div class="theme" id="theme" role="radiogroup" aria-label="Appearance"><button type="button" role="radio" data-choice="system">System</button><button type="button" role="radio" data-choice="light">Light</button><button type="button" role="radio" data-choice="dark">Dark</button></div></header>
   <section class="tiles" id="tiles"></section>
   <h2>Objects</h2>
   <section class="cards" id="cards"></section>
@@ -75,7 +102,7 @@ label { color: var(--soft); font-size: 13px; display: inline-flex; gap: 6px; ali
     <label><input type="checkbox" id="drops"> Drops and failures only</label>
   </div>
   <section class="log" id="log"></section>
-  <p class="note">Each object reports what it is doing to the Inspector, so this is the app's view, not Cloudflare's. An object only appears once it has reported since this was turned on. Sleep is inferred: a wake is the object's constructor running, and one that wakes with fewer sockets than it reported closed them while it slept or was reset. Rates are averaged since the object's previous report (every second while this page is open, every minute otherwise). Busy objects that go quiet for 5 minutes are marked stale. The log keeps the last 500 lines for 24 hours. CPU, memory and billing: the Cloudflare dashboard's Durable Objects metrics.</p>
+  <p class="note">Each object reports what it is doing to the Inspector, so this is the app's view, not Cloudflare's. An object only appears once it has reported since this was turned on. Sleep is inferred: a wake is the object's constructor running, and one that wakes with fewer sockets than it reported closed them while it slept or was reset. Rates are averaged since the object's previous report (every second while this page is open, every four minutes otherwise). Busy objects that go quiet for 5 minutes are marked stale. The log keeps the last 500 lines for 24 hours. Estimated CPU is a model, not a measurement: each message in costed at 1/600 s and each send out at 1/1000 s of the object's one thread, from Cloudflare's published throughput for a Durable Object (the World Map at /map shows the same). Measured CPU, memory and billing: the Cloudflare dashboard's Durable Objects metrics.</p>
 </main>
 <script nonce="__NONCE__">
 "use strict";
@@ -96,6 +123,13 @@ var clock = function (t) { return new Date(t).toLocaleTimeString([], { hour12: f
 var num = function (n, d) { return n === undefined || n === null ? "—" : Number(n).toFixed(d || 0); };
 var label = function (key) { var i = key.indexOf(":"); return key.slice(i + 1) + " : " + key.slice(0, i); };
 var BUSY = { live: 1, running: 1, open: 1 };
+var CPU = ${JSON.stringify(CPU_MODEL)};
+
+// The estimated CPU of an object's messages in and sends out a second (cpu-model.js), against its one thread.
+function cpuBar(r) {
+  var ms = (r.in || 0) * CPU.inMs + (r.out || 0) * CPU.outMs;
+  return bar("est. CPU", ms, CPU.budgetMs, "≈ " + num(ms, ms < 10 ? 1 : 0) + " ms/s of " + CPU.budgetMs + " · " + num(ms / CPU.budgetMs * 100, 1) + "% · estimate").replace('class="bar"', 'class="bar cpu"');
+}
 
 function bar(name, value, max, text) {
   var pct = max > 0 && value >= 0 ? Math.min(100, value / max * 100) : 0;
@@ -124,7 +158,7 @@ function roomCard(row) {
     ["alarm started", st.alarmStarted ? dur(now() - st.alarmStarted) + " ago" : "none"],
     ["alarm finished", st.alarmFinished ? dur(now() - st.alarmFinished) + " ago" : "none"],
     ["alarm registered", st.alarmRegisteredAt ? (st.alarmRegisteredAt < now() ? "overdue " + dur(now() - st.alarmRegisteredAt) : "in " + dur(st.alarmRegisteredAt - now())) : "none"]]);
-  var bars = bar("players", st.players, st.maxPlayers, (st.players || 0) + " / " + st.maxPlayers)
+  var bars = cpuBar(r) + bar("players", st.players, st.maxPlayers, (st.players || 0) + " / " + st.maxPlayers)
     + bar("messages in", r.in || 0, L.requestsPerSecond, num(r.in, 1) + "/s of ~" + L.requestsPerSecond)
     + bar("snapshots", r.snapshots || 0, st.tickHz, num(r.snapshots, 1) + " of " + st.tickHz + " Hz · worst " + num(pk.late) + " ms late")
     + bar("sent", r.out || 0, L.requestsPerSecond * 4, num(r.out, 1) + " msg/s · " + num((r.outBytes || 0) / 1024, 1) + " KB/s")
@@ -140,7 +174,7 @@ function gameCard(row) {
   var st = row.state || {}, r = row.rates || {}, pk = row.peaks || {};
   return fields([["running", st.running ? "yes" : "no"], ["ticks", num(r.ticks, 1) + "/s · worst " + num(pk.late) + " ms late"],
     ["last save", st.savedAt ? dur(now() - st.savedAt) + " ago" : "—"], ["reports lost", row.failed || 0]])
-    + '<div class="bars">' + bar("sockets", st.sockets, st.maxSockets, (st.sockets || 0) + " / " + st.maxSockets)
+    + '<div class="bars">' + cpuBar(r) + bar("sockets", st.sockets, st.maxSockets, (st.sockets || 0) + " / " + st.maxSockets)
     + bar("messages in", r.in || 0, S.limits.requestsPerSecond, num(r.in, 1) + "/s") + "</div>";
 }
 // Ooga Chat's audience (#669): one object for both zones, its counts and caps, and the media cleanup it owes.
@@ -232,9 +266,14 @@ function describe(e) {
       if (f.code) how += " " + f.code + (f.clean === true ? ", clean" : f.clean === false ? ", not clean" : "");
       if (f.said) how += ' · page said "' + f.said + '"';
       if (f.error) how += " · " + f.error;
-      return ["drop", "drop", who + " · " + how + (f.zone ? " · in " + f.zone : "") + (f.on !== undefined ? " · on " + dur(f.on) : "")
+      return ["drop", "drop", who + " · " + how + (f.held ? " · not back while held" : "") + (f.zone ? " · in " + f.zone : "") + (f.on !== undefined ? " · on " + dur(f.on) : "")
         + (f.heard !== undefined ? " · last heard " + dur(f.heard) + " before" : "") + (f.voice ? " · in voice" : "") + (f.mass ? " · mass drop (" + f.mass + ")" : "")];
     }
+    case "hold": {
+      var lost = f.error ? "socket error · " + f.error : (f.code ? "closed " + f.code + (f.clean ? ", clean" : ", not clean") : f.said === "resumed" ? "came back on a new socket" : "closed");
+      return ["drop", "held", who + " · " + lost + (f.said && f.said !== "resumed" ? ' · page said "' + f.said + '"' : "") + " · held for their page" + (f.zone ? " · in " + f.zone : "") + (f.voice ? " · in voice" : "")];
+    }
+    case "resume": return ["back", "resumed", who + " · back after " + dur(f.away) + ", nobody else saw them go"];
     case "back": return ["back", "back", who + " · down " + dur(f.down) + " · browser saw " + (f.code || "no close") + (f.clean ? ", clean" : f.code ? ", not clean" : "") + " · page says " + f.why];
     case "zone": return ["zone", "zone", who + " · " + f.from + " → " + f.to];
     case "visible": return ["zone", "tab", who + " · " + (f.visible ? "shown" : "hidden")];
@@ -320,6 +359,15 @@ function connect() {
     setTimeout(connect, Math.min(15000, 1000 * Math.pow(2, retry++)));
   };
 }
+// Appearance: System follows the system; Light and Dark are kept in this browser (localStorage ooga-theme, shared with /map).
+function choose(choice) {
+  try { if (choice === "system") localStorage.removeItem("ooga-theme"); else localStorage.setItem("ooga-theme", choice); } catch (e) {}
+  if (choice === "system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", choice);
+  var shown = document.documentElement.getAttribute("data-theme") || "system", buttons = $("theme").querySelectorAll("button");
+  for (var i = 0; i < buttons.length; i++) buttons[i].setAttribute("aria-checked", String(buttons[i].getAttribute("data-choice") === shown));
+}
+$("theme").addEventListener("click", function (ev) { var b = ev.target.closest("button"); if (b) choose(b.getAttribute("data-choice")); });
+choose(document.documentElement.getAttribute("data-theme") || "system");
 $("filter").addEventListener("input", renderLog);
 $("drops").addEventListener("change", renderLog);
 setInterval(function () { if (!document.hidden) { renderTiles(); renderCards(); renderZones(); renderLog(); } }, 1000);

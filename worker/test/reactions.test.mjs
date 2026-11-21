@@ -41,6 +41,8 @@ const roomClass = (extra = {}) => {
   // Rooms built here without the constructor (Object.create) take the inspector's reporter switched off, as the
   // constructor gives one without INSPECTOR_IDS.
   context.Room.prototype.inspect = protocol.inspectReporter(null, {}, "Room", () => "", () => null);
+  context.Room.prototype.world = protocol.worldReporter(null, {}, () => null);
+  context.Room.prototype.catalog = protocol.roomCatalog.create({}, context.CAST_ROWS, protocol.castIndex);
   return context.Room;
 };
 const forbidden = (what) => () => { throw new Error(`a reaction touched ${what}`); };

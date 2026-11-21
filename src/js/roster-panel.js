@@ -4,10 +4,12 @@
 // the name, which opens a darker strip of their stats under the row, the voice mark, how long ago they last contributed
 // and their state (clank, chill, sleep, away), every row in the chosen order (latest contribution by default, or most
 // contributions in the newest oogatron reading, this browser's choice), the away rows behind their Show away button.
-// The strip: their Ooga's face, their total across the five kinds and the day of their first contribution side by
-// side (its year shortened to ’26 on every strip at once when the roster's longest total and longest date would not
-// fit), then the kinds and a chip linking each repository they contributed to (not the org's `.github`) with their
-// count there. A section's rows are made once and kept for the page life, reused on every visit.
+// The strip: their Ooga's face, their contributions (commits on the default branch, PRs, reviews and issues, as
+// GitHub's graph counts them) and the day of their first contribution side by side (its year shortened to ’26 on
+// every strip at once when the roster's longest total and longest date would not fit), then those kinds, their
+// comments and merges on a line of their own (activity, outside the total), and a chip for each repository they
+// contributed to (not the org's `.github`) with their contributions there, linking to that repository's issues and
+// pull requests that involve them. A section's rows are made once and kept for the page life, reused on every visit.
 // The hooks are what differs between the pages: `roster` (the contributors: `name`, `display`), `stateFor(c)` and
 // `ageLabel(c)` (their contribution's state and age, `stateAt` and `ageAt` below), `stamp(c)` (when they last
 // contributed), `login(c)` and `joinedAt(c)` (their first contribution where the reading has no `first_seen_at` for them), `stats()` (the newest oogatron reading, normalized), `face(c)` (a canvas or
@@ -35,7 +37,10 @@
     if (hours < 24) return `${hours}h ago`;
     return `${Math.floor(hours / 24)}d ago`;
   };
-  const STAT_KINDS = [["commits", "commit", "commits"], ["prs", "PR", "PRs"], ["reviews", "review", "reviews"], ["issues", "issue", "issues"], ["comments", "comment", "comments"]];
+  // Each kind with whether it is a contribution: the four GitHub's contribution graph counts are, while comments and
+  // merges are activity shown beside the total.
+  const STAT_KINDS = [["commits", "commit", "commits", true], ["prs", "PR", "PRs", true], ["reviews", "review", "reviews", true],
+    ["issues", "issue", "issues", true], ["comments", "comment", "comments", false], ["merges", "merge", "merges", false]];
   // The org's .github repository holds its profile and templates, not a project, so it gets no chip.
   const REPO_URL = "https://github.com/OogaBoogaX/", UNLISTED_REPOS = new Set([".github"]);
   const SINCE = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -47,7 +52,7 @@
   };
   const countFor = (boards, login) => {
     let n = 0;
-    if (boards) for (const [kind] of STAT_KINDS) n += countIn(boards[kind], login);
+    if (boards) for (const [kind, , , counts] of STAT_KINDS) if (counts) n += countIn(boards[kind], login);
     return n;
   };
 
@@ -103,7 +108,7 @@
     const listeners = new AbortController(), { signal } = listeners;
     const on = (target, type, fn) => target.addEventListener(type, fn, { signal });
     const rosterRank = (state) => own.sort === "recent" || state === "away" ? ROSTER_ORDER[state] : 0;
-    // Every login's contributions across the five kinds in the newest reading, and the first time Oogatron saw them in
+    // Every login's contributions in the newest reading, and the first time Oogatron saw them in
     // any org repository's history (`first_seen_at`, from before a repository joined the org too), worked out once a
     // reading.
     const tallied = () => {
@@ -113,8 +118,8 @@
       tally.totals.clear();
       tally.firstSeen.clear();
       const boards = data && data.leaderboards;
-      if (boards) for (const [kind] of STAT_KINDS) {
-        if (!Array.isArray(boards[kind])) continue;
+      if (boards) for (const [kind, , , counts] of STAT_KINDS) {
+        if (!counts || !Array.isArray(boards[kind])) continue;
         for (const entry of boards[kind]) {
           const login = entry.login.toLowerCase();
           tally.totals.set(login, (tally.totals.get(login) || 0) + entry.count);
@@ -229,7 +234,8 @@
     };
     const buildStats = (row) => {
       const box = doc.createElement("div"), faceCanvas = doc.createElement("canvas"), facts = doc.createElement("dl");
-      const total = doc.createElement("dd"), since = doc.createElement("dd"), kinds = doc.createElement("p"), repos = doc.createElement("div");
+      const total = doc.createElement("dd"), since = doc.createElement("dd"), kinds = doc.createElement("p"), also = doc.createElement("p");
+      const repos = doc.createElement("div");
       box.className = "roster-stats"; box.id = `roster-stats-${row.rosterIndex}-${row.contributor.name}`;
       faceCanvas.className = "roster-stats-face"; faceCanvas.setAttribute("role", "img"); faceCanvas.setAttribute("aria-label", `${row.contributor.display}'s Ooga`);
       facts.className = "roster-stats-facts";
@@ -240,10 +246,11 @@
         facts.append(pair);
       }
       kinds.className = "roster-stats-kinds";
+      also.className = "roster-stats-kinds roster-stats-also";
       // Links in a group, not list items: the roster's own rows are its <li>s.
       repos.className = "roster-stats-repos"; repos.setAttribute("role", "group"); repos.setAttribute("aria-label", "Repositories");
-      box.append(faceCanvas, facts, kinds, repos);
-      const strip = row.nodes.stats = { box, face: faceCanvas, facts, total, since, kinds, repos, long: "", short: "", fitWidth: 0 };
+      box.append(faceCanvas, facts, kinds, also, repos);
+      const strip = row.nodes.stats = { box, face: faceCanvas, facts, total, since, kinds, also, repos, long: "", short: "", fitWidth: 0 };
       row.li.append(box);
       own.sinceFits.set(facts, strip);
       if (!own.sinceResize) own.sinceResize = new ResizeObserver((entries) => {
@@ -280,23 +287,28 @@
       strip.long = joined > 0 ? SINCE.format(joined) : "—";
       strip.short = joined > 0 ? shortYear(joined) : "—";
       const data = stats();
-      const kinds = [];
+      const kinds = [], also = [];
       let sum = 0;
-      for (const [kind, one, many] of STAT_KINDS) {
+      for (const [kind, one, many, counts] of STAT_KINDS) {
         const n = countIn(data && data.leaderboards && data.leaderboards[kind], login);
-        sum += n;
-        if (n) kinds.push(`${statCount(n)} ${n === 1 ? one : many}`);
+        if (counts) sum += n;
+        if (n) (counts ? kinds : also).push(`${statCount(n)} ${n === 1 ? one : many}`);
       }
       strip.total.textContent = statCount(sum);
       fitSince();
       // Each count stays on one line with its label (and the dot after it), so the line wraps only between them.
-      strip.kinds.replaceChildren();
-      kinds.forEach((text, i) => {
-        const item = doc.createElement("span");
-        item.textContent = i < kinds.length - 1 ? `${text} ·` : text;
-        strip.kinds.append(item, i < kinds.length - 1 ? " " : "");
-      });
-      strip.kinds.hidden = !kinds.length;
+      const line = (p, items, lead) => {
+        p.replaceChildren();
+        if (items.length && lead) p.append(lead);
+        items.forEach((text, k) => {
+          const item = doc.createElement("span");
+          item.textContent = k < items.length - 1 ? `${text} ·` : text;
+          p.append(item, k < items.length - 1 ? " " : "");
+        });
+        p.hidden = !items.length;
+      };
+      line(strip.kinds, kinds);
+      line(strip.also, also, "Also ");
       const repoList = [];
       for (const repo of data && Array.isArray(data.repos) ? data.repos : []) {
         if (UNLISTED_REPOS.has(repo.name)) continue;
@@ -308,7 +320,7 @@
       strip.repos.replaceChildren();
       for (const { name, n } of repoList) {
         const a = doc.createElement("a"), b = doc.createElement("b");
-        a.href = REPO_URL + name; a.target = "_blank"; a.rel = "noopener";
+        a.href = `${REPO_URL}${name}/issues?q=${encodeURIComponent(`involves:${login}`)}`; a.target = "_blank"; a.rel = "noopener";
         a.title = `${name}: ${n.toLocaleString()} contribution${n === 1 ? "" : "s"}`;
         b.textContent = statCount(n);
         a.append(name, b);
@@ -433,7 +445,8 @@
       if (own.sort === "most") sortRoster();
     };
     // Faces that arrived after a strip opened.
-    const faceChanged = () => {
+    const faceChanged = (reset = false) => {
+      if (reset) own.faces.clear();
       for (const row of rosterRows.values()) if (row.open) paintFace(row);
     };
     const dispose = () => listeners.abort();

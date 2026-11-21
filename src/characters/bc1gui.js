@@ -36,8 +36,8 @@
     lastCommit: 1788190400,
     look: { portrait: { min: [-3, -2, -1], max: [7, 13, 8] }, skater: true, hairless: true, noBrow: true, face: "smirk", skin: "#f2a33c", hair: "#e4561f", fur: "#8f4f17" },
     dress: {
-      crown(k, v) {
-        const P = k.P, knit = k.color("#8cc63f"), knitDk = k.color("#6faa2f"), pom = k.color("#a9d94c"), btc = k.color("#f7931a"), lens = k.color("#3f9c96");
+      hat(k, v) {
+        const knit = k.color("#8cc63f"), knitDk = k.color("#6faa2f"), pom = k.color("#a9d94c"), btc = k.color("#f7931a");
         const rib = (x, y, z) => (x + z) % 2 ? knitDk : knit;
         v.fill(-1, 7, 4, 8, -1, 6, rib);
         v.fill(-1, 5, 9, 9, 0, 5, rib);
@@ -45,6 +45,9 @@
         v.fill(-3, 0, 11, 12, 1, 3, k.jit(pom, knit, 0.2));
         v.fill(-2, -1, 13, 13, 2, 2, pom);
         for (const [bx, by] of [[3, 8], [4, 8], [3, 7], [5, 7], [3, 6], [4, 6], [3, 5], [5, 5], [3, 4], [4, 4]]) v.set(bx, by, 6, btc);
+      },
+      crown(k, v) {
+        const P = k.P, lens = k.color("#3f9c96");
         if (BL.models.STYLE !== "R") {
           for (const z of [-1, 1, 3]) {
             v.fill(-1, -1, -2, 3, z, z, k.hairJ);

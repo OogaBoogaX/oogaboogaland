@@ -13,7 +13,7 @@
   "use strict";
   const BL = window.BL;
   const RM = BL.timechainRoomModels, CH = BL.timechainCharts, ROOMS = BL.timechainRooms;
-  const { face, blank, ballGeo, UP, DOWN } = RM.helpers;
+  const { face, blank, ballGeo, owned, UP, DOWN } = RM.helpers;
   const { merge, noShadow } = BL.models;
   const DEG = Math.PI / 180, TAU = Math.PI * 2;
   const smooth = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -271,13 +271,13 @@
     geo.spacers = spacers;
     return geo;
   };
-  // Built once per page in steps at the doorway (`steps`), or whole when the plan asks for it first.
+  // Built once per owning visit, in doorway steps or whole when the plan asks for it first.
   const statueRead = BL.models.cachedSteps(statueBuild);
-  const statue = () => BL.models.withScope("timechain", statueRead);
+  const statue = () => owned(statueRead);
   // Each step false once the statue is built, so the doorway spends no frame on the steps left over.
   const steps = () => {
     let it = null, done = false;
-    const advance = () => BL.models.withScope("timechain", () => {
+    const advance = () => owned(() => {
       if (done) return false;
       if (!it) it = statueRead.steps();
       const end = performance.now() + BUDGET;
@@ -563,6 +563,7 @@
   const CHIME_NOTES = [1568, 1760, 2093, 2349, 2637, 3136], CHIME_OVERTONE = 2.76;
   const sounds = () => {
     let ctx = null, disposed = false, nextChime = 0;
+    const soundChannel = BL.sound.channel("temple");
     const voices = {}, chimes = [];
     // A pooled gain taken from wherever it is now to `peak` over `attack`, then let die away over `fade` seconds.
     const envelope = (param, t, peak, attack, fade) => {
@@ -573,7 +574,7 @@
     const build = () => {
       ctx = new AudioContext();
       const out = ctx.createGain();
-      out.connect(BL.sound.output(ctx));
+      out.connect(soundChannel.node(ctx));
       const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), data = buffer.getChannelData(0);
       let seed = 2140;
       for (let i = 0; i < data.length; i++) { seed = (Math.imul(seed, 1103515245) + 12345) | 0; data[i] = (seed >>> 0) / 2147483648 - 1; }
@@ -627,7 +628,7 @@
         const level = (name) => voices[name] ? +voices[name].parts.reduce((sum, p) => sum + p.g.gain.value, 0).toFixed(4) : 0;
         return { contexts: ctx ? 1 : 0, state: ctx ? ctx.state : "none", voices: Object.keys(voices).length, chimes: chimes.length, levels: { bell: level("bell"), gong: level("gong"), bowl: level("bowl") } };
       },
-      dispose() { disposed = true; if (ctx) ctx.close().catch(() => {}); ctx = null; }
+      dispose() { disposed = true; soundChannel.release(); if (ctx) ctx.close().catch(() => {}); ctx = null; }
     };
   };
 

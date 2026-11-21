@@ -61,12 +61,12 @@
   const worldClock = $("world-clock"), soundButton = $("environment-sound");
   const sound = window.BL.sound;
   const showSound = () => {
-    const label = sound.muted ? "Unmute environment sounds" : "Mute environment sounds";
-    const voice = window.BL.voice.stats;
-    soundButton.setAttribute("aria-label", label); soundButton.title = voice.enabled || voice.joining || voice.returning ? label : `${label} · M`;
-    soundButton.setAttribute("aria-pressed", String(sound.muted));
+    const voice = window.BL.voice.stats, label = sound.muted ? "Sound levels (game sounds muted)" : "Sound levels";
+    soundButton.setAttribute("aria-label", label);
+    soundButton.title = voice.enabled || voice.joining || voice.returning ? label : `${label} · M mutes game sounds`;
+    soundButton.dataset.muted = String(sound.muted);
   };
-  BL.destinationMap = BL.destinationMap.create({ current: () => active, ready: () => !!active && !transition, offerCoach: params.get("coach") === "1" });
+  BL.destinationMap = BL.destinationMap.create({ current: () => active, ready: () => !!active && !transition });
   let helpHeld = false;
   // Both panels pause the scene. A pad keeps working inside them: its Menus context reaches no scene while they show.
   const controlsHelp = BL.controlsHelp.create({ current: () => active, ready: () => !!active && !transition,
@@ -92,7 +92,8 @@
     }
   });
   const offSound = sound.subscribe(showSound);
-  soundButton.addEventListener("click", sound.toggle);
+  // The button's press opens each sound's level (sound-panel.js); M mutes.
+  const soundPanel = window.BL.soundPanel.create({ button: soundButton });
   showSound();
   // Reserve M before scene capture listeners and transition holds; editable fields keep it for typing.
   const onVoiceMuteKey = (e) => {
@@ -131,6 +132,8 @@
       retry.type = "button"; retry.className = "link"; retry.textContent = "Try again";
       retry.addEventListener("click", () => location.reload(), { once: true });
       saying.textContent = "The island could not open. "; saying.appendChild(retry);
+      curtain.dataset.failed = "true";
+      retry.focus();
       return;
     }
   }
@@ -348,7 +351,7 @@
   };
   // An arrival in three parts: `arriving` before the scene's own enter, the enter, then `arrived`. A scene with
   // `enterSteps` may run its enter in slices between them (see `swap`).
-  const arcadeScenes = new Set([...window.BL.arcadeCabinets.entries.map(c => c.id), "race", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride"]);
+  const arcadeScenes = new Set([...window.BL.arcadeCabinets.entries.map(c => c.id), "race", "raid", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride"]);
   const arriving = (next, place) => {
     const retainedTime = next.retained ? next.elapsed : 0;
     ctx.from = active ? active.id : null;
@@ -361,6 +364,7 @@
     for (const el of intros) el.hidden = el.dataset.intro !== next.id || place === "zipline" || place === BL.blockWire.WATCH_DECK_PLACE;
     // Arcade games share the hall's controls and start with folded social panels.
     document.body.dataset.activeScene = next.id;
+    soundPanel.close();
     document.body.classList.toggle("arcade-game", arcadeScenes.has(next.id) || next.id === "hub" && place === "cloud-hopper");
     window.BL.net.setBody(null);
     window.BL.net.setBlend(null, 0);
@@ -478,7 +482,7 @@
   };
   // True once the next scene has entered. A scene with `enterSteps` (a released hub, rebuilding its island's whole
   // visit) enters in slices instead: the departed scene is gone, nothing updates, draws or takes a key, and the screen
-  // holds (black, or an instant crossing's last frame) until the last slice, when `done` carries the transition on.
+  // holds black until the last slice, when `done` carries the transition on.
   // A first slice that finishes the enter (a kept hub resuming) completes in the same frame, as `enter` would.
   const swapScenes = (next, place, done) => {
     const leaving = active;
@@ -487,6 +491,8 @@
     let left;
     try { left = leaving.leave(); }
     finally { visitController.abort(); }
+    // Where the Ooga stood belongs to the scene just left (visit-spot.js); the next one notes its own.
+    window.BL.visitSpot.clear();
     if (DEBUG && leaving.root.children.length) throw new Error(`${leaving.id}.leave left ${leaving.root.children.length} nodes in its root`);
     if (DEBUG && left.targets) throw new Error(`${leaving.id}.leave left ${left.targets} input targets`);
     clearTweens();
@@ -580,8 +586,8 @@
       if (fade === 1 || transition.instant) transition.held += dt;
       return;
     }
-    // An instant crossing (a doorway seen from the Ooga's eyes, a mirror) never goes black: the scene left keeps
-    // playing while it prepares, and its last frame holds while the next one builds.
+    // Instant crossings skip the fade ramp. The departing scene can keep updating,
+    // but drawFade covers preparation and sliced entry with an opaque black hold.
     if (transition.instant) {
       if (!transition.ready || !buildLanding(transition)) { transition.held += dt; return; }
       const arrive = () => { settled(); fade = 0; };
@@ -605,25 +611,12 @@
     if (fade === 0) settled();
   };
   // Fills in CSS pixels (clientWidth/clientHeight, cached above), not backing-store pixels.
-  // A second on black, or waiting for an instant crossing, turns on the boot curtain's spinner.
-  const SPINNER_AFTER = 1, SPINNER_R = 13, SPINNER_ACCENT = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#ffd27a";
+  // Loading holds stay plain black, including an instant crossing awaiting its destination.
   const drawFade = () => {
-    overlayCtx.globalAlpha = fade;
+    overlayCtx.globalAlpha = transition && transition.instant && (!transition.ready || transition.entering) ? 1 : fade;
     overlayCtx.fillStyle = "#000000";
     overlayCtx.fillRect(0, 0, overlayCssW, overlayCssH);
     overlayCtx.globalAlpha = 1;
-    if (!transition || transition.held < SPINNER_AFTER
-      || !(fade === 1 || transition.instant && (!transition.ready || transition.entering))) return;
-    const x = overlayCssW / 2, y = overlayCssH / 2, turn = elapsed / 0.9 % 1 * Math.PI * 2;
-    // A transparent hold never redraws the scene's overlay. Erase only the old spinner, including stroke fringes.
-    const pad = SPINNER_R + 3;
-    if (fade < 1) overlayCtx.clearRect(x - pad, y - pad, pad * 2, pad * 2);
-    if (transition.entryFailed) return;
-    overlayCtx.lineWidth = 3;
-    overlayCtx.strokeStyle = "rgba(243, 239, 228, 0.18)";
-    overlayCtx.beginPath(); overlayCtx.arc(x, y, SPINNER_R, 0, Math.PI * 2); overlayCtx.stroke();
-    overlayCtx.strokeStyle = SPINNER_ACCENT;
-    overlayCtx.beginPath(); overlayCtx.arc(x, y, SPINNER_R, turn - Math.PI * 0.75, turn - Math.PI * 0.25); overlayCtx.stroke();
   };
 
   // Sampled from delivered frame intervals, never from the cost of issuing a frame.
@@ -659,6 +652,7 @@
   // delays. Recalibrated 2026-09-24 against the hub as it now is: an M4 Max builds it in about 2.35 s, so the old 2200 started every machine at medium. The same ratio to
   // that fast build is kept, and the frame-interval auto-tier still steps a slow device down while it plays.
   const BOOT_MEDIUM = 3600, BOOT_LOW = 5400;
+  let bootCPU = null;
   const tierFromBoot = (ms) => {
     if (renderer.kind !== "webgl2") return;
     const wanted = ms > BOOT_LOW ? "low" : ms > BOOT_MEDIUM || MEMORY_LIMITED ? "medium" : null;
@@ -672,7 +666,7 @@
   let lastRender = 0;
   let renderedFrames = 0;
   let firstDraw = false, firstPlayable = false;
-  // A first visit opens the Bananas panel a beat after the curtain (0.9 s) has parted on the world (`sheet.welcome`),
+  // A first visit opens the Bananas panel a beat after the black curtain (0.9 s) has faded (`sheet.welcome`),
   // unless the visitor chose a panel, left the scene or began a game meanwhile. Quiet `nosim` pages (the suite, the
   // cards) opt out unless `welcome=1` asks; `welcome=0` turns it off anywhere.
   const WELCOME_MS = 1800;
@@ -680,7 +674,7 @@
   let welcomeTimer = 0;
   const openCurtain = () => {
     curtain.addEventListener("transitionend", (e) => {
-      if (e.propertyName === "transform") curtain.remove();
+      if (e.target === curtain && e.propertyName === "opacity") curtain.remove();
     });
     curtain.dataset.open = "true";
   };
@@ -709,6 +703,7 @@
     // eaten since it arrived, in whole bananas.
     if (pileFeed.at) world.level = Math.min(pileMod.MAX_BANANAS, Math.max(0, Math.floor(pileFeed.bananas - pileFeed.eatPerHour * (performance.now() - pileFeed.at) / 36e5)));
     if (!panelHolds) active.update(sceneDt, sceneTime);
+    if (active.id !== "studio") BL.equipment.applyLocal(active.debug?.pilot?.player || active.debug?.crew?.player);
     showZoneLine();
     cabinetView.update(dt, active, !!openIntro() || !!active.cabinetMenu, !!transition);
     if (POSITION_DEBUG && active.id !== "hub" && elapsed >= positionDebugNext) {
@@ -734,7 +729,7 @@
         }, WELCOME_MS);
       }
       if (params.get("signin") === "contributor-required") {
-        window.BL.hud.toast("Sign-in is for contributors with their own Ooga. Keep exploring signed out.");
+        window.BL.hud.openRecipe(true);
         params.delete("signin");
         const back = new URL(location.href); back.searchParams.delete("signin");
         history.replaceState(history.state, "", back.pathname + back.search + back.hash);
@@ -1009,10 +1004,18 @@
   })();
   const housekeepTimer = window.setInterval(housekeep, 6e4);
   // EntropyLab currently lives in its island cave; retain the isolated scene for debug checks only.
-  // The character studio (scene-studio.js) is a debug page too.
-  const routed = router.current();
+  // The character studio also opens directly for same-origin wardrobe saves.
+  // The bare address goes back to the place the visitor last stood in this browser (visit-spot.js), as its own route
+  // would: a Timechain room by its number, any other scene as a whole. The island stands its Ooga at its own spot.
+  const resumeRoute = () => {
+    const was = DEBUG || params.has("scene") || WIP ? null : window.BL.visitSpot.resume();
+    if (!was || was.scene === "hub" || !Object.hasOwn(scenes, was.scene)) return null;
+    const list = window.BL.routes.list;
+    return list.find((e) => e.scene === was.scene && (e.place || "") === was.place) || list.find((e) => e.scene === was.scene && !e.place) || { scene: was.scene, place: null };
+  };
+  const routed = router.current() || resumeRoute();
   const requestedScene = (routed && routed.scene) || params.get("scene") || (WIP !== "1" ? WIP : null);
-  const sceneId = requestedScene === "race" && !RALLY_TEST ? "arcade" : (requestedScene === "lab" || requestedScene === "studio") && !DEBUG ? null : requestedScene;
+  const sceneId = requestedScene === "race" && !RALLY_TEST ? "arcade" : requestedScene === "lab" && !DEBUG ? null : requestedScene;
   // Building the first scene holds the main thread with nothing painted yet.
   // Run boot from a task after the first frame so the leaf curtain is on screen, not the previous page.
   let destroyed = false;
@@ -1108,8 +1111,11 @@
     }
     mark("core-ready");
     mark("ready");
-    // A restored island counts as the build it replaced, so the cache never starts a device a tier higher.
-    tierFromBoot(window.BL.buildTasks.cpu - constructionCPU - uploadCPU + (window.BL.terrainCache?.stats.credit || 0));
+    // A restored island counts as the build it replaced, and so does a build the scene left for after its first paint
+    // (`bootDeferred`), so neither starts a device a tier higher.
+    bootCPU = window.BL.buildTasks.cpu - constructionCPU - uploadCPU + (window.BL.terrainCache?.stats.credit || 0);
+    bootCPU *= 1 + (active?.bootDeferred || 0);
+    tierFromBoot(bootCPU);
     raf = window.requestAnimationFrame(frame);
     if (terrainController && window.BL.terrainCache?.stats.lastSource === "miss") fillTerrain();
   };
@@ -1132,6 +1138,7 @@
       cabinet: cabinetView,
       renderer,
       startLevel: START_BANANAS,
+      get bootCPU() { return bootCPU; },
       hubPolicy: ctx.hubPolicy,
       testBananas: TEST_BANANAS,
       project: renderer.project,
@@ -1177,7 +1184,7 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "lab", "headquarters", "hud", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "drop", "diver", "plane", "course", "jumbotron", "repoIsland", "physics", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "block", "dsb", "clankers", "clankerPlay", "factory", "hangar", "bifrost", "arcade", "carnival", "npcSync", "footsteps", "timechain", "studio", "halloween" /* HALLOWEEN */]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "lab", "headquarters", "hud", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "drop", "diver", "plane", "course", "jumbotron", "repoIsland", "physics", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "block", "dsb", "clankers", "clankerPlay", "factory", "hangar", "bifrost", "arcade", "carnival", "npcSync", "footsteps", "timechain", "studio", "raid", "halloween" /* HALLOWEEN */]) {
       Object.defineProperty(ooga, key, { get: () => active && active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;
@@ -1217,7 +1224,7 @@
     window.BL.voice.dispose();
     window.BL.highscores.dispose();
     net.dispose();
-    offSound(); soundButton.removeEventListener("click", sound.toggle);
+    offSound(); soundPanel.dispose();
     window.removeEventListener("keydown", onVoiceMuteKey, true);
     offPad();
     padSettings.dispose();

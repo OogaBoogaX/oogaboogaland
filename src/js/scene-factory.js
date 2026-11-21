@@ -52,8 +52,8 @@
   // The gate's shield stands at the balcony's back edge, where the island's tunnel's shield lands in the hall. Walking out,
   // the walk takes an Ooga no nearer the arrival's step than OUT_SLACK behind it, so a step back from there stays in the
   // hall. An Ooga walking in through the hangar's door comes on with the view no farther behind it than IN_VIEW and no
-  // higher than IN_PITCH, so the view starts in the doorway. WALK_STOP is how far past the gate a walk in ends.
-  const GATE_Z = HALL.front - 0.6, IN_VIEW = BL.factoryWindow.GLIDE.view + 0.8, IN_PITCH = BL.factoryWindow.GLIDE.pitch, OUT_SLACK = 1.2, WALK_STOP = BL.factoryWindow.stopPast(FOLLOW.min);
+  // higher than IN_PITCH, so the view starts in the doorway. Gate walks end far enough in to clear the saved view.
+  const GATE_Z = HALL.front - 0.6, IN_VIEW = BL.factoryWindow.GLIDE.view + 0.8, IN_PITCH = BL.factoryWindow.GLIDE.pitch, OUT_SLACK = 1.2;
   // Paired peer mirrors share their arch coordinates. A half turn carries an
   // incoming walk out of the other face, retaining height and distance crossed.
   const PEER_OPENING = { minX: -2.1, maxX: 2.1, floorY: 0.1, ceilingY: 4.65 }, PEER_PLANE = 0.45, PEER_TINT = [0.3, 0.72, 1];
@@ -1153,7 +1153,7 @@
     // A step short of this shield in the tunnel the two ends share, which the walk opens.
     walk.phase = WALK_ON;
     pilot.navigate({ yaw: 0, pitch: 0, dist: FOLLOW.min, position: { x: clamp(c.across, -1.2, 1.2), y: LAYOUT.entrance.y, z: GATE_Z - c.past }, framed: true });
-    eyes.arrive(avatar, Math.PI);
+    eyes.arrive(avatar, Math.PI, c);
     const p = avatar.root.position;
     Object.assign(walk, { phase: WALK_ON, t: 0, x: p.x, z: p.z, through: false, handing: false });
   };
@@ -1172,14 +1172,14 @@
     walk.through = false;
     people.steer(0, 0, 0, 0, 0);
     eyes.letGo(FOLLOW.min);
-    // A forward key held through the walk goes on walking; anything else waits to be let go, as the view has turned.
-    walk.settle = people.player === avatar && !pilot.controls.takeForward();
+    // The eye rig restores the view and movement still held when the walk releases it.
+    walk.settle = false;
   };
   const walkStep = (dt) => {
     const w = walk, G = BL.factoryWindow.GLIDE, p = avatar.root.position, off = w.phase === WALK_OFF;
     w.t += dt;
     const moved = Math.hypot(p.x - w.x, p.z - w.z);
-    if (people.player !== avatar || moved > 1.2 || w.t > G.limit || !off && p.z <= GATE_Z - WALK_STOP) return walkLetGo();
+    if (people.player !== avatar || moved > 1.2 || w.t > G.limit || !off && p.z <= GATE_Z - BL.factoryWindow.stopPast(FOLLOW.min, eyes.returnView)) return walkLetGo();
     w.x = p.x; w.z = p.z;
     const dx = -p.x * 0.6, dz = off ? G.ahead : -G.ahead, d = Math.hypot(dx, dz);
     people.steer(dx / d, dz / d, 0, 1, 0, G.eyePace);
@@ -1200,7 +1200,7 @@
       people.steer(0, 0, 0, 0, 0);
       return;
     }
-    world.factoryCrossing = { across: p.x, past: p.z - GATE_Z, held: kept };
+    world.factoryCrossing = { across: p.x, past: p.z - GATE_Z, held: kept, view: eyes.returnView, focused: eyes.focused };
     w.phase = 0;
     w.grab = kept;
     people.steer(0, 0, 0, 0, 0);
@@ -1218,13 +1218,15 @@
       && past > Math.max(-G.reach, d.plane - HANGAR_IN + OUT_SLACK) && toward > G.moving;
   };
   // On in through the hangar door's shield from the hangar: as far to its side and as far past it as the Ooga went
-  // through the hangar's, facing out along the walkway, the view square behind it, and the walk on.
+  // through the hangar's, keeping the doorway-relative view while walking on.
   const walkInHangar = (c) => {
+    walk.view = c.doorView;
     const G = BL.factoryWindow.GLIDE, at = BL.factoryWindow.arrival(HANGAR_WAY, clamp(c.side, -1.2, 1.2), clamp(c.past, 0, G.past), ARRIVE);
-    pilot.navigate({ yaw: at.yaw, pitch: clamp(c.pitch, FOLLOW.pitch[0], IN_PITCH), dist: clamp(c.dist, FOLLOW.min, IN_VIEW), position: { x: at.x, y: LAYOUT.hangar.y, z: at.z }, framed: true });
-    pilot.orbit.tDist = HANGAR_ARRIVAL.dist;
+    if (walk.view) BL.factoryWindow.restoreDoorView(pilot, Math.atan2(-HANGAR_WAY.ox, -HANGAR_WAY.oz), walk.view, { x: at.x, y: LAYOUT.hangar.y, z: at.z });
+    else pilot.navigate({ yaw: at.yaw, pitch: clamp(c.pitch, FOLLOW.pitch[0], IN_PITCH), dist: clamp(c.dist, FOLLOW.min, IN_VIEW), position: { x: at.x, y: LAYOUT.hangar.y, z: at.z }, framed: true });
     const p = avatar.root.position;
     Object.assign(walk, { phase: HANGAR_ON, t: 0, x: p.x, z: p.z, through: false });
+    pilot.setExternalControl(true, null, true);
   };
   // The walk through the hangar's door, as the gate's (`walkStep`): down the door's middle, into the hangar with an
   // instant switch, or on from it to where an arrival stands.
@@ -1236,15 +1238,19 @@
     if (people.player !== avatar || moved > 1.2 || w.t > G.limit || !off && d.plane - past >= HANGAR_IN) {
       w.phase = 0;
       w.through = false;
-      w.settle = people.player === avatar;
+      w.settle = false;
       people.steer(0, 0, 0, 0, 0);
+      pilot.setExternalControl(false);
+      if (people.player === avatar) {
+        BL.factoryWindow.restoreDoorView(pilot, Math.atan2(off ? d.ox : -d.ox, off ? d.oz : -d.oz), w.view);
+        pilot.controls.takeMovement();
+      }
+      w.view = null;
       return;
     }
     w.x = p.x; w.z = p.z;
     const k = off ? G.ahead : -G.ahead, wx = d.ox * k + d.oz * side * 0.6, wz = d.oz * k - d.ox * side * 0.6, l = Math.hypot(wx, wz);
     people.steer(wx / l, wz / l, 0, 1, 0, G.speed);
-    const behind = off ? Math.atan2(-d.ox, -d.oz) : Math.atan2(d.ox, d.oz);
-    o.tYaw = o.yaw + Math.atan2(Math.sin(behind - o.yaw), Math.cos(behind - o.yaw));
     if (!off) return;
     if (!w.through && past >= 0) {
       w.through = true;
@@ -1257,19 +1263,25 @@
       people.steer(0, 0, 0, 0, 0);
       return;
     }
-    world.hangarCrossing = BL.factoryWindow.crossing(d, p, o);
+    world.hangarCrossing = { ...BL.factoryWindow.crossing(d, p, o), doorView: w.view };
     w.phase = 0;
     w.grab = true;
     people.steer(0, 0, 0, 0, 0);
     enterHangar(true);
     // A switch the director refuses (another under way) leaves the Ooga in the hall.
-    if (!leaving) { world.hangarCrossing = null; w.through = w.grab = false; }
+    if (!leaving) { world.hangarCrossing = null; w.through = w.grab = false; pilot.setExternalControl(false); BL.factoryWindow.restoreDoorView(pilot, Math.atan2(d.ox, d.oz), w.view); pilot.controls.takeMovement(); w.view = null; }
   };
   // The island could not be built for the way out (the director's `stay`): the Ooga walks again, and the gate waits for
   // it to step back out of the opening before it tries again. Kept from the hangar (its code could not be fetched), the
   // Ooga is the visitor's again, and the hangar's door waits the same way.
   const stay = () => {
-    if (toHangar) { toHangar = false; hangarHeld = true; pilot.setActive(true); }
+    pilot.setExternalControl(false);
+    if (toHangar) {
+      toHangar = false; hangarHeld = true; pilot.setActive(true);
+      BL.factoryWindow.restoreDoorView(pilot, Math.atan2(HANGAR_WAY.ox, HANGAR_WAY.oz), walk.view);
+      pilot.controls.takeMovement();
+    }
+    walk.view = null;
     leaving = false; exitHeld = true; walk.phase = 0; walk.through = walk.handing = walk.grab = false; walk.still = walk.hold = 0; world.factoryCrossing = world.hangarCrossing = null;
     eyes.reset();
   };
@@ -1740,6 +1752,11 @@
   const reloadPolicy = { near: () => false, available: () => false };
   const walkableFor = (ax, az, bx, bz, y, height, actor) => actor === avatar && walkTunnel(bx, bz) || FM.walkable(ax, az, bx, bz, y, actor.bodyRadius || 0.35, height);
   const ceilingFor = (x, z, feet, actor) => FM.stairCeilingAt(x, z, feet, actor.bodyRadius || 0.35);
+  // A reload of this tab stands where the Ooga stood (visit-spot.js), while the floor is still there to walk on from.
+  const stoodAt = (ctx) => {
+    const spot = ctx.from === null && !ctx.place ? BL.visitSpot.take("factory", "") : null;
+    return spot && Math.abs(groundFor(spot.x, spot.z, spot.y, spot.y, avatar) - spot.y) < 0.05 && BL.visitSpot.holds(spot, walkableFor, avatar) ? spot : null;
+  };
   // In the air, keep the same obstacle clearance without requiring the floor to be within a step.
   const flyableFor = (ax, az, bx, bz, y, height, actor) => {
     const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.2)), radius = actor.bodyRadius || 0.35;
@@ -1970,7 +1987,10 @@
       // shield, it comes on through the gate's in its light instead, and walks on to that step.
       if (crossing) walkIn(crossing);
       else if (fromHangar && scene.hangar) walkInHangar(fromHangar);
-      else pilot.navigate(arrival);
+      else {
+        const stood = stoodAt(ctx);
+        pilot.navigate(stood ? { yaw: stood.yaw - Math.PI, pitch: arrival.pitch, dist: arrival.dist, position: stood } : arrival);
+      }
       scene.gate.phase.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
       for (const t of scene.tunnels) t.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
       if (scene.hangar) scene.hangar.phase.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
@@ -2234,6 +2254,7 @@
       const p = drivenHere.root.position;
       BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, BL.crew.weaponFlags(drivenHere), BL.crew.visualState(drivenHere));
       BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned);
+      if (!walk.phase && !leaving) BL.visitSpot.note("factory", "", drivenHere);
     }
     remotes.update(dt);
     footsteps.update(drivenHere);
@@ -2297,7 +2318,9 @@
         pilot.controls.reset(); input.reset(); hud.tooltip.hide();
         eyes.enter(avatar, 0);
       } else if (!hangarHeld && driven === avatar && walkingToHangar(s, p, previousX, previousZ, dt)) {
+        walk.view = BL.factoryWindow.doorView(pilot, Math.atan2(HANGAR_WAY.ox, HANGAR_WAY.oz));
         Object.assign(walk, { phase: HANGAR_OFF, t: 0, x: p.x, z: p.z, through: false });
+        pilot.setExternalControl(true, null, true);
         pilot.controls.reset(); input.reset(); hud.tooltip.hide();
       } else if (!exitHeld && inOpening && p.z > HALL.front - 1.3) leaveCave();
       else if (!hangarHeld && throughHangar(s, p, driven.baseY)) enterHangar();
@@ -2484,6 +2507,7 @@
     return kept;
   };
   const leave = () => {
+    pilot.setExternalControl(false); walk.view = null;
     eyes.reset();
     eyes = null;
     // Capture once, before disposal: the island retains only this visit, never a union of earlier halls.

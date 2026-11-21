@@ -132,7 +132,12 @@ export const audienceRoom = {
     // Its answer says which identities still have subscriptions not yet confirmed closed at the SFU. Not delivered, the
     // island's word is sent again from the Room's alarm (`retry`), so a grant the Room took back never leaves the
     // Audience listing its publication.
-    const told = stub(room).world(room.audienceSeq, speakers, active).then((answer) => { room.audienceRetry = null; return answer; },
+    // Its answer also carries the public receivers it counts now, which corrects a count the Room missed.
+    const told = stub(room).world(room.audienceSeq, speakers, active).then((answer) => {
+      room.audienceRetry = null;
+      if (answer && answer.ok && answer.listeners) audienceRoom.listeners(room, answer.listeners, true);
+      return answer;
+    },
       () => { audienceRoom.retryLater(room); return null; });
     room.background(told);
     return told;
@@ -166,6 +171,15 @@ export const audienceRoom = {
     const told = audienceRoom.world(room, !!(p && p.outdoor && p.outdoor.state !== "none"));
     if (p && told && p.outdoor && p.outdoor.state !== "none") (room.retiring || (room.retiring = new Map())).set(p.id, told);
     return told;
+  },
+
+  // A player held over a lost socket (room.js `hold`): still on the island, but its connection's grant goes now, as at a
+  // leave, and its page's next connection waits for that (`settled`) whether it takes the record back or not.
+  hold(room, p) {
+    if (!p.outdoor || p.outdoor.state === "none") return;
+    const told = audienceRoom.retire(room, p, "left").catch(() => false);
+    (room.retiring || (room.retiring = new Map())).set(p.id, told);
+    room.background(told);
   },
 
   // Before a connection's welcome: the account's last connection's grants are taken back (bounded wait).
@@ -270,7 +284,7 @@ export const audienceRoom = {
   sourcesFor: (room, scope) => (room.chatSources || []).filter((s) => s.zone === scope).map((s) => s.id),
   tellAudience(room, p) {
     const o = p.outdoor;
-    audienceRoom.sendOutdoor(room, p, { op: "audience", epoch: o.epoch, listeners: (room.audienceListeners || {})[o.scope] || 0, sources: audienceRoom.sourcesFor(room, o.scope) });
+    audienceRoom.sendOutdoor(room, p, { op: "audience", epoch: o.epoch, listeners: (room.audienceCounts || {})[o.scope] || 0, sources: audienceRoom.sourcesFor(room, o.scope) });
   },
 
   async enterOutdoor(room, p, msg) {
@@ -288,7 +302,7 @@ export const audienceRoom = {
     p.outdoor = { state: "open", epoch: msg.epoch, scope: msg.scope, left: o.left };
     room.saveAttachment(p);
     audienceRoom.world(room);
-    audienceRoom.sendOutdoor(room, p, { op: "open", epoch: msg.epoch, scope: msg.scope, listeners: (room.audienceListeners || {})[msg.scope] || 0,
+    audienceRoom.sendOutdoor(room, p, { op: "open", epoch: msg.epoch, scope: msg.scope, listeners: (room.audienceCounts || {})[msg.scope] || 0,
       sources: audienceRoom.sourcesFor(room, msg.scope) });
     room.updateVoice();
   },
@@ -341,8 +355,12 @@ export const audienceRoom = {
   },
 
   // How many public listeners each zone has, for the open grants' `audience` frames.
-  listeners(room, counts) {
-    room.audienceListeners = { main: Number.isSafeInteger(counts && counts.main) ? counts.main : 0, dsb: Number.isSafeInteger(counts && counts.dsb) ? counts.dsb : 0 };
+  // `quiet`: from a `world` answer, which repeats the count unchanged far more often than it changes: tell only a change.
+  listeners(room, counts, quiet = false) {
+    const next = { main: Number.isSafeInteger(counts && counts.main) ? counts.main : 0, dsb: Number.isSafeInteger(counts && counts.dsb) ? counts.dsb : 0 };
+    const was = room.audienceCounts;
+    room.audienceCounts = next;
+    if (quiet && was && was.main === next.main && was.dsb === next.dsb) return;
     for (const p of room.players.values()) if (isOpen(p)) audienceRoom.tellAudience(room, p);
   },
 

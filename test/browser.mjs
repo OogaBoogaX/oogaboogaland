@@ -68,6 +68,8 @@ const keyOf = ({ w = 1440, h = 900, mobile = false, perf = false, motion = false
 // Queue just that work; running sessions still share the runner's lanes and keep their absolute deadline.
 let startup = Promise.resolve();
 export const launch = (opts = {}) => new Promise((resolve, reject) => {
+  if (opts.startupMs !== undefined && (!Number.isInteger(opts.startupMs) || opts.startupMs < SETUP_MS || opts.startupMs > 60000))
+    throw new RangeError("startupMs must be an integer from 10000 to 60000");
   // Admission has its own bound: a queued session has no Chrome to kill yet.
   // Expired requests must never spawn after the startup ahead of them finishes.
   let expired = false;
@@ -82,7 +84,7 @@ export const launch = (opts = {}) => new Promise((resolve, reject) => {
   startup = next.then(() => {}, () => {});
   next.then(resolve, reject);
 });
-const startChrome = async ({ w = 1440, h = 900, mobile = false, perf = false, motion = false } = {}) => {
+const startChrome = async ({ w = 1440, h = 900, mobile = false, perf = false, motion = false, startupMs = SETUP_MS } = {}) => {
   // Fresh profile per launch, so storage never leaks between runs.
   const profile = mkdtempSync(join(tmpdir(), "ooga-test-"));
   // Chrome picks a free port and writes it into the profile, so concurrent launches never collide.
@@ -118,7 +120,9 @@ const startChrome = async ({ w = 1440, h = 900, mobile = false, perf = false, mo
   });
   const logs = [];
   let page = null;
-  const startupDeadline = Date.now() + SETUP_MS;
+  // An isolated cold renderer may allow more time to publish its port/page. Queue admission and
+  // DevTools setup commands retain their short deadlines; this never extends a running session.
+  const startupDeadline = Date.now() + startupMs;
   while (!page && state.alive && Date.now() < startupDeadline) {
     await sleep(20);
     if (!state.alive) break;

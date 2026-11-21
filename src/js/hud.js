@@ -215,7 +215,7 @@
       donationMessageLabel: $("donation-message-label"),
       bananaPanel: $("bananas-panel"),
       subtitle: $("subtitle"),
-      topbar: document.querySelector(".topbar"), brand: document.querySelector(".brand"),
+      topbar: document.querySelector(".topbar"), brand: document.querySelector(".brand"), stage: $("stage"),
       clock: $("world-clock"), block: $("world-block"),
       equipment: $("equipment-hud"), equipmentRow: document.querySelector(".weapon-equipment-row"), leave: $("leave-hud"),
       micNote: $("mic-note"),
@@ -319,10 +319,23 @@
       const bannerStyle = (node, property, value) => {
         if (node.style.getPropertyValue(property) !== value) node.style.setProperty(property, value);
       };
+      // A box measured in the stage's own layout, which the banner's controls are placed in: a cabinet zoom's scale and
+      // offset on the stage (Cloud Hopper's ride up out of the glass) never reach them, and nothing measures again once
+      // the zoom lets go, since a transform resizes nothing the observers watch.
+      const stage = { left: 0, top: 0, k: 1 };
+      const inStage = (node) => {
+        const r = node.getBoundingClientRect();
+        return { left: (r.left - stage.left) / stage.k, right: (r.right - stage.left) / stage.k,
+          top: (r.top - stage.top) / stage.k, bottom: (r.bottom - stage.top) / stage.k, width: r.width / stage.k };
+      };
       const fitBanner = () => {
         bannerFrame = 0;
         if (document.body.dataset.activeScene !== bannerScene) return;
-        const brand = el.brand.getBoundingClientRect(), clock = el.clock.getBoundingClientRect(), block = el.block.getBoundingClientRect();
+        // The Sign in button's room, set before the clock is measured: the clock stands clear of it.
+        bannerStyle(el.topbar, "--hub-banner-account", `${accountTop().offsetWidth ? accountTop().offsetWidth + 8 : 0}px`);
+        const box = el.stage.getBoundingClientRect();
+        stage.left = box.left; stage.top = box.top; stage.k = el.stage.offsetWidth ? box.width / el.stage.offsetWidth : 1;
+        const brand = inStage(el.brand), clock = inStage(el.clock), block = inStage(el.block);
         const topbar = getComputedStyle(el.topbar), row = getComputedStyle(el.equipmentRow);
         const fontSize = parseFloat(getComputedStyle(el.clock).fontSize) || 22;
         const scale = Math.max(0.7, Math.min(0.85, 0.7 + (fontSize - 13) / 60));
@@ -373,7 +386,7 @@
           const presetTop = banner === "below" ? top + equipmentHeight + (count ? 8 : 0) : (topEdge + bottomEdge - 28) / 2;
           const equipmentWidth = (compactWidth + (banner === "full" && expanded ? 140 : 0)) * scale;
           const presetLeft = banner === "below" ? belowLeft : leftEdge + equipmentWidth + (count ? 12 : 0);
-          bannerStyle(presets, "--banner-equipment-right", `${el.equipmentRow.getBoundingClientRect().left + equipmentWidth + 8}px`);
+          bannerStyle(presets, "--banner-equipment-right", `${inStage(el.equipmentRow).left + equipmentWidth + 8}px`);
           bannerStyle(presets, "--banner-presets-top", `${presetTop}px`);
           bannerStyle(presets, "--banner-presets-left", `${presetLeft}px`);
           bannerStyle(presets, "--banner-presets-width", `${Math.max(0, window.innerWidth - presetLeft - paddingRight)}px`);
@@ -390,7 +403,7 @@
       };
       const bannerResize = new ResizeObserver(scheduleBanner), bannerEquipment = new MutationObserver(scheduleBanner);
       // Cabinet zooms resize the stage without changing the viewport or the title's own size.
-      for (const node of [el.topbar, el.brand, el.clock, el.block, el.equipmentRow]) bannerResize.observe(node);
+      for (const node of [el.topbar, el.brand, el.clock, el.block, el.equipmentRow, accountTop()]) bannerResize.observe(node);
       if (presets) {
         bannerResize.observe(presets);
         bannerEquipment.observe(presets, { attributes: true, subtree: true, childList: true, characterData: true, attributeFilter: ["hidden", "disabled"] });
@@ -409,7 +422,7 @@
         el.messageStack.style.removeProperty("--hub-equipment-bottom");
         el.micNote.style.removeProperty("--hub-equipment-bottom");
         document.body.style.removeProperty("--banner-controls-bottom");
-        for (const property of ["--hub-banner-button", "--hub-banner-button-top", "--hub-banner-button-right", "--hub-banner-button-gap"]) el.topbar.style.removeProperty(property);
+        for (const property of ["--hub-banner-button", "--hub-banner-button-top", "--hub-banner-button-right", "--hub-banner-button-gap", "--hub-banner-account"]) el.topbar.style.removeProperty(property);
       });
       scheduleBanner();
     }
@@ -1062,7 +1075,8 @@
         pointOnBoard(e);
         if (!board.dragStart(screenPoint.x, screenPoint.y)) return;
         screenPointer = e.pointerId;
-        el.boardScreen.setPointerCapture(e.pointerId);
+        // The virtual menu cursor owns capture for the synthetic events it routes.
+        if (e.isTrusted) el.boardScreen.setPointerCapture(e.pointerId);
         e.preventDefault(); e.stopPropagation(); updateBoard();
       });
       on(el.boardScreen, "pointermove", e => {
@@ -1573,9 +1587,7 @@
       panelsHidden = on;
       for (const popup of floatingBoards) popup.setHidden(on);
     };
-    const openRecipe = () => {
-      if (!el.recipe.open) el.recipe.showModal();
-    };
+    const openRecipe = () => showRecipe(false);
     const closeRecipe = () => {
       if (el.recipe.open) el.recipe.close();
     };
@@ -1603,6 +1615,16 @@
     dismissOutside(el.recipe, closeRecipe);
     dismissOutside(el.board, () => mainBoard.close());
     dismissOutside($("donation-popup"), () => BL.donationPopup.closeOutside());
+    // The Genesis Museum (timechain-room-genesis.js): its Proof of Knowledge panel, which the room fills and shows, and
+    // the whitepaper's reader, whose strip the room slides. The panel's own button hides it; the reader's closes it,
+    // as a press outside it does.
+    const genesis = { portal: $("genesis-portal"), body: $("genesis-portal-body"), reader: $("wp-reader"), view: $("wp-reader-view"), strip: $("wp-reader-strip"), thumb: $("wp-reader-thumb"), page: $("wp-reader-page"), about: $("wp-reader-about") };
+    const showGenesisPortal = (shown) => { genesis.portal.hidden = !shown; };
+    const openReader = () => { if (!genesis.reader.open) genesis.reader.showModal(); };
+    const closeReader = () => { if (genesis.reader.open) genesis.reader.close(); };
+    on(genesis.portal, "click", (e) => { const button = e.target.closest("[data-action='genesis-portal-close']"); if (button) { button.blur(); showGenesisPortal(false); } });
+    on(genesis.reader, "click", (e) => { const button = e.target.closest("[data-action='reader-close']"); if (button) { button.blur(); closeReader(); } });
+    dismissOutside(genesis.reader, closeReader);
     // The prompt is written to be pasted, so it leaves in one click.
     const copyRecipe = (button) => {
       const text = el.recipeText.textContent;
@@ -1727,7 +1749,7 @@
       else if (b.dataset.action === "account-login") BL.net.login();
       else if (b.dataset.action === "account-logout") BL.net.logout();
       else if (b.dataset.action === "account-rejoin") BL.net.rejoin();
-      else if (b.dataset.action === "account-voice") BL.voice.toggle();
+      else if (b.dataset.action === "account-voice" || b.dataset.action === "account-mute") BL.voice.toggle();
       else if (b.dataset.action === "account-voice-leave") BL.voice.leave();
       else actionHandler && actionHandler(b.dataset.action);
     });
@@ -1985,7 +2007,7 @@
         Object.defineProperties(this, Object.getOwnPropertyDescriptors(next));
         return this;
       },
-      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setWeaponSkin, setDestinations, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, dispose };
+      el, genesis, showGenesisPortal, openReader, closeReader, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setWeaponSkin, setDestinations, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, dispose };
   };
   // Detached panels can be visible together. Each has a view of the same account and voice state.
   const ROOM_WORDS = { replaced: "open in another tab", full: "island full" };
@@ -2018,8 +2040,28 @@
       if (el[key] !== value) el[key] = value;
     }
   };
+  // The banner's own Sign in, which turns into Sign out, in sight without a panel open: its `data-action` is whichever of
+  // the account row's two applies, so a scene's HUD presses it as it presses the row's. Found when first asked for, as
+  // nothing here reads the document at load.
+  let accountTopNode = null;
+  const accountTop = () => accountTopNode || (accountTopNode = $("account-top"));
+  // Add an Ooga, with its note when a sign-in was refused for want of an Ooga: a scene's HUD opens it, and the director
+  // with no HUD at hand.
+  const showRecipe = (refused) => {
+    const recipe = $("recipe");
+    $("recipe-note").hidden = !refused;
+    if (!recipe.open) recipe.showModal();
+  };
   const showAccount = ({ backend, me, room, online }) => {
     const live = !!me && room === "live", words = live ? `${online} online` : ROOM_WORDS[room] || "";
+    const top = accountTop(), topTip = me ? `Signed in as ${me.display} · Sign out` : "Sign in with GitHub · needs your own Ooga";
+    if (top.hidden !== !backend) top.hidden = !backend;
+    if (top.title !== topTip) {
+      top.title = topTip;
+      top.setAttribute("aria-label", me ? "Sign out" : "Sign in with GitHub");
+      top.dataset.signed = String(!!me);
+      top.dataset.action = me ? "account-logout" : "account-login";
+    }
     writeAccount("account", "hidden", !backend);
     writeAccount("account-name", "textContent", me ? me.display : "");
     writeAccount("account-name", "hidden", !me);
@@ -2032,20 +2074,33 @@
     const iceBlocked = voice.error === BL.voice.ICE_BLOCKED;
     const voiceFailure = iceBlocked ? voice.error : voice.returning ? voice.micError : voice.enabled ? "" : voice.error || voice.micError;
     const reason = voiceReason();
-    const voiceWords = reason ? reason : voice.reconnecting ? "Reconnecting voice" : voice.joining ? "Joining voice" : voiceFailure ? `Voice: ${voiceFailure}` : !voice.enabled && !voice.returning ? "Join voice" : voice.muted ? "Unmute" : "Mute";
-    writeAccount("account-voice", "hidden", !live);
-    writeAccount("account-voice", "textContent", voiceWords);
+    // As Ooga Chat's footer: the microphone always first, off and reading Unmute until in voice, then Join voice or Leave
+    // voice. In voice the microphone is Mute or Unmute in Ooga Chat's colours (green while live, red while muted), says
+    // Reconnecting voice while a dropped voice comes back (still setting the mute it lands with), and says why a
+    // returning visitor's voice failed rather than offering an unexplained Unmute.
+    const inVoice = voice.enabled || voice.returning || voice.reconnecting, micOn = inVoice && !reason;
+    const failed = micOn && !voice.reconnecting && voiceFailure, asMic = micOn && !voice.reconnecting && !voiceFailure;
+    writeAccount("account-mute", "hidden", !live);
+    writeAccount("account-mute", "disabled", !micOn);
+    writeAccount("account-mute", "textContent", micOn && voice.reconnecting ? "Reconnecting voice" : failed ? `Voice: ${voiceFailure}` : asMic && !voice.muted ? "Mute" : "Unmute");
+    writeAccount("account-voice", "hidden", !live || inVoice);
+    writeAccount("account-voice", "textContent", reason ? reason : voice.joining ? "Joining…" : voiceFailure ? `Voice: ${voiceFailure}` : "Join voice");
     writeAccount("account-voice", "disabled", !!reason);
     // A blocked WebRTC explains itself in a tooltip, and only while it is the reason: a VPN's leak protection is what
     // usually does it, by turning off non-proxied UDP (Brave's "WebRTC IP handling policy").
     const voiceTip = iceBlocked
       ? "A VPN's leak protection can block WebRTC by setting the browser's IP handling policy to disable non-proxied UDP (Brave specific). Allow WebRTC for this site, or turn that protection off."
       : "";
-    writeAccount("account-voice", "title", voiceTip);
-    writeAccount("account-voice-leave", "hidden", !live || !voice.enabled && !voice.returning && !voice.reconnecting);
-    const pressed = String(voice.enabled && !voice.muted), onlineDot = String(live);
+    writeAccount("account-voice", "title", inVoice ? "" : voiceTip);
+    writeAccount("account-mute", "title", failed ? voiceTip : "");
+    writeAccount("account-voice-leave", "hidden", !live || !inVoice);
+    const pressed = String(asMic && voice.muted), onlineDot = String(live);
     for (const row of fieldsFor("account")) if (row.dataset.live !== onlineDot) row.dataset.live = onlineDot;
-    for (const button of fieldsFor("account-voice")) if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
+    const mic = asMic ? voice.muted ? "muted" : "live" : "";
+    for (const button of fieldsFor("account-mute")) {
+      if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
+      if (button.dataset.mic !== mic) button.dataset.mic = mic;
+    }
   };
   // The microphone's note (#181), page-level as the account line is: muted in voice, it stays until unmuted;
   // alone in voice (nobody here to hear, so the microphone is held off), it says so until someone comes; held (Ooga Chat's
@@ -2233,5 +2288,5 @@
     const clear = () => { for (const r of pool) r.li.remove(); pool.length = 0; };
     return { set, clear };
   };
-  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, faceScores, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor, voiceIcon, voiceWords };
+  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, faceScores, signLettering, showAccount, openRecipe: showRecipe, showMic, showVoices, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor, voiceIcon, voiceWords };
 })();

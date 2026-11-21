@@ -1,0 +1,97 @@
+{
+  "format": 1,
+  "items": [
+    {
+      "id": "bitcoin-bill-straw",
+      "label": "Straw hat",
+      "creator": "Bitcoin-Bill",
+      "current": "c6f85793cc6314e8e0ca023c21ebb925060400ed3b4bc499694c32daa050e8eb",
+      "versions": [
+        "c6f85793cc6314e8e0ca023c21ebb925060400ed3b4bc499694c32daa050e8eb"
+      ]
+    },
+    {
+      "id": "global-dsb-spiked-helmet",
+      "label": "Spiked helmet",
+      "creator": "Global-DSB",
+      "current": "84ceb32b39ae91eb06e1bfee4767d522c83125d88a0c5cd2bc484f650ef99d38",
+      "versions": [
+        "84ceb32b39ae91eb06e1bfee4767d522c83125d88a0c5cd2bc484f650ef99d38"
+      ]
+    },
+    {
+      "id": "bc1gui-green-beanie",
+      "label": "Green Bitcoin beanie",
+      "creator": "bc1gui",
+      "current": "5fdd8f47b975be5461f88b2bb9464ad08a106a50064e2d783751ef96101aa86c",
+      "versions": [
+        "5fdd8f47b975be5461f88b2bb9464ad08a106a50064e2d783751ef96101aa86c"
+      ]
+    },
+    {
+      "id": "hotpixelgroup-flame-crown",
+      "label": "Green flame crown",
+      "creator": "hotpixelgroup",
+      "current": "a02db307ac7533f5abf77304fa44dc0b4885afac7b6385eb5f822762c678386a",
+      "versions": [
+        "a02db307ac7533f5abf77304fa44dc0b4885afac7b6385eb5f822762c678386a"
+      ]
+    },
+    {
+      "id": "itsliran-taproot-cap",
+      "label": "Taproot cap",
+      "creator": "itsLiran",
+      "current": "bb887370398cee83f57bf29838698ea76be7cccefb0422b43148f589709292d6",
+      "versions": [
+        "bb887370398cee83f57bf29838698ea76be7cccefb0422b43148f589709292d6"
+      ]
+    },
+    {
+      "id": "johnstackton21m-helmet",
+      "label": "Gold space helmet",
+      "creator": "johnstackton21m",
+      "current": "ca76d20012c00802760ddc7bb81bc42e47267ccd0bdc088f00c6f85aeda4aea9",
+      "versions": [
+        "ca76d20012c00802760ddc7bb81bc42e47267ccd0bdc088f00c6f85aeda4aea9"
+      ]
+    },
+    {
+      "id": "midy-machete-crown",
+      "label": "Ruby crown",
+      "creator": "midy-machete",
+      "current": "048d285d3e63b63c9fbec5b033dacce22ce33dc83da5a4c2f5d20f739dfa397b",
+      "versions": [
+        "048d285d3e63b63c9fbec5b033dacce22ce33dc83da5a4c2f5d20f739dfa397b"
+      ]
+    },
+    {
+      "id": "rules-without-rulers-top-hat",
+      "label": "Orange-band top hat",
+      "creator": "rules-without-rulers",
+      "current": "9ceae44a88cc91185ed244425aeb90ee564a503b36087aff09c01bc7a890d68d",
+      "versions": [
+        "9ceae44a88cc91185ed244425aeb90ee564a503b36087aff09c01bc7a890d68d"
+      ]
+    },
+    {
+      "id": "timechainb-gold-crown",
+      "label": "Gold crown",
+      "creator": "timechainb",
+      "current": "b5f533f2a0fd0c7717438b8e9c3f192615e5110b8c59d5aa81f1c2ab91549257",
+      "versions": [
+        "b5f533f2a0fd0c7717438b8e9c3f192615e5110b8c59d5aa81f1c2ab91549257"
+      ]
+    }
+  ],
+  "sources": {
+    "bitcoin-bill-straw": "850b7c985192332ded71a882d77e6a74c31e71792b852b2d3bafeca766c8f299",
+    "global-dsb-spiked-helmet": "32032de240bce413b8d01c9a66ef5e6da8f8fb45eece872cf7616ee4a4496e0e",
+    "bc1gui-green-beanie": "79d89712b6348d3c72fbff80d6b015c041dabe41ede96c13eaeca866a1807533",
+    "hotpixelgroup-flame-crown": "1d49a8478b78a0e29e4e703b1db10a6eac116789507aae52c40c954e274828a7",
+    "itsliran-taproot-cap": "e49ff9f7afa2c76e52f4e39ba35d4dd57c88d8d147150c0150a184257bfe1f32",
+    "johnstackton21m-helmet": "3fdde8bbaf52442dca87aed78c2ae8d143d6fb58f1d1cac987570142799b634e",
+    "midy-machete-crown": "e2b8aa8b0bd0c78f40622927ea65272c59736b575a8d29a8df733e13bd5f8622",
+    "rules-without-rulers-top-hat": "cc734645b4e99d5796b477fcc87e8815ef9f6711677b7d955d75987fe900a348",
+    "timechainb-gold-crown": "eb98c2270ea64e1569bfa991de385f19155e25be7e19577c90f4d2c948097d0a"
+  }
+}

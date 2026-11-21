@@ -12,7 +12,7 @@
   // Discrete shortcuts shared by scene handlers and their reference rows.
   const SHORTCUTS = { view: ["x"], resetView: ["0"], weapon: ["1", "2"], swapWeapon: ["g"], attack: ["v"], reload: ["r"], bash: ["f"], jetpack: ["j"], actor: ["t"], escape: ["escape"], start: ["enter"], item: ["e", "shift"], autopilot: ["g"], spacewalk: ["v"], mineView: ["v"], crack: ["c"], pause: ["p"], act: [" ", "enter"] };
   const shortcutKeys = action => SHORTCUTS[action];
-  Object.assign(SHORTCUTS, { north: ["n"], twirl: ["n"], tint: ["c"], horn: ["h"], tomato: ["t"], throwWallet: ["y"], grab: ["g"], smash: ["1"], chest: ["c"], hand: ["h"], linkAll: ["l"] });
+  Object.assign(SHORTCUTS, { north: ["n"], twirl: ["n"], tint: ["c"], horn: ["h"], tomato: ["t"], throwWallet: ["y"], grab: ["g"], ghost: ["g"], smash: ["1"], chest: ["c"], hand: ["h"], linkAll: ["l"] });
   const matches = (e, action) => SHORTCUTS[action].includes(e.key.toLowerCase());
   const resets = new Set();
   const resetAll = () => { for (const reset of resets) reset(); };
@@ -89,7 +89,11 @@
   // The keys physically down, whichever scene is listening. A scene's controls learn of a key only from its events, so a
   // key held across a change of scene is lost to them (at once where a later key has stopped its auto-repeat).
   const physical = new Map();
-  window.addEventListener("keydown", (e) => { if (!e.metaKey && !e.ctrlKey && !e.altKey && !uiKey(e)) physical.set(e.code || e.key, e); }, true);
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Tab") { physical.clear(); return; }
+    const key = e.code || e.key;
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && !uiKey(e) && (!e.repeat || physical.has(key))) physical.set(key, e);
+  }, true);
   window.addEventListener("keyup", (e) => physical.delete(e.code || e.key), true);
   window.addEventListener("blur", () => physical.clear());
   const create = ({ move = null, look = null, boost = null, chord = null, onAction = null, pressActions = false, tabNavigation = false, shooter = () => false, canDescend = () => true } = {}) => {
@@ -288,6 +292,16 @@
       if (forward) for (const e of physical.values()) { const name = keyName(e); if (name === "forward" || name === "left" || name === "right" || name === "sprint") held[name] = 1; }
       return forward || pad.ly > 0.2 || !!moveStick && moveStick.y > 0.2;
     };
+    // A land arrival resumes only movement still physically held when control returns.
+    // Releases during loading and blur/Tab cancellation must not become stuck keys.
+    const takeMovement = () => {
+      if (typing({ target: document.activeElement })) return;
+      for (const e of physical.values()) {
+        const name = keyName(e);
+        if (blockedKeys.has(e.code || e.key)) continue;
+        if (name === "forward" || name === "back" || name === "left" || name === "right" || name === "sprint") held[name] = 1;
+      }
+    };
     let listening = true;
     const dispose = () => {
       resets.delete(reset);
@@ -357,7 +371,7 @@
       if (moveStick) moveStick.resume();
       if (lookStick) lookStick.resume();
     };
-    return { read, moving, takeForward, axes, clearPointer, reset, consumeTab, resume, borrowPitch, dispose, get rightShift() { return !!held.peek; } };
+    return { read, moving, takeForward, takeMovement, axes, clearPointer, reset, consumeTab, resume, borrowPitch, dispose, get rightShift() { return !!held.peek; } };
   };
   // Whether the controller was the last thing used, for words that name its buttons: a key or pointer press from the
   // visitor (never a key the pad delivered) hands prompts back to the keyboard.

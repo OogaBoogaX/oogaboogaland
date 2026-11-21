@@ -1263,6 +1263,7 @@
   //   crown(k, v)  hats and hair over the head    eyes(k, v)   replaces the eyes
   //   mark(k, v)   face paint after the pupils
   //   headgear(k)  nodes on the head              extras(k)    nodes on the root, last
+  //   hat(k, v), hatNodes(k)  removable authored headwear, apart from hair, faces and anatomy
   //   tint(k, palette)  a second colourway: return an alternate palette and every
   //                     voxel part is baked again under it, paired in `tint`
   //   refine(k, part, v, side)  paints a part's fine map before it bakes (see FINE)
@@ -1500,6 +1501,7 @@
       }
       // Ears on a bare head; hair covers them otherwise.
       if (!hairy && !dress.skull) for (const x of [-1, 7]) v.fill(x, x, 2, 3, 2, 3, P.skinDk);
+      if (dress.hat && !traits.equipmentBare) dress.hat(k, v);
       if (dress.crown) dress.crown(k, v);
       // Ragged hair: a few exposed cells go. One cut out of the middle of a flat stretch of hair behind the face (a cell
       // with hair or head on every side but its outer one) is a hole, so it goes back once the pass is over; the draws
@@ -1563,6 +1565,9 @@
     parts.head = createNode({ position: { x: 0, y: 0.5 * h, z: 0.02 * h }, geometry: headOpen });
     parts.face = createNode({ position: { x: 0, y: 0, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
     addChild(parts.head, parts.face);
+    const beforeHat = parts.head.children.length;
+    if (dress.hatNodes && !traits.equipmentBare) dress.hatNodes(k);
+    parts.nativeHat = parts.head.children.slice(beforeHat);
     if (dress.headgear) dress.headgear(k);
     addChild(root, parts.legR, parts.legL, parts.torso, parts.armR, parts.armL, parts.head);
     if (dress.extras) dress.extras(k);
@@ -1978,7 +1983,7 @@
       if (STYLE === "R" && dress.model) wearing = () => BL.heroBody.wear(k, { ...authored, palette, P, loin: k.loin, strap: !traits.slim });
       const model = STYLE !== "R" ? null : dress.model ? dress.model(k, wearing) : worn = rewear(palette);
       // One that draws no head of its own gets the modelled body's head too.
-      if (model && !model.headOpen && !(dress.skull || dress.crown || dress.eyes || dress.mark || dress.refine)) Object.assign(model, BL.heroBody.head(k, { palette, P }));
+      if (model && !model.headOpen && !(dress.skull || dress.hat || dress.crown || dress.eyes || dress.mark || dress.refine)) Object.assign(model, BL.heroBody.head(k, { palette, P }));
       if (model) {
         parts.torso.geometry = model.torso;
         parts.torso.scale.x = parts.torso.scale.z = 1;
@@ -2179,6 +2184,7 @@
   // Traits hash from the handle, so one handle always builds the same voxels.
   // Callers get fresh nodes over shared geometry: one build per contributor, GPU records survive a scene swap.
   const cavemen = scopedMap();
+  const bareHeads = scopedMap();
   const cloneNode = (node, copies) => {
     const copy = createNode({ ...node, position: { ...node.position }, rotation: { ...node.rotation }, scale: { ...node.scale }, parent: null, children: [], world: new Float32Array(node.world), local: new Float32Array(node.local) });
     if (node.quaternion) copy.quaternion = new Float32Array(node.quaternion);
@@ -2187,8 +2193,9 @@
     return copy;
   };
   const caveman = (traits) => {
-    let template = cavemen.get(traits.name);
-    if (!template) cavemen.set(traits.name, template = buildCaveman(traits));
+    const key = traits.name + (traits.equipmentBare ? "\0bare-head" : "");
+    let template = cavemen.get(key);
+    if (!template) cavemen.set(key, template = buildCaveman(traits));
     const copies = new Map(), root = cloneNode(template.root, copies), parts = {};
     // A legged companion names its own limbs (`legs`, `tail`); the clone's must be its own nodes, not the template's.
     for (const [node, copy] of copies) {
@@ -2204,7 +2211,17 @@
     let face;
     return { root, parts, traits, modelled: template.modelled, elbow: template.elbow, back: template.back, armScale: template.armScale, fist: template.fist, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed,
       get portraitHead() { return face === undefined ? template.portraitHead : face; }, set portraitHead(geometry) { face = geometry; },
-      skins, clubRest: template.clubRest, clubCarry: template.clubCarry, tint: template.tint, gunHeadBounds: template.gunHeadBounds };
+      skins, clubRest: template.clubRest, clubCarry: template.clubCarry, tint: template.tint, gunHeadBounds: template.gunHeadBounds,
+      // Only the same character's approved builder runs here; borrowed hats are archived geometry, never hooks.
+      bareHead: () => {
+        let bare = bareHeads.get(traits.name);
+        if (!bare) {
+          const body = buildCaveman({ ...BL.contributors.traitsFor(traits.name), equipmentBare: true });
+          bare = { headOpen: body.headOpen, headClosed: body.headClosed, portraitHead: body.portraitHead };
+          bareHeads.set(traits.name, bare);
+        }
+        return bare;
+      } };
   };
   // A real die: opposite faces sum to seven. Round pip faces sit just above the
   // voxel shell so even the smallest die does not render them as square cells.

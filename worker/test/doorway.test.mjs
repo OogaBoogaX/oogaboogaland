@@ -356,3 +356,30 @@ test("the frames every page hears are held to a rate, well over any page's", asy
   await h.send(r, a, { t: "zone", name: "sphere-7" });
   assert.equal(b.sent.filter((m) => m.t === "zone").at(-1).name, "sphere-7", "and it comes back");
 });
+
+test("regression: a full voice cleanup queue lets go of sessions nobody holds rather than refuse everyone's voice", async () => {
+  const h = host(), r = h.room();
+  const a = await h.join(r, 1, "a"), b = await h.join(r, 2, "b");
+  await h.enter(r, a, "a", "sphere-1"); await h.enter(r, b, "b", "sphere-1");
+  const pa = r.players.get(1), pb = r.players.get(2);
+  pa.voice = { pub: "pub-a", sub: "sub-a", track: "mic", gen: 1, mids: {} };
+  pb.voice = { pub: "pub-b", sub: "sub-b", track: "mic", gen: 1, mids: {} };
+  r.sfu = {
+    newTracks: async (session, body) => ({ tracks: body.tracks.map((t, i) => ({ sessionId: t.sessionId, mid: String(i) })), sessionDescription: { type: "offer", sdp: "x" } }),
+    closeTracks: async () => { throw Object.assign(new Error("SFU no answer"), { status: 0 }); },
+    getSession: async () => { throw Object.assign(new Error("SFU no answer"), { status: 0 }); },
+  };
+  const job = (session, at) => ({ session, at, revision: 0, mids: ["0"], midVersions: { 0: 0 }, inspect: false, inspectUntil: 0 });
+  const pull = () => r.voiceRequest("pull", { headers: new Headers({ "x-player-id": "1", "x-room-token": pa.connectionToken }), json: async () => ({ ids: [2] }) });
+  // Every session in the queue is still held: the bound holds, and the pull is refused as before.
+  r.cleanupJobs = [];
+  for (let i = 0; i < 64; i++) r.cleanupJobs.push(job(i % 2 ? "sub-b" : "sub-a", 1000 + i));
+  assert.equal((await pull()).status, 503);
+  // Held by nobody (pages that restarted or left, while the SFU stopped answering): the oldest goes, and voice goes on.
+  r.cleanupJobs = [];
+  for (let i = 0; i < 64; i++) r.cleanupJobs.push(job(i === 0 ? "sub-a" : `gone-${i}`, 1000 + i));
+  assert.notEqual((await pull()).status, 503);
+  assert.ok(r.cleanupJobs.some((j) => j.session === "sub-a"), "a held session's job is kept, however old");
+  assert.ok(!r.cleanupJobs.some((j) => j.session === "gone-1"), "the oldest job nobody holds is let go");
+  assert.ok(r.cleanupJobs.length < 64);
+});

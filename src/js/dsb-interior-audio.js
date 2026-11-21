@@ -5,10 +5,11 @@
     let context=null,bus=null,hum=null,buzz=null,noise=null,filter=null,humGain=null,buzzGain=null,noiseGain=null;
     let kind="meme-factory",duck=false;
     let active=false,muted=false,connected=false,disposed=false;
+    const soundChannel=window.BL.sound.channel("room");soundChannel.show(false);
     const gate=()=>{
       if(!bus)return;
       const on=active&&!muted&&!window.BL.sound.muted;
-      if(on&&!connected){bus.connect(context.destination);connected=true;}
+      if(on&&!connected){bus.connect(soundChannel.node(context));connected=true;}
       if(!on&&connected){bus.disconnect();connected=false;}
     };
     const wake=()=>{
@@ -30,7 +31,7 @@
     document.addEventListener("pointerdown",gesture);document.addEventListener("keydown",gesture);
     const offSound=window.BL.sound.subscribe(gate);
     return {
-      setActive:(on,room="meme-factory")=>{active=!!on;kind=room;duck=false;wake();gate();},
+      setActive:(on,room="meme-factory")=>{active=!!on;soundChannel.show(active);kind=room;duck=false;wake();gate();},
       setDucked:on=>{duck=!!on;},
       update:on=>{
         if(muted!==!!on){muted=!!on;gate();}
@@ -44,7 +45,7 @@
       },
       get stats(){return {active,connected,contexts:context?1:0,sources:context?3:0,state:context?.state||"locked"};},
       dispose:()=>{
-        offSound();disposed=true;active=false;gate();
+        offSound();soundChannel.release();disposed=true;active=false;gate();
         document.removeEventListener("pointerdown",gesture);document.removeEventListener("keydown",gesture);
         if(!context)return;
         for(const source of [hum,buzz,noise]){source.stop();source.disconnect();}

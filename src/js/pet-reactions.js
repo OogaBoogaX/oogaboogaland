@@ -32,6 +32,8 @@
   const create = () => {
     let context = null, tone = null, voice = null, rasp = null, previous = null, target = null, wait = 0, barks = 0;
     let sounding = false;
+    const soundChannel = BL.sound.channel("pets");
+    soundChannel.show(false);
     const stop = () => {
       if (!sounding) return;
       sounding = false;
@@ -44,7 +46,8 @@
       if (context) return true;
       if (typeof AudioContext === "undefined" || !navigator.userActivation?.hasBeenActive) return false;
       context = new AudioContext();
-      const output = BL.sound.output(context), filter = context.createBiquadFilter();
+      soundChannel.show(true);
+      const output = soundChannel.node(context), filter = context.createBiquadFilter();
       filter.type = "bandpass"; filter.frequency.value = 1500; filter.Q.value = 1.2;
       voice = context.createGain(); voice.gain.value = 0; voice.connect(filter);
       rasp = context.createGain(); rasp.gain.value = 0; rasp.connect(filter); filter.connect(output);
@@ -89,7 +92,7 @@
       if (!wait && open()) { play(); wait = PERIOD; }
     };
     const dispose = () => {
-      stop(); off();
+      stop(); off(); soundChannel.release();
       if (context) context.close().catch(() => {});
       context = tone = voice = rasp = previous = target = null;
     };

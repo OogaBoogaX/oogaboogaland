@@ -64,10 +64,32 @@ contributed within the past hour, so the adapter ignores rows without a valid
 activity timestamp. Profile names, email addresses, and avatars are not imported.
 
 The activity adapter is event-type agnostic, so every event type shares the same
-one-hour clanking and 24-hour chilling windows through `last_seen_at`.
-Oogatron currently stores `mergedAt` in a pull request event's payload but timestamps
-that event with the pull request's creation time; an older pull request merged today
-therefore still needs an Oogatron-side event/timestamp update to count as activity today.
+one-hour clanking and 24-hour chilling windows through `last_seen_at`. A merge is
+its own event, timed when the pull request was merged and credited to whoever
+merged it, so merging an old pull request today is activity today.
+
+## Activity and contribution counts
+
+Activity and the counts are two different things. Activity is everything
+Oogatron sees, and it alone sets an Ooga's state and the cave it works at: a push
+to a pull request's branch, a comment or a merge wakes an Ooga at once.
+
+The counts (the Contributions number on a roster strip, its kinds, its repository
+chips, the "most contributions" sort and the jumbotron's leaderboards) follow
+GitHub's contribution graph, within the OogaBoogaX repositories alone:
+
+- **Commits** count once they are on the repository's default branch. A commit
+  only on a pull request's branch is activity until it lands; a squash merge's
+  one commit counts for the pull request's author, and a merge commit for its
+  author. A rebased or amended patch counts once.
+- **Pull requests**, **reviews** and **issues** opened count as they happen.
+- **Comments** and **merges** are activity, not contributions: the strip shows
+  them on a line of their own, outside the total, and the snapshot carries a
+  `merges` count and leaderboard of their own.
+
+Oogatron keeps both from one store: every distinct event is activity
+(`counted`), and its `tally` is what the counts read. See Oogatron's README,
+How activity is counted.
 
 Repository names normalize to lowercase through `activity-repos.js`. Any
 `OogaBoogaX/<repo>` is accepted, with `w-s-bitcoin/entropylab` as the historical

@@ -16,10 +16,52 @@
   // Unread counts on the players and chat tabs (#430) belong to the page, not to one scene's sheet: players.js and
   // chat.js keep them, and whichever sheet is up paints them.
   const badges = { players: 0, chat: 0 };
+  // What the counts are of, oldest first, for the bell's list: a line for each sign-in and sign-out (`note`, its `kind`
+  // "in" or "out" choosing the line's mark), and for The Commons a line a run of messages, "3 new messages": lines
+  // heard one after another with no other notice between them share one. At most NOTICES_KEPT lines; older ones are
+  // only counted (`earlier`). A tab's lines go with its count.
+  const NOTICES_KEPT = 8;
+  const notices = [], earlier = { players: 0, chat: 0 };
   let paintBadges = null;
+  // Runs of messages left side by side, once the line between them has gone, are one run.
+  const mend = () => {
+    for (let i = notices.length - 1; i > 0; i--) if (notices[i].kind === "chat" && notices[i - 1].kind === "chat") {
+      notices[i - 1].count += notices[i].count;
+      notices.splice(i, 1);
+    }
+  };
+  const forget = (name) => {
+    for (let i = notices.length - 1; i >= 0; i--) if (notices[i].name === name) notices.splice(i, 1);
+    earlier[name] = 0;
+    mend();
+  };
+  const trim = () => { if (notices.length > NOTICES_KEPT) earlier[notices.shift().name]++; };
   const setBadge = (name, count) => {
-    if (badges[name] === count) return;
+    const more = count - badges[name];
+    if (!more) return;
     badges[name] = count;
+    if (!count) forget(name);
+    else if (name === "chat" && more > 0) {
+      const last = notices[notices.length - 1];
+      if (last && last.name === "chat") last.count += more;
+      else { notices.push({ name, key: null, kind: "chat", text: "", count: more }); trim(); }
+    }
+    if (paintBadges) paintBadges();
+  };
+  // One event on a tab, counted and listed. `key` names a line that `unnote` may take back, count and all.
+  const note = (name, text, key = null, kind = "") => {
+    notices.push({ name, key, kind, text, count: 1 });
+    badges[name]++;
+    trim();
+    if (paintBadges) paintBadges();
+  };
+  const unnote = (name, key) => {
+    let i = notices.length - 1;
+    while (i >= 0 && (notices[i].name !== name || notices[i].key !== key)) i--;
+    if (i >= 0) { notices.splice(i, 1); mend(); }
+    else if (earlier[name]) earlier[name]--;
+    else return;
+    badges[name]--;
     if (paintBadges) paintBadges();
   };
   // Only an explicit tab opening acknowledges that tab. Layout and notification inspection leave counts alone.
@@ -193,6 +235,26 @@
       button.setAttribute("aria-describedby", detail.id);
       panel.querySelector(".panel-title").append(view);
       let hovered = false, focused = false, pinned = false;
+      // A row a line, made as the list first reaches it and kept: at most NOTICES_KEPT and the count of earlier ones.
+      // Each carries its mark, drawn by its kind (style.css): a green dot for a sign-in, a red one for a sign-out, The
+      // Commons' own icon for messages.
+      const rows = [];
+      const addRow = () => {
+        const node = document.createElement("li"), mark = document.createElement("span"), text = document.createElement("span");
+        mark.className = "sheet-unread-mark"; mark.setAttribute("aria-hidden", "true");
+        mark.append(BL.nativeIcons.svg("chat"));
+        node.append(mark, text); detail.append(node);
+        return { node, text };
+      };
+      const list = (lines, kinds) => {
+        for (let i = 0; i < lines.length; i++) {
+          const row = rows[i] || (rows[i] = addRow());
+          if (row.text.textContent !== lines[i]) row.text.textContent = lines[i];
+          if (row.node.dataset.kind !== kinds[i]) row.node.dataset.kind = kinds[i];
+          if (row.node.hidden) row.node.hidden = false;
+        }
+        for (let i = lines.length; i < rows.length; i++) if (!rows[i].node.hidden) rows[i].node.hidden = true;
+      };
       const paint = () => {
         const shown = hovered || focused || pinned;
         if (detail.hidden === shown) {
@@ -216,17 +278,24 @@
         e.preventDefault(); e.stopPropagation();
         reset();
       });
-      return { panel, view, detail, paint, reset };
+      return { panel, view, list, paint, reset };
     });
     on(document, "pointerdown", (e) => {
       for (const item of notificationViews) if (!item.view.contains(e.target)) item.reset();
     }, { capture: true });
+    const lines = [], kinds = [];
     const showCounts = () => {
-      const detail = `Online Oogas: ${badgeText(badges.players)} new\nThe Commons: ${badgeText(badges.chat)} new`;
-      for (const item of notificationViews) {
-        if (item.detail.textContent !== detail) item.detail.textContent = detail;
-        item.paint();
+      // The bell lists the events, newest first.
+      lines.length = kinds.length = 0;
+      for (let i = notices.length - 1; i >= 0; i--) {
+        const notice = notices[i];
+        lines.push(notice.kind === "chat" ? `${badgeText(notice.count)} new ${notice.count === 1 ? "message" : "messages"}` : notice.text);
+        kinds.push(notice.kind);
       }
+      const older = earlier.players + earlier.chat;
+      if (older) { lines.push(`${badgeText(older)} earlier`); kinds.push("earlier"); }
+      if (!lines.length) { lines.push("No new notifications"); kinds.push("none"); }
+      for (const item of notificationViews) { item.list(lines, kinds); item.paint(); }
       for (const w of windows) for (const badge of w.nav.querySelectorAll(".tab-count")) {
         const tab = badge.closest("[data-tab]"), name = tab.dataset.tab;
         const count = isOpen(w) ? 0 : badges[name] || 0;
@@ -547,5 +616,5 @@
     firstVisit = false;
     return opened;
   };
-  BL.sheet = { create, visible, tabFor, setBadge, watchViews, attending, welcome };
+  BL.sheet = { create, visible, tabFor, setBadge, note, unnote, watchViews, attending, welcome };
 })();

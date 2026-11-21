@@ -59,16 +59,17 @@
   // Ooga's eyes, these doors never opening: the other scene needs its own copy of this side of them.
   const walk = ({ door, frame: F, sign, pilot, crew, camera, prepare, onThrough, onState = () => {}, followMin = 3, shut = false }) => {
     const state = { phase: "idle", wanted: false, x: 0, z: 0, seen: false, t: 0, cave: null, ready: false, failed: false, busy: false, settle: false, yaw: 0, dist: 4.5,
-      lens: null, glide: 1, heading: 0, focused: false, from: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, to: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, fromFov: 0, pitch: 0, head: null };
+      lens: null, glide: 1, heading: 0, focused: false, returnView: null, from: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, to: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, fromFov: 0, pitch: 0, head: null };
     const set = (phase) => { if (state.phase !== phase) { state.phase = phase; onState(phase); } };
     const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
-    // The eye as the pilot's first person places it, looking straight down the way through, so the view held here and
-    // the one the other scene takes over are the same view whichever way the Ooga was still turning.
+    // Keep the look relative to the doorway, including a visitor backing through it.
+    // Both scenes use the same eye while the guided body clears the threshold.
     const eyePose = (cave, out) => {
       const p = cave.root.position, heading = state.heading, ahead = 0.16 * cave.traits.height * Math.cos(state.pitch);
       out.x = p.x + Math.sin(heading) * ahead; out.z = p.z + Math.cos(heading) * ahead;
       out.y = p.y - cave.baseY + cave.headOffset * 0.95 + cave.viewLift;
-      out.yaw = heading; out.pitch = state.pitch;
+      out.yaw = heading + (state.returnView ? state.returnView.relYaw + Math.PI : 0);
+      out.pitch = state.returnView ? -state.returnView.pitch : state.pitch;
     };
     const readPose = (out) => {
       const p = camera.position, t = camera.target, dx = t.x - p.x, dy = t.y - p.y, dz = t.z - p.z;
@@ -92,11 +93,17 @@
       hideHead(cave, false);
       pilot.setExternalControl(false);
       lens("back");
+      if (pilot.player !== cave) { state.returnView = null; state.focused = false; return; }
       const p = cave.root.position;
-      pilot.navigate({ position: { x: p.x, y: p.y - cave.baseY, z: p.z }, yaw: cave.root.rotation.y + Math.PI, pitch: LET_GO_PITCH, dist: followMin });
+      const kept = state.returnView;
+      const yaw = kept ? state.heading + kept.relYaw : cave.root.rotation.y + Math.PI;
+      pilot.navigate({ position: { x: p.x, y: p.y - cave.baseY, z: p.z }, yaw: kept?.view === "first-person" ? yaw : cave.root.rotation.y + Math.PI, pitch: kept ? kept.pitch : LET_GO_PITCH, dist: kept ? kept.distance : followMin });
+      if (kept) { kept.relYaw = yaw - cave.root.rotation.y; pilot.adopt(kept, false); }
+      state.returnView = null;
       // Mouse-look, if the walk took it away.
       if (state.focused) pilot.focusAim();
       state.focused = false;
+      pilot.controls.takeMovement();
     };
     // Called once the camera is final for the frame.
     const view = (dt) => {
@@ -119,7 +126,7 @@
     const handOver = (player, across, d) => {
       crew.steer(0, 0, 0, 0, 0);
       set("through");
-      if (onThrough({ across, past: -d, pitch: state.pitch, dist: state.dist, shut, focused: state.focused }) === false) { letGo(player); set("idle"); state.wanted = false; }
+      if (onThrough({ across, past: -d, pitch: state.pitch, dist: state.dist, shut, focused: state.focused, view: state.returnView }) === false) { letGo(player); set("idle"); state.wanted = false; }
     };
     const load = () => {
       if (state.ready || state.busy) return;
@@ -148,7 +155,7 @@
         const to = -sign * (state.stopAt + AHEAD) + F.plane;
         const dx = F.x + F.sr * to + F.cr * across * 0.5 - p.x, dz = F.z + F.cr * to - F.sr * across * 0.5 - p.z, m = Math.hypot(dx, dz) || 1;
         crew.steer(dx / m, dz / m, 0, 1, 0, SPEED);
-        if (d >= state.stopAt && viewPast >= VIEW_CLEAR || state.t > LIMIT) { letGo(player); state.settle = true; set("idle"); }
+        if (d >= state.stopAt && viewPast >= VIEW_CLEAR || state.t > LIMIT) { letGo(player); set("idle"); }
         return;
       }
       if (state.settle) {
@@ -189,6 +196,8 @@
         state.wanted = false;
         state.t = 0; state.cave = player; state.dist = pilot.orbit.dist; state.pitch = 0; state.heading = Math.atan2(sign * F.sr, sign * F.cr);
         state.focused = pilot.captureControl({}).focused;
+        state.returnView = pilot.viewState();
+        if (state.returnView) state.returnView.relYaw += player.root.rotation.y - state.heading;
         door.away(sign);
         pilot.setExternalControl(true);
         lens("eyes");
@@ -200,7 +209,8 @@
     const arrive = (crossing, player, yaw) => {
       player.root.rotation.y = yaw + Math.PI;
       // Far enough on that the view handed back, at its nearest behind the Ooga, stands clear of the doors.
-      Object.assign(state, { t: 0, cave: player, yaw, heading: yaw + Math.PI, focused: !!crossing.focused, ready: true, seen: false, dist: crossing.dist, pitch: crossing.pitch, lens: "eyes", glide: 1, fromFov: 0, stopAt: Math.max(ARRIVE, followMin * Math.cos(LET_GO_PITCH) + CLEAR_BACK) });
+      const kept = crossing.view, distance = kept && kept.view !== "first-person" ? kept.distance : followMin;
+      Object.assign(state, { t: 0, cave: player, yaw, heading: yaw + Math.PI, focused: !!crossing.focused, returnView: kept ? { ...kept } : null, ready: true, seen: false, dist: crossing.dist, pitch: crossing.pitch, lens: "eyes", glide: 1, fromFov: 0, stopAt: Math.max(ARRIVE, distance * Math.cos(kept ? kept.pitch : LET_GO_PITCH) + CLEAR_BACK) });
       door.set(false);
       door.away(-sign);
       if (!crossing.shut) door.set(true);
@@ -209,7 +219,7 @@
       set("arriving");
     };
     const reset = () => {
-      state.wanted = state.seen = state.settle = false; state.busy = false; state.lens = null;
+      state.wanted = state.seen = state.settle = false; state.busy = false; state.lens = null; state.returnView = null;
       if (state.cave) { hideHead(state.cave, false); pilot.setExternalControl(false); }
       set("idle");
     };

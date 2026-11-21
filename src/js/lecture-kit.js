@@ -41,8 +41,13 @@
     if (lectures.has(lecture.id)) throw new Error(`Lecture ${lecture.id} is already registered`);
     lectures.set(lecture.id, lecture);
   };
-  // A recording's times: where each sentence starts in it (seconds) and how long the recording runs.
-  const timing = (id, starts, duration) => { timings.set(id, { starts, duration }); };
+  // A recording's times: where each sentence starts in it (seconds), how long the recording runs and its file, named
+  // `<id>-<first 16 hex of its SHA-256>.m4a` and served from R2 by the Worker (worker/src/lecture-audio.js), so a file
+  // once published never changes.
+  const timing = (id, starts, duration, file) => {
+    if (typeof file !== "string" || file !== `${id}-${file.slice(id.length + 1, -4)}.m4a` || !/^[0-9a-f]{16}$/.test(file.slice(id.length + 1, -4))) throw new Error(`Lecture ${id}'s recording is named ${file}`);
+    timings.set(id, { starts, duration, file });
+  };
   const words = (text) => { let n = 0, inWord = false; for (let i = 0; i < text.length; i++) { const sp = text.charCodeAt(i) <= 32; if (!sp && !inWord) n++; inWord = !sp; } return n; };
   const sentenceOf = (s) => typeof s === "string" ? s : s.s;
   const shapeOf = (op) => { for (const k of SHAPES) if (op[k] !== undefined) return k; return null; };
@@ -132,7 +137,7 @@
     // Each board's first stroke, and each slide's title for the outline.
     const epochs = [];
     strokes.forEach((s, i) => { if (!epochs[s.epoch]) epochs[s.epoch] = { first: i, count: 0, title: s.title }; epochs[s.epoch].count++; if (s.title) epochs[s.epoch].title = s.title; });
-    return { id: lecture.id, lecture, recorded: !!rec, duration, sentences, beats, sections, slides, strokes, epochs, quizzes };
+    return { id: lecture.id, lecture, recorded: !!rec, audio: rec ? `/media/lectures/${rec.file}` : null, duration, sentences, beats, sections, slides, strokes, epochs, quizzes };
   };
   // The sentence being said at `t` (the last one that has started), by bisection.
   const sentenceAt = (timeline, t) => {

@@ -3,7 +3,8 @@
 Each of `cloud-hopper-l1` through `cloud-hopper-l4` has one current winning replay. Guests can read it. Only an
 eligible signed-in character owner can submit a recording from a run begun in the same account/session. The timer
 shows the shared record holder, a small ghost button immediately left of the time, and the existing race clock.
-The ghost defaults off on each attempt, loads only when enabled, and retains that attempt's selected winner
+The ghost defaults off; the player turns it on or off (its button or G) before a run, never during one, and the choice
+is kept in this browser (localStorage `ooga-cloud-hopper-ghost`) for every later run. It loads only while on, and retains that attempt's selected winner
 through the active run. Numeric boards keep updating independently, including the timer and result card. Ending
 the run stops playback and releases the selection, so an accepted finish updates the results immediately.
 There is no browser-personal-best playback fallback. Numeric local bests remain.

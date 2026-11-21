@@ -5,8 +5,9 @@
 // Never in the way of play: a report is one fire-and-forget RPC inside `ctx.waitUntil`, its failure only counted, and
 // nothing at all runs unless INSPECTOR_IDS names an account (and the INSPECTOR binding exists): every method returns at
 // its first line otherwise. No timers: events go out on the next microtask, and `tick` rides calls the object already
-// makes (a snapshot, an alarm, a game tick), sending state at most once a second while someone watches and once a
-// minute otherwise, so a room with nothing happening still hibernates. Each report's answer says whether a viewer is
+// makes (a snapshot, an alarm, a game tick), sending state at most once a second while someone watches and every four
+// minutes otherwise (inside the Inspector's STALE_MS, and each report wakes the Inspector), so a room with nothing
+// happening still hibernates. Each report's answer says whether a viewer is
 // watching (`watchUntil`), which is how an object learns to send its per-socket rows; memory goes with hibernation, so
 // the first report after a wake learns it again.
 import { listed, listedIds } from "./allowlist.js";
@@ -16,7 +17,7 @@ export const INSPECTOR_NAME = "global";
 // Why a page says its last socket ended (net.js), on the close frame and in the `back` message after it rejoins.
 export const BACK_WHY = ["socket", "heartbeat", "network", "paused", "kicked", "signout", "other"];
 
-const QUIET_MS = 60000, WATCHED_MS = 1000, QUEUE_MAX = 64;
+const QUIET_MS = 240000, WATCHED_MS = 1000, QUEUE_MAX = 64;
 
 export const inspectorOn = (env) => !!(env && env.INSPECTOR) && listedIds(env.INSPECTOR_IDS).length > 0;
 export const inspectorAllowed = (env, id) => inspectorOn(env) && listed(env.INSPECTOR_IDS, id);

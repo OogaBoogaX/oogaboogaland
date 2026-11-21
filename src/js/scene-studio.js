@@ -104,6 +104,7 @@
   // Who is wanted on the pad: the address's Ooga as the page loads, then whoever the list or a script asks for.
   let asked = (params.get("character") || "").trim();
   let night = false, combatShown = null, nearKey = "", spoken = 0, watchTimer = 0, watchVersion = null, watchError = "", broken = "", homeLink = null, homeTitle = "", homeWords = "", pick = null, titled = false;
+  let wardrobe = null;
 
   // What stands in a walker's way: the chair, the fire and the hammock's posts, each a circle.
   const blocked = (x, z, r) => {
@@ -246,9 +247,10 @@
     for (let i = 0; i < v.length; i += 3) for (let k = 0; k < 3; k++) { b[k] = Math.min(b[k], v[i + k]); b[k + 3] = Math.max(b[k + 3], v[i + k]); }
     return b;
   });
-  const propTarget = (node, kind, body) => input.add(node, { kind: "prop", piece: kind, body,
+  const propTargets = [];
+  const propTarget = (node, kind, body) => { propTargets.push(node); input.add(node, { kind: "prop", piece: kind, body,
     pickRay: (ray) => physics && physics.raycast(ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, camera.far, PROP_HIT) && PROP_HIT.body === body ? PROP_HIT.t : NaN },
-    { radius: Math.max(0.35, physics.radius(body)) });
+    { radius: Math.max(0.35, physics.radius(body)) }); };
   // The chair stands where it belongs again (Chair, or sitting down in it after it was knocked over).
   const chairHome = () => {
     if (!physics.displaced(chairBody)) return;
@@ -546,6 +548,137 @@
     asked = state.name;
     return false;
   };
+  const startWardrobe = (signal) => {
+    const $ = (id) => document.getElementById(id), equipment = BL.equipment, hats = BL.equipmentHats;
+    const view = wardrobe = { choices: $("studio-hat-choices"), range: $("studio-hat-size"), sizeOutput: $("studio-hat-size-value"), reset: $("studio-hat-size-reset"),
+      save: $("studio-hat-save"), own: $("studio-hat-own"), status: $("studio-hat-status"), link: $("studio-hat-link"), selection: null, size: 100, dirty: false, ticket: 0, stop: null };
+    const key = (s) => s ? s.item === "none" ? "none" : `${s.item}@${s.version}` : "authored";
+    const rows = [], grouped = new Map(), disclosures = [], savedRows = new Map();
+    let selectedKey = null, serial = 0;
+    const add = (parent, selection, label, creators = [], choice = null, parents = []) => {
+      const node = document.createElement("label"), input = document.createElement("input"), words = document.createElement("span"), name = document.createElement("span");
+      node.className = "studio-hat-choice" + (parent === view.choices ? " slab" : "");
+      input.type = "radio"; input.name = "studio-hat-choice"; input.id = `studio-hat-choice-${serial++}`;
+      input.value = key(selection); input.dataset.hatItem = selection?.item || "authored";
+      if (choice) input.dataset.hatKey = choice.key;
+      name.className = "studio-hat-name"; name.textContent = label; words.append(name);
+      if (creators.length) {
+        const credit = document.createElement("span"); credit.className = "studio-hat-credit";
+        credit.textContent = "By " + creators.join(", "); words.append(credit);
+      }
+      node.append(input, words); parent.append(node);
+      const row = { node, input, selection, label, choice, parents };
+      rows.push(row); return row;
+    };
+    const authored = add(view.choices, null, "Original character look"), none = add(view.choices, { item: "none", version: null }, "No hat");
+    const family = (choice, parent, parents) => {
+      const node = document.createElement("div"); node.className = "studio-hat-family" + (parent === view.choices ? " slab" : "");
+      parent.append(node);
+      const row = add(node, choice.selection, choice.label, choice.creators, choice, parents);
+      grouped.set(choice.key, row);
+      if (choice.children.length) {
+        const details = document.createElement("details"), summary = document.createElement("summary");
+        details.className = "studio-hat-variants";
+        const disclosure = { details, summary, count: choice.children.length };
+        disclosures.push(disclosure); details.append(summary); node.append(details);
+        for (const child of choice.children) family(child, details, [...parents, disclosure]);
+      }
+    };
+    for (const choice of hats.groups()) family(choice, view.choices, []);
+    const showSelection = () => {
+      const saved = owns() && equipment.state.supported ? equipment.state.record.selection : null, retained = new Set();
+      // Keep a distinct old pin available while trying another hat. Only the saved and current preview pins may
+      // add rows beyond the catalog, so successive accepts or other-tab changes cannot grow a version history here.
+      for (const selection of [saved, view.selection]) {
+        if (!selection || selection.item === "none") continue;
+        const choice = hats.choiceFor(selection), value = key(selection);
+        if (choice && grouped.has(choice.key)) continue;
+        retained.add(value);
+        if (!savedRows.has(value)) {
+          const item = hats.get(selection.item, selection.version) || hats.get(selection.item);
+          const row = add(view.choices, selection, `${item?.label || "My hat"} · saved version`, item?.creator ? [item.creator] : []);
+          row.input.dataset.savedVersion = "true"; savedRows.set(value, row);
+        }
+      }
+      for (const [value, row] of savedRows) if (!retained.has(value)) { row.node.remove(); rows.splice(rows.indexOf(row), 1); savedRows.delete(value); }
+      const value = key(view.selection), choice = view.selection && view.selection.item !== "none" ? hats.choiceFor(view.selection) : null;
+      const selected = !view.selection ? authored : view.selection.item === "none" ? none : (choice && grouped.get(choice.key)) || savedRows.get(value);
+      for (const row of rows) {
+        row.input.checked = row === selected;
+        // The visible duplicate row represents the wearer's exact pin, never a silent transfer to another creator.
+        row.input.value = key(row === selected ? view.selection : row.selection);
+      }
+      if (selectedKey !== value) for (const parent of selected.parents) parent.details.open = true;
+      for (const disclosure of disclosures) disclosure.summary.textContent = `Variants (${disclosure.count})`
+        + (selected.parents.includes(disclosure) ? ` · ${selected.label} selected` : "");
+      if (selectedKey !== value && view.choices.clientHeight) {
+        // Keep the pin in view without moving focus or scrolling the surrounding studio panel.
+        const bounds = view.choices.getBoundingClientRect(), row = selected.node.getBoundingClientRect();
+        const top = bounds.top + view.choices.clientTop, bottom = top + view.choices.clientHeight;
+        if (row.top < top || row.height > view.choices.clientHeight) view.choices.scrollTop += row.top - top;
+        else if (row.bottom > bottom) view.choices.scrollTop += row.bottom - bottom;
+      }
+      selectedKey = value;
+    };
+    const owns = () => BL.net.ownCharacter()?.handle.toLowerCase() === state.name.toLowerCase();
+    const draw = async () => {
+      const ticket = ++view.ticket, chosen = view.selection, size = view.size;
+      try {
+        if (chosen && chosen.item !== "none" && !BL.equipmentHats.loaded(chosen.item, chosen.version)) await BL.equipmentHats.load(chosen.item, chosen.version);
+        if (signal.aborted || wardrobe !== view || ticket !== view.ticket) return;
+        if (!BL.characterEquipment.apply(cave, chosen, size)) view.status.textContent = "This character needs a hat fitting before it can wear this selection.";
+      } catch { if (!signal.aborted && wardrobe === view && ticket === view.ticket) view.status.textContent = "This hat could not be loaded. Try again."; }
+    };
+    const changed = () => {
+      if (wardrobe !== view) return;
+      const own = owns(), s = equipment.state, supported = BL.characterEquipment.supports(cave);
+      if (!view.dirty) {
+        view.selection = own && s.supported ? s.record.selection : null;
+        view.size = view.selection && view.selection.item !== "none" ? s.record.size : 100;
+      }
+      showSelection();
+      const minimum = BL.characterEquipment.minimumSize(cave, view.selection);
+      view.range.min = String(minimum);
+      view.size = Math.max(minimum, view.size);
+      if (!view.dirty) draw();
+      view.range.value = String(view.size);
+      view.range.setAttribute("aria-valuetext", `${view.size}%`);
+      view.sizeOutput.value = `${view.size}%`;
+      view.range.disabled = !supported || !view.selection || view.selection.item === "none";
+      view.reset.disabled = view.range.disabled || view.size === 100;
+      view.save.disabled = !own || !s.supported || s.busy || !supported;
+      view.own.hidden = !BL.net.state.me || own;
+      $("studio-hat-signin").hidden = !BL.net.state.backend || !!BL.net.state.me;
+      view.status.textContent = s.error || (s.busy ? "Saving…" : !supported ? "This character needs a hat fitting before it can wear shared hats."
+        : !s.supported ? "Preview only here. Use the staging studio while signed in to save your hat."
+        : !BL.net.state.me ? "Sign in to save a hat for your Ooga." : !own ? "Preview any Ooga. Switch to your own to save a hat." : view.dirty ? "Previewing. Save to wear this in the world." : "Your saved hat follows you into the world.");
+      if (!view.range.disabled && minimum > 80) view.status.textContent += ` Minimum size for this Ooga: ${minimum}%.`;
+      view.link.hidden = s.supported || document.documentElement.dataset.workerPage === "1";
+      view.link.href = `https://oogaboogaland-staging.wickedsmartbitcoin.workers.dev/?scene=studio&character=${encodeURIComponent(state.name)}`;
+    };
+    view.choices.addEventListener("change", (event) => {
+      const row = rows.find((row) => row.input === event.target);
+      if (!row || !row.input.checked) return;
+      view.selection = row.choice ? hats.selectionFor(row.choice, owns() ? equipment.state.record.selection : null) : row.selection;
+      view.size = owns() && view.selection && view.selection.item !== "none" && key(view.selection) === key(equipment.state.record.selection) ? equipment.state.record.size : 100;
+      view.dirty = true; changed(); draw();
+    }, { signal });
+    const resize = (size) => {
+      if (view.range.disabled || !Number.isInteger(size) || size < BL.characterEquipment.minimumSize(cave, view.selection) || size > 120 || size === view.size) return;
+      view.size = size; view.dirty = true; changed(); draw();
+    };
+    view.range.addEventListener("input", () => resize(Number(view.range.value)), { signal });
+    view.reset.addEventListener("click", () => resize(100), { signal });
+    view.save.addEventListener("click", async () => {
+      if (!owns()) return;
+      const submitted = key(view.selection), size = view.size;
+      if (await equipment.save(view.selection, view.selection && view.selection.item !== "none" ? size : undefined)
+        && !signal.aborted && wardrobe === view && key(view.selection) === submitted && view.size === size) { view.dirty = false; changed(); }
+    }, { signal });
+    view.own.addEventListener("click", () => { const own = BL.net.ownCharacter(); if (own) show(own.handle); }, { signal });
+    view.stop = equipment.subscribe(changed);
+    changed();
+  };
   // A file-less Ooga's build is read as its model is first made, so the other build is a reload.
   const rebuild = () => {
     remember();
@@ -599,7 +732,7 @@
   const HOOKS = {
     torso: "Paints the chest, belt and hips", gear: "Paints the arms, legs and feet", club: "The weapon it holds first, drawn by its club hook",
     skull: "Its own head shape", crown: "Hair, or a crown", eyes: "Eyes of its own", mark: "Marks on the face",
-    hatY: "Does nothing: it placed the loot crates' hats, which are gone", headgear: "A hat or a helmet", extras: "Pieces of its own: a pet, a bag, a pack",
+    hatY: "Does nothing: it placed the loot crates' hats, which are gone", headgear: "Head details", hat: "A shareable hat", hatNodes: "Details on a shareable hat", extras: "Pieces of its own: a pet, a bag, a pack",
     tint: "A second colourway, changing with the day's price", model: "A modelled body of its own", refine: "Fine detail painted on the body"
   };
   // A hook whose name in the file would mislead a player is shown by what the game calls it: `club` draws whatever the
@@ -850,6 +983,7 @@
     watchVersion = null; watchError = "";
     if (WATCH) watchTimer = window.setInterval(() => watch(ctx.signal), 1000);
     // Who is on the pad: the handle asked for, with a file or without, else the roster's first.
+    if (!asked && BL.net.ownCharacter()) asked = BL.net.ownCharacter().handle;
     const valid = /^[A-Za-z0-9-]{1,39}$/.test(asked);
     const find = (name) => contributors.roster.find((c) => c.name.toLowerCase() === name.toLowerCase());
     if (valid && !find(asked)) {
@@ -1034,6 +1168,7 @@
       if (saved.free) { setFree(true); [free.x, free.y, free.z, free.yaw, free.pitch, free.dist] = saved.free; }
     }
     nearKey = ""; spoken = 0;
+    startWardrobe(ctx.signal);
     if (broken) hud.hint(broken, 36e5);
     Object.assign(studioScene, { root, camera, input, debug: { camera, crew, fx, pilot, hud, controls: pilot.controls, cavemen: crew.cavemen, physics, studio: { place, toggle, speak, show, state, free, resetProps, get hammock() { return hammock; }, get bed() { return bed; }, get seats() { return seats; }, get cave() { return cave; } } } });
     pilot.update(0);
@@ -1086,6 +1221,7 @@
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   const leave = () => {
+    if (wardrobe) { wardrobe.stop(); wardrobe.choices.replaceChildren(); wardrobe = null; }
     window.clearInterval(watchTimer);
     watchTimer = 0;
     homeLink.title = homeTitle;
@@ -1108,6 +1244,8 @@
     crew.dispose();
     fx.dispose();
     pilot.dispose();
+    for (const node of propTargets) input.remove(node);
+    propTargets.length = 0;
     while (root.children.length) removeChild(root, root.children[root.children.length - 1]);
     const count = input.targetCount;
     input.dispose();

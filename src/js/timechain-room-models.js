@@ -38,14 +38,23 @@
   };
   const quad = (geo, a, b, c, d, color, emissive, normal) => face(geo, [a, b, c, d], color, emissive, normal);
   const blank = () => ({ verts: [], faces: [], lines: [] });
-  // Preview construction, liveGeometry and cancellation all run from the hub; these meshes belong to the room.
+  // Doorway previews belong to Timechain. A short-lived observer can own its synchronous
+  // build batches instead, including nested kind helpers, without pinning a scene it never enters.
+  let ownerScope = "timechain";
+  const withScope = (scope, build) => {
+    const previous = ownerScope;
+    ownerScope = scope;
+    try { return BL.models.withScope(scope, build); }
+    finally { ownerScope = previous; }
+  };
+  const owned = (build, arg) => BL.models.withScope(ownerScope, build, arg);
   const own = (build) => {
     const read = BL.models.cached(build);
-    return () => BL.models.withScope("timechain", read);
+    return () => owned(read);
   };
   const perRoom = (build) => {
     const read = BL.models.variants(build);
-    return (id) => BL.models.withScope("timechain", read, id);
+    return (id) => owned(read, id);
   };
   const UP = [0, 1, 0], DOWN = [0, -1, 0];
   // What of a convex polygon of [x, z] corners keeps nx·x + nz·z ≤ d (Sutherland–Hodgman against one half-plane).
@@ -181,7 +190,7 @@
       node: (name, geometry, x = 0, y = 0, z = 0, o = {}) => {
         let geo = geometry;
         if (typeof geometry === "function") {
-          const sub = { L: into.L, room: into.room, body: [], glow: [], flat: [], nodes: into.nodes, solids: [], seats: [], lights: [], live: into.live, targets: into.targets };
+          const sub = { L: into.L, room: into.room, body: [], glow: [], flat: [], nodes: into.nodes, solids: [], seats: [], lights: [], live: into.live, targets: into.targets, geometries: into.geometries };
           geometry(kit(sub));
           geo = sub.body.length || sub.glow.length ? merge(...sub.body, ...sub.glow) : null;
           if (geo && !sub.body.length) noShadow(geo);
@@ -199,9 +208,13 @@
         return K.node(o.name || null, flatPicture(canvas, w, h, o.emissive === undefined ? 0.9 : o.emissive), x, y, z, { ...o, glow: true });
       },
       // What a body cannot walk through, in this frame: a circle, or a box `hx` by `hz` either side turned with the frame.
+      // With `stay` a walker meeting it is never shouldered round it (a stage it climbs by its own steps).
+      // A `deck` (a box with both a `top` and a `below`) is a floor overhead: the room keeps the camera on the Ooga's
+      // side of it. A `floor` (the Block Party's stage) is ground to the camera too: its eye stays over its top, as over the
+      // room's floor.
       solid: (o) => {
-        const p = at(o.x || 0, 0, o.z || 0);
-        into.solids.push(o.r !== undefined ? { x: p.x, z: p.z, r: o.r, top: o.top, below: o.below } : { x: p.x, z: p.z, hx: o.hx, hz: o.hz, ry: K.yaw(o.ry || 0), top: o.top, below: o.below });
+        const p = at(o.x || 0, 0, o.z || 0), stay = !!o.stay;
+        into.solids.push(o.r !== undefined ? { x: p.x, z: p.z, r: o.r, top: o.top, below: o.below, stay } : { x: p.x, z: p.z, hx: o.hx, hz: o.hz, ry: K.yaw(o.ry || 0), top: o.top, below: o.below, stay, deck: !!o.deck, floor: !!o.floor });
       },
       // A seat for the visitor's Ooga: `y` its height over `floor`, what it stands on, facing `heading` in this frame;
       // standing up leaves it at `back` behind it.
@@ -224,9 +237,13 @@
       // The room's light: overrides of the scene's render options (sky, ground, direct, ambient floor, bloom).
       render: (o) => { into.render = o; },
       wallColor: (c) => { into.wallColor = c; },
+      // The lit strip along the screen's lower edge, where a kind wants its own colour for it.
+      rimColor: (c) => { into.rimColor = c; },
       // A raked hall's colours: its terraces (alternating), their amber nosings and the doorway's landing.
       rakeColors: (o) => { if (o.terrace) into.terrace = o.terrace; if (o.nosing) into.nosing = o.nosing; if (o.landing) into.landing = o.landing; },
-      floorColor: (c) => { into.floorColor = c; }
+      floorColor: (c) => { into.floorColor = c; },
+      // An unpainted floor drawn as glass this opaque (over a kind's own under-floor), as the glass cases are.
+      floorGlass: (opacity) => { into.floorGlass = opacity; }
     };
     return K;
   };
@@ -387,7 +404,7 @@
       // The amber strip along the screen's lower edge, just inside it, and the skirting round the floor.
       const s0 = ROOMS.onSphere(L, a0, e0, 0.996), s1 = ROOMS.onSphere(L, a1, e1, 0.996);
       const strip = [[s0.x, s0.y - 0.04, s0.z], [s1.x, s1.y - 0.04, s1.z], [s1.x, s1.y + 0.04, s1.z], [s0.x, s0.y + 0.04, s0.z]];
-      for (const piece of outsideDoor(strip)) face(glowing, piece, C.amber, 1, inward(piece));
+      for (const piece of outsideDoor(strip)) face(glowing, piece, into.rimColor || C.amber, 1, inward(piece));
       const fy = L.yMin + 0.07, fr = ROOMS.radiusAt(L, fy) * 0.997;
       const skirt = [[fr * Math.sin(a0), fy - 0.02, -fr * Math.cos(a0)], [fr * Math.sin(a1), fy - 0.02, -fr * Math.cos(a1)], [fr * Math.sin(a1), fy + 0.02, -fr * Math.cos(a1)], [fr * Math.sin(a0), fy + 0.02, -fr * Math.cos(a0)]];
       for (const piece of outsideDoor(skirt)) face(glowing, piece, C.skirt, 0.8, inward(piece));
@@ -423,7 +440,7 @@
     if (canvas) {
       const F = floorMap(L, into.floorSize ? into.floorSize.scale : 0);
       geo.imageSurface = { canvas, version: 1, rect: [-F.rf, -F.rf, 2 * F.rf, 2 * F.rf], tessellated: true };
-    }
+    } else if (into.floorGlass) { geo.glassOpacity = into.floorGlass; noShadow(geo); }
     return geo;
   });
   // A raked hall's floor: the terraces stepping down round the focus, each with an amber nosing, the landing at the
@@ -452,21 +469,18 @@
       parts.push(slabGeo([[rB * Math.sin(t0), F + rB * Math.cos(t0)], [r0 * Math.sin(w0), r0 * Math.cos(w0)], [r0 * Math.sin(w1), r0 * Math.cos(w1)], [rB * Math.sin(t1), F + rB * Math.cos(t1)]], L.yMin, 0, into.landing || "#1f1c1a"));
     }
     glows.push(sectorGeo(F, rB - 0.02, rB + 0.04, -pL, pL, 0, 0.012, nosing, 0.9));
-    // The theater aisle's half steps, a box in the outer half of each row.
-    if (K.halfSteps) for (let i = 0; i < K.rows.length; i++) {
-      const row = K.rows[i], next = i + 1 < K.rows.length ? K.rows[i + 1].y : 0, hy = row.y + (next - row.y) / 2;
-      parts.push(box({ w: 2 * K.aisle, h: hy - row.y, d: K.rows[i].rOut - row.d, color: "#1d1a18", offset: { x: 0, y: (row.y + hy) / 2, z: F + (row.d + row.rOut) / 2 } }));
+    // The aisle's steps: each row's depth shared equally between its own level and its steps, a box a step.
+    const m = K.aisleSteps || 0, tread = K.depth / (m + 1);
+    for (let i = 0; i < K.rows.length; i++) for (let j = 1; j <= m; j++) {
+      const row = K.rows[i], top = ROOMS.aisleStep(K, i, j);
+      parts.push(box({ w: 2 * K.aisle, h: top - row.y, d: tread, color: "#1d1a18", offset: { x: 0, y: (row.y + top) / 2, z: F + row.rIn + (j + 0.5) * tread } }));
     }
-    // The aisle's chain: a link on every row (and half step), on down the landing to the door.
+    // The aisle's chain: a link on every row and on each of its steps, on down the landing to the door.
     const links = [];
-    for (let i = 0; i < K.rows.length; i++) {
-      const row = K.rows[i];
-      links.push([F + row.d - (K.halfSteps ? K.depth / 4 : 0), row.y]);
-      if (K.halfSteps) links.push([F + row.d + K.depth / 4, row.y + ((i + 1 < K.rows.length ? K.rows[i + 1].y : 0) - row.y) / 2]);
-    }
+    for (let i = 0; i < K.rows.length; i++) for (let j = 0; j <= m; j++) links.push([F + K.rows[i].rIn + (j + 0.5) * tread, ROOMS.aisleStep(K, i, j)]);
     for (let z = F + rB + 0.4; z < L.doorZ - 0.4; z += 0.8) links.push([z, 0]);
     for (const [z, y] of links) {
-      glows.push(box({ w: 0.7, h: 0.012, d: K.halfSteps ? 0.58 : 0.66, color: "#e8891a", emissive: 0.6, offset: { x: 0, y: y + 0.006, z } }));
+      glows.push(box({ w: 0.7, h: 0.012, d: m ? 0.58 : 0.66, color: "#e8891a", emissive: 0.6, offset: { x: 0, y: y + 0.006, z } }));
       parts.push(box({ w: 0.24, h: 0.016, d: 0.24, color: "#1a1410", offset: { x: 0, y: y + 0.008, z } }));
     }
     return { body: merge(...parts), glow: noShadow(merge(...glows)) };
@@ -501,9 +515,12 @@
   // The vestibule past the doorway, dim, ending in a hanging curtain of dark strips; the same depth in every room.
   const vestibule = perRoom((id) => {
     const L = ROOMS.layout(id), geo = blank(), Z = L.doorZ, W = DOOR.halfW, D = DOOR.height, end = Z + DOOR.vestibule;
-    quad(geo, [-W, 0, Z], [W, 0, Z], [W, 0, end], [-W, 0, end], C.vestibule, 0, UP);
-    quad(geo, [-W, D, Z], [W, D, Z], [W, D, end], [-W, D, end], C.vestibule, 0, DOWN);
-    for (const side of [-1, 1]) quad(geo, [side * W, 0, Z], [side * W, 0, end], [side * W, D, end], [side * W, D, Z], C.vestibule, 0, [-side, 0, 0]);
+    // Its floor a little under the room's, whose disc reaches past the doors over it (two faces 2 mm apart flicker).
+    quad(geo, [-W, -0.004, Z], [W, -0.004, Z], [W, -0.004, end], [-W, -0.004, end], C.vestibule, 0, UP);
+    // Its walls and ceiling start just past the doorway's frame, which reaches a little into it in the same planes.
+    const Zw = Z + 0.025;
+    quad(geo, [-W, D, Zw], [W, D, Zw], [W, D, end], [-W, D, end], C.vestibule, 0, DOWN);
+    for (const side of [-1, 1]) quad(geo, [side * W, 0, Zw], [side * W, 0, end], [side * W, D, end], [side * W, D, Zw], C.vestibule, 0, [-side, 0, 0]);
     const strips = 10;
     for (let i = 0; i < strips; i++) {
       const x0 = -W + 2 * W * i / strips, x1 = x0 + 2 * W / strips;
@@ -607,7 +624,7 @@
   const button = perRoom((id) => {
     const st = doorStyle(id), geo = merge(box({ w: 0.38, h: 0.38, d: 0.06, color: st.plate }), box({ w: 0.28, h: 0.28, d: 0.02, color: st.face, emissive: 0.85, offset: { z: -0.035 } }));
     const base = geo.verts.length / 3;
-    geo.verts.push(0.06, 0.08, -0.047, 0.06, -0.08, -0.047, -0.08, 0, -0.047);
+    geo.verts.push(0.06, 0.08, -0.049, 0.06, -0.08, -0.049, -0.08, 0, -0.049);
     geo.faces.push({ i: [base, base + 1, base + 2], color: hexToRgb(st.mark), emissive: 0 });
     return geo;
   });
@@ -789,8 +806,8 @@
     return geo;
   };
   BL.timechainRoomModels = {
-    build, plan, prepareSteps, geometries, picture, liveGeometry, flatPicture, sphere: sphereParts, domeMap, floorMap, paintKit, KINDS, COLORS: C, MARK_BIAS, EXIT_HEADER,
+    build, plan, prepareSteps, geometries, picture, liveGeometry, flatPicture, sphere: sphereParts, domeMap, floorMap, paintKit, KINDS, COLORS: C, MARK_BIAS, EXIT_HEADER, withScope,
     doorway, doorBulbs, bulbsOf, solo,
-    helpers: { face, quad, blank, clip, own, perRoom, cylinder, ballGeo, slabGeo, sectorGeo, litWord, UP, DOWN }
+    helpers: { face, quad, blank, clip, own, perRoom, owned, cylinder, ballGeo, slabGeo, sectorGeo, litWord, UP, DOWN }
   };
 })();

@@ -11,7 +11,7 @@
 // baked set's nodes. A theme's `inside` list and `ceiling` lamp runs in scene-hub.js furnish the room behind
 // a mouth from the kit's pieces.
 //
-// Beyond sets: `palm(v)` three swaying cartoon palm meshes (not voxels) placed as their own nodes (`palmTrunk(v, y)` their trunk's middle and radius at a height), `islet(v)` the terraced sea stacks on the horizon (variant 1 has a sea arch), `motes(opts)` a
+// Beyond sets: `palm(v)` three swaying cartoon palm meshes (not voxels) placed as their own nodes (`palmTrunk(v, y)` their trunk's middle and radius at a height), `islet(v, clear)` the terraced sea stacks on the horizon (variant 1 has a sea arch; `clear` a twin that sheds most of the fog), `motes(opts)` a
 // fixed field of glowing dust that wraps round the view (`update(elapsed, x, z)`), `flock(opts)` one
 // instanced batch of wheeling gulls and `fleet(opts)` log rafts on the sea, each with `update(elapsed)`.
 //
@@ -1231,9 +1231,14 @@
   const palm = BL.models.variants((v) => BL.models.foliageLods(palmGeometry(v), palmGeometry(v, 1)));
   // The islands on the horizon: terraced sea stacks on the island's own grid mesher, two metres a cell, a sand
   // ring at the waterline, rock cliffs and grass tops; variant 1 has a sea arch through it. Built once a page.
-  const islets = [];
-  const islet = (v) => {
-    if (islets[v]) return islets[v];
+  // `clear` is a twin that takes ISLET_PIERCE of the fog off itself, for a scene whose haze would otherwise paint
+  // the stacks in the horizon's colour well before the sea under them hazes at all: the sea hazes later, and into
+  // the darker sky below the horizon, so fully hazed stacks stood pale on blue water at noon, orange at dusk and
+  // brighter than the sea at night.
+  const islets = [], ISLET_PIERCE = 0.8;
+  const islet = (v, clear = false) => {
+    const slot = clear ? v + 3 : v;
+    if (islets[slot]) return islets[slot];
     const u = 2, S = 40, H = 16 + v * 5, grid = BL.terrain.makeGrid(S, H, S), rand = mulberry32(1200 + v * 7);
     const bumps = Array.from({ length: 6 }, () => [rand() * S, rand() * S, 4 + rand() * 6]);
     const heightAt = (x, z) => {
@@ -1252,7 +1257,8 @@
     }
     const geo = BL.terrain.gridGeometry(grid, { unit: u, palette: [null, ...RGB], origin: { x: -S * u / 2, y: 0, z: -S * u / 2 } });
     geo.castShadow = false;
-    islets[v] = geo;
+    if (clear) geo.fogPierce = ISLET_PIERCE;
+    islets[slot] = geo;
     return geo;
   };
   // The nodes for a baked set: solid (for the caller's collision), hang, decorative glow, lantern glow and swinging layers. All

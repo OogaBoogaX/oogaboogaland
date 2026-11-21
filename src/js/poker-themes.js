@@ -4,11 +4,16 @@
   const BL = window.BL;
   const themes = [
     {
-      id: "gatsby", name: "Banana Club", short: "Club", detail: "Ivory stone, emerald felt and golden chandelier light.", lamp: 0,
-      stone: ["#b4ab92", "#c5bba2", "#b0a68d", "#baaf93", "#7e8068", "#d0c6ab"],
-      wood: "#775338", accent: "#c8a45f", mineral: "#dac390", felt: "#317459", panel: "#245749", runner: "#376653",
+      id: "gatsby", name: "Banana Club", short: "Club", detail: "White marble hall, gold columns, a fountain and the statues of Bitcoin's road.", lamp: 0,
+      // Marble: floor, wall panels, side walls, end walls, the cream ceiling and the table tops. Walnut chairs, a darker
+      // marble base, a deeper green runner on the white floor and pale gold lettering on the far wall's green field.
+      stone: ["#ece8e1", "#e8e3da", "#d9d2c6", "#e4ded4", "#efe3c8", "#f1ede6"],
+      wood: "#4a2e1e", accent: "#c8a45f", mineral: "#e2c98a", felt: "#317459", panel: "#cbc4b8", runner: "#2c614c",
       ui: { accent: "#dfbe77", bright: "#f4dda2", ink: "#213023", text: "#f5efdf", muted: "#c1d0bb", surface: "#243e33", deep: "#142820", halo: "#45654f", rail: "#d3c5a5", feltLight: "#3b7963", feltDark: "#164332" },
-      sky: [0.62, 0.57, 0.45], ground: [0.31, 0.36, 0.27], direct: [0.88, 0.77, 0.58], ambient: 0.48,
+      // A bright, warm white marble hall, brighter than the caves, with low bloom so white stone does not glare; each
+      // table's lamp still outshines the chandeliers over its felt. Tuned by eye in the built room.
+      sky: [0.86, 0.83, 0.77], ground: [0.62, 0.59, 0.54], direct: [0.98, 0.87, 0.68], ambient: 0.56,
+      tableRange: 11, tableY: 4.4, bloom: 0.22, directStrength: 0.42,
       tableLight: [1, 0.84, 0.58], roomLight: [1, 0.87, 0.63]
     },
     {

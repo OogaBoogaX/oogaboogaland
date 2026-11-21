@@ -67,6 +67,10 @@
   const CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
   // The pool of the scene that updated last: only the active scene's pool updates.
   let activePool = null;
+  // The scenes' cabinet levers by seat (arcadeModels.joystick): a scene registers each of its cabinets' while it shows
+  // them, and `stick` null takes one off; a player at that seat works it (`playCabinet`).
+  const sticks = new Map();
+  const joystick = (id, stick) => { if (stick) sticks.set(id, stick); else sticks.delete(id); };
   const BAR_FILL = "#d8892b", BAR_KO = "#e5533d", ICON_IDLE = "#a6a6a2", ICON_SPEAKING = "#22c55e", ICON_MUTED = "#e5533d";
   // A chat line stays up this long once said through.
   const CHAT_SAY = 4;
@@ -401,6 +405,135 @@
         parts.chuk.rotation.x = cave.chukAngle;
       }
     };
+    // A player at an arcade cabinet (the room's `cabinets`, net.js `cabinetSeats`) stands, by their room pose, on the
+    // cabinet's spot CABINET_SPOT out from its middle and facing it (net.js `sendPose`). Here the body stands
+    // CABINET_STEP nearer on the cabinet's platform (`arcadeModels.PLATFORM`), its legs straight under its hips and
+    // its body leant forward from them as far as it must for both hands to reach the control panel
+    // (`arcadeModels.PANEL`). The left fist holds the lever under its knob and works it round
+    // (the lever the scene registered for that seat, `joystick`, tilting with it): a new direction every JOY_BEAT s
+    // from JOY_MOVES, eased into. The right smashes the three buttons in a pattern
+    // of its own (`CABINET_TAPS`, a hit every CABINET_BEAT s): it rises off one, moves over to the next and slams down
+    // on it. Each arm is swivelled from the shoulder so its fist, at its usual turn and with the wrist straight, faces its back out to the body's side. Its eyes are on the screen and the club out of the hand. Each arm is moved so its deltoid stays on the
+    // shoulder as it reaches (as crew.js `keepDeltoid` keeps a cut's), a move this takes off again on the next frame,
+    // and the lean and the lever as they leave; the rest is laid over the frame's pose, which the next frame's pose
+    // replaces. Allocates nothing once a body has played.
+    const CABINET_SPOT = 1.25, CABINET_STEP = 0.15, CABINET_BEAT = 0.24, CABINET_TAPS = [0, 1, 2, 1, 0, 0, 2, 1, 2, 0, 1, 1];
+    const CABINET_LEAN = 0.55, CABINET_REACH = 0.9, SMASH_LIFT = 0.1, SMASH_HIT = 0.03;
+    const JOY_BEAT = 0.34, JOY_TILT = 0.3, JOY_GRIP = 0.11;
+    const JOY_MOVES = [0, 1, 0, 0, 1, -1, -1, 0, 1, 1, -1, 1, 0, -1, 1, 0, -1, -1, 0, 1];
+    const seatOf = (id) => {
+      if (!net.cabinetSeats) return null;
+      for (const seat of net.cabinetSeats.values()) if (seat.player === id) return seat;
+      return null;
+    };
+    // A point on the panel, in the deck's frame (`dy` over it), in the frame the arms hang in (the root's) for a body
+    // leant `lean` forward from its hips: the root faces the cabinet, which turns its x and z round.
+    const PANEL_AT = new Float64Array(3), DELTOID_AT = new Float64Array(3), DELTOID_REST = new Float64Array(3), REST = quat.create();
+    const panelPoint = (entry, lean, dx, dy, dz) => {
+      const P = BL.arcadeModels.PANEL, c = Math.cos(P.lean), sn = Math.sin(P.lean), cl = Math.cos(lean), sl = Math.sin(lean);
+      const y = P.y - BL.arcadeModels.PLATFORM.h - entry.baseY + dy * c - dz * sn;
+      const z = CABINET_SPOT - CABINET_STEP - P.z - (dy * sn + dz * c);
+      PANEL_AT[0] = -dx; PANEL_AT[1] = cl * y + sl * z; PANEL_AT[2] = -sl * y + cl * z;
+      return PANEL_AT;
+    };
+    // How far a point in the arm's frame is from its shoulder, as a share of the arm's whole reach.
+    const reachShare = (cave, arm, at) => Math.hypot(at[0] - arm.position.x, at[1] - arm.position.y, at[2] - arm.position.z)
+      / ((Math.hypot(cave.elbow.y, cave.elbow.z) + cave.elbow.length) * cave.armScale);
+    // Turns the whole arm from the shoulder about its own line to the hand by `turn` (as crew.js `swivelArm` does), so
+    // the hand stays where it is and turns with the forearm, the wrist straight.
+    const SWIVEL_AXIS = new Float64Array(3), SWIVEL = quat.create();
+    const swivel = (cave, arm, forearm, q, turn) => {
+      const e = cave.elbow, k = cave.armScale, flex = -forearm.rotation.x;
+      quat.rotateVec(SWIVEL_AXIS, q, 0, (e.y - e.length * Math.cos(flex)) * k, (e.z + e.length * Math.sin(flex)) * k);
+      const l = Math.hypot(SWIVEL_AXIS[0], SWIVEL_AXIS[1], SWIVEL_AXIS[2]);
+      if (l < 1e-6) return;
+      quat.fromAxisAngle(SWIVEL, -SWIVEL_AXIS[0] / l, -SWIVEL_AXIS[1] / l, -SWIVEL_AXIS[2] / l, turn);
+      quat.multiply(q, SWIVEL, q);
+      arm.quaternion = q;
+    };
+    // Reaches `arm` for (tx, ty, tz) and swivels it until the fist, at its usual turn on the forearm, faces its back out
+    // to the body's side `side`; then moves it so its deltoid lies where it does on the arm at rest, keeping the move in
+    // `off` to be taken off again, and reaches and swivels once more from where it now hangs.
+    const reachKept = (cave, arm, forearm, fingers, q, off, armZ, pole, side, tx, ty, tz) => {
+      const d = cave.elbow.deltoid * cave.armScale, usual = 2 * Math.atan2(fingers.quaternion[1], fingers.quaternion[3]);
+      for (let pass = 0; pass < 3; pass++) {
+        BL.crew.reachArm(cave, arm, forearm, q, tx, ty, tz, pole, -0.5, -0.2);
+        const turn = backOut(arm, forearm, side) - usual;
+        swivel(cave, arm, forearm, q, Math.atan2(Math.sin(turn), Math.cos(turn)));
+        if (pass === 2) break;
+        quat.fromEuler(REST, -0.2, 0, armZ);
+        quat.rotateVec(DELTOID_REST, REST, 0, -d, 0);
+        quat.rotateVec(DELTOID_AT, q, 0, -d, 0);
+        const dx = DELTOID_REST[0] - DELTOID_AT[0], dy = DELTOID_REST[1] - DELTOID_AT[1], dz = DELTOID_REST[2] - DELTOID_AT[2];
+        arm.position.x += dx - off[0]; arm.position.y += dy - off[1]; arm.position.z += dz - off[2];
+        off[0] = dx; off[1] = dy; off[2] = dz;
+      }
+    };
+    const unshift = (arm, off) => {
+      arm.position.x -= off[0]; arm.position.y -= off[1]; arm.position.z -= off[2];
+      off[0] = off[1] = off[2] = 0;
+    };
+    // Takes the deltoid moves, the lean and the lever's tilt off again: before each frame's reach, and once as they leave.
+    const unplayCabinet = (entry) => {
+      const play = entry.cabinet, parts = entry.cave.parts;
+      if (!play || !play.on) return;
+      unshift(parts.armL, play.offL); unshift(parts.armR, play.offR);
+      entry.cave.root.rotation.x = 0;
+      if (play.stick) { play.stick.rotation.x = play.stick.rotation.z = 0; play.stick = null; }
+      play.on = false;
+    };
+    // The turn of a fist about its forearm (crew.js `poseFingers`) that would face its back, which lies along the hand's
+    // -z (an arm hanging at the side, at its usual turn, has it facing out), out to the body's side `side` (+1 its left,
+    // -1 its right), whatever way the arm reaches; the arm is swivelled by what that differs from its usual turn.
+    const BACK_INVERSE = quat.create(), BACK_AT = new Float64Array(3);
+    const backOut = (arm, forearm, side) => {
+      const q = arm.quaternion, flex = forearm.rotation.x, c = Math.cos(flex), sn = Math.sin(flex);
+      BACK_INVERSE[0] = -q[0]; BACK_INVERSE[1] = -q[1]; BACK_INVERSE[2] = -q[2]; BACK_INVERSE[3] = q[3];
+      quat.rotateVec(BACK_AT, BACK_INVERSE, side, 0, 0);
+      return Math.atan2(-BACK_AT[0], -(-BACK_AT[1] * sn + BACK_AT[2] * c));
+    };
+    const smooth = (v) => { v = Math.max(0, Math.min(1, v)); return v * v * (3 - 2 * v); };
+    const playCabinet = (entry, seat, dt) => {
+      const cave = entry.cave, parts = cave.parts, P = BL.arcadeModels.PANEL, root = cave.root;
+      if (!cave.modelled) return;
+      const play = entry.cabinet || (entry.cabinet = { t: Math.random() * 8, on: false, stick: null, tx: 0, tz: 0,
+        armL: quat.create(), armR: quat.create(), offL: new Float64Array(3), offR: new Float64Array(3) });
+      unplayCabinet(entry);
+      play.on = true;
+      play.t += dt;
+      const t = play.t;
+      // The lever: toward this beat's direction (x tips it toward the screen, z to the side), eased.
+      const j = Math.floor(t / JOY_BEAT) * 2 % JOY_MOVES.length, ease = 1 - Math.exp(-16 * dt);
+      play.tx += (JOY_MOVES[j] * JOY_TILT - play.tx) * ease; play.tz += (JOY_MOVES[j + 1] * JOY_TILT - play.tz) * ease;
+      play.stick = sticks.get(seat.id) || null;
+      if (play.stick) { play.stick.rotation.x = play.tx; play.stick.rotation.z = play.tz; }
+      const ux = -Math.sin(play.tz), uy = Math.cos(play.tz) * Math.cos(play.tx), uz = Math.cos(play.tz) * Math.sin(play.tx);
+      const kx = P.pivot[0] + ux * JOY_GRIP, ky = P.pivot[1] + uy * JOY_GRIP, kz = P.pivot[2] + uz * JOY_GRIP;
+      // The buttons: this beat's hit, then up off it, over to the next and down on that.
+      const n = Math.floor(t / CABINET_BEAT), f = t / CABINET_BEAT - n, L = CABINET_TAPS.length;
+      const a = CABINET_TAPS[n % L] * 2, b = CABINET_TAPS[(n + 1) % L] * 2, s = smooth((f - 0.1) / 0.5);
+      const bx = P.buttons[a] + (P.buttons[b] - P.buttons[a]) * s, bz = P.buttons[a + 1] + (P.buttons[b + 1] - P.buttons[a + 1]) * s;
+      const lift = f < 0.6 ? 1 - (1 - f / 0.6) * (1 - f / 0.6) : 1 - ((f - 0.6) / 0.4) * ((f - 0.6) / 0.4);
+      const by = P.top + SMASH_HIT + SMASH_LIFT * lift;
+      // The least lean that brings both hands within reach.
+      let lean = 0;
+      for (; lean < CABINET_LEAN; lean += 0.05) {
+        if (reachShare(cave, parts.armL, panelPoint(entry, lean, kx, ky, kz)) > CABINET_REACH) continue;
+        if (reachShare(cave, parts.armR, panelPoint(entry, lean, bx, by + SMASH_LIFT, bz)) <= CABINET_REACH) break;
+      }
+      root.position.x += Math.sin(root.rotation.y) * CABINET_STEP;
+      root.position.y += BL.arcadeModels.PLATFORM.h;
+      root.position.z += Math.cos(root.rotation.y) * CABINET_STEP;
+      root.rotation.x = lean;
+      parts.legL.rotation.x -= lean; parts.legR.rotation.x -= lean;
+      let at = panelPoint(entry, lean, kx, ky, kz);
+      reachKept(cave, parts.armL, parts.forearmL, parts.fingersL, play.armL, play.offL, cave.armLZ, 1, 1, at[0], at[1], at[2]);
+      at = panelPoint(entry, lean, bx, by, bz);
+      reachKept(cave, parts.armR, parts.forearmR, parts.fingersR, play.armR, play.offR, cave.armRZ, -1, -1, at[0], at[1], at[2]);
+      parts.head.rotation.x = -lean + 0.1;
+      if (parts.club && parts.club.parent === parts.armR) parts.club.visible = false;
+    };
+
     // Another player's banana flies as the crew's replayed shots do, with no hits; their strike swings the arm.
     const shotHeard = (id, a) => {
       const entry = bodies.get(id);
@@ -438,6 +571,7 @@
           if (bodies.size >= MAX) continue;
           entry = build(rec);
         }
+        if (!entry.gorilla) BL.equipment?.applyRemote(entry.cave, rec.id);
         // A copy this page drove when the body arrived (another tab's takeover) becomes its ghost once let go.
         if (ghost && crew && !entry.gorilla && !entry.ghosted) {
           const cave = crew.cavemen.get(entry.name);
@@ -473,6 +607,9 @@
             if (gun) gun.visible = false;
           }
           if (posed) posed(entry.cave, entry.cave.root.position.y - entry.baseY, rec, dt);
+          const seat = seatOf(rec.id);
+          if (seat) playCabinet(entry, seat, dt);
+          else unplayCabinet(entry);
           if (entry.cave.pet) {
             const p = entry.cave.root.position, riding = entry.cave.riding;
             riding.x = p.x; riding.y = p.y; riding.z = p.z;
@@ -811,5 +948,5 @@
 
   const nameplate = (id) => activePool ? activePool.nameplate(id) : null;
   const body = (id) => activePool ? activePool.body(id) : null;
-  BL.remotePlayers = { create, nameplate, body, onIsland, sameZone, MAX, BODY_HEIGHT };
+  BL.remotePlayers = { create, nameplate, body, joystick, onIsland, sameZone, MAX, BODY_HEIGHT };
 })();

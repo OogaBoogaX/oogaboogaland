@@ -82,5 +82,7 @@
   const arrange = (rows, mine) => rows.sort((a, b) => a.group === b.group
     ? (b.self ? 1 : 0) - (a.self ? 1 : 0) || COLLATE.compare(a.name, b.name) || a.id - b.id
     : a.group === mine ? -1 : b.group === mine ? 1 : COLLATE.compare(heading(a.group), heading(b.group)) || (a.group < b.group ? -1 : 1));
-  BL.zoneMap = { ROOT, landOf, groupOf, heading, line, parentOf, routeFrom, next, arrange };
+  // Every zone the tables name, for the World Map (scripts/world-map.mjs), which places each one or drops it by name.
+  const zones = Object.freeze([...new Set([ROOT, ...Object.keys(LANDS), ...Object.keys(PARENTS), ...Object.keys(HEADINGS)])]);
+  BL.zoneMap = { ROOT, zones, landOf, groupOf, heading, line, parentOf, routeFrom, next, arrange };
 })();

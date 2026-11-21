@@ -2,7 +2,8 @@
 // can leave a trail, and off-path destinations retain their final approach.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const CAPACITY = 4096, SPACING = 0.25, LOOK_AHEAD = 0.45, LANE_OFFSET = 0.35;
   const create = ({ island, walkable, surfaceAt = island.surfaceAt, pointAllowed = null }) => {
     const path = island.path, size = CAPACITY;

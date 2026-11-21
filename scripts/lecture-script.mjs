@@ -4,9 +4,13 @@
 //                                                     seconds of silence before it (a breath, a new slide, a new section);
 //                                                     after a question come his replies to each of its answers in turn
 //   npm run lecture:script -- --import <folder>       takes a recording back from the folder a voice tool wrote:
-//                                                     <id>.m4a to src/media/lectures/ and timing.json (where each
-//                                                     sentence starts) to src/js/lecture-<id>.timing.js
+//                                                     <id>.m4a to the gitignored untracked/lectures/ as
+//                                                     <id>-<hash>.m4a, and timing.json (where each sentence starts)
+//                                                     to src/js/lecture-<id>.timing.js, which names that file. The
+//                                                     recording reaches the site through R2 (docs/lectures.md):
+//                                                     npm --prefix worker run lectures:staging, then :production
 // The voice tool is its own project (lecture-voice); this file is all of it that the game knows.
+import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,9 +43,11 @@ if (args[0] === "--import") {
   if (rec.starts.some((t, i) => typeof t !== "number" || !(t >= 0) || i && t <= rec.starts[i - 1]) || !(rec.duration > rec.starts[count - 1])) fail(`${file}'s times are not in order`);
   const audio = join(folder, `${id}.m4a`);
   if (!existsSync(audio)) fail(`${folder} has no ${id}.m4a`);
-  mkdirSync(join(root, "src", "media", "lectures"), { recursive: true });
-  copyFileSync(audio, join(root, "src", "media", "lectures", `${id}.m4a`));
-  writeFileSync(join(root, "src", "js", `lecture-${id}.timing.js`), `// Where each sentence of ${id} starts in its recording, in seconds, and how long the recording is. Written by\n// scripts/lecture-script.mjs --import; a lecture changed since then needs recording again.\nwindow.BL.lectures.timing(${JSON.stringify(id)}, ${JSON.stringify(rec.starts)}, ${rec.duration});\n`);
+  // Named by its hash, so a name once published never changes what it holds (worker/src/lecture-audio.js).
+  const name = `${id}-${createHash("sha256").update(readFileSync(audio)).digest("hex").slice(0, 16)}.m4a`;
+  mkdirSync(join(root, "untracked", "lectures"), { recursive: true });
+  copyFileSync(audio, join(root, "untracked", "lectures", name));
+  writeFileSync(join(root, "src", "js", `lecture-${id}.timing.js`), `// Where each sentence of ${id} starts in its recording, in seconds, how long the recording is and its file. Written by\n// scripts/lecture-script.mjs --import; a lecture changed since then needs recording again.\nwindow.BL.lectures.timing(${JSON.stringify(id)}, ${JSON.stringify(rec.starts)}, ${rec.duration}, ${JSON.stringify(name)});\n`);
   // The timing file loads with its lecture: its tag goes after the lecture's own, in the same deferred group.
   const page = join(root, "src", "index.html"), html = readFileSync(page, "utf8");
   if (!html.includes(`js/lecture-${id}.timing.js`)) {
@@ -49,7 +55,8 @@ if (args[0] === "--import") {
     if (!tag) fail(`src/index.html has no <script> tag for js/lecture-${id}.js to put the timing file's after`);
     writeFileSync(page, html.replace(tag[0], `${tag[0]}${tag[1]}<script src="js/lecture-${id}.timing.js" data-defer="${tag[2]}"></script>\n`));
   }
-  console.log(`${id}: src/media/lectures/${id}.m4a and src/js/lecture-${id}.timing.js (${count} sentences, ${Math.floor(rec.duration / 60)}:${String(Math.round(rec.duration % 60)).padStart(2, "0")})`);
+  console.log(`${id}: untracked/lectures/${name} and src/js/lecture-${id}.timing.js (${count} sentences, ${Math.floor(rec.duration / 60)}:${String(Math.round(rec.duration % 60)).padStart(2, "0")})`);
+  console.log(`Put it in R2 before deploying: npm --prefix worker run lectures:staging (and lectures:production)`);
 } else {
   const id = args[0] || fail("Which lecture? npm run lecture:script -- btc-01 [file.json]");
   // Every sentence a recording holds, in the timeline's order: the lecture, and after each question what he says to

@@ -15,6 +15,7 @@
   const create = () => {
     // The page-wide environment mute (sound.js), shared with the banner speaker and M.
     let ctx = null, master = null, ready = false, muted = BL.sound.muted;
+    const soundChannel = BL.sound.channel("block");
     const voices = [];
     let voiceNext = 0;
     const layers = { jet: null, zip: null, zipFilter: null, splat: null, splatFilter: null, boom: null, boomFilter: null };
@@ -24,7 +25,7 @@
       ctx = new AudioContext();
       master = ctx.createGain();
       master.gain.value = muted ? 0 : MASTER;
-      master.connect(ctx.destination);
+      master.connect(soundChannel.node(ctx));
       const filter = (type, freq, q = 1) => {
         const f = ctx.createBiquadFilter();
         f.type = type;
@@ -203,7 +204,7 @@
     };
     const offSound = BL.sound.subscribe(setMuted);
     const dispose = () => {
-      offSound();
+      offSound(); soundChannel.release();
       if (!ctx) return;
       quiet();
       ctx.close();

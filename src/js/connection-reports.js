@@ -9,7 +9,8 @@
   const helpButton = document.getElementById("players-diagnostics-info");
   const help = document.getElementById("players-diagnostics-help");
   if (!box || !input || !status) return;
-  const build = document.currentScript?.src.match(/\/main-([a-f0-9]{8,64})\.js(?:\?|$)/)?.[1] || "";
+  const build = typeof BL.clientBuild === "string" && /^[a-f0-9]{8,64}$/.test(BL.clientBuild) ? BL.clientBuild
+    : document.currentScript?.src.match(/\/main-([a-f0-9]{8,64})\.js(?:\?|$)/)?.[1] || "";
   const kinds = new Set(["connect", "open", "welcome", "clear", "retry", "visibility",
     "socket-error", "socket-close", "heartbeat-timeout", "kick", "peer-return"]);
   const rooms = new Set(["off", "connecting", "live", "paused", "replaced", "full", "revoked", "protocol", "other"]);

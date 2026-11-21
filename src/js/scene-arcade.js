@@ -96,6 +96,8 @@
   let bhSky = null, zipline = null, promptZip = null;
   let ghostEntry = null, ghosts = null, ghostChannel = null, tess = null, gameMode = false, fence = null, fenceK = 0, totemsAt = [], totemLife = [], lasers = [], armed = false, inArena = false, rifleWas = false;
   let zoneNow = "arcade.hall", zoneHeld = 0, exitButton = null, hallwayFar = false, hallwayAlong = 0, huntHearing = 0;
+  // The seats whose levers this visit registered (remote-players.js `joystick`).
+  let levers = [];
   let stations = null, blocks = null, carnival = null, staff = null, orders = 0, ticketBoard = null, prizeUi = null;
   let crowd = null, spin = null;
   let unwatchHockey = null, hockeyPlayers = null;
@@ -211,6 +213,28 @@
     });
   };
   const play = (i) => GAMES[i].id === "cloud-hopper" ? open("hub", "cloud-hopper") : open(GAMES[i].id);
+  // The back door opens Ooga Raid, once that game is on the page; without it the door only knocks. On a site with
+  // accounts it opens only for a signed-in visitor, asked as it is pressed by the raid's own gate (`refusalFor`), whose
+  // words it toasts. The gate comes with the raid's code, so a hosted page that has not fetched it yet fetches it first
+  // (the door's approach usually has). Boot waits for the account look, so one still unsettled here failed and will not
+  // retry: the door stays shut until a reload.
+  const openRaid = () => {
+    const raid = BL.scenes.raid;
+    if (!raid) {
+      const d = LAYOUT.backDoor;
+      hear(d.x, d.z, "knock");
+      return hud.toast(TIPS.door[1]);
+    }
+    const ask = () => {
+      const refused = raid.refusalFor(BL.net.state);
+      if (refused) return hud.toast(refused);
+      open("raid");
+    };
+    // The raid's code is fetched only here, once the visitor has asked to play: nearness and a hover fetch nothing.
+    const loading = BL.deferred.load("raid-scene");
+    if (!loading) return ask();
+    loading.then(() => { if (hud && !leaving) ask(); }, () => { if (hud) hud.toast("Ooga Raid could not load · try again"); });
+  };
   const revealCabinetPlayers = () => {
     for (const [node, before] of cabinetHidden) node.cameraHidden = before;
     cabinetHidden.clear();
@@ -381,18 +405,25 @@
     stations.push({ kind: "wheel", play: W.play, label: "the jackpot wheel" });
     // The cabinets: each loops its game with the best under it, then blinks PRESS START; the stage's open the Ooga
     // games, the mezzanine's their retro games (`retro`, a station on the deck at `MEZZ.y`).
-    screens = [];
+    screens = []; levers = [];
     // What powers up on arrival, each with its delay: the machines light in a wave from the doorway inward.
     power = [];
     const wave = (node, x, z) => power.push({ node, delay: 0.15 + Math.max(0, HALL.front - 1 - z) * 0.09 + Math.abs(x) * 0.02 });
     for (const c of LAYOUT.cabinets) {
       const on = c.game >= 0, named = on ? GAMES[c.game] : AM.RETRO[c.retro], MQ = AM.MARQUEE;
-      const frames = on ? AM.attractFrames(c.game) : AM.retroFrames(c.retro), node = framed(c), body = createNode({ geometry: AM.cabinet(c.index) });
+      const frames = on ? AM.attractFrames(c.game) : AM.retroFrames(c.retro), node = framed(c), body = createNode({ geometry: c.service ? AM.cabinet(c.index) : AM.cabinetBare(c.index) });
       const screen = createNode({ position: { x: 0, y: SCREEN.y, z: SCREEN.z }, rotation: { x: SCREEN.lean, y: 0, z: 0 }, geometry: frames[0], sightHidden: true, depthBias: -0.1 });
       const best = createNode({ geometry: on ? AM.bestLine(c.game, bestOf(named.id)) : AM.retroLine(c.retro, bestOf(named.id)), sightHidden: true, depthBias: -0.12 });
       addChild(screen, best);
       screens.push({ node: screen, best, frames, start: on ? AM.attractStart(c.game) : AM.retroStart(c.retro) });
       addChild(node, body, signNode(named.title, named.icon, MQ.w, 0, MQ.y, MQ.z), screen);
+      // Its lever on a node of its own, which whoever plays this cabinet works (remote-players.js).
+      if (!c.service) {
+        const lever = AM.joystick(), seat = BL.arcadeCabinets.entries[c.index].id;
+        addChild(node, lever.node);
+        BL.remotePlayers.joystick(seat, lever.stick);
+        levers.push(seat);
+      }
       if (c.service) {
         const bay = createNode({ geometry: AM.rallyRepairBay() });
         const panel = createNode({ geometry: AM.cabinetPanel(c.index), position: { x: -1.08, y: 0.1, z: 0.28 }, rotation: { x: -0.22, y: -0.4, z: -0.12 } });
@@ -417,7 +448,9 @@
       wave(body, c.x, c.z); wave(screen, c.x, c.z);
       target(body, on ? { kind: "cabinet", game: c.game } : { kind: "retro", retro: c.retro }, 1.3);
       blocks.push(blockOf(c, -CAB.w / 2, CAB.w / 2, -CAB.d / 2, CAB.d / 2, c.y === MEZZ.y ? DECK_FEET : FLOOR_FEET));
-      stations.push(on ? { kind: "cabinet", game: c.game, play: c.play, y: c.y, label: named.name + (named.unavailable ? " · out of order" : "") } : { kind: "retro", retro: c.retro, id: named.id, play: c.play, y: c.y, label: named.name });
+      // Played standing on its box (arcadeModels.PLATFORM), whose top is the station's level.
+      const level = c.y + (c.service ? 0 : PF.h);
+      stations.push(on ? { kind: "cabinet", game: c.game, play: c.play, y: level, label: named.name + (named.unavailable ? " · out of order" : "") } : { kind: "retro", retro: c.retro, id: named.id, play: c.play, y: level, label: named.name });
     }
     // Every game in the hall: each machine in its frame with its game over nodes under it, and a station in front of
     // it that opens that game at that machine.
@@ -542,6 +575,8 @@
     const BD = LAYOUT.backDoor, door = createNode({ position: { x: BD.x, y: 0, z: BD.z }, geometry: AM.backDoor() }), doorBox = boundsOf(door.geometry);
     addChild(root, door);
     target(door, { kind: "door" }, 1.4);
+    // Its station, a stride out from the columns' faces, facing the door: Ooga Raid's, once that game is on the page.
+    if (BL.scenes.raid) stations.push({ kind: "door", play: { x: BD.x, z: columnFace + DOOR_STEP, facing: Math.PI }, label: "Ooga Raid" });
     // The door and its frame stand out of the back wall's rock; the block stops a few cm short of the frame's face (a
     // walker's torso stops short of its square), flush with the columns' blocks either side, so a walker sliding along
     // the wall past the door and the columns catches on neither.
@@ -559,6 +594,7 @@
     for (let i = 0; i < MOTES; i++) { const n = createNode({ geometry: AM.spark(0), scale: { x: 0.5, y: 0.5, z: 0.5 }, sightHidden: true }); addChild(root, n); motes.push({ node: n, a: 0.2 + (i * 0.37) % 0.4, b: 0.15 + (i * 0.53) % 0.3, p: i * 2.39 }); }
   };
   const MOTES = 36;
+  const DOOR_STEP = 0.9;
   // Actual records, never invented NPC scores: M1/M2 identify the winning machine, LOC an offline local best.
   const FAME_GAMES = [["THRO", "skee"], ["HOOP", "hoops"], ["TOSS", "shy"], ["CLAW", "claw"]];
   const fameRows = () => FAME_GAMES.map(([label, kind]) => {
@@ -587,6 +623,7 @@
     else if (s.kind === "machine") open(s.game.kind, s.index);
     else if (s.kind === "prizes") openPrizes();
     else if (s.kind === "wheel") spinWheel();
+    else if (s.kind === "door") openRaid();
     else order();
   };
   // The prize counter's dialog: the balance and each prize, redeemable when it is not won yet and the tickets cover it;
@@ -1148,6 +1185,8 @@
   // mezzanine's deck and the stair up to it (a ramp, running a little on past both ends), and the haunted hallway's
   // and the arena's floor, level with the deck. Allocation-free.
   const STEP = 0.6, STAIRS = MEZZ.stairs.map(([x, foot, , head]) => ({ x0: x - MEZZ.stairW / 2, x1: x + MEZZ.stairW / 2, foot, head, run: foot - head }));
+  // The platforms in front of the cabinets (arcadeModels.PLATFORM), each its cabinet's place and turn.
+  const PF = AM.PLATFORM, PLATFORMS = LAYOUT.cabinets.filter(c => !c.service).map(c => ({ x: c.x, z: c.z, y: c.y + PF.h, c: Math.cos(c.turn), s: Math.sin(c.turn) }));
   const supportAt = (x, z, feet) => {
     const reach = feet + STEP;
     if (x > BH.x0 - 0.5 && x < BH.x1 + 0.5 && z < HALL.back + 0.5 && z > BH.ledge - 0.5 && BH.y <= reach) return BH.y;
@@ -1162,6 +1201,10 @@
       if (x < st.x0 || x > st.x1 || z > st.foot + 0.3 || z < st.head - 0.3) continue;
       const y = MEZZ.y * Math.min(1, Math.max(0, (st.foot - z) / st.run));
       if (y > best && y <= reach) best = y;
+    }
+    for (let i = 0; i < PLATFORMS.length; i++) {
+      const p = PLATFORMS[i], dx = x - p.x, dz = z - p.z, lx = p.c * dx - p.s * dz, lz = p.s * dx + p.c * dz;
+      if (p.y > best && p.y <= reach && Math.abs(lx) <= PF.w / 2 && lz >= PF.z0 && lz <= PF.z1) best = p.y;
     }
     return best;
   };
@@ -1711,6 +1754,19 @@
     for (let i = 0; i < staff.length; i++) { const o = staff[i].spot; if (staff[i] !== g && o && Math.abs(o.x - s.x) + Math.abs(o.z - s.z) < 2.2) return true; }
     return false;
   };
+  // Whether an Ooga is at a job's spot, playing that machine: a player's (or the visitor's own) within PLAYER_CLEAR of
+  // it on its level. The staff never take a job there, and leave one as a player comes.
+  const PLAYER_CLEAR = 1.8;
+  const playedAt = (s, deck) => {
+    const r2 = PLAYER_CLEAR * PLAYER_CLEAR;
+    for (const rec of BL.net.remotes.values()) {
+      if (!rec.body || !HALL_ZONES.has(rec.zone) || (rec.y >= MEZZ.y - 0.5) !== deck) continue;
+      if ((rec.x - s.x) * (rec.x - s.x) + (rec.z - s.z) * (rec.z - s.z) < r2) return true;
+    }
+    if (!avatar || (feetOf() >= MEZZ.y - 0.5) !== deck) return false;
+    const p = avatar.root.position;
+    return (p.x - s.x) * (p.x - s.x) + (p.z - s.z) * (p.z - s.z) < r2;
+  };
   const candidates = (g, near, far) => {
     const p = g.agent.root.position, jobs = g.role.jobs;
     let n = 0;
@@ -1719,7 +1775,7 @@
       if (g.role.id === "runner" && (job === JOBS.serve) !== g.carrying) continue;
       for (let k = 0; k < job.spots.length && n < CAND.length; k++) {
         const s = job.spots[k], d = (s.x - p.x) * (s.x - p.x) + (s.z - p.z) * (s.z - p.z);
-        if (s.taken || s === g.last || claimedNear(g, s) || d < near * near || d > far * far) continue;
+        if (s.taken || s === g.last || claimedNear(g, s) || d < near * near || d > far * far || playedAt(s, g.deck)) continue;
         CAND[n++] = s;
       }
     }
@@ -1882,7 +1938,8 @@
         g.stuck = g.skip = 0;
         g.ax = p.x; g.az = p.z;
         if (g.phase === "work") work(g, dt);
-        if (g.t >= g.dur) finish(g);
+        if (g.phase === "work" && g.spot && playedAt(g.spot, g.deck)) nextJob(g);
+        else if (g.t >= g.dur) finish(g);
       }
       const standing = g.phase !== "walk" && g.phase !== "wait" && !a.beating;
       g.blend += ((standing ? 1 : 0) - g.blend) * Math.min(1, dt * 7);
@@ -1984,6 +2041,7 @@
       if (o.kind === "machine") return `${o.station.label} · walk up and press ${COARSE ? "PLAY" : "Space"}`;
       if (o.kind === "prizes") return `Prize counter · ${shownTickets()} tickets`;
       if (o.kind === "wheel") return `Jackpot wheel · ${AM.WHEEL_COST} tickets a spin`;
+      if (o.kind === "door" && BL.scenes.raid) return `Ooga Raid · walk up and press ${COARSE ? "RAID" : "Space"}`;
       if (o.kind === "ride") return `${["Silverback", "Monkey cart", "Dino", "Baby mammoth"][o.index]} ride · tap to rock`;
       return TIPS[o.kind] ? TIPS[o.kind][0] : "";
     };
@@ -1992,6 +2050,8 @@
       onHover: (hit, p) => {
         if (hit && !inView(hit)) hit = null;
         if (hit?.owner.kind === "cabinet" && GAMES[hit.owner.game] && !GAMES[hit.owner.game].unavailable) BL.deferred.prefetchScene(GAMES[hit.owner.game].id);
+        else if (hit?.owner.kind === "machine") BL.deferred.prefetchScene(hit.owner.station.game.kind);
+        else if (hit?.owner.kind === "retro") BL.deferred.prefetchScene(AM.RETRO[hit.owner.retro].id);
         if (hit) hud.tooltip.show(tipFor(hit), p.x, p.y);
         else hud.tooltip.hide();
       },
@@ -2005,6 +2065,7 @@
         if (o.kind === "cabinet") return play(o.game);
         if (o.kind === "retro") return open(AM.RETRO[o.retro].id, 0);
         if (o.kind === "machine") return open(o.station.game.kind, o.station.index);
+        if (o.kind === "door") return openRaid();
         if (o.kind === "snack") return order();
         if (o.kind === "prizes") return openPrizes();
         const sound = TAP_SOUNDS[o.kind];
@@ -2050,9 +2111,11 @@
     const fromBlockHall = ctx.from === "block", fromWatch = ctx.place === AW.PLACE || ctx.place === AW.PLACE_FULL;
     const from = GAMES.findIndex((g) => g.id === (ctx.place === "cloud-hopper-return" ? "cloud-hopper" : ctx.from)), machineFrom = stations.find((st) => st.kind === "machine" && st.game.kind === ctx.from && st.index === (ctx.place || 0));
     const retroFrom = stations.find((st) => st.kind === "retro" && st.id === ctx.from) || null;
+    // Back from Ooga Raid, at the door's spot as at a cabinet's: facing the door, with the camera behind it in the hall.
+    const doorFrom = ctx.from === "raid" ? stations.find((st) => st.kind === "door") : null;
     const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
     const named = asked ? contributors.roster.find((c) => c.name.toLowerCase() === asked) : null;
-    const wanted = named ? named.name : fromBlockHall || from >= 0 || machineFrom || retroFrom ? lastPlayer || world.pilot : world.pilot;
+    const wanted = named ? named.name : fromBlockHall || from >= 0 || machineFrom || retroFrom || doorFrom ? lastPlayer || world.pilot : world.pilot;
     const wantedEntry = wanted && contributors.roster.find((c) => c.name === wanted);
     const assigned = BL.net.preferredCharacter(), assignedEntry = assigned && contributors.roster.find((c) => c.name === assigned.handle);
     const playerName = wantedEntry && mayPick(wantedEntry) ? wanted : assignedEntry && mayPick(assignedEntry) ? assignedEntry.name
@@ -2072,10 +2135,13 @@
       pilot.bind(shared);
       avatar = people.cavemen.get(playerName);
       buildZipline(shared);
-      // At a machine an Ooga plays, a step back from its spot, where that Ooga stands again.
+      // At a machine an Ooga plays, a step back from its spot, where that Ooga stands again. A reload of the hall
+      // stands where the Ooga stood, on whichever floor, while that floor is still there to walk on from (visit-spot.js).
       const spawn = DEBUG ? debugSpawn() : null;
-      const at = fromWatch ? AW.ARRIVAL : spawn ? spawn : fromBlockHall ? { x: BH.x, z: BH.z0 + 1, facing: 0 } : from >= 0 ? live.find((c) => c.game === from).play : retroFrom ? retroFrom.play : machineFrom ? (machineFrom.bot ? toHall({ x: machineFrom.play.x, z: machineFrom.play.z, turn: machineFrom.turn }, 0, 1.3, { facing: machineFrom.play.facing }) : machineFrom.play) : { x: 0, z: HALL.front - 1.5, facing: Math.PI };
-      Object.assign(avatar.root.position, { x: at.x, y: avatar.baseY + supportAt(at.x, at.z, fromBlockHall || at.deck || retroFrom || from >= 0 && live.find(c => c.game === from).y === MEZZ.y ? MEZZ.y : 1), z: at.z });
+      const stood = ctx.from === null && !ctx.place ? BL.visitSpot.take("arcade", "") : null;
+      const back = stood && Math.abs(supportAt(stood.x, stood.z, stood.y) - stood.y) < 0.05 && BL.visitSpot.holds(stood, walkableFor, avatar) ? stood : null;
+      const at = fromWatch ? AW.ARRIVAL : spawn ? spawn : fromBlockHall ? { x: BH.x, z: BH.z0 + 1, facing: 0 } : from >= 0 ? live.find((c) => c.game === from).play : retroFrom ? retroFrom.play : machineFrom ? (machineFrom.bot ? toHall({ x: machineFrom.play.x, z: machineFrom.play.z, turn: machineFrom.turn }, 0, 1.3, { facing: machineFrom.play.facing }) : machineFrom.play) : doorFrom ? doorFrom.play : back ? { x: back.x, z: back.z, facing: back.yaw } : { x: 0, z: HALL.front - 1.5, facing: Math.PI };
+      Object.assign(avatar.root.position, { x: at.x, y: avatar.baseY + supportAt(at.x, at.z, back && !spawn ? back.y : fromBlockHall || at.deck || retroFrom || from >= 0 && live.find(c => c.game === from).y === MEZZ.y ? MEZZ.y : 1), z: at.z });
       avatar.root.rotation.y = at.facing;
       // Carry the view and record the outside loadout before parking its weapons for the visit.
       const carried = pilot.arrive(avatar);
@@ -2149,7 +2215,7 @@
     audio = BL.carnivalAudio.create();
     audio.room(true);
     // Walked in through the doors the room is already lit, as the visitor saw it through them.
-    powerT = from < 0 && !machineFrom && !retroFrom && !crossing ? 0 : 99;
+    powerT = from < 0 && !machineFrom && !retroFrom && !doorFrom && !crossing ? 0 : 99;
     if (powerT === 0) for (const q of power) q.node.glow = 0.08;
     ambientT = 1;
     // Back with more tickets than last time (a game's, or a spin's left turning): the wheel's pods and the room's lights
@@ -2216,6 +2282,13 @@
         const c = live[i], dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
         if (GAMES[c.game] && !GAMES[c.game].unavailable && dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(GAMES[c.game].id);
       }
+      // The carnival machines and the deck's retro cabinets share one chunk, fetched at the same reach.
+      for (let i = 0; i < stations.length; i++) {
+        const s = stations[i], id = s.kind === "machine" ? s.game.kind : s.kind === "retro" ? s.id : null;
+        if (!id) continue;
+        const dx = p.x - s.play.x, dy = p.y - (s.y || 0), dz = p.z - s.play.z;
+        if (dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(id);
+      }
     }
     if (!leaving) pilot.readInput(dt);
     slideStep(dt);
@@ -2244,6 +2317,7 @@
     if (drivenHere) {
       const p = drivenHere.root.position;
       BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, BL.crew.weaponFlags(drivenHere), BL.crew.visualState(drivenHere));
+      if (!leaving && !(doorWalk && doorWalk.holding)) BL.visitSpot.note("arcade", "", drivenHere);
     }
     // The hallway joins Ooga Arcade to Ghost Hunter's Arena (#422), a voice group of its own: each half is a zone of the
     // land it leads to (`arcade.haunt`, `ghost-arena.haunt`), so the room hands both the hunt and a spectator there
@@ -2345,7 +2419,7 @@
         prompt = near; promptOccupied = occupied; promptRail = rail;
         if (rail) { hud.hint(COARSE ? "Tap SLIDE to slide down the handrail" : "Space: slide down the handrail"); hud.setAct("SLIDE"); }
         else if (near) {
-          const verb = near.kind === "snack" ? "order at " : near.kind === "prizes" ? "shop at " : "", act = near.kind === "snack" ? "ORDER" : near.kind === "prizes" ? "PRIZES" : near.kind === "wheel" ? "SPIN" : "PLAY";
+          const verb = near.kind === "snack" ? "order at " : near.kind === "prizes" ? "shop at " : near.kind === "door" ? "play " : "", act = near.kind === "snack" ? "ORDER" : near.kind === "prizes" ? "PRIZES" : near.kind === "wheel" ? "SPIN" : near.kind === "door" ? "RAID" : "PLAY";
           hud.hint(occupied ? `${near.label} · ${occupied.name} is playing` : near.kind === "wheel" ? `${COARSE ? act : "Space: spin"} (${AM.WHEEL_COST} tickets)` : `${COARSE ? act : "Space"}: ${verb}${near.label}`);
           hud.setAct(act);
         } else { hud.hideHint(); pilot.showAct(); }
@@ -2363,7 +2437,7 @@
     fx.update(dt, elapsed);
     if (ghosts) ghosts.shake(camera);
   };
-  const TAP_SOUNDS = { door: "knock", changer: "coin", muncher: "spit", wheel: "click", disco: "ding", fame: "ding", off: "ding", sign: "grunt" };
+  const TAP_SOUNDS = { changer: "coin", muncher: "spit", wheel: "click", disco: "ding", fame: "ding", off: "ding", sign: "grunt" };
   const drawExtra = (ctx2d, project) => {
     remotes.drawNames(ctx2d, project);
     if (hockeyPlayers) hockeyPlayers.draw(ctx2d, project);
@@ -2381,6 +2455,8 @@
     captureOnArrival = false;
     doors = doorWalk = caveCopy = null;
     if (caveYard) { caveYard.dispose(); caveYard = null; }
+    for (const seat of levers) BL.remotePlayers.joystick(seat, null);
+    levers = [];
     revealCabinetPlayers();
     openingRequest++;
     if (!openingGame) BL.net.leaveCabinet();

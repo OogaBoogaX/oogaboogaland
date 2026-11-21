@@ -61,27 +61,30 @@ const hex = async (text) => {
 };
 
 // Per isolate: the last good of each source and when it was last asked for, keyed to the env it was read for.
-let memory = null;
-export const forgetPublic = () => { memory = null; };
+let memories = new WeakMap();
+export const forgetPublic = () => { memories = new WeakMap(); };
 /**
  * The public panels' data as this isolate last read it, for the health view (#669), without reading it again: `ok`,
  * `stale` (a kept copy after a failed look), `unavailable`, or `unknown` when this isolate has not read it yet.
  */
 export const publicState = (env, now = Date.now()) => {
-  if (!memory || memory.env !== env) return "unknown";
+  const memory = memories.get(env);
+  if (!memory) return "unknown";
   const stats = memory.stats && now - memory.stats.generatedAt < STATS_KEEP_MS ? memory.stats : null;
   if (!stats || !memory.cast) return "unavailable";
   return memory.statsOk && memory.castOk && now - stats.generatedAt < STALE_AFTER_MS ? "ok" : "stale";
 };
 
 export const contributorsSnapshot = async (env, { fetcher = fetch, now = Date.now() } = {}) => {
-  if (!memory || memory.env !== env) memory = { env, cast: null, castAt: -Infinity, castOk: false, stats: null, statsAt: -Infinity, statsOk: false };
+  let memory = memories.get(env);
+  if (!memory) { memory = { cast: null, castAt: -Infinity, castOk: false, stats: null, statsAt: -Infinity, statsOk: false }; memories.set(env, memory); }
   if (now - memory.castAt >= CAST_EVERY_MS || !memory.cast) {
     memory.castAt = now;
     const reply = await bridgeCall(env, "cast");
     const rows = reply.ok && reply.result && Array.isArray(reply.result.rows) ? reply.result : null;
     memory.castOk = !!rows;
-    if (rows) memory.cast = { rows: rows.rows, revision: String(rows.revision || "").slice(0, 32) };
+    if (rows) memory.cast = { rows: rows.rows, revision: String(rows.revision || "").slice(0, 32), portraits: rows.portraits || null,
+      catalogRevision: rows.catalogRevision, catalogGeneration: rows.catalogGeneration };
   }
   if (now - memory.statsAt >= STATS_EVERY_MS) {
     memory.statsAt = now;
@@ -104,11 +107,25 @@ export const contributorsSnapshot = async (env, { fetcher = fetch, now = Date.no
     stale: statsState !== "ok" || castState !== "ok",
     sources,
     cast: memory.cast ? memory.cast.rows : null,
+    ...(memory.cast?.portraits ? { portraits: memory.cast.portraits, catalogRevision: memory.cast.catalogRevision,
+      catalogGeneration: memory.cast.catalogGeneration } : {}),
     stats: stats ? stats.stats : null,
   };
 };
 
 export const handlePublic = async (request, env, url, deps) => {
+  if (url.pathname.startsWith("/api/chat/public/portraits/")) {
+    if (!["GET", "HEAD"].includes(request.method)) return refusal("method_not_allowed", 405);
+    const match = /^\/api\/chat\/public\/portraits\/([a-f0-9]{64})\/([a-f0-9]{64})\.png$/.exec(url.pathname);
+    if (!match) return refusal("not_found", 404);
+    if (!(await allowed(env.CHAT_PUBLIC_LIMITER, clientIp(request)))) return refusal("rate_limited", 429, { retryable: true, retryAfter: 60 });
+    if (!env.OBL || typeof env.OBL.fetch !== "function") return refusal("unavailable", 503, { retryable: true, retryAfter: 15 });
+    const headers = new Headers({ "x-ooga-chat-environment": env.ENVIRONMENT });
+    const etag = request.headers.get("if-none-match");
+    if (etag) headers.set("if-none-match", etag);
+    try { return await env.OBL.fetch(new Request(`https://island.invalid/portraits/${match[1]}/${match[2]}.png`, { method: request.method, headers })); }
+    catch { return refusal("unavailable", 503, { retryable: true, retryAfter: 15 }); }
+  }
   if (url.pathname !== "/api/chat/public/contributors") return refusal("not_found", 404);
   if (request.method !== "GET" && request.method !== "HEAD") return refusal("method_not_allowed", 405);
   if (!(await allowed(env.CHAT_PUBLIC_LIMITER, clientIp(request)))) return refusal("rate_limited", 429, { retryable: true, retryAfter: 60 });

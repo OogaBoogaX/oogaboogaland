@@ -164,7 +164,7 @@
   const acts = (name, id, a, b, c) => onDeck() ? false : liveRound() ? round.act(name, id, a, b, c) : SIM[name](sim, id, a, b, c);
   let jumpWas = false, panelOpen = false;
   const el = {};
-  const blockScene = {
+  const blockScene = BL.deferred.scene("block", {
     id: "block", voiceZone: BL.blockWire.ZONE, renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() { return phase === "play" || fx.inMotion; },
     // A live session keeps stepping behind the controls panels: a host that stopped would freeze the round and lose its
@@ -174,7 +174,7 @@
       panelOpen = on;
       if (on && panelLive()) { trigger = false; arrows.left = arrows.right = 0; move.crouch = 0; jumpWas = false; }
     }
-  };
+  });
 
   const panelLive = () => panelOpen && blockScene.runsBehindPanels;
   const place = (node) => { addChild(root, node); placed.push(node); return node; };
@@ -2179,6 +2179,11 @@
       if (homer && Math.random() < 0.5) fx.burst(s.x, s.y, s.z, 1, SMOKE_BITS, 0.3);
     }
   };
+  // The shadow map's centre steps across a grid under the Ooga instead of following it exactly: between steps the light's
+  // view holds still, so the renderer keeps its baked shadows of the map rather than redrawing every caster each frame.
+  // A step is small beside the map's shadow reach (`shadowExtent`), so the Ooga never nears its edge.
+  const SHADOW_STEP = 4;
+  const shadowAt = (x, z) => setVec(RENDER_OPTS.shadowCenter, Math.round(x / SHADOW_STEP) * SHADOW_STEP, 0, Math.round(z / SHADOW_STEP) * SHADOW_STEP);
   const updateCamera = (dt) => {
     const me = sim ? sim.actors[0] : null, x = me ? me.x : 0, y = me ? me.y : 0, z = me ? me.z : 0;
     // First person looks exactly where the Ooga faces; the chase camera swings round behind it within a few frames.
@@ -2222,7 +2227,7 @@
         fpGunL.rotation.y = cam.yaw;
         fpGunL.rotation.x = fpGun.rotation.x;
       }
-      setVec(RENDER_OPTS.shadowCenter, x, 0, z);
+      shadowAt(x, z);
       return;
     }
     camera.fov = damp(camera.fov, (aiming && !cam.island ? AIM_FOV : 58) * Math.PI / 180, 10, dt);
@@ -2256,7 +2261,7 @@
     }
     if (cam.island) setVec(camera.target, x, y + 1.1, z);
     else setVec(camera.target, x + Math.sin(cam.yaw) * 2, y + 1.9, z + Math.cos(cam.yaw) * 2);
-    setVec(RENDER_OPTS.shadowCenter, x, 0, z);
+    shadowAt(x, z);
   };
   // How far back along `pitch` (and the camera's yaw) the eye can sit from (x, y, z) before a wall: the direction goes
   // in EYE.
@@ -2567,14 +2572,18 @@
   // Everything that belongs to the map, under one node so a new map replaces it whole: the ground and buildings, the
   // quiz pads, power-up spots, trampolines, ammo caches, and the campfire with its three dancing potato Oogas.
   // The extras (foliage and the map's dressing), all behind the Detail setting so they can be turned off or withdrawn.
+  // Low also draws three quarters of the tier's pixels each way (the renderer's floor), for GPUs that struggle on Full.
+  // Low only ever takes away what is drawn: what an Ooga stands on, bumps into or hides behind is the sim's and the same.
   const detail = { full: true };
-  const DETAIL_KEY = "ooga-block-detail";
-  const loadDetail = () => { try { detail.full = localStorage.getItem(DETAIL_KEY) !== "low"; } catch { /* the default stands */ } };
+  const DETAIL_KEY = "ooga-block-detail", LOW_SCALE = 0.75;
+  const detailScale = () => { renderer.setScale(detail.full ? 1 : LOW_SCALE); };
+  const loadDetail = () => { try { detail.full = localStorage.getItem(DETAIL_KEY) !== "low"; } catch { /* the default stands */ } detailScale(); };
   const chooseDetail = (full) => {
     if (full === detail.full) return;
     detail.full = full;
     try { localStorage.setItem(DETAIL_KEY, full ? "full" : "low"); } catch { /* this visit only */ }
     for (const b of el.details) b.setAttribute("aria-pressed", String((b.dataset.detail === "full") === full));
+    detailScale();
     if (sim) { buildMap(); mapBase = null; }
   };
   // A few themed plants and rocks round the island's outer ring: shared geometry, placed once a map, mirrored half
@@ -2733,6 +2742,8 @@
   const CLANK_THROW = ["Happy to help you... off the island", "As an AI, I must throw you now", "Task complete!"];
   const APOLOGY = ["I apologize for the confusion", "You're right, that wasn't the block", "Let me try again"];
   let clankNodes = null, clankSaid = 0, decoyNoticeAt = -99;
+  // The fans' steps a second: each a twelfth of a turn, so about nine radians a second, as they spun one by one.
+  const FAN_RATE = 18;
   // The map's own nodes: the firewall's two halves, the decoys (each the block's own geometry and ring of ticks, so
   // they look exactly like a loose block), the moon, and on Full detail the miners' fans and lights and the dressing.
   const buildClank = (A, add) => {
@@ -2755,15 +2766,8 @@
     if (detail.full) {
       add(createNode({ geometry: BM.clankDress(), sightHidden: true }));
       for (let k = 0; k < 2; k++) leds.push(add(createNode({ geometry: BM.minerLeds(k), sightHidden: true, visible: k === 0 })));
-      // A fan on every other miner of two rows, on each face of each wall.
-      for (const b of miners) {
-        const along = b[1] - b[0] >= b[3] - b[2], len = along ? b[1] - b[0] : b[3] - b[2], n = Math.max(1, Math.round(len / 1.25)), step = len / n, thin = along ? b[3] - b[2] : b[1] - b[0];
-        for (let i = 0; i < n; i++) for (const j of [1, 4]) for (const s of [-1, 1]) {
-          const c = (along ? b[0] : b[2]) + (i + 0.5) * step, y = (j + 0.5) * 0.6;
-          const x = along ? c : (b[0] + b[1]) / 2 + s * (thin / 2 + 0.05), z = along ? (b[2] + b[3]) / 2 + s * (thin / 2 + 0.05) : c;
-          fans.push(add(createNode({ geometry: BM.minerFan(), position: { x, y, z }, rotation: { x: 0, y: along ? (s > 0 ? 0 : Math.PI) : (s > 0 ? Math.PI / 2 : -Math.PI / 2), z: (i + j) * 0.7 }, sightHidden: true })));
-        }
-      }
+      // The miners' fans, every wall's in one mesh a step of their turn apart: shown one at a time, they spin.
+      for (let k = 0; k < BM.FAN_STEPS; k++) fans.push(add(createNode({ geometry: BM.minerFans(k), sightHidden: true, visible: k === 0 })));
     }
     // The mirage's phantom landmarks: stacks of miners that shimmer in and out (seen only from inside the mirage).
     const M = A.mirage, props = [[-5.5, 3.5, 0.6], [6, -4.5, -0.9], [2.5, 6.8, 2.1]].map(([x, z, turn]) => add(createNode({ geometry: BM.minerStack(), position: { x: M.x + x, y: 0, z: M.z + z }, rotation: { x: 0, y: turn, z: 0 }, visible: false, sightHidden: true })));
@@ -2786,7 +2790,7 @@
       D.tickRoot.rotation.y = elapsed * 1.5;
     }
     if (detail.full) {
-      if (!hookStill) for (let i = 0; i < N.fans.length; i++) N.fans[i].rotation.z += dt * (9 + (i % 3));
+      if (!hookStill) { const f = Math.floor(elapsed * FAN_RATE) % N.fans.length; for (let i = 0; i < N.fans.length; i++) N.fans[i].visible = i === f; }
       const on = Math.floor(elapsed / 0.7) % 2;
       if (N.leds.length) { N.leds[0].visible = on === 0; N.leds[1].visible = on === 1; }
       if (Math.random() < dt * 3 && N.stacks.length) { const s = N.stacks[Math.floor(Math.random() * N.stacks.length)]; fx.burst(s[0], s[1] + 0.3, s[2], 3, SMOKE_BITS, 0.7); }
@@ -2845,7 +2849,7 @@
     const inside = phase === "play" && !onDeck() && SIM.inMirage(me.x, me.z);
     if (inside !== MIRAGE.on) {
       MIRAGE.on = inside;
-      if (el.mirage) { el.mirage.hidden = !inside; el.mirage.dataset.calm = String(calm); }
+      if (el.mirage) el.mirage.hidden = !inside;
       if (inside) notice("You've walked into the Mainframe's mirage · not everything here is real", 2600);
     }
     MIRAGE.spin = inside && !calm ? MIRAGE.spin + dt * 0.22 : MIRAGE.spin * Math.max(0, 1 - dt * 2);
@@ -3290,6 +3294,8 @@
     if (el.watch) el.watch.hidden = true;
     if (el.viewerBoard) el.viewerBoard.hidden = true;
     undeckRender();
+    // The page's other scenes draw at their tier's own density.
+    renderer.setScale(1);
     chairsGreeted = false;
     deck = null; you = 0; kept = null; liveCast = null; watchVisit = false; panelOpen = false;
     BL.net.setBody(null);

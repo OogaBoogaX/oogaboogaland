@@ -16,7 +16,11 @@ Tell the player at the start what it takes from them, and do the rest yourself:
 - make a GitHub account, if they have none, and approve one sign-in in their browser;
 - answer a few questions at a time, and send a picture or two if they have them;
 - look at their Ooga in the studio, a page on their own computer, and say what to change;
-- say yes before anything is sent.
+- say yes before anything is sent;
+- wait for it to go live: a plain Ooga is merged the next day and a custom one when a
+  maintainer has read it, and the island shows it after its next deploy. Only then can they
+  sign in (section 9). Until then they can visit [oogabooga.land](https://oogabooga.land)
+  signed out.
 
 ## 1. Get set up
 
@@ -76,10 +80,13 @@ Nothing else: there is no `npm install`.
 arrives as a PR from the player's own fork:
 
 ```bash
-gh repo fork OogaBoogaX/oogaboogaland --clone --default-branch-only
+gh repo fork OogaBoogaX/oogaboogaland --clone --default-branch-only -- --depth 1
 cd oogaboogaland
 git switch -c ooga/<login>
 ```
+
+`--depth 1` fetches only the newest commit, about 100 MB in a few seconds. The whole
+history is several times that, and an Ooga needs none of it.
 
 A player who already has the clone: `git switch rock`, `gh repo sync`, `git pull`, then the
 branch.
@@ -171,8 +178,10 @@ comments you need kept (the bundle rewrites the file from its data).
 
 - `handle` is the GitHub login, `github` the owning login where the handle differs from it,
   `display` a name of at most 39 characters.
-- `joined` and `lastCommit` are Unix seconds in the past. `joined` orders the roster. If the
-  game already made a file for the player, keep its dates.
+- `joined` and `lastCommit` are Unix seconds, never in the future. `joined` orders the
+  roster. For a new Ooga set both to now, the number `date +%s` prints: the numbers in the
+  example above are only placeholders, and `npm run test:unit` fails a new player's file
+  that keeps them. If the game already made a file for the player, keep its dates.
 - `look` may hold, and nothing else:
   - colours as six-digit hex: `skin`, `hair`, `fur`, `eyeColor`;
   - `build`: `"slim"` (female) or `"normal"` (male, the default);
@@ -197,6 +206,18 @@ each means under the modelled look. In short: `torso` and `gear` paint blocks th
 body wears as bands of colour; `crown`, `skull`, `eyes` and `mark` build the head in
 blocks; `club`, `headgear` and `extras` add pieces; `model(k, wear)` builds what blocks
 cannot say and lifts it off the body with `BL.heroBody.trunk(slim)`.
+
+Put removable headwear in `dress.hat(k, v)` (hat voxels on the authored head grid)
+or `dress.hatNodes(k)` (hat nodes attached to `k.parts.head`). Keep hair, glasses,
+facial features and anatomy in their existing head hooks so taking a hat off
+preserves the character underneath. These hooks still belong in your one file.
+
+If your hat is already available in the shared wardrobe, submit changes only to
+your character file. Normal builds use the committed wearable archives; changes
+to your voice, body or hat do not require you to edit the shared catalog. Your
+authored Ooga changes with the reviewed character release. A maintainer separately
+reviews and publishes any shared hat update, retaining older wearable versions
+for players who keep them; see [Live character hats](character-equipment.md).
 
 The limits a maintainer cannot waive:
 
@@ -242,7 +263,13 @@ a change to the game, reviewed as ordinary code, so ask a maintainer before prom
 - sound;
 - anything other players' pages must agree on beyond the shape itself;
 - a change to the shared bodies (how shoulders, hands or hips are built for everyone);
-- a new plain-data option.
+- a new plain-data option;
+- a panel tab of their own. That is planned: [custom-tabs.md](custom-tabs.md) describes it
+  (text and a pixel icon, for everyone, signed-in players or contributors as the builder
+  chooses, off by default until a visitor adds it). Until it is built, don't
+  add a `tab` field; help the player write the tab's title, who should see it and its text in an issue instead.
+  Anyone can read a tab's text in the page's source, whoever it is shown to, so it holds
+  nothing private.
 
 If the wish is close to something an Ooga already does, say which one, and build on that.
 
@@ -325,7 +352,9 @@ full the file is. It cannot check ownership: GitHub settles that from the PR.
 npm run test:unit
 ```
 
-must pass before the PR. It builds every Ooga and checks their stowed gear.
+must pass before the PR. It builds every Ooga and checks their stowed gear, and takes a
+minute or two. If it names the player's own handle under `characters:`, look at the file's
+`joined` and `lastCommit` first (section 4).
 
 ## 8. The PR, and what the bot does
 
@@ -339,13 +368,15 @@ gh pr create --repo OogaBoogaX/oogaboogaland --base rock --head <login>:ooga/<lo
   --title "<login>'s Ooga" --body "<the plan from section 2, sorted as section 3 sorts it, and what was checked>"
 ```
 
-`gh pr ready` marks it ready once the work and the checks are done.
+`gh pr ready` marks it ready once the work and the checks are done. Do not stop at the
+draft: the bot never reads a draft, so nothing happens to it, however long the player waits.
 
 - Open the PR against `rock` as a **draft** with the one file. Keep it draft while
   building or debugging. Mark it **ready for review** only after the work and authorized
   checks are complete, and record the validation and any remaining acceptance work in
   its description. Return it to draft for substantial new work; small review fixes can
-  stay ready. Batch related fixes before pushing. Commit as the player. Do not
+  stay ready. While it is draft, commit and push each round the player approves; once
+  it is ready, batch related fixes before pushing. Commit as the player. Do not
   force-push over commits the bot has read.
 - The bot reads the file as text and never runs it. It copies an accepted file into one of
   two standing bundle PRs, says which and why, and **closes your PR on purpose**: the
@@ -356,6 +387,25 @@ gh pr create --repo OogaBoogaX/oogaboogaland --base rock --head <login>:ooga/<lo
   or, when an earlier commit is what was refused, open a new PR from a fresh branch that
   adds only the file.
 - Only the GitHub owner of a character, or a maintainer, can change it.
-- Once it is merged and the site next deploys, the player signs in on
-  [oogabooga.land](https://oogabooga.land) with GitHub (**Contributor sign-in**, in the
-  Contributing Oogas panel), and the island hands them their own Ooga to drive.
+
+## 9. Tell them what happens next
+
+Finish by telling the player, in plain words, where their Ooga is and what is left:
+
+- **It is sent, not live.** The bot's comment on the PR says which bundle took it. Plain
+  data merges at or after the next midnight UTC; custom code when a maintainer has read it.
+  `gh pr view <number> --repo OogaBoogaX/oogaboogaland --comments` shows the bot's answer,
+  so read it before you say it went through.
+- **Then the island has to deploy.** The maintainers deploy
+  [oogabooga.land](https://oogabooga.land) by hand, so a merged Ooga can take a while
+  longer to appear. The player can visit signed out meanwhile and look for their name in
+  the Contributing Oogas panel (under **Show away**, if some weeks have passed): once it
+  is listed there, it is live.
+- **Then they sign in.** The sign-in button at the top right of the island (an arrow
+  going in at a door, left of the controller) signs them in with GitHub, using the
+  account that opened the PR, and the island hands them their own Ooga
+  to drive, among the other players, with voice and chat. (**Contributor sign-in** in the
+  Contributing Oogas panel does the same.)
+- **Signing in earlier is refused.** The island signs in only an account whose Ooga it
+  already has. A player who tries too soon lands back on the island signed out, with
+  nothing lost, and can try again later.

@@ -79,7 +79,6 @@
     dress: {
       club: (k) => AXE ? { voxels: staffVoxels(k.rand), rest: { x: 0.24, z: 0 }, carry: { x: 0.95, z: 0 } } : { voxels: staffVoxels(k.rand), rest: { x: 0.2, z: 0 } },
       crown(k, v) {
-        const P = k.P, gold = k.color("#d4a83a"), goldDk = k.color("#9c7a22");
         const hair = k.color("#33200f"), hairDk = k.color("#2b1b0d");
         const curl = (x, y, z) => (x + y + z) % 2 ? hairDk : hair;
         v.fill(-1, 7, -4, 5, -2, -1, curl);
@@ -90,6 +89,9 @@
         v.fill(1, 5, -5, -3, 6, 8, curl);
         v.fill(2, 4, -7, -6, 7, 8, curl);
         v.set(3, -8, 8, hairDk);
+      },
+      hat(k, v) {
+        const gold = k.color("#d4a83a"), goldDk = k.color("#9c7a22");
         v.fill(-1, 7, 6, 8, -1, 6, (x, y) => y === 7 ? gold : goldDk);
         v.fill(0, 6, 9, 9, 0, 5, gold);
         v.fill(1, 5, 10, 10, 1, 4, goldDk);

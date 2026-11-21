@@ -18,17 +18,17 @@
   const entry = (parent, slot) => {
     const node = createNode({ position: { x: slot.lx, y: 0, z: slot.lz }, rotation: { x: 0, y: slot.turn, z: 0 } });
     const body = createNode({}), screen = createNode({ position: { x: 0, y: AM.SCREEN.y, z: AM.SCREEN.z }, rotation: { x: AM.SCREEN.lean, y: 0, z: 0 }, sightHidden: true, depthBias: -0.1 });
-    const marquee = createNode({ position: { x: 0, y: AM.MARQUEE.y, z: AM.MARQUEE.z } });
-    addChild(node, body, screen, marquee);
+    const marquee = createNode({ position: { x: 0, y: AM.MARQUEE.y, z: AM.MARQUEE.z } }), lever = AM.joystick();
+    addChild(node, body, screen, marquee, lever.node);
     addChild(parent, node);
-    return { slot, node, body, screen, marquee, game: null, cabinet: null, frames: null, shown: -1,
+    return { slot, node, body, screen, marquee, stick: lever.stick, game: null, cabinet: null, frames: null, shown: -1,
       action: { kind: "arcade-cabinet", slot: slot.slot }, owner: { kind: "arcade-cabinet", slot: slot.slot, priority: 2, weaponType: "none" } };
   };
   // What one cabinet shows: its body, marquee and attract loop.
   const dress = (e, id) => {
     const c = cabinetOf(id), named = gameOf(c);
     e.game = id; e.cabinet = c; e.frames = framesOf(c); e.shown = -1;
-    e.body.geometry = AM.cabinet(c.index);
+    e.body.geometry = AM.cabinetBare(c.index);
     e.screen.visible = !!e.frames;
     if (e.frames) e.screen.geometry = e.frames[0];
     const sign = BL.hubModels.caveSign(named.title, named.icon), b = boundsOf(sign), k = AM.MARQUEE.w / (b.max[0] - b.min[0]);
@@ -67,8 +67,11 @@
       if (e.game === id) return;
       const registered = e.game !== null;
       if (registered) solids.remove(e.body);
+      // Whoever plays this cabinet works its lever (remote-players.js), under the seat of the game it shows.
+      if (visit && e.game !== null) BL.remotePlayers.joystick(AC.outdoorSeat(e.game), null);
       dress(e, id);
       solids.add(e.body);
+      if (visit) BL.remotePlayers.joystick(AC.outdoorSeat(e.game), e.stick);
       warmFrames(e);
     };
     const show = (top) => { entries.forEach((e, i) => setGame(e, top[i])); };
@@ -110,7 +113,10 @@
       walk = BL.arcadeDoors.walk({ door, frame, sign: -1, pilot: v.pilot, crew: v.crew, camera: v.camera, prepare, onThrough, onState: () => { v.refreshPrompt(); }, followMin: v.followMin, shut: true });
       door.set(false);
       setBarrier(true);
-      for (const e of entries) addTarget(e.body, e.owner, { radius: 0.9 });
+      for (const e of entries) {
+        addTarget(e.body, e.owner, { radius: 0.9 });
+        if (e.game !== null) BL.remotePlayers.joystick(AC.outdoorSeat(e.game), e.stick);
+      }
       off = BL.arcadePopular.subscribe(show);
       BL.arcadePopular.load();
       show(BL.arcadePopular.top());
@@ -120,7 +126,10 @@
     const unbind = () => {
       if (!visit) return;
       if (off) off(); off = null;
-      for (const e of entries) removeTarget(e.body);
+      for (const e of entries) {
+        removeTarget(e.body);
+        if (e.game !== null) BL.remotePlayers.joystick(AC.outdoorSeat(e.game), null);
+      }
       // A walk handed over to the hall ends here: the island may be kept for the way back, so its Ooga gets its head back.
       if (walk) walk.reset();
       // A seat granted after the island was left has no one to use it. A cabinet visit under way keeps its own.

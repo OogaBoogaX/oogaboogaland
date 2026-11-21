@@ -205,23 +205,25 @@
   let carried = null;
   // The visitor's last choice of view in this browser (localStorage VIEW_KEY): carry or combat, the view, the look from
   // the Ooga's heading, pitch, zoom, overhead height, shoulder side and the weapon in hand, never its rounds or a captured
-  // cursor. `remember` keeps it in `chosen`, but not while a game forces combat (`combatOnly`), and it is written when the
-  // page hides or closes. A page's first arrival, before anything is carried, comes back in it (`arrive`). Debug pages
-  // neither read nor write it, so fixtures and the suite always start from the default view.
+  // cursor, and whether the jetpack was worn where the scene has one (`jetpackStatus`). `remember` keeps it in `chosen`,
+  // but not while a game forces combat (`combatOnly`), and it is written when the page hides or closes. A page's first
+  // arrival, before anything is carried, comes back in it (`arrive`), the jetpack put back on through the scene's
+  // `wearJetpack`. Debug pages neither read nor write it, so fixtures and the suite always start from the default view.
   const VIEW_KEY = "ooga-view", VIEWS = ["first-person", "shoulder", "birds-eye", "orbit"];
   const KEEP_VIEW = !new URLSearchParams(location.search).has("debug");
   // Bird's-eye combat is a game's to offer (`birdsEye`, the ghost hunt's). A debug page's `birdseye=1` offers it in every
   // scene that does not keep it out, for the checks of the overhead camera and the island's cutaway.
   const BIRDS_EYE_FIXTURE = !KEEP_VIEW && new URLSearchParams(location.search).get("birdseye") === "1";
-  const chosen = { view: "", combat: false, relYaw: 0, pitch: 0, distance: 0, height: 0, side: 1, held: 0 };
+  const chosen = { view: "", combat: false, relYaw: 0, pitch: 0, distance: 0, height: 0, side: 1, held: 0, jet: null };
   const readView = () => {
     let v = null;
     try { v = JSON.parse(localStorage.getItem(VIEW_KEY)); } catch { return null; }
     if (!v || !VIEWS.includes(v.view) || typeof v.combat !== "boolean" || ![v.relYaw, v.pitch, v.distance, v.height].every(Number.isFinite)
       || Math.abs(v.pitch) > Math.PI / 2 || !(v.distance > 0 && v.distance < 1e3) || Math.abs(v.height) > 1e3 || (v.side !== 1 && v.side !== -1) || ![0, 1, 2].includes(v.held)) return null;
-    return { name: "", view: v.view, combat: v.combat, focused: false, relYaw: v.relYaw, pitch: v.pitch, distance: v.distance, height: v.height, side: v.side, held: v.held, ammo: NaN };
+    return { name: "", view: v.view, combat: v.combat, focused: false, relYaw: v.relYaw, pitch: v.pitch, distance: v.distance, height: v.height, side: v.side, held: v.held, ammo: NaN, jet: v.jet === true };
   };
   const saved = KEEP_VIEW ? readView() : null;
+  if (saved) chosen.jet = saved.jet;
   const saveView = () => {
     if (!chosen.view) return;
     const relYaw = Math.atan2(Math.sin(chosen.relYaw), Math.cos(chosen.relYaw));
@@ -428,13 +430,16 @@
       zoomTilt = false;
       zoomPitchVelocity = 0;
     };
-    let lockPending = false, lockCancelled = false, aimLocked = false, softAimFocused = false, externalControl = false, externalCombat = null, menuOpen = false, unlockedAt = -Infinity;
+    let lockPending = false, lockCancelled = false, aimLocked = false, softAimFocused = false, externalControl = false, externalCamera = false, externalCombat = null, menuOpen = false, unlockedAt = -Infinity;
     let savedPitch = 0, savedDist = 0, savedNear = camera.near, sightClear = null, cursorClear = null, aimSurface = null;
     const weaponViewReady = (cave) => active && !!cave && !cave.health.stunned && !restingView(cave) && (closeWanted || (!cave.camp.seat || cave.camp.seat.allowWeapons) && !cave.bedTravel.mode);
     // Lying in a hammock keeps the view it was lain down in: combat's look and capture carry on, with the weapons parked
     // under the cloth (the crew refuses them on a seat) and a dot for a crosshair (`syncWeaponHud`).
     const lyingLook = (cave) => active && !!cave && !!cave.camp.seat?.lying && !crew.sleeping && !cave.health.stunned;
-    const restCombat = (cave) => lyingLook(cave) && cave.weapon.aiming;
+    // A swivel seat can keep combat's camera through the first-person/shoulder
+    // handoff without granting permission to equip or fire a weapon.
+    const seatCombatReady = (cave) => lyingLook(cave) || active && !!cave && !!cave.camp.seat?.combatView && !crew.sleeping && !cave.health.stunned;
+    const restCombat = (cave) => seatCombatReady(cave) && cave.weapon.aiming;
     const shoulderBoomPitch = (pitch) => Math.max(pitch, Math.min(0, pitch + SHOULDER_LEVEL));
     // Level and downward aim lift the eye so the head sits below the
     // crosshair and the band beside it stays clear. Looking up sinks the body
@@ -580,10 +585,12 @@
       return true;
     };
     // Another playable actor shares the canvas and controls, but owns its own
-    // aim events and pointer lock until it hands the pilot control back.
-    const setExternalControl = (active, combat = null) => {
+    // aim events and pointer lock until it hands the pilot control back. A guided
+    // doorway can keep the native camera following while its input stays blocked.
+    const setExternalControl = (active, combat = null, followCamera = false) => {
       clearRightGesture();
       externalControl = !!active;
+      externalCamera = !!active && followCamera;
       externalCombat = active ? combat : null;
       aimLocked = false;
       unlockedAt = -Infinity;
@@ -606,11 +613,12 @@
       lockPending = false;
       if (externalControl && !disposed) return;
       carryCursor.endAim();
+      if (carryCursor.modal) carryCursor.stop();
       if (disposed) retireAimLock();
       if (!disposed && armed()) hud.hint("Mouse capture unavailable");
     };
     const lockAim = () => {
-      if (externalControl || menuOpen || coarse || disposed || !armed()) return;
+      if (externalControl || menuOpen && !carryCursor.modal || coarse || disposed || !armed()) return;
       lockCancelled = false;
       if (lockPending || document.pointerLockElement === canvas || !canvas.requestPointerLock) return;
       lockPending = true;
@@ -639,15 +647,25 @@
     // A menu releases mouse-look without changing carry/combat intent. Network
     // transitions can close it without a gesture: soft focus restores the
     // crosshair then, and the next real canvas click takes native lock again.
-    const setMenuOpen = (on, restore = true) => {
+    const setMenuOpen = (on, restore = true, centeredDialog = null) => {
       if (menuOpen === on) return;
+      const centered = on && centeredDialog && !coarse && armed() && (softAimFocused || lockPending || document.pointerLockElement === canvas);
       menuOpen = on;
       if (on) {
-        freeCursor();
+        if (centered) {
+          // The browser cannot warp a released native pointer. Hand relative motion to
+          // the menu pointer at the crosshair instead, with all combat input held.
+          controls.reset(); resetPointer(); clearRightGesture();
+          ads = mouseAds = false; aimLeftAccepted = aimLeftFocused = false;
+          setSoftAimFocus(false);
+          if (player()) { crew.stopBurst(player()); crew.releaseSwing(player(), true); }
+          carryCursor.startModal(centeredDialog); lockAim();
+        } else freeCursor();
         if (player()) { crew.thrust(false); crew.holdRocketJump(false); }
         attackReleaseBlocked = true;
         clearFeedback();
       } else {
+        if (carryCursor.modal) carryCursor.stop();
         controls.reset();
         resetPointer();
         if (restore && armed()) focusAim(!!navigator.userActivation?.isActive);
@@ -701,7 +719,7 @@
         const rect = canvas.getBoundingClientRect();
         carryCursor.start(rect.left + overheadX * rect.width / renderer.size.width,
           rect.top + overheadY * rect.height / renderer.size.height, false, false);
-      } else if (combat && !overhead && carryCursor.active) { carryCursor.stop(); resetPointer(preserveZoom); }
+      } else if (combat && !menuOpen && !overhead && carryCursor.active) { carryCursor.stop(); resetPointer(preserveZoom); }
       if (!combat && (carryCursor.active || softAimFocused || document.pointerLockElement === canvas)) unlockAim(preserveZoom);
       const cave = aimView() ? controlled : null;
       if (cave === aimCave) return;
@@ -1374,7 +1392,18 @@
       sleepCameraUp.x = sleepUp[0]; sleepCameraUp.y = sleepUp[1]; sleepCameraUp.z = sleepUp[2];
       camera.up = sleepCameraUp;
       camera.fov = carryFov; camera.near = savedNear;
-      if (!carrySelection && ctx.observeOrbit) ctx.observeOrbit(camera.position, dt);
+      if (ctx.observeOrbit) {
+        if (!carrySelection) ctx.observeOrbit(camera.position, dt);
+      } else if (!externalControl) {
+        // Restored carry views still belong inside the scene, including the
+        // stationary selection held just after arrival. Keep their look and
+        // requested zoom while moving both eye and target clear of the walls.
+        const x = camera.position.x, y = camera.position.y, z = camera.position.z;
+        clampCamera(camera.position, 0, undefined, false, dt);
+        camera.target.x += camera.position.x - x;
+        camera.target.y += camera.position.y - y;
+        camera.target.z += camera.position.z - z;
+      }
       setOverheadProjection(cave, carryStartOrtho * (1 - mix));
       camera.orthoHeight = carryStartScale * (1 - mix) + camera.orthoHeight * mix;
       syncHeadVisibility(cave);
@@ -2103,7 +2132,7 @@
         return true;
       }
       // A game's combat intent survives sleep/stuns; readiness still gates aiming and attacks.
-      if (!weaponViewReady(cave) && !lyingLook(cave) && !combatOnly) {
+      if (!weaponViewReady(cave) && !seatCombatReady(cave) && !combatOnly) {
         hud.hint(crew.sleeping ? "Wake this Ooga Booga before entering shooter mode" : "Stand up before entering shooter mode");
         return true;
       }
@@ -2203,7 +2232,8 @@
     };
     // The Ooga driven now in the view and mode `incoming` describes (as `captureControl` writes them), the shown camera
     // handing over to it: a possession's, or `adopt`'s for an Ooga already driven.
-    const takeView = (cave, incoming) => {
+    const takeView = (cave, incoming, blend = true) => {
+      if (!blend) handoff.cancel();
       centeredCarry = carrySelection = resumeSleepOverhead = false;
       const nextView = incoming.active ? incoming.view : "orbit";
       // Combat that was overhead, or would go there, comes in at the shoulder where this scene offers no overhead.
@@ -2272,7 +2302,7 @@
       syncWeaponHud();
       hud.tooltip.hide();
       syncModeHud();
-      handoff.begin(incoming);
+      if (blend) handoff.begin(incoming);
       targetWait = assistedTargetWait = 0;
       finishHandoffView(0);
     };
@@ -2288,9 +2318,10 @@
         side: shoulderSideTarget < 0 ? -1 : 1 };
     };
     // The Ooga driven now takes a view and mode `viewState` gave, blending from the view shown, without letting go of it.
+    // Scripted doorways pass blend=false when their own lens already animates the handoff.
     // First person keeps the look it has (where the Ooga faces now is what it looks at); the others take the kept look
     // from the Ooga's heading, pitch and zoom.
-    const adopt = (state) => {
+    const adopt = (state, blend = true) => {
       const cave = player();
       if (!cave || !state || !VIEWS.includes(state.view) || firstOnly) return false;
       const t = captureControl(controlTransition), feet = cave.root.position.y - cave.baseY;
@@ -2306,7 +2337,7 @@
       endCenteredCarry();
       unlockAim();
       headOrbit = exitAngleHold = closeCameraActive = entryRebase = entryOffsetActive = false;
-      takeView(cave, t);
+      takeView(cave, t, blend);
       requireCombat();
       return true;
     };
@@ -2331,9 +2362,11 @@
       if (!KEEP_VIEW || ctx.combatOnly?.()) return;
       chosen.view = c.view; chosen.combat = c.combat; chosen.relYaw = c.relYaw; chosen.pitch = c.pitch;
       chosen.distance = c.distance; chosen.height = c.height; chosen.side = c.side; chosen.held = c.held;
+      // Only a scene with jetpacks has a say: one without leaves the choice made where it could be.
+      if (ctx.jetpackStatus && cave.jetpackOwned) chosen.jet = !!cave.jet;
     };
     // The next `navigate`, in this same tick, keeps this look, pitch and zoom from the Ooga's new heading.
-    let arriving = null;
+    let arriving = null, arrivalMovement = false;
     // A scene's arrival with the visitor's own Ooga: possessed with the view and combat it last had where they carry, its
     // weapon back in hand where this scene allows (the primary when the rifle is not), and the next `navigate` keeping the
     // look, pitch and zoom. Nothing blends in from the old scene's camera, whose coordinates mean nothing here. Before
@@ -2361,13 +2394,17 @@
       const w = cave.weapon, now = w.equipped ? 2 : w.primaryEquipped ? 1 : 0, slot = held === 2 && w.secondaryOwned ? 2 : held && w.primaryOwned ? 1 : 0;
       if (Number.isFinite(ammo)) w.ammo = ammo;
       if (crew.weaponsEnabled && slot !== now && (slot || !w.aiming)) crew.selectWeapon(slot, cave);
+      // The jetpack this browser last wore, on the page's first arrival.
+      if (c === saved && c.jet && !cave.jet && ctx.wearJetpack) ctx.wearJetpack(cave);
       arriving = arrivalKeep;
+      arrivalMovement = true;
       return true;
     };
     // Lifecycle only (a scene's teardown, a switch to another Ooga or a gorilla, an account that may no longer drive it):
     // the camera stays where it is, on a target of its own, until the next possession.
     const release = () => {
       if (firstOnly && player() && !disposed) return;
+      arrivalMovement = false;
       handoff.cancel();
       restoredPose = null;
       endCenteredCarry();
@@ -2689,6 +2726,7 @@
     const readInput = (dt) => {
       readPad();
       if (!active || externalControl || menuOpen) { if (!buttonsHeld) releaseTriggerButton(); return; }
+      if (arrivalMovement) { arrivalMovement = false; controls.takeMovement(); }
       syncAim();
       const a = controls.read();
       // Arrival easing keeps its label; only manual camera input fades it.
@@ -3016,7 +3054,7 @@
       eyeMotionValid = false;
     };
     const updateCamera = (dt) => {
-      if (externalControl) return;
+      if (externalControl && !externalCamera) return;
       if (closeWanted || shoulderView || armed()) frameLiftWanted = 0;
       frameLift = damp(frameLift, frameLiftWanted, 6, dt);
       if (Math.abs(frameLift - frameLiftWanted) < 1e-4) frameLift = frameLiftWanted;
@@ -3192,7 +3230,7 @@
       }
       viewPitch = orbit.pitch * (1 - flatten);
       const cp = Math.cos(viewPitch), sp = Math.sin(viewPitch);
-      const targetX = orbit.tx, targetY = orbit.ty - portrait * 0.6, targetZ = orbit.tz;
+      let targetX = orbit.tx, targetY = orbit.ty - portrait * 0.6, targetZ = orbit.tz;
       const orbitX = orbit.tx + Math.sin(orbit.yaw) * cp * orbit.dist;
       const orbitY = orbit.ty + sp * orbit.dist;
       const orbitZ = orbit.tz + Math.cos(orbit.yaw) * cp * orbit.dist;
@@ -3244,7 +3282,13 @@
         camera.position.y += dollyVelocity.y * carry;
         camera.position.z += dollyVelocity.z * carry;
       }
+      const unclampedX = camera.position.x, unclampedY = camera.position.y, unclampedZ = camera.position.z;
       if (!(lying && closeWanted && closeMix === 1)) clampCamera(camera.position, closeMix, eyeClearance, groundEasing, dt, groundReset, directCameraPosition, !cave && orbit.target === freeTarget, headOrbit && !closeWanted && (exitAngleHold || closeMix > 0));
+      // A portal wall may pass between the eye and its body while fading out.
+      // Translate the orbit's target equally instead of flipping across it.
+      if (ctx.preserveClampedLook) {
+        targetX += camera.position.x - unclampedX; targetY += camera.position.y - unclampedY; targetZ += camera.position.z - unclampedZ;
+      }
       const lookCp = Math.cos(orbit.pitch), lookSp = Math.sin(orbit.pitch);
       let lookX = camera.position.x - Math.sin(orbit.yaw) * lookCp * CLOSE_LOOK_DIST;
       let lookY = camera.position.y - lookSp * CLOSE_LOOK_DIST;
@@ -3335,7 +3379,7 @@
     const update = (dt) => {
       arriving = null;
       if (ctx.carry && player()) remember(player());
-      if (externalControl) return;
+      if (externalControl && !externalCamera) return;
       // Overhead where the scene no longer offers it (a hunt that ended, a view left lying down) comes down to the
       // shoulder, as a right-click there does. A held replay keeps its pose until it is resumed.
       if (birdsEye() && noOverhead() && !restoredPose) shooterView(true, null, null, true);
@@ -3981,7 +4025,7 @@
       if (cave) {
         if (!touch) rows.push(H.row(["shiftleft"], "Run"));
         rows.push(H.row(touch ? [] : [" "], hud.el.act.textContent.trim() || "Jump / use nearby object", touch ? "Action button" : ""));
-        if (!firstOnly && !ctx.combatOnly?.() && (weaponViewReady(cave) || lyingLook(cave))) add("view", "Toggle view control", "View button");
+        if (!firstOnly && !ctx.combatOnly?.() && (weaponViewReady(cave) || seatCombatReady(cave))) add("view", "Toggle view control", "View button");
         if (!touch && !firstOnly && armed()) rows.push(H.row([], "Zoom / aim", "Hold right mouse click"));
         if (!touch && armed() && shoulderView && !closeWanted) rows.push(H.row(["shiftright"], "Tap to swap shoulder · hold with A/D to peek"));
         if (!touch && birdsEye()) add("north", "Face north", "");

@@ -903,12 +903,25 @@
   };
   // A coconut-shell button: a half shell in husk brown, its rim darker, with a small dot painted `color` on its crown,
   // the dot lit `emissive`.
+  // The joystick's bone stick from its base on the deck.
+  const lever = () => lathe({ profile: [[0.05, 0], [0.05, 0.012], [0.018, 0.02], [0.018, 0.13], [0, 0.13]], segments: 10, color: BONE });
   const shellButton = (r, color, emissive = 0.35) => {
     const geo = lathe({ profile: [[r, 0], [r * 1.05, 0.013], [r * 0.9, 0.03], [r * 0.55, 0.043], [r * 0.32, 0.047], [0, 0.049]], segments: 8, color: (t) => t < 0.3 ? "#5a3c20" : t < 0.7 ? "#7a5530" : color });
     geo.faces.forEach((f, k) => { f.emissive = k >= 32 ? emissive : 0; });
     return geo;
   };
   const BUTTON_INKS = ["#e0a83a", "#c0482a", "#4aa89a"];
+  // A cabinet's control panel in its own frame (+z out toward the player): the deck turned back `lean` about its x
+  // axis and set at (0, y, z), the bone lever standing on it at `pivot` with its coconut knob `stick` up it (at
+  // `knob` upright), and the three buttons' middles along it (`buttons`, x and z), their tops `top` over it.
+  // Players' Oogas at a cabinet reach for these and work the lever (remote-players.js).
+  const PANEL = Object.freeze({ lean: 0.32, y: 1.03, z: 0.3, pivot: Object.freeze([-0.3, 0.04, 0.03]), stick: 0.16,
+    knob: Object.freeze([-0.3, 0.2, 0.03]), top: 0.089, buttons: Object.freeze([0.03, 0.05, 0.18, -0.03, 0.33, 0.05]) });
+  // The low box the player stands on in front of a cabinet, in its frame: `w` wide, from `z0` out past its play spot
+  // to `z1`, its top `h` over the floor. A walker stands on it (scene-arcade.js
+  // `supportAt`; on the island the cabinet's own collision shell), and a player's Ooga at the cabinet stands on it
+  // there (remote-players.js).
+  const PLATFORM = Object.freeze({ w: 0.75, z0: 0.85, z1: 1.4, h: 0.25 });
   // Where an Ooga machine takes its coin: a tiki mouth carved into its front, `rx` by `ry`, facing +z about the origin
   // and 0.035 proud at most: thick dark timber lips round the black throat, bone teeth pointing in from its top and
   // foot, and an ember glowing `e` low in the throat. Flat parts.
@@ -936,7 +949,8 @@
   };
   const cabinetPanel = variants(i => buildCabinetPanel(CABINETS[i]));
   // The hall and Cloud Hopper share the same carved body, trim, controls and jungle dressing.
-  const buildCabinet = (c, named) => {
+  // `bare` leaves the lever out, for a cabinet whose lever stands on a node of its own (`joystick`).
+  const buildCabinet = (c, named, bare = false) => {
     const i = c.index, on = c.game >= 0, parts = [], round = [], J = BL.hubModels;
     const inks = [earth(c.trim), earth(c.second), BONE], cuts = c.stone ? SLABS : PLANKS, edge = c.stone ? tint(c.body, 0.68) : BARK;
     for (const s of [-1, 1]) {
@@ -951,6 +965,9 @@
       round.push(moved(turnedY(boneTusk(0.8, 0.042, 1.7), -s * 1.3), s * 0.58, 1.8, 0.37));
     }
     for (const z of [0.39, -0.39]) round.push(J.log(-0.62, 0.078, z, 0.62, 0.078, z, 0.075));
+    // The box the player stands on, in the cabinet's own colour. The out-of-order cabinet's bay has none.
+    if (!c.service) parts.push(box({ w: PLATFORM.w, h: PLATFORM.h, d: PLATFORM.z1 - PLATFORM.z0, color: tint(c.body, 0.9),
+      offset: { y: PLATFORM.h / 2, z: (PLATFORM.z0 + PLATFORM.z1) / 2 } }));
     // The back, planks up and down (two slabs on stone), the hide over the front and the lid.
     const back = c.stone ? [-1, 1].map((k) => bevelBox({ w: 1.04, h: 1.04, d: 0.06, color: tint(c.body, 1 + k * 0.05), bevel: 0.025, offset: { y: 1.09 + k * 0.53, z: -0.42 } }))
       : [0, 1, 2, 3].map((k) => bevelBox({ w: 0.255, h: 2.1, d: 0.06, color: tint(c.body, PLANK_TONES[k + 1]), bevel: 0.02, offset: { x: -0.39 + k * 0.26, y: 1.09, z: -0.42 } }));
@@ -977,13 +994,13 @@
     // and three big coconut-shell buttons in an arc.
     const deck = [bevelBox({ w: 1.1, h: 0.08, d: 0.36, color: TIMBER_LT, bevel: 0.02 }), box({ w: 1.02, h: 0.006, d: 0.3, color: leather(c.second), offset: { y: 0.042 } })];
     deck.push(box({ w: 0.2, h: 0.004, d: 0.08, color: "#d8c09a", offset: { x: -0.02, y: 0.046, z: -0.1 } }));
-    deck.push(moved(lathe({ profile: [[0.05, 0], [0.05, 0.012], [0.018, 0.02], [0.018, 0.13], [0, 0.13]], segments: 10, color: BONE }), -0.3, 0.04, 0.03));
-    BUTTON_INKS.forEach((color, k) => deck.push(moved(shellButton(0.052, color), 0.03 + k * 0.15, 0.04, k === 1 ? -0.03 : 0.05)));
-    const controlPanel = moved(turnedX(merge(...deck), 0.32), 0, 1.03, 0.3);
+    if (!bare) deck.push(moved(lever(), ...PANEL.pivot));
+    BUTTON_INKS.forEach((color, k) => deck.push(moved(shellButton(0.052, color), PANEL.buttons[k * 2], 0.04, PANEL.buttons[k * 2 + 1])));
+    const controlPanel = moved(turnedX(merge(...deck), PANEL.lean), 0, PANEL.y, PANEL.z);
     parts.push(controlPanel);
     // The joystick's knob, a coconut, round so it shades smooth.
-    const joystick = moved(turnedX(moved(nut("husk", 0.05, false, false), -0.3, 0.2, 0.03), 0.32), 0, 1.03, 0.3);
-    round.push(joystick);
+    const joystick = moved(turnedX(moved(nut("husk", 0.05, false, false), ...PANEL.knob), PANEL.lean), 0, PANEL.y, PANEL.z);
+    if (!bare) round.push(joystick);
     // The bezel: rough stone bars round the glass, their inner edges on the screen's, painted corners.
     const W = SCREEN.w / 2 + 0.05, H = SCREEN.h / 2 + 0.05, stone = c.stone ? tint(c.body, 1.15) : STONE_LT, bezel = [
       bevelBox({ w: W * 2 + 0.14, h: 0.12, d: 0.08, color: stone, bevel: 0.025, offset: { y: H + 0.01 } }),
@@ -1064,6 +1081,20 @@
     const c = CABINETS[i];
     return buildCabinet(c, c.game >= 0 ? GAMES[c.game] : RETRO[c.retro]);
   });
+  const cabinetBare = variants(i => {
+    const c = CABINETS[i];
+    return buildCabinet(c, c.game >= 0 ? GAMES[c.game] : RETRO[c.retro], true);
+  });
+  // A bare cabinet's lever: the bone stick from its base, its coconut knob `stick` up it, on `stick`, a node whose x
+  // and z turns tilt it, under a node laid on the deck; `node` goes under the cabinet's.
+  const stickGeometry = cached(() => shaded([moved(nut("husk", 0.05, false, false), 0, PANEL.stick, 0)], [lever()]));
+  const joystick = () => {
+    const { createNode, addChild } = BL.scene;
+    const stick = createNode({ position: { x: PANEL.pivot[0], y: PANEL.pivot[1], z: PANEL.pivot[2] }, geometry: stickGeometry() });
+    const node = createNode({ position: { x: 0, y: PANEL.y, z: PANEL.z }, rotation: { x: PANEL.lean, y: 0, z: 0 } });
+    addChild(node, stick);
+    return { node, stick };
+  };
   const CLOUD_HOPPER = { title: "CLOUD HOPPER", icon: "cloud" };
   const cloudHopperCabinet = cached(() => buildCabinet({ ...CABINETS[1], pictograph: "cloudHopper", trim: "#d8efff", second: "#5ec8ff" }, CLOUD_HOPPER));
   // ---- the attract loops --------------------------------------------------------------------------------
@@ -1489,7 +1520,7 @@
     ride: LAYOUT.rides.map((r) => ({ ...r, play: { x: r.x + Math.sin(r.turn) * 1.4, z: r.z + Math.cos(r.turn) * 1.4, facing: r.turn + Math.PI } }))
   };
   BL.arcadeModels = {
-    DOOR, doorParts, caveFloor, HALL, STAGE, MEZZ, HANDRAIL, HANDRAILS, handrailAt, slideAt, HAUNT, BLOCK_HALL, MEZZ_POSTS, GAMES, CABINETS, LAYOUT, CAB, SCREEN, FRAMES, FPS, START_FRAMES, SKEE, HOOP, SHY, METER_LEN, METER_WINDOW, SIGN_FRAME, POSTER_SCALE, MARQUEE, PRIZES, SPOTS, SPOT_Y, SPOT_FIRE, spark, CLAW, PIN, HOCKEY, WHEEL_VALUES, WHEEL_COST, blaze, MAMMOTH_AT, RETRO, RIDE_Y, RIDE_SEATS, RIDE_BEAT, POOL, POOL_COLORS, DART, FAME, PRIZE_SHELF, MAT_Y, cabinet, cabinetPanel, attractFrames, CLOUD_HOPPER, cloudHopperCabinet, cloudHopperFrames
+    DOOR, doorParts, caveFloor, HALL, STAGE, MEZZ, HANDRAIL, HANDRAILS, handrailAt, slideAt, HAUNT, BLOCK_HALL, MEZZ_POSTS, GAMES, CABINETS, LAYOUT, CAB, SCREEN, PANEL, PLATFORM, FRAMES, FPS, START_FRAMES, SKEE, HOOP, SHY, METER_LEN, METER_WINDOW, SIGN_FRAME, POSTER_SCALE, MARQUEE, PRIZES, SPOTS, SPOT_Y, SPOT_FIRE, spark, CLAW, PIN, HOCKEY, WHEEL_VALUES, WHEEL_COST, blaze, MAMMOTH_AT, RETRO, RIDE_Y, RIDE_SEATS, RIDE_BEAT, POOL, POOL_COLORS, DART, FAME, PRIZE_SHELF, MAT_Y, cabinet, cabinetBare, joystick, cabinetPanel, attractFrames, CLOUD_HOPPER, cloudHopperCabinet, cloudHopperFrames
   };
   // Private lexical bindings used by the scene-only extension; read once when that group evaluates.
   BL.arcadeModelsSceneKit = { paving, flagstone, clipped, BANANA, BANANA_LEAF_TONES, BARK, BL, BONE, BONE_INK, CABINETS, CLAW, DART, DOT, EARTH_BLACK, EARTH_CHALK, EARTH_OCHRE, EARTH_RED, EMBER_GLOW, FAME, FAME_ROW, FAME_W, FRAMES, GAMES, GLASS_DK, GLYPH_H, GLYPH_W, GRID_H, GRID_W, HALL, HAUNT, BLOCK_HALL, HOCKEY, HOOP, LAYOUT, MAMMOTH_AT, MARK, MAT_Y, METER_LEN, METER_WINDOW, MEZZ, MEZZ_POSTS, NUTS, PALETTES, PICTOS, PIN, PIXEL, POOL, POOL_COLORS, POSTER_SCALE, PRIZES, PRIZE_SHELF, RETRO, RIDE_BEAT, RIDE_Y, ROPE, SCREEN, SHY, SIGN_FRAME, SKEE, SPOTS, SPOT_Y, STAGE, TIMBER_DK, TIMBER_LT, TRACKING, WHEEL_COST, WHEEL_VALUES, along, at, bake, bananaLeaf, band, beam, bevelBox, blaze, boneTusk, box, cached, ccw, centred, daubDot, daubHand, daubPoly, daubStroke, daubTaper, daubZigzag, dots, earth, face, facing, flame, geometry, grid, hexToRgb, hide, lathe, leafBlade, line, merge, mirror, moved, mulberry32, nut, oval, pictograph, prism, pushVert, rect, ring, scaled, shaded, sideShape, signBinding, stone, strip, text, textWidth, tikiMouth, tint, titleBones, torus, tuck, turn, turnedX, turnedY, turnedZ, unshadowed, variants, zigzag };

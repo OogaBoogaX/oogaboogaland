@@ -8,6 +8,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeCharacters } from "./characters.mjs";
+import { writeEquipmentHats } from "./equipment-hats.mjs";
+import { catalogBaseline, catalogContinuation } from "./character-catalog-build.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path) => readFileSync(join(root, "src", path), "utf8");
@@ -17,6 +19,7 @@ const sha256 = (text) => `'sha256-${createHash("sha256").update(text, "utf8").di
 runInNewContext(read("js/cave-directory.js"), { window: {}, URL });
 
 writeCharacters();
+writeEquipmentHats();
 let html = read("index.html");
 
 // The source links its touch icon beside index.html; the single-file page has no file beside it (opened from disk it
@@ -51,7 +54,7 @@ const latin1 = (code) => code.replace(/[^\x00-\xff]/g, (ch) => `\\u${ch.charCode
 // Escape </script inside inlined JS: a literal closing tag would end the block early. `block` is also how
 // scripts/site.mjs finds a deferred module in the page.
 export const block = (src) => latin1(`// ---- ${src} ----\n${read(src).trim().replace(/\r\n/g, "\n")}`).replace(/<\/script/gi, "<\\/script");
-const js = sources.map(block).join("\n\n");
+const js = catalogContinuation(sources, block, catalogBaseline(root));
 // A module tagged `data-early` runs where it stands, before the page's one script arrives (the loading curtain's
 // line). Its block opens as `<script data-early>`, so the distribution steps still find the page's script as the
 // first `<script>`, and its hash follows that script's in the policy, which they rewrite.

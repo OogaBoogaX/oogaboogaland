@@ -11,7 +11,7 @@
     "email:56537ddd43347582": "MrHodlX",
     "harry": "hotpixelgroup"
   });
-  const METRICS = ["commits", "prs", "reviews", "issues", "comments"];
+  const METRICS = ["commits", "prs", "reviews", "issues", "comments", "merges"];
   const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
   const ownerOf = (login) => typeof login === "string" && Object.hasOwn(OWNERS, login.toLowerCase()) ? OWNERS[login.toLowerCase()] : login;
   const number = (value) => Number.isSafeInteger(value) && value >= 0 ? value : 0;

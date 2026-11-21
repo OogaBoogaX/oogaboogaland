@@ -8,6 +8,8 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import * as protocol from "../src/protocol.js";
 import { ghostHunt } from "../src/games/ghost-hunt.js";
+import { island, castFrom, applyStats, applyActivity, bananasAt } from "../src/games/island.js";
+import CAST_ROWS from "../src/characters.gen.json" with { type: "json" };
 import "../../src/js/game-wire.js";
 
 const WIRE = globalThis.BL.gameWire, SIM = globalThis.BL.ghostSim, ST = SIM.STATE;
@@ -41,7 +43,7 @@ const relayed = { ...echo, id: "relay", limits: { sockets: 3, chars: 64, bytes: 
   create: () => ({ ...echo.create(), relay: (p) => p.id === 1 }) };
 // A kind that greets a page joining with a frame of its own.
 const greeted = { ...echo, id: "greet", create: () => ({ ...echo.create(), greet: (p) => [new Uint8Array([9, p.id]).buffer] }) };
-const KINDS = new Map([[echo.id, echo], [relayed.id, relayed], [greeted.id, greeted], [ghostHunt.id, ghostHunt]]);
+const KINDS = new Map([[echo.id, echo], [relayed.id, relayed], [greeted.id, greeted], [ghostHunt.id, ghostHunt], [island.id, island]]);
 
 const harness = ({ stored = new Map(), env = {}, sockets = [] } = {}) => {
   const clock = { now: 1.7e12 };
@@ -387,4 +389,115 @@ test("a page joining hears the state and then what the game greets it with; afte
   assert.deepEqual(woke.host.game.state().heard, ["join 1", "join 2"], "both still connected, joined again");
   await woke.send(b, { t: "run" });
   assert.equal(woke.host.game.state().running, true, "and heard as players");
+});
+
+// ---- the island's world (games/island.js) ----
+const castRow = (handle, last, login = handle) => ({ handle, github_login: login, display: null, joined_at: "2025-10-01T00:00:00.000Z", last_commit_at: last, look: {} });
+
+test("the island's world runs while a page follows it: a row for every Ooga, quiet while none moves, and no record kept", async () => {
+  const h = harness();
+  const { res, ws } = await h.join(1, "island:main:v1");
+  assert.equal(res.status, 101);
+  const cast = states(ws).at(-1).s.cast;
+  assert.deepEqual(cast, castFrom(CAST_ROWS).map((c) => c.name), "the cast, in join order, at once");
+  h.run(30000);
+  const frame = WIRE.frame();
+  assert.ok(ws.bins.length > 0 && WIRE.decode(ws.bins.at(-1), frame), "motion frames");
+  assert.equal(frame.kind, island.code);
+  assert.equal(frame.count, cast.length, "a row an Ooga");
+  for (let i = 0; i < frame.count; i++) {
+    assert.equal(frame.rows[i * 8 + 1], i, "rows in cast order");
+    assert.equal(frame.rows[i * 8 + 2], globalThis.BL.math.fnv1a(cast[i]) & 0xffff, "each row names its Ooga");
+  }
+  assert.ok(ws.bins.length < 300, `frames skipped while nothing moves (${ws.bins.length} in 30 s at 10 Hz)`);
+  assert.equal(h.stored.has("game"), false, "nothing stored");
+  h.host.webSocketClose(ws, 1000, "", true);
+  const sent = ws.bins.length;
+  h.run(5000);
+  assert.equal(ws.bins.length, sent, "nobody following, nothing runs");
+  assert.equal(h.timers.filter((t) => t.at > h.clock.now).length, 0, "and no timer is left");
+});
+
+test("the island's states and caves come from Oogatron's stats, as a page's crew reads them", () => {
+  const now = Date.parse("2026-11-20T12:00:00Z"), iso = (ms) => new Date(now - ms).toISOString(), H = 3600e3;
+  const cast = castFrom([castRow("ann", iso(400 * 24 * H)), castRow("bob", iso(400 * 24 * H), "BobGH"), castRow("cy", iso(400 * 24 * H)),
+    castRow("dee", iso(400 * 24 * H)), castRow("eve", iso(30 * 60e3))]);
+  const stats = { meta: { schema_version: 3, org: "OogaBoogaX", generated_at: iso(0) },
+    contributors: [{ login: "ann", last_seen_at: iso(10 * 60e3) }, { login: "bobgh", last_seen_at: iso(3 * H) }, { login: "cy", last_seen_at: iso(5 * 24 * H) }],
+    repos: [{ name: "lightningfoundry", contributors: [{ login: "ann", last_seen_at: iso(10 * 60e3) }] },
+      { name: "somewhere-else", contributors: [{ login: "ann", last_seen_at: iso(20 * 60e3) }] }] };
+  assert.ok(applyStats(cast, stats, now) > 0);
+  const ISIM = globalThis.BL.islandSim, sim = ISIM.create();
+  sim.setCast(cast);
+  applyActivity(sim, cast, now);
+  const want = (name) => sim.byName(name).want, mask = (name) => sim.byName(name).mask;
+  const sites = globalThis.BL.islandLayout.sites, at = (pred) => sites.findIndex(pred);
+  assert.equal(want("ann"), 0, "seen ten minutes ago: working");
+  assert.equal(mask("ann"), 1 << at((s) => s.repo === "oogaboogax/lightningfoundry") | 1 << at((s) => s.fallback),
+    "at the cave of the repository they worked in, and the namesake cave for one with no cave");
+  assert.equal(want("bob"), 1, "three hours ago, by the login that owns the Ooga: chilling");
+  assert.equal(want("cy"), 2, "five days ago: sleeping");
+  assert.equal(want("dee"), 3, "a year ago: away");
+  assert.equal(want("eve"), 0, "an Ooga the stats leave out keeps its bundled stamp, as on a page");
+});
+
+test("a game that keeps no record writes nothing to storage", async () => {
+  const h = harness();
+  const { ws } = await h.join(1, "island:main:v1");
+  let writes = 0;
+  const put = h.host.ctx.storage.put, del = h.host.ctx.storage.delete;
+  h.host.ctx.storage.put = async (...a) => { writes++; return put(...a); };
+  h.host.ctx.storage.delete = async (...a) => { writes++; return del(...a); };
+  h.run(20000);
+  assert.equal(writes, 0);
+  h.host.webSocketClose(ws, 1000, "", true);
+});
+
+test("a world that cannot read Oogatron starts from the stats every deploy bakes into the page, as a page does", async () => {
+  const h = harness();
+  h.clock.now = Date.parse(globalThis.BL.jumbotronData.meta.generated_at) + 30 * 60e3;
+  await h.join(1, "island:main:v1");
+  const sim = h.host.game.sim, now = h.clock.now, cast = castFrom(CAST_ROWS), check = globalThis.BL.islandSim.create();
+  applyStats(cast, globalThis.BL.jumbotronData, now);
+  check.setCast(cast);
+  applyActivity(check, cast, now);
+  const wants = (s) => s.oogas.map((o) => `${o.name}:${o.want}:${o.mask}`).join(",");
+  assert.equal(wants(sim), wants(check), "each Ooga's state and caves as the baked snapshot gives them");
+  assert.notEqual(wants(sim), wants((() => { const plain = globalThis.BL.islandSim.create(), bare = castFrom(CAST_ROWS); plain.setCast(bare); applyActivity(plain, bare, now); return plain; })()),
+    "which is not the cast's own bundled dates");
+});
+
+test("the island's pile comes from bananapayserver: one short socket for its pile, read again every few minutes while the world runs", async () => {
+  const at = Date.parse("2026-11-20T12:00:00Z"), sockets = [];
+  const socket = () => {
+    const on = {};
+    return { closed: null, addEventListener(type, fn) { on[type] = fn; }, close(code) { this.closed = code; },
+      accept() {
+        queueMicrotask(() => {
+          on.message({ data: JSON.stringify({ type: "status", open: true }) });
+          on.message({ data: JSON.stringify({ type: "pile", bananas: 5000, at, eatPerHour: 60 }) });
+        });
+      } };
+  };
+  const DONATIONS = { fetch: async (req) => {
+    const ws = socket();
+    sockets.push({ path: new URL(req.url).pathname, upgrade: req.headers.get("upgrade"), client: req.headers.get("x-client"), ws });
+    return { webSocket: ws };
+  } };
+  const game = island.create(at, { DONATIONS, SITE_ORIGIN: "https://site.test" }), settle = () => new Promise((r) => setTimeout(r, 5));
+  game.join({});
+  game.step(at);
+  await settle();
+  game.step(at + 4 * 60000);
+  const check = globalThis.BL.islandSim.create();
+  check.setBananas(bananasAt({ bananas: 5000, at, eatPerHour: 60 }, at + 4 * 60000));
+  assert.equal(sockets.length, 1);
+  assert.deepEqual([sockets[0].path, sockets[0].upgrade, sockets[0].client, sockets[0].ws.closed], ["/donations/socket", "websocket", "island-world", 1000]);
+  assert.equal(game.sim.platform, check.platform, "sized by the pile eaten down to now (4,996 bananas four minutes on)");
+  assert.notEqual(game.sim.platform, globalThis.BL.islandSim.create().platform, "not the nominal pile");
+  game.step(at + 4.5 * 60000); await settle();
+  assert.equal(sockets.length, 1, "not again within five minutes");
+  game.step(at + 5 * 60000 + 1); await settle();
+  assert.equal(sockets.length, 2, "and again after them");
+  assert.equal(bananasAt({ bananas: 10, at, eatPerHour: 60 }, at + 3600e3), 0, "never below none");
 });
