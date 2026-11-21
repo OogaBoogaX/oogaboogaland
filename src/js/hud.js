@@ -2052,7 +2052,8 @@
     $("recipe-note").hidden = !refused;
     if (!recipe.open) recipe.showModal();
   };
-  const showAccount = ({ backend, me, room, online }) => {
+  const showAccount = (state) => {
+    const { backend, me, room } = state, online = BL.cloudPanel ? BL.cloudPanel.online(state) : state.online;
     const live = !!me && room === "live", words = live ? `${online} online` : ROOM_WORDS[room] || "";
     const top = accountTop(), topTip = me ? `Signed in as ${me.display} · Sign out` : "Sign in with GitHub · needs your own Ooga";
     if (top.hidden !== !backend) top.hidden = !backend;

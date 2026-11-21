@@ -134,6 +134,7 @@
   let preferenceOwner = 0;
   let mic = null, pubPc = null, subPc = null, desired = [], queue = Promise.resolve();
   let listenerCount = null;
+  const LISTENERS_MAX = 1024;
   // The outdoor bridge's word (setOutdoor): the microphone held off, public listeners, public speakers to play at full.
   let outdoorHeld = false, outdoorAudience = 0, outdoorSources = null;
   // Overhearing (below, `overhear`): a receive session this page opened by itself to hear the main island's public
@@ -1271,7 +1272,8 @@
   const setPeers = (ids, gens = null, listeners = null) => {
     syncPreferences();
     desired = ids.slice();
-    listenerCount = Number.isSafeInteger(listeners) && listeners >= 0 && listeners < 32 ? listeners : null;
+    // Linked partners in Ooga Chat add to the room's own players, up to its 64 links, so the bound is the two together.
+    listenerCount = Number.isSafeInteger(listeners) && listeners >= 0 && listeners <= LISTENERS_MAX ? listeners : null;
     wantedGen.clear();
     for (let i = 0; i < ids.length; i++) wantedGen.set(ids[i], gens ? gens[i] : 0);
     for (const [id, s] of subs) hear(s, heard(id));

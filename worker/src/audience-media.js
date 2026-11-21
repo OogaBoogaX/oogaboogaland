@@ -6,6 +6,8 @@
 // of anyone else's, and `sync` pulls every speaker of its zone, other than itself, that is publishing:
 //   world speakers   the island's outdoor publishers, by the publication reference the Room hands over in `world`
 //   chat speakers    Ooga Chat speakers whose lease is active and whose microphone is published (`publish/ready`)
+//   linked speakers  island players this connection's identity holds a voice link with, wherever they stand, by the
+//                    reference the Room hands over in `world`'s `linked`
 // checked before the SFU call and again after it, so a zone, lease or publication that changed while it was in flight
 // keeps nothing it should not: those tracks are closed through the durable cleanup queue before any reply.
 // A speaker publishes one track, the microphone alone (never playback, a mix or a loopback), on its own session, only
@@ -118,12 +120,17 @@ export const createMediaBroker = (aud) => {
   };
 
   // --- what may be pulled ---
-  /** participant -> { session, track, gen } for every publishing speaker of `conn`'s zone but its own identity. */
+  /** participant -> { session, track, gen } for every publishing speaker of `conn`'s zone but its own identity, and its
+   *  identity's linked island partners in any zone. */
   const authorizedFor = (conn) => {
     const out = new Map();
-    if (!conn || !conn.zone) return out;
+    if (!conn) return out;
+    for (const l of aud.island.linked || []) {
+      if (l.pub && l.id !== conn.id && l.to.includes(conn.id)) out.set(l.id, { session: l.pub.session, track: l.pub.track, gen: l.pub.gen || 0 });
+    }
+    if (!conn.zone) return out;
     for (const s of aud.island.speakers) {
-      if (s.zone === conn.zone && s.id !== conn.id && s.pub && s.pub.session && s.pub.track) out.set(s.id, { session: s.pub.session, track: s.pub.track, gen: s.pub.gen || 0 });
+      if (s.zone === conn.zone && s.id !== conn.id && s.pub && s.pub.session && s.pub.track && !out.has(s.id)) out.set(s.id, { session: s.pub.session, track: s.pub.track, gen: s.pub.gen || 0 });
     }
     for (const c of aud.model.conns.values()) {
       if (c.zone !== conn.zone || c.id === conn.id || !c.lease || c.lease.state !== "active") continue;
@@ -171,6 +178,8 @@ export const createMediaBroker = (aud) => {
   const published = () => {
     const now = new Map();
     for (const s of aud.island.speakers) if (s.pub && s.pub.session && s.pub.track) now.set(s.zone, `${now.get(s.zone) || ""}|${s.id}:${s.pub.gen || 0}`);
+    // A linked publication is announced to its partners' connections alone, keyed by identity.
+    for (const l of aud.island.linked || []) if (l.pub) for (const to of l.to) now.set(`@${to}`, `${now.get(`@${to}`) || ""}|${l.id}:${l.pub.gen || 0}`);
     for (const c of aud.model.conns.values()) {
       if (!c.zone || !c.lease || c.lease.state !== "active") continue;
       const m = states.get(c.connId);
@@ -192,7 +201,7 @@ export const createMediaBroker = (aud) => {
     for (const [zone, sig] of now) announced.set(zone, sig);
     if (!changed.size) return;
     for (const [connId, s] of states) {
-      const c = aud.model.conns.get(connId), ws = s.sub && c && changed.has(c.zone) ? aud.sockets.get(connId) : null;
+      const c = aud.model.conns.get(connId), ws = s.sub && c && (changed.has(c.zone) || changed.has(`@${c.id}`)) ? aud.sockets.get(connId) : null;
       if (ws) aud.send(ws, { type: "media", op: "sync" });
     }
   };

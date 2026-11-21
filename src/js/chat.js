@@ -65,7 +65,7 @@
       displayInput.disabled = !player || displaySaving; displaySave.disabled = !player || displaySaving;
     }
     const live = !!player && room === "live";
-    const chip = live ? `${online} online` : "Offline";
+    const chip = live ? `${BL.cloudPanel ? BL.cloudPanel.online({ online, room }) : online} online` : "Offline";
     if (roomChip.textContent !== chip) {
       roomChip.textContent = chip;
     }

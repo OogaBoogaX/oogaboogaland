@@ -95,7 +95,7 @@ export class Audience extends DurableObject {
     this.replies = new Map();
     this.buckets = new Map();
     this.watching = new Set();
-    this.island = { seq: 0, speakers: [], active: [] };
+    this.island = { seq: 0, speakers: [], active: [], linked: [] };
     this.roomQueue = Promise.resolve();
     this.genAt = 0;
     this.contributions = { at: 0, map: null, pending: null };
@@ -124,6 +124,7 @@ export class Audience extends DurableObject {
       if (!meta) { meta = { epoch: Date.now(), revs: null }; await ctx.storage.put("meta", meta); }
       this.model = createAudience({ epoch: meta.epoch, limits: limitsOf(env), revs: meta.revs });
       this.island = (await ctx.storage.get("world")) || this.island;
+      if (!Array.isArray(this.island.linked)) this.island = { ...this.island, linked: [] };
       this.watching = new Set((await ctx.storage.get("watch")) || []);
       // A woken object rebuilds its roster from its sockets' attachments and the island's last word, at the stored
       // revision: what clients already hold is still true, so nothing is sent. A socket already closing is restored too,
@@ -145,8 +146,8 @@ export class Audience extends DurableObject {
       // socket empties it), so the Room's own stored copy never stays stale.
       this.sourcesSig = (await ctx.storage.get("sourcesSig")) ?? null;
       // The island's `outdoor` switch off (the kill switch, deployed): no island publication stays pullable.
-      if (!bridgeFeatures(env).outdoor && this.island.speakers.length) {
-        this.island = { ...this.island, speakers: [] };
+      if (!bridgeFeatures(env).outdoor && (this.island.speakers.length || this.island.linked.length)) {
+        this.island = { ...this.island, speakers: [], linked: [] };
         await ctx.storage.put("world", this.island);
         this.model.setWorld([], this.island.active);
         this.model.commit();
@@ -254,15 +255,25 @@ export class Audience extends DurableObject {
 
   // Speakers receive too, including while their microphone is opening. The island must not gate its microphone
   // as alone merely because everybody in Ooga Chat pressed Join Voice.
+  // `ears`: for each island player the Room listed as linked, its partners here now, by name, so the island shows them.
   hearingCounts() {
-    const main = this.model.counts("main"), dsb = this.model.counts("dsb");
-    return { main: main.listeners + main.chatSpeakers, dsb: dsb.listeners + dsb.chatSpeakers };
+    const main = this.model.counts("main"), dsb = this.model.counts("dsb"), ears = {};
+    for (const l of this.island.linked) {
+      const here = [];
+      for (const id of l.to) {
+        const p = this.model.people.get(id);
+        if (p && p.conns.size) here.push({ id, login: p.info.login, display: p.info.display || p.info.login });
+      }
+      if (here.length) ears[l.id] = here;
+    }
+    const counts = { main: main.listeners + main.chatSpeakers, dsb: dsb.listeners + dsb.chatSpeakers };
+    return Object.keys(ears).length ? { ...counts, ears } : counts;
   }
 
   /** Each zone's receivers for the Room's open grants (#667), sent when a zone gains or loses its last receiver. */
   listenersChanged() {
     const counts = this.hearingCounts();
-    const sig = `${counts.main > 0}|${counts.dsb > 0}`;
+    const sig = `${counts.main > 0}|${counts.dsb > 0}|${JSON.stringify(counts.ears || {})}`;
     if (sig === this.listenersSig || !this.env.ROOM) return;
     this.listenersSig = sig;
     this.roomQueue = this.roomQueue.then(() => this.env.ROOM.getByName("island").audienceListeners(counts)).catch(() => {
@@ -655,8 +666,11 @@ export class Audience extends DurableObject {
 
   // --- the Room's and the bridge's calls (RPC) ---
 
-  /** The island's whole word on its players, newest `seq` wins: who publishes outdoors where, who is in its voice. */
-  async world(seq, speakers, active) {
+  /**
+   * The island's whole word on its players, newest `seq` wins: who publishes outdoors where, who is in its voice, and
+   * `linked`, the island publications only each one's voice-link partners (`to`) may pull, wherever its player stands.
+   */
+  async world(seq, speakers, active, linked = []) {
     if (!Number.isSafeInteger(seq) || seq <= this.island.seq || !Array.isArray(speakers) || !Array.isArray(active)) return { ok: false };
     // With the island's `outdoor` switch off, no island publication is listed or pullable, whatever the Room sends.
     const allowed = bridgeFeatures(this.env).outdoor ? speakers : [];
@@ -669,7 +683,16 @@ export class Audience extends DurableObject {
       info: { provider: "github", login: String(s.login || "").slice(0, 39), display: String(s.display || s.login || "").slice(0, 50), character: s.character || null,
         contributions: this.contributionOf(s.login) },
     }));
-    this.island = { seq, speakers: clean, active: active.slice(0, 64).filter((id) => ID.test(id)) };
+    // Linked island players and their partners; a publication by reference too, never listed in a roster and pulled
+    // only by a partner's own connections. One in voice without a publication is named so its partners here are told
+    // back (`hearingCounts`' `ears`).
+    const links = (bridgeFeatures(this.env).outdoor && Array.isArray(linked) ? linked : []).slice(0, 64)
+      .filter((l) => l && ID.test(l.id) && Array.isArray(l.to))
+      .map((l) => ({ id: l.id, to: l.to.slice(0, 64).filter((to) => typeof to === "string" && /^gh:[1-9][0-9]{0,19}$/.test(to) && to !== l.id),
+        pub: l.pub && typeof l.pub.session === "string" && typeof l.pub.track === "string"
+          ? { session: l.pub.session.slice(0, 64), track: l.pub.track.slice(0, 64), gen: Number.isSafeInteger(l.pub.gen) ? l.pub.gen : 0 } : null }))
+      .filter((l) => l.to.length);
+    this.island = { seq, speakers: clean, active: active.slice(0, 64).filter((id) => ID.test(id)), linked: links };
     await this.ctx.storage.put("world", this.island);
     // Whether each identity holds an island source, before and after: one that gained or lost it is `denied` or
     // `eligible` again in every Ooga Chat tab it has open, which hears it now rather than at its next lease change.

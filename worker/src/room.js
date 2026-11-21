@@ -112,6 +112,9 @@ export class Room extends DurableObject {
     this.chatBuckets = new Map();
     this.pmAccounts = new Map();
     this.links = new Map();
+    // Until the stored voice links load, the island's word to the Audience waits (room-audience.js `world`): sent sooner,
+    // it would name no linked partner and close every pull a partner in Ooga Chat holds.
+    this.linksReady = false;
     this.doorQueue = [];
     this.doorActive = null;
     this.doorPasses = new Map();
@@ -168,6 +171,11 @@ export class Room extends DurableObject {
         this.cloudsRev = clouds && Number.isSafeInteger(clouds.revision) ? clouds.revision : 0;
       }, () => { this.clouds = []; this.cloudsRev = 0; });
       await this.restoring("voiceLinks", (links) => { this.links = restoreLinks(links); });
+      // The links are here, and the players (rebuilt from their sockets below, which ran at the first await above): outdoor
+      // grants held over a wake or a redeploy are checked again, taken back if the switch is now off, and the island's
+      // word, held back until now, goes with every linked partner in it.
+      this.linksReady = true;
+      audienceRoom.restore(this);
       await this.restoring("chalk", async (chalk) => {
         const marks = chalk && CHALK.restore(chalk.marks);
         // A board stored before the board grew (no `v`) is widened as it loads; the next save stores it widened.
@@ -223,8 +231,6 @@ export class Room extends DurableObject {
     this.restoreDoor();
     this.hostId = electHost(this.players.values(), 0, (p) => this.npcEligible(p));
     this.followers = npcFollowers(this.players.values(), this.hostId, (p) => this.npcEligible(p));
-    // Outdoor grants held over a wake or a redeploy are checked again, and taken back if the switch is now off.
-    audienceRoom.restore(this);
     this.inspect.woke(this.players.size);
   }
 
@@ -1432,7 +1438,22 @@ export class Room extends DurableObject {
 
   saveAttachment(p) { p.ws.serializeAttachment(this.attachment(p)); }
 
-  sendLinks(p, refused, all, n) { this.send(p.ws, { t: "links", ...linkView(this.links, p.id), ...(refused ? { refused } : {}), ...(all ? { all, n } : {}) }); }
+  // The asker's own socket hears why (`refused`, `all`); the account's other sockets, its island player and its Ooga
+  // Chat members (room-commons.js), hear the same asks and links without it. An island socket also hears `app`, its
+  // linked partners in Ooga Chat, who can hear it wherever it is, so Online Oogas shows each of them with the link.
+  sendLinks(p, refused, all, n) {
+    const view = linkView(this.links, p.id), app = audienceRoom.partners(this, p.id), q = this.players.get(p.id);
+    this.send(p.ws, { t: "links", ...view, ...(p.community ? {} : { app }), ...(refused ? { refused } : {}), ...(all ? { all, n } : {}) });
+    if (q && q !== p) this.send(q.ws, { t: "links", ...view, app });
+    commonsRoom.links(this, p.id, { t: "links", ...view }, p);
+  }
+  // Account `id`'s asks and links, to every socket it has here: on the island, in Ooga Chat, or both.
+  tellLinks(id) {
+    const q = this.players.get(id);
+    if (q) this.sendLinks(q);
+    else commonsRoom.links(this, id, { t: "links", ...linkView(this.links, id) });
+  }
+  linkViewOf(id) { return linkView(this.links, id); }
 
   saveLinks() { if (this.ctx && this.ctx.storage) this.background(this.ctx.storage.put("voiceLinks", storedLinks(this.links))); }
 
@@ -1455,9 +1476,9 @@ export class Room extends DurableObject {
     this.saveLinks();
     this.sendLinks(p);
     if (was === voiceLinked(this.links, p.id, msg.to)) return;
-    const q = this.players.get(msg.to);
-    if (q) this.sendLinks(q);
+    this.tellLinks(msg.to);
     this.enforceStudio();
+    audienceRoom.world(this);
   }
 
   // The L key: link with everyone in the room who has asked this player and has not been asked back, as far as the
@@ -1477,15 +1498,16 @@ export class Room extends DurableObject {
       if (!fits.length) return this.sendLinks(p, "full");
       this.saveLinks();
       this.sendLinks(p, fits.length < waiting.length ? "full" : undefined, "linked", fits.length);
-      for (const id of fits) this.sendLinks(this.players.get(id));
+      for (const id of fits) this.tellLinks(id);
     } else if (wants) {
       const broken = [...wants].filter((id) => voiceLinked(this.links, p.id, id));
       this.links.delete(p.id);
       this.saveLinks();
       this.sendLinks(p, undefined, "unlinked", wants.size);
-      for (const id of broken) { const q = this.players.get(id); if (q) this.sendLinks(q); }
+      for (const id of broken) this.tellLinks(id);
     } else return this.sendLinks(p, undefined, "none", 0);
     this.enforceStudio();
+    audienceRoom.world(this);
   }
 
   // An account deleted (`DELETE /api/me`, through the Worker's binding alone): its asks, and every ask of it, go.
@@ -1500,8 +1522,9 @@ export class Room extends DurableObject {
     }
     if (!changed) return;
     await this.ctx.storage.put("voiceLinks", storedLinks(this.links));
-    for (const other of told) { const p = this.players.get(other); if (p) this.sendLinks(p); }
+    for (const other of told) this.tellLinks(other);
     this.enforceStudio();
+    audienceRoom.world(this);
   }
 
   // One bucket a record for reactions and the hand, made full on first use.
@@ -1592,9 +1615,11 @@ export class Room extends DurableObject {
       if (p.zone === STUDIO_ZONE) {
         listeners = 0;
         for (const q of this.players.values()) if (q !== p && q.voice && q.voice.sub && (q.zone === STUDIO_ZONE || voiceLinked(this.links, p.id, q.id))) listeners++;
+        listeners += audienceRoom.ears(this, p.id);
       }
       // Someone back from an earlier session with the microphone closed, or a linked partner in a Studio audience.
-      const ears = p.zone === STUDIO_ZONE ? 0 : quiet.get(p.id) || 0;
+      // Linked partners hearing it from Ooga Chat count too.
+      const ears = p.zone === STUDIO_ZONE ? 0 : (quiet.get(p.id) || 0) + audienceRoom.ears(this, p.id);
       const sig = peers.map((id, i) => `${id}:${gens[i]}`).join(",") + (listeners === undefined ? "" : `|${listeners}`) + (ears ? `+${ears}` : "");
       if (p.sent === sig) continue;
       p.sent = sig;

@@ -80,7 +80,7 @@
   // within a group the visitor's own row first, then everyone by name. Rows carry `group`, `name`, `self` and `id`.
   const COLLATE = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
   const arrange = (rows, mine) => rows.sort((a, b) => a.group === b.group
-    ? (b.self ? 1 : 0) - (a.self ? 1 : 0) || COLLATE.compare(a.name, b.name) || a.id - b.id
+    ? (b.self ? 1 : 0) - (a.self ? 1 : 0) || (a.listener ? 1 : 0) - (b.listener ? 1 : 0) || COLLATE.compare(a.name, b.name) || a.id - b.id
     : a.group === mine ? -1 : b.group === mine ? 1 : COLLATE.compare(heading(a.group), heading(b.group)) || (a.group < b.group ? -1 : 1));
   // Every zone the tables name, for the World Map (scripts/world-map.mjs), which places each one or drops it by name.
   const zones = Object.freeze([...new Set([ROOT, ...Object.keys(LANDS), ...Object.keys(PARENTS), ...Object.keys(HEADINGS)])]);

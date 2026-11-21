@@ -397,18 +397,26 @@
     });
     const rtc = fakeRtc(voice);
     const commons = (boot, { message, status }) => {
+      // Voice links as the island keeps them: linked with Sample Oak, an ask waiting on Sample-Fern, who asked back.
       let closed = false, next = HISTORY.length + 1;
+      const wants = new Set([11, 12]), asking = new Set([11]);
+      const links = () => ({ wants: [...wants], linked: [...wants].filter((id) => asking.has(id)) });
       const timers = new Set();
       const later = (ms, fn) => { const timer = setTimeout(() => { timers.delete(timer); if (!closed) fn(); }, ms); timers.add(timer); };
       const you = { id: 1, login: account?.identity.login || "sample-contributor", display: named || account?.identity.display || "sample-contributor" };
       status("connecting");
       later(300, () => {
         status("live");
-        message({ t: "community", v: 1, op: "welcome", epoch: 1, send: true, you, players: TOWN, features: ["chat-unicode-v1", "commons-v1"] });
+        message({ t: "community", v: 1, op: "welcome", epoch: 1, send: true, you, players: TOWN, links: links(), features: ["chat-unicode-v1", "commons-v1"] });
         message({ t: "chat-history", messages: HISTORY });
       });
       return {
         send(data) {
+          if (!closed && data.t === "link") {
+            if (data.on) wants.add(data.to); else wants.delete(data.to);
+            later(150, () => message({ t: "links", ...links() }));
+            return true;
+          }
           if (closed || data.t !== "chat") return false;
           const id = next++;
           later(250, () => {

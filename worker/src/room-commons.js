@@ -7,9 +7,11 @@
 // bucket by account, so a contributor's tabs on the island and in Ooga Chat together still speak about once a second.
 // Its view of Online Oogas is presence without positions: each player's id, login, display, body, zone, voice, mute and
 // hand (`join`, `leave`, `body`, `zone`, `vstate`, `hand`), the clouds and active duel pair ids for local listening.
-// No duel health, coordinates, challenges or outcomes. No pose, distance, SFU id, private
-// conversation or voice link reaches it, and it can send nothing but chat lines: private conversations, voice links,
-// reactions over a body and every world action stay the island's (docs/ooga-chat-backend.md, the capability matrix).
+// No duel health, coordinates, challenges or outcomes. No pose, distance, SFU id or private conversation reaches it.
+// Its account's voice links do (`links`, its asks and which are two-way, in its welcome and on every change), and it may
+// ask for or take back one with an island player (`link`), the same asks the island keeps, so a link shows and holds in
+// both apps; beyond that it sends only chat lines: private conversations, reactions over a body and every world action
+// stay the island's (docs/ooga-chat-backend.md, the capability matrix).
 // Re-exported by protocol.js, as the audience glue is, so the Room's checks load it with the protocol.
 
 import { bridgeFeatures } from "./chat-bridge-protocol.js";
@@ -84,6 +86,7 @@ export const commonsRoom = {
     room.send(server, { t: "community", v: COMMONS_V, op: "welcome", epoch: epochOf(room, now), send: bridgeFeatures(room.env).commonsSend,
       you: { id: m.id, login: m.login, display: m.display }, players: [...room.players.values()].map(presenceOf),
       duels: [...room.duels.values()].map((d) => ({ id: d.id, a: d.a, b: d.b })),
+      ...(typeof room.linkViewOf === "function" ? { links: room.linkViewOf(m.id) } : {}),
       features: [globalThis.BL.chatPolicy.FEATURE, COMMONS_FEATURE] });
     room.send(server, { t: "chat-history", messages: room.chat.list() });
     audienceRoom.welcome(room, m);
@@ -104,18 +107,24 @@ export const commonsRoom = {
     return m && m.ws === ws ? m : null;
   },
 
-  /** A member's frame, already parsed by the Room: a chat line is all it may send. */
+  /** A member's frame, already parsed by the Room: a chat line, or a voice link's ask, is all it may send. */
   async message(room, ws, msg, now = Date.now()) {
     const m = commonsRoom.memberOf(room, ws);
     if (!m) return;
     if (msg === false) { commonsRoom.close(room, m, CLOSE.bad, "unreadable message"); return; }
     m.seenAt = now;
     if (m.authUntil <= m.seenAt) { commonsRoom.close(room, m, CLOSE.auth, "auth_required"); return; }
+    if (msg && msg.t === "link" && typeof room.linkMessage === "function") { room.linkMessage(m, msg); return; }
     if (!msg || msg.t !== "chat") return;
     // Rolled out reading first (#670): until the island's `commons-send`, a line is refused and the app keeps its draft.
     if (!bridgeFeatures(room.env).commonsSend) { room.send(ws, { t: "chat-rejected", clientId: msg.clientId, reason: "read_only" }); return; }
     if (!m.chatBucket) m.chatBucket = room.chatBucketFor(m.id, m.seenAt);
     await room.say(m, msg.text, msg.clientId);
+  },
+
+  /** A `links` frame to account `id`'s members, but `except`. */
+  links(room, id, frame, except = null) {
+    for (const m of members(room).values()) if (m.id === id && m !== except) room.send(m.ws, frame);
   },
 
   closed(room, ws) {

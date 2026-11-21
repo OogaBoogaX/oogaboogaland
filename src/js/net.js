@@ -249,7 +249,7 @@
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, hostEpoch: 0, props: false, npcVersion: 0, catalogRequired: false, catalogMatch: false, catalog: null, doorway: false, pokerVoice: null,
     self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0, reactions: false, customHand: false, hand: false, handTone: 0, handEmoji: "",
-    voiceLinks: false, linkWants: new Set(), linked: new Set(), outdoorVoice: false, duel: false, placed: 0, audience: false, clouds: NO_CLOUDS,
+    voiceLinks: false, linkWants: new Set(), linked: new Set(), linkApp: Object.freeze([]), outdoorVoice: false, duel: false, placed: 0, audience: false, clouds: NO_CLOUDS,
     // Voice on another device (voice-handoff.js): `voiceElsewhere` while the account speaks from Ooga Chat somewhere
     // else, as the room's welcome and its `voice-elsewhere` say; `voiceMoved` counts the times Ooga Chat took this
     // page's voice on the visitor's word there (`voice-moved`, which leaves voice here).
@@ -265,6 +265,11 @@
   if (cloudSeed) state.clouds = cloudSeed;
   const REACT_FEATURE = "react-v1", LINK_FEATURE = "vlink-v1", LINK_MAX = 64, OUTDOOR_FEATURE = "outdoor-voice-v1";
   const linkIds = (list) => new Set(Array.isArray(list) ? list.filter((id) => Number.isSafeInteger(id) && id > 0).slice(0, LINK_MAX) : []);
+  // Linked partners in Ooga Chat (`links`' `app`), who can hear this page wherever it is: `{ id, login, display }` each.
+  const LINK_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+  const linkApp = (list) => Object.freeze(Array.isArray(list) ? list.slice(0, LINK_MAX).filter((q) => q && Number.isSafeInteger(q.id) && q.id > 0
+    && typeof q.login === "string" && LINK_LOGIN.test(q.login)).map((q) => Object.freeze({ id: q.id, login: q.login,
+    display: typeof q.display === "string" && q.display.length <= 50 && !/[\u0000-\u001f\u007f]/.test(q.display) && q.display.trim() ? q.display : q.login })) : []);
   // The room's last word on whom to hear, for what a move to another place keeps.
   let peersHeard = [], gensHeard = null;
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, unanswered = 0, hiddenTimer = 0, stopped = false;
@@ -408,7 +413,7 @@
     if (room !== "live") { cabinetSeats.clear(); cabinetSeat = null; state.cabinets = false; finishCabinetRequest("Connection to the arcade was lost"); }
     if (room !== "live") state.tessGuide = null;
     if (room !== "live") state.chatUnicode = state.privateChat = state.audience = false;
-    if (room !== "live") { state.voiceLinks = false; state.linkWants.clear(); state.linked.clear(); peersHeard = []; gensHeard = null; }
+    if (room !== "live") { state.voiceLinks = false; state.linkWants.clear(); state.linked.clear(); state.linkApp = linkApp(null); peersHeard = []; gensHeard = null; }
     if (room !== "live") state.outdoorVoice = false;
     if (lost) privateHeard({ op: "lost" });
     if (lost) outdoorHeard({ op: "lost" });
@@ -902,7 +907,7 @@
         BL.voice.setPeers(msg.peers, gensHeard, state.zone === "dsb-studio" ? msg.listeners : ears);
       }
     } else if (msg.t === "links") {
-      state.linkWants = linkIds(msg.wants); state.linked = linkIds(msg.linked);
+      state.linkWants = linkIds(msg.wants); state.linked = linkIds(msg.linked); state.linkApp = linkApp(msg.app);
       if (msg.refused === "full") BL.hud.toast("Too many voice links: break one first");
       else if (msg.all === "linked" && msg.n > 0) BL.hud.toast(`Voices linked with ${msg.n} ${msg.n === 1 ? "player" : "players"}`);
       else if (msg.all === "unlinked") BL.hud.toast("Unlinked everyone");

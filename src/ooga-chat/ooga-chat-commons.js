@@ -4,8 +4,9 @@
 // `commons` socket, and the state the tabs draw: `you` ({ id, login, display }), `send` (whether lines may go from
 // here; false while the Commons is read-only from Ooga Chat), `epoch`, `unicode` (the room takes extended text),
 // `players` (a Map by id of `{ id, login, display, zone, voice, muted, hand, handTone, handEmoji }`, presence without a
-// position, as the Room shows it) and `lines` (the last CHAT_KEEP, by id). `subscribe(fn)` hears
-// `fn("welcome" | "players")`, `fn("lines", list, joined)` and `fn("receipt", receipt)`; `reset()` forgets everything on
+// position, as the Room shows it), `lines` (the last CHAT_KEEP, by id) and `links`, the account's voice links as the
+// island keeps them (`wants`, its own asks, and `linked`, those asked back; null from a Room that sends none).
+// `subscribe(fn)` hears `fn("welcome" | "players" | "links")`, `fn("lines", list, joined)` and `fn("receipt", receipt)`; `reset()` forgets everything on
 // a sign-out or another account. Anything malformed is dropped as the island's own page drops it.
 (() => {
   "use strict";
@@ -24,8 +25,10 @@
     id: p.id, login: p.login, display: words(p.display, 50) && p.display.trim() ? p.display : p.login,
     zone: words(p.zone, 64) && p.zone ? p.zone : "none", voice: p.voice === true, muted: p.muted === true, ...handOf(p.hand, p.handTone, p.handEmoji)
   } : null;
+  const linksOf = (raw) => raw && Array.isArray(raw.wants) && Array.isArray(raw.linked)
+    ? { wants: new Set(raw.wants.filter(id).slice(0, 64)), linked: new Set(raw.linked.filter(id).slice(0, 64)) } : null;
   const create = () => {
-    const state = { you: null, send: false, epoch: 0, unicode: false, players: new Map(), lines: [] };
+    const state = { you: null, send: false, epoch: 0, unicode: false, players: new Map(), lines: [], links: null };
     const subscribers = new Set();
     const emit = (...args) => { for (const fn of subscribers) fn(...args); };
     const keep = (list, joined) => {
@@ -46,12 +49,18 @@
         state.send = frame.send === true;
         state.epoch = Number.isSafeInteger(frame.epoch) ? frame.epoch : 0;
         state.unicode = Array.isArray(frame.features) && frame.features.includes(BL.chatPolicy.FEATURE);
+        state.links = linksOf(frame.links);
         state.players.clear();
         for (const raw of frame.players.slice(0, 256)) {
           const p = playerOf(raw);
           if (p) state.players.set(p.id, p);
         }
         emit("welcome");
+      } else if (frame.t === "links") {
+        const links = linksOf(frame);
+        if (!links || !state.you) return;
+        state.links = links;
+        emit("links");
       } else if (frame.t === "chat-history") {
         if (!Array.isArray(frame.messages)) return;
         const lines = [];
@@ -91,7 +100,7 @@
       }
     };
     const reset = () => {
-      state.you = null; state.send = false; state.epoch = 0; state.unicode = false;
+      state.you = null; state.send = false; state.epoch = 0; state.unicode = false; state.links = null;
       state.players.clear();
       state.lines.length = 0;
       emit("welcome");

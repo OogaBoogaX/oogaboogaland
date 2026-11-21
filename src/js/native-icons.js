@@ -1,7 +1,7 @@
 // The sheet's tab icons as pixel paths, shared by the island's panel tabs and the Ooga Chat app (src/ooga-chat/), so
 // neither redraws them. `svg(name)` returns a fresh element; an element carrying `data-native-icon="<name>"` gets one
 // prepended by `fill(root)` (hud.js fills the island's tabs at load). `cloud` is Ooga Chat's mark, which its build also
-// draws as the app's favicons and icons (scripts/ooga-chat.mjs), and `dsb` DSB Land's destination mark; `voice()` is the roster's voice mark, which hud.js and Ooga Chat both draw.
+// draws as the app's favicons and icons (scripts/ooga-chat.mjs), and `dsb` DSB Land's destination mark; `voice()` is the roster's voice mark, which hud.js and Ooga Chat both draw, and `link()` with `LINK_WORDS` the voice link's.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -89,5 +89,23 @@
   const fill = (root) => {
     for (const el of root.querySelectorAll("[data-native-icon]")) if (!el.querySelector(":scope > svg")) el.prepend(svg(el.dataset.nativeIcon));
   };
-  BL.nativeIcons = { svg, fill, voice, names: Object.keys(ICONS), ICONS, VOICE_PARTS };
+  // A voice link's mark, an 11x11 pixel chain of two links in currentColor, and what it says in each state; the
+  // island's Online Oogas and Ooga Chat's both draw it.
+  const LINK_PATH = "M7 0h3v1H7zM6 1h1v1H6zM9 1h2v1H9zM5 2h1v1H5zM10 2h1v1h-1zM4 3h1v1H4zM10 3h1v1h-1zM4 4h1v1H4zM9 4h1v1H9zM2 5h1v1H2zM4 5h1v1H4zM8 5h1v1H8zM1 6h1v1H1zM4 6h4v1H4zM0 7h1v1H0zM0 8h1v1H0zM5 8h1v1H5zM0 9h2v1H0zM4 9h1v1H4zM1 10h3v1H1z";
+  const link = () => {
+    const el = document.createElementNS(NS, "svg");
+    el.setAttribute("viewBox", "0 0 11 11");
+    el.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS(NS, "path");
+    path.setAttribute("fill", "currentColor");
+    path.setAttribute("d", LINK_PATH);
+    el.append(path);
+    return el;
+  };
+  const LINK_WORDS = Object.freeze({
+    none: (name) => `Link voices with ${name}: once they link back, you hear each other in any zone`,
+    asked: (name) => `Waiting for ${name} to link back: click to cancel`,
+    linked: (name) => `Voices linked with ${name}: click to unlink`,
+  });
+  BL.nativeIcons = { svg, fill, voice, link, LINK_WORDS, names: Object.keys(ICONS), ICONS, VOICE_PARTS };
 })();

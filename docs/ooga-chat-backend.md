@@ -480,8 +480,23 @@ cost, latency and security review; no speaker is dropped to fit.
 ## The privacy boundary (#667)
 
 The guarantee: the island's private audio (a level below, a Sphere room, the Bifrost chamber, a DSB room, any
-other scene, a voice link) is never discoverable or subscribable through Ooga Chat, and a valid transition out of the
+other scene) is never discoverable or subscribable through Ooga Chat, and a valid transition out of the
 outdoors cannot carry new private microphone samples to a subscription that was public. Launch waits on this.
+A voice link is the one carve-out, and only for the two accounts in it: the island tells the Audience each linked
+player's publication with its partners (`world`'s `linked`, by GitHub id), and only connections of a partner's own
+GitHub identity may pull it (`authorizedFor`), wherever the player stands; it is in no roster, zone or count of Ooga
+Chat's, and goes the moment the link breaks, the player leaves voice or the `outdoor` switch is off. The player always
+sees who can hear it: the Room names its partners for every player in voice, the Audience answers with those connected
+to it by name (`listeners`' `ears`), and the island player's `links` frame carries them as `app`, each a row of its
+Online Oogas with the link (under Ooga Chat, or Main Island while listening there, or on its cloud while speaking),
+whose click takes back that one ask. Deleting an Ooga Chat account the island never had takes the links it asked
+for from there (`forgetVoiceLinks`, as `DELETE /api/me` does for an island account). A Room waking from hibernation or a deploy
+sends its first word only once its stored links have loaded, so a wake never names an empty list and closes a
+partner's pull. The other way, an island
+player hears a linked partner speaking from Ooga Chat wherever it stands (`addSources`), and a partner listening from
+Ooga Chat keeps the island microphone from being alone (`listeners`' `ears`). A link is the same ask in both apps: a
+contributor's Online Oogas in Ooga Chat shows it on each island player's row and asks or takes back through the Commons
+(below), never in the Ooga Chat tab.
 
 **Who decides the scope.** The page decides first and finer, from the body's own geometry (`src/js/outdoor-scope.js`,
 #658: the Sphere's shell, a level's start), and asks the Room with the handshake (#661). The Room admits only a
@@ -625,7 +640,15 @@ display, body, zone, voice, muted, hand, handTone, handEmoji }`, and after that 
 receives `{ t: "duel", op: "start", id, a, b }` and `{ t: "duel", op: "end", id }`: only active pair ids, stripped
 from the island's frames. The initial pairs are rebuilt from the room's restored duel records. Challenges, health,
 positions and results are never relayed, and the member cannot send duel actions. No pose, position snapshot, distance,
-NPC frame, SFU id, voice link, private-conversation frame, reaction over a body, other game state or chalk reaches a member.
+NPC frame, SFU id, private-conversation frame, reaction over a body, other game state or chalk reaches a member.
+
+**Voice links in both apps.** The welcome carries the account's links as the island keeps them, `links: { wants, linked
+}` (its own asks by account id, and those asked back), and every change reaches each of the account's sockets, island
+and Ooga Chat alike, as `{ t: "links", wants, linked }` (the asking socket alone also hears `refused`, `all` and `n`). A
+member may send `{ t: "link", to, on }`, the island's own frame, through the Room's `linkMessage`: the same rate bucket,
+limits and storage, an island player its only target. Online Oogas in Ooga Chat draws it on each island player's row,
+and lists Main Island's Ooga Chat listeners after its players in gray; every "N online" in both apps counts them, anyone
+also on the island once.
 
 **The contract names (#670), over the island's own frames.** No second chat format: `communitySnapshot` is the welcome,
 `commonsHistory` the `chat-history` after it, `onlineDelta` the relayed `join`, `leave`, `body`, `zone`, `vstate` and
@@ -646,7 +669,8 @@ A socket kept open across a hibernation misses nothing and gets no second welcom
 | Speak from a cloud (#666, #668) | no | no | no | yes, with `speak` and `cloud` | its own voice |
 | The Commons: read and send lines | no | no | no | yes, with `commons` | yes |
 | Online Oogas: who is here, zone, voice, hand | no | no | no | yes, without positions | yes, with distances |
-| Private conversations, voice links | no | no | no | no (island only) | yes |
+| Private conversations | no | no | no | no (island only) | yes |
+| Voice links | no | no | no | yes, in Online Oogas: the island's own asks, its audio both ways | yes |
 | A body, poses, NPC host, games, chalk | no | no | no | no | yes |
 | Edit the display name | no | no | no | yes, the name field at the top of The Commons (`POST /api/chat/commons/name`), saved as the island's own; shown in both | yes (`PATCH /api/me`) |
 

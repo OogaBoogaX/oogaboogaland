@@ -1551,6 +1551,13 @@ body[data-active-scene="block"] .mode-hud {
   box-shadow: 0 0 5px rgba(177, 138, 255, 0.6);
 }
 
+/* An Ooga Chat listener on Main Island (players.js, and Ooga Chat's Online Oogas): in gray, dot and name. */
+.roster-presence[data-online="listener"] {
+  background: var(--faint);
+  box-shadow: none;
+}
+.players-listener .roster-label { color: var(--muted); }
+
 /* The name, on one line and cut short with an ellipsis where it would not fit, filling its cell: a button, with no
    caret, that opens the row onto a darker strip under it (the contributor's stats here, a player's volume in Online
    Oogas). */

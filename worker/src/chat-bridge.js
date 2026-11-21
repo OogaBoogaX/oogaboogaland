@@ -23,7 +23,7 @@ import { catalogFor } from "./character-catalog.js";
 import { handleCharacterPortrait, portraitsFor } from "./character-portraits.js";
 import { publicOps } from "./chat-public.js";
 import { displayOps } from "./chat-display.js";
-import { deleteChatOnlyPlayer } from "./db.js";
+import { deleteChatOnlyPlayer, getPlayer } from "./db.js";
 import { AUDIENCE_NAME } from "./audience.js";
 
 const refuse = (code, retryable = false, extra = {}) => ({ ok: false, error: { code, retryable, ...extra } });
@@ -68,8 +68,13 @@ export const revokeOps = {
       // The Commons is a GitHub contributor's alone: its sockets close too (#670).
       const github = p.provider === "github" && /^[1-9][0-9]{0,15}$/.test(String(p.providerUserId)) ? Number(p.providerUserId) : 0;
       const commons = github && env.ROOM ? await env.ROOM.getByName("island").communityRevoke(github, reason).catch(() => ({ revoked: 0 })) : { revoked: 0 };
-      // An Ooga Chat account deleted takes back the player row its Commons name made, while it never signed in here.
-      if (github && reason === "deleted" && env.DB) await deleteChatOnlyPlayer(env.DB, github);
+      // An Ooga Chat account deleted takes back the player row its Commons name made, while it never signed in here, and
+      // the voice links it asked for from Ooga Chat (as `DELETE /api/me` takes an island account's): an account the
+      // island still has keeps its own. One that cannot be reached now must not undo the deletion.
+      if (github && reason === "deleted" && env.DB) {
+        await deleteChatOnlyPlayer(env.DB, github);
+        if (env.ROOM && !(await getPlayer(env.DB, github))) await Promise.resolve().then(() => env.ROOM.getByName("island").forgetVoiceLinks(github)).catch(() => {});
+      }
       return { revoked: audience.revoked + commons.revoked };
     },
   },

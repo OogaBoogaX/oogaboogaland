@@ -143,16 +143,36 @@
   const onSheet = () => updateShowing();
   document.addEventListener("sheetchange", onSheet);
 
+  // Main Island's listeners in Ooga Chat, for Online Oogas (players.js) and every "N online", while the roster is current:
+  // the visitor and anyone also on the island are players, counted and listed once.
+  const listeners = () => {
+    if (model.zone !== "main" || model.status !== "live" && model.status !== "stale") return [];
+    const out = [];
+    for (const r of model.rows.values()) {
+      if (r.role !== "listener" || r.self) continue;
+      const gh = r.id.startsWith("gh:") ? Number(r.id.slice(3)) : 0;
+      if (gh && (gh === net.state.selfId || net.remotes.has(gh))) continue;
+      out.push(r);
+    }
+    return out;
+  };
+  // The roster changed: every place that lists or counts its listeners hears it.
+  const listenersChanged = () => {
+    if (BL.players) BL.players.refresh();
+    if (BL.hud) BL.hud.showAccount(net.state);
+    if (BL.chat) BL.chat.account(net.state);
+  };
+
   // The room: live with the audience feature asks for the desired view (the visitor's own zone at first); signing out
   // forgets everything, and a dropped room keeps the choice for the next welcome.
   let ready = false, logoutEpoch = net.state.logoutEpoch;
   const account = () => {
     const s = net.state;
-    if (s.logoutEpoch !== logoutEpoch) { logoutEpoch = s.logoutEpoch; model.reset("off"); }
+    if (s.logoutEpoch !== logoutEpoch) { logoutEpoch = s.logoutEpoch; model.reset("off"); listenersChanged(); }
     if (!fixture) {
       const now = available() && s.room === "live";
       if (now && !ready) { if (!model.setDesired(ZONE)) model.ask(); }
-      else if (!now && ready) model.reset(s.me ? s.room === "connecting" ? "connecting" : "unavailable" : "off");
+      else if (!now && ready) { model.reset(s.me ? s.room === "connecting" ? "connecting" : "unavailable" : "off"); listenersChanged(); }
       ready = now;
     }
     render(); paintFooter();
@@ -165,7 +185,7 @@
   subs.push(net.subscribe(account));
   subs.push(net.subscribeAudience((msg) => {
     if (msg.kind === "react") pop(msg);
-    else if (model.apply(msg) !== "ignored") { render(); paintFooter(); }
+    else if (model.apply(msg) !== "ignored") { render(); paintFooter(); listenersChanged(); }
   }));
   subs.push(voice.subscribe(paintFooter));
   // The visitor's own reaction pops on their own tile at once, as Online Oogas pops it: the room never echoes it back.
@@ -203,6 +223,9 @@
   BL.cloudPanel = {
     available,
     dispose,
+    listeners,
+    // Who is online, as every "N online" on the island says it: the room's players and Main Island's listeners.
+    online: (state = net.state) => (state.online || 0) + (state.room === "live" ? listeners().length : 0),
     get stats() { return { rows: model.rows.size, drawn: list.childElementCount, cached: tiles.count, status: model.status, zone: model.zone, desired: model.desired, showing }; }
   };
 })();
