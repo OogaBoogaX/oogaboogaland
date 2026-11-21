@@ -29002,6 +29002,14 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
       && animation.host.ooga >= 58 && animation.host.gorilla >= 58 && animation.network && animation.controlled >= 58, JSON.stringify(animation));
 } };
 scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffects] });
+// The server's island world runs on tables baked from the hub (scripts/island-layout.mjs): they must be the hub's own.
+scene("hub", { label: "island layout", query: "pos=0&net=0", steps: [{
+  name: "island layout", why: "rule: the server's island world runs on the hub's own fire seats, spots, work places and paths, so its Oogas stand where a page's would", run: async (b) => {
+    const same = await b.evaluate(`JSON.stringify(BL.scenes.hub.debug.routineLayout()) === JSON.stringify(BL.islandLayout)`);
+    record("island layout: src/js/island-layout.js matches the hub it was baked from (run node scripts/island-layout.mjs when it does not)", same);
+  }
+}] });
+
 // No other session's cast holds the default local Ooga or a server-vouched contributor: both join the roster before
 // the crew is built, as on a real arrival.
 scene("hub", { label: "guest likeness", query: "pos=0", opts: { initScript: GUEST_LIKENESS_INIT }, steps: [hubGuestLikeness] });
@@ -31755,7 +31763,7 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
       return at({ x: m.x + Math.sin(m.ry) * along, y: m.floorY, z: m.z + Math.cos(m.ry) * along }, 0.5);
     });
     out.air = at({ x: 53.7, y: 8, z: -31 }, 0.5);
-    // Inside the Sphere's shell, down its passage short of the curtain, and Merge Rock, which has no public scope yet.
+    // Inside the Sphere's shell, down its passage short of the curtain, and Merge Rock, which is Main Island.
     // Only a crossing's Ooga stands behind the doors (timechain-gate.js puts one left there on the bridge), so the
     // passage is read from the hub's own shell test and reason at that spot rather than by parking an Ooga in it.
     const passage = BL.timechainModels.PASSAGE.curtain + 0.5, px = T.worldX(0, passage), pz = T.worldZ(0, passage);
@@ -31769,12 +31777,12 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
   record("voice levels: the bridges and the air off the edge are the land between, the cave entrances the island, and none of them is a crossing",
     lands.every((land) => !r[land].home.to && r[land].home.zone === "outside" && !r[land].bridge.to && r[land].bridge.zone === "between" && !r[land].land.to && r[land].land.zone === land)
       && r.mouth.zone === "outside" && r.air.zone === "between" && !r.air.to, JSON.stringify(r));
-  // The outdoor scope (outdoor-scope.js) goes by entrances, not the panels' zone names: the lab's room reads `outside`
-  // as a zone but is a cave, and the Sphere's passage is the way into its rooms.
-  record("outdoor scope: the island, its apron, bridges, air and the three bridged lands' tops are Main Island, while a cave's room, the Sphere's passage and Merge Rock are not",
+  // The outdoor scope (outdoor-scope.js): a cave's entrance on the island (the lab's room reads `outside`) is the
+  // island's surface, while the Sphere's passage is the way into its rooms.
+  record("outdoor scope: the island, its apron, a cave's entrance, bridges, air, Merge Rock and the three bridged lands' tops are Main Island, while the Sphere's passage is not",
     lands.every((land) => r[land].home.scope === "main" && r[land].bridge.scope === "main" && r[land].land.scope === "main")
-      && r.apron.scope === "main" && r.air.scope === "main" && r.mouth.scope === null && r.mouth.reason === "interior"
-      && r.passage.scope === null && r.passage.reason === "interior" && (!r.repos || r.repos.scope === null && r.repos.reason === "unscoped"), JSON.stringify(r));
+      && r.apron.scope === "main" && r.air.scope === "main" && r.mouth.scope === "main" && r.mouth.reason === "outdoor"
+      && r.passage.scope === null && r.passage.reason === "interior" && (!r.repos || r.repos.scope === "main"), JSON.stringify(r));
   record("outdoor scope: covered cave approaches before the Arcade doors and Factory shield stay in Main Island",
     r.canopies.every((p) => p.zone === "outside" && p.scope === "main"), JSON.stringify(r.canopies));
   // Levels: by height off the island's edge, and down HQ's ramps, its basement's and the rainforest's descent.
@@ -45326,18 +45334,17 @@ const outdoorScopeChecks = () => {
   runInNewContext(readFileSync(join(root, "src/js/zone-map.js"), "utf8"), context);
   const hub = (zone, inside = false, descending = false) => O.hubReason(zone, inside, descending);
   const policy = {
-    outdoors: ["outside", "between", "sphere", "rainforest", "bifrost"].every((zone) => hub(zone) === "outdoor"),
+    outdoors: ["outside", "between", "sphere", "rainforest", "bifrost", "repos"].every((zone) => hub(zone) === "outdoor"),
     entrances: ["outside", "sphere", "rainforest", "bifrost"].every((zone) => hub(zone, true) === "interior"),
     under: ["rainforest-under", "hq", "hq-basement"].every((zone) => hub(zone) === "descending") && hub("outside", false, true) === "descending"
       && hub("sphere", false, true) === "descending" && hub("between", false, true) === "descending" && hub("outside", true, true) === "interior",
-    unscoped: hub("repos") === "unscoped",
     // Grouped with the island by the panels (zone-map.js), but never public by that.
     grouped: ["lab", "bca", "factory", "arcade", "mirror", "cave-3"].every((zone) => Z.zoneMap.groupOf(zone) === "outside" && hub(zone) === "unknown"),
     elsewhere: ["", "none", "scene-transition", "lab.hall", "bifrost.chamber", "sphere-0", "sphere-1", "dsb-outside", "block-frenzy"].every((zone) => hub(zone) === "unknown"),
     dsb: O.dsbReason(false, false, false) === "outdoor" && O.dsbReason(true, false, false) === "transit" && O.dsbReason(false, true, false) === "entering"
       && O.dsbReason(false, true, true) === "entering" && O.dsbReason(false, false, true) === "interior"
   };
-  record("outdoor scope policy: only the island's outdoors, bridges and air and the Sphere's, rainforest's and Bifrost's tops are Main Island; cave and shell interiors, any descent, Merge Rock, the panels' island groupings and every other zone are not; DSB Land is outdoors only with no room, no fade and no arrival under way",
+  record("outdoor scope policy: only the island's outdoors (its cave entrances in its zone), bridges and air and the Sphere's, rainforest's and Bifrost's tops are Main Island, with Merge Rock; the Sphere's shell, any descent, the panels' island groupings and every other zone are not; DSB Land is outdoors only with no room, no fade and no arrival under way",
     Object.values(policy).every(Boolean), JSON.stringify(policy));
   // A transport's acknowledgements against moves, backtracking, resets and a lost transport.
   const T = O.create(), S = T.state, heard = [];
@@ -46430,6 +46437,78 @@ const lecturePlayerChecks = async () => {
   }
 };
 
+// The island's world (island-sim.js over island-layout.js), as the server and a signed-out page run it, with no page:
+// the same seed gives the same world; workers go round the caves they are active at in turn, shoot from a place in
+// that cave's fan and eat their magazine back at the reload fan round the pile; chillers idle on distinct spots clear
+// of the pile's ring and every working cave's zone; sleepers and the away are not shown; and its windows and caves
+// read as a page's crew reads them (roster-panel.js `stateAt`, contributors.js `hasRecentActivity`).
+const islandWorldProof = async () => {
+  const context = { window: { BL: {} }, crypto: globalThis.crypto };
+  for (const file of ["math.js", "npc-paths.js", "roster-panel.js", "island-layout.js", "island-sim.js", "game-wire.js"])
+    runInNewContext(await readFile(join(root, "src/js", file), "utf8"), context);
+  const BLx = context.window.BL, S = BLx.islandSim, L = BLx.islandLayout, ACT = S.ACT;
+  const cast = Array.from({ length: 40 }, (_, i) => ({ name: `ooga${i}` }));
+  const world = (seed) => {
+    const sim = S.create({ seed });
+    sim.setCast(cast);
+    cast.forEach((c, i) => sim.setActivity(c.name, S.STATES[i % 4], i % 4 === 0 ? 0b0101 : 0));
+    return sim;
+  };
+  const rows = (sim) => { const f = BLx.gameWire.frame(); sim.motion(f, 0); return Array.from(f.rows.subarray(0, f.count * 8)).join(","); };
+  const a = world(5), b = world(5);
+  const visited = new Map(), shotFrom = [], reloadAt = [];
+  let idleClear = true, spotsDistinct = true, hiddenOk = true;
+  for (let step = 0; step < 20 * 600; step++) {
+    a.step(S.STEP); b.step(S.STEP);
+    const keys = new Set();
+    for (const o of a.oogas) {
+      if (o.state >= 2 && o.visible) hiddenOk = false;
+      if (o.state === 0 && o.act === ACT.FIRE) {
+        if (!visited.has(o.name)) visited.set(o.name, []);
+        const seen = visited.get(o.name);
+        if (seen.at(-1) !== o.site) seen.push(o.site);
+        const place = L.sites[o.site].places.find((p) => Math.hypot(p[1] - o.p.x, p[2] - o.p.z) < 1e-6);
+        shotFrom.push(!!place);
+      }
+      if (o.state === 0 && o.act === ACT.RELOAD) reloadAt.push(Math.abs(Math.hypot(o.p.x, o.p.z) - a.ring.loading) < 1e-6);
+      if (o.state === 1 && o.mode === 1) {
+        const key = `${o.table}:${o.spot}`;
+        if (keys.has(key)) spotsDistinct = false;
+        keys.add(key);
+        if (Math.hypot(o.p.x, o.p.z) < a.ring.outer + 1.5) idleClear = false;
+      }
+    }
+  }
+  const rounds = [...visited.values()];
+  const panel = BLx.rosterPanel, at = 1.7e12, H = 3600e3;
+  const ages = [-1, 0, 30e3, H - 1, H, 5 * H, 24 * H - 1, 24 * H, 29 * 24 * H, 30 * 24 * H, 30 * 24 * H + 1, 400 * 24 * H];
+  const sites = L.sites, index = (pred) => sites.findIndex(pred);
+  const lab = index((s) => s.repo === "oogaboogax/entropylab"), fallback = index((s) => s.fallback);
+  // A world started beside a crew that has placed its Oogas takes each up where it stands, once (island-world.js).
+  const seat = L.seats[0], placed = S.create({ seed: 3 });
+  placed.setCast(cast.slice(0, 3));
+  placed.place("ooga0", 7, 3, 1); placed.place("ooga1", seat[0] + 0.1, seat[1], 0); placed.place("ooga2", 7, -3, 0);
+  placed.setActivity("ooga0", "working", 0b0101); placed.setActivity("ooga1", "chilling", 0); placed.setActivity("ooga2", "sleeping", 0);
+  placed.step(S.STEP);
+  const [w, c, z] = placed.oogas, worker = w.visible && w.p.x === 7 && w.p.z === 3 && w.heading === 1;
+  const seated = c.p.x === seat[0] + 0.1 && c.p.z === seat[1] && c.table === 0 && c.spot === 0 && c.act === ACT.SIT;
+  placed.setActivity("ooga2", "working", 0b0101); placed.step(S.STEP);
+  return {
+    startsPlaced: worker, startsSeated: seated, startsOnce: !z.start && Math.hypot(z.p.x - 7, z.p.z + 3) > 0.5,
+    deterministic: rows(a) === rows(b) && rows(a) !== rows(world(6)),
+    pileTable: L.pile.length > 4 && L.pile.every(([count, radius]) => { const p = S.create(); p.setBananas(count); return Math.abs(p.platform - radius) < 1e-9; }),
+    roundRobin: rounds.length > 0 && rounds.every((r) => r.every((site) => site === 0 || site === 2)),
+    bothCaves: rounds.some((r) => r.length >= 3),
+    shotFromFan: shotFrom.length > 0 && shotFrom.every(Boolean),
+    reloadOnRing: reloadAt.length > 0 && reloadAt.every(Boolean),
+    idleClear, spotsDistinct, hiddenOk,
+    windows: ages.every((age) => S.STATES[S.stateAt(age < 0 ? 0 : at - age, at)] === panel.stateAt(age < 0 ? 0 : at - age, at)),
+    caves: S.sitesFor(sites, new Map([["oogaboogax/entropylab", at - 60e3]]), false, at) === 1 << lab
+      && S.sitesFor(sites, new Map([["oogaboogax/entropylab", at - 2 * H]]), false, at) === 0
+      && S.sitesFor(sites, new Map([["oogaboogax/elsewhere", at - 60e3]]), false, at) === 1 << fallback
+      && S.sitesFor(sites, new Map(), true, at) === (1 << sites.length) - 1
+  };
+};
 const unitChecks = async () => {
   await lecturePlayerChecks();
   dsbIslandWadingChecks();
@@ -46488,6 +46567,9 @@ const unitChecks = async () => {
   const fixedRoutine = await fixedRoutineProof();
   record("passive work legs: the authored fixed planner circles the real pile ring, follows one spoke out to the target, never crosses the pile, and replans rather than reuse a graph lane; a walker between spoke samples, or a goal between them, is never sent back to a sample behind it or past the goal; a passive return leg keeps its reserved pile slot on the planned path while an ordinary one keeps the direct pile approach; clanking to chilling from mid-outbound or mid-return walks back along the cave route to the pile slot, then to the chill spot, on terrain and ignoring objects; a passive gorilla's walk to its Ooga's pile slot goes straight over the pile while its work travel to a cave walks straight from another cave or the meadow, even when its origin is reset mid-walk, on terrain, still handing wall steps to the climber",
     Object.values(fixedRoutine).every(Boolean), JSON.stringify(fixedRoutine));
+  const islandWorld = await islandWorldProof();
+  record("island world: one seed, one world; workers go round their active caves in turn, shoot from a place in the cave's fan and eat back at the reload fan, chillers idle on spots of their own clear of the pile's ring, sleepers and the away are not shown, its pile from a banana count is the hub's, its windows and caves read as a page's crew reads them, and a world started beside a placed crew takes each Ooga up where it stands, once",
+    Object.values(islandWorld).every(Boolean), JSON.stringify(islandWorld));
   const passiveWeapons = await passiveWeaponTargetProof();
   record("passive weapon targets: a shot passes through a passive NPC to the body behind it, hover and carry picks still find the NPC, and a non-passive body takes the hit",
     Object.values(passiveWeapons).every(Boolean), JSON.stringify(passiveWeapons));

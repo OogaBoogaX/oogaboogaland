@@ -14,8 +14,8 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
 test("the registry: only the named outdoor zones are public; every level, room, scene and unknown zone is excluded", () => {
   const body = (zone, extra = {}) => scopeOf({ body: "amy", zone, ...extra }, globalThis.BL.arcadeCabinets);
   assert.deepEqual(Object.entries(OUTDOOR_ZONES).map(([zone]) => [zone, body(zone).scope]),
-    [["outside", "main"], ["between", "main"], ["sphere", "main"], ["rainforest", "main"], ["bifrost", "main"], ["dsb-outside", "dsb"]]);
-  // Every zone of the island's world is either public by name or excluded: its levels and Merge Rock are not.
+    [["outside", "main"], ["between", "main"], ["sphere", "main"], ["rainforest", "main"], ["bifrost", "main"], ["repos", "main"], ["dsb-outside", "dsb"]]);
+  // Every zone of the island's world is either public by name or excluded: its levels are not.
   const world = readFileSync(new URL("../../src/js/voice-blend.js", import.meta.url), "utf8").match(/const WORLD = (\[[^\]]+\])/)[1];
   for (const zone of JSON.parse(world.replace(/'/g, '"'))) {
     if (Object.hasOwn(OUTDOOR_ZONES, zone)) continue;
@@ -27,7 +27,7 @@ test("the registry: only the named outdoor zones are public; every level, room, 
   assert.ok(rooms.length >= 10);
   for (const zone of rooms) assert.equal(body(zone).scope, null, zone);
   for (const zone of ["sphere-0", "sphere-1", "sphere-9", "bifrost.chamber", "lab.hall", "factory.hall", "factory.hangar", "arcade.hall", "ghost-arena", "ember-den",
-    "block-frenzy", "hq", "hq-basement", "rainforest-under", "repos", "none", "outside.room", "outsidex", "dsb", "dsb-outside.x", "", undefined])
+    "block-frenzy", "hq", "hq-basement", "rainforest-under", "none", "outside.room", "outsidex", "dsb", "dsb-outside.x", "", undefined])
     assert.equal(body(zone).scope, null, String(zone));
   assert.deepEqual(scopeOf({ body: null, zone: "outside" }), { scope: null, reason: "no-body" });
   assert.deepEqual(body("outside", { blendTo: "hq" }), { scope: null, reason: "descending" }, "on the way down a level, at any depth");

@@ -179,11 +179,10 @@ voice-blend.js `WORLD` (which folds HQ and the caves into the surface) are no pr
 
 | Where the body is | Scope | Reason |
 |---|---|---|
-| the island's surface and cave aprons, its bridges and the air between lands | `main` | `outdoor` |
-| the Timechain Sphere's exterior and bridge, the Mempool rainforest's top, the Bifrost islet | `main` | `outdoor` |
-| inside any cave (behind its doorway plane: HQ, the lab, B.C.A., the mirror room, a hall's tunnel) or the Sphere's shell (its passage included) | none | `interior` |
+| the island's surface and every cave entrance on it, up to the scene or level the cave leads to (the lab's room, B.C.A., the mirror room, the Factory's tunnel to its shield, the Arcade's cave to its doors, HQ's mouths above their ramps), its bridges and the air between lands | `main` | `outdoor` |
+| the Timechain Sphere's exterior and bridge, the Mempool rainforest's top, the Bifrost islet, Merge Rock (`repos`) | `main` | `outdoor` |
+| inside the Sphere's shell (its passage included) | none | `interior` |
 | any way down a level: HQ's ramps and basement, the rainforest's descent, tunnels and chamber, at any depth | none | `descending` |
-| Merge Rock (`repos`), until it has a scope decision | none | `unscoped` |
 | DSB Land's outdoors, no room active, no entry or exit fading, arrival done | `dsb` | `outdoor` |
 | a DSB room, known or not | none | `interior` |
 | a DSB entry or exit, from its request (before the fade) to its end | none | `entering` |

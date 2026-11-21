@@ -479,21 +479,21 @@ cost, latency and security review; no speaker is dropped to fit.
 
 ## The privacy boundary (#667)
 
-The guarantee: the island's private audio (a cave, a level below, a Sphere room, the Bifrost chamber, a DSB room, any
+The guarantee: the island's private audio (a level below, a Sphere room, the Bifrost chamber, a DSB room, any
 other scene, a voice link) is never discoverable or subscribable through Ooga Chat, and a valid transition out of the
 outdoors cannot carry new private microphone samples to a subscription that was public. Launch waits on this.
 
 **Who decides the scope.** The page decides first and finer, from the body's own geometry (`src/js/outdoor-scope.js`,
-#658: a cave's doorway plane, the Sphere's shell), and asks the Room with the handshake (#661). The Room admits only a
+#658: the Sphere's shell, a level's start), and asks the Room with the handshake (#661). The Room admits only a
 scope its own registry agrees with (`worker/src/outdoor-policy.js`), from what it holds about the player: its zone, its
 body, a level crossing (`blendTo`) and a cabinet seat. The registry is default-deny, every public zone named one by one:
 
 | Zone | Scope |
 |---|---|
-| `outside`, `between`, `sphere`, `rainforest`, `bifrost` | `main` |
+| `outside` (cave entrances included), `between`, `sphere`, `rainforest`, `bifrost`, `repos` (Merge Rock) | `main` |
 | `dsb-outside` | `dsb` |
 | no body; any crossing to or between levels; a seat at a hall cabinet (the cave apron's outdoor seats are `outside`) | none |
-| every other zone, known or not: `hq`, `hq-basement`, `rainforest-under`, `repos` (Merge Rock, no decision yet), `sphere-0`…`sphere-9`, `bifrost.chamber`, every DSB room, every other scene's zone | none |
+| every other zone, known or not: `hq`, `hq-basement`, `rainforest-under`, `sphere-0`…`sphere-9`, `bifrost.chamber`, every DSB room, every other scene's zone | none |
 
 A new outdoor is added here with a check; a new interior needs nothing to stay excluded. The checks enumerate the island's
 world zones and DSB Land's rooms from their own sources, so a new one is caught as it lands.

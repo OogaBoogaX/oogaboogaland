@@ -15,18 +15,19 @@
   const BL = window.BL = window.BL || {};
   const VERSION = 1;
   // Why the body is, or is not, in a public scope. Only `outdoor` is public.
-  const REASONS = ["outdoor", "interior", "descending", "entering", "transit", "scene", "game", "unscoped", "no-body", "unknown"];
+  const REASONS = ["outdoor", "interior", "descending", "entering", "transit", "scene", "game", "no-body", "unknown"];
   // The hub's own zones (scene-hub.js `zoneOf`) that may be public, named one by one: never a group, a prefix or WORLD.
-  // The bridges and the air between lands are the public air joining them. Merge Rock (`repos`) and any other land
-  // await an explicit scope decision; every zone not named here is excluded.
-  const HUB_OUTDOOR = new Set(["outside", "between", "sphere", "rainforest", "bifrost"]);
+  // The bridges and the air between lands are the public air joining them, and Merge Rock (`repos`) is one of those
+  // lands. Every zone not named here is excluded.
+  const HUB_OUTDOOR = new Set(["outside", "between", "sphere", "rainforest", "bifrost", "repos"]);
   const HUB_UNDER = new Set(["rainforest-under", "hq", "hq-basement"]);
-  // The hub's reason from its immediate zone, whether the body is inside a cave or the Sphere's shell (either counts,
-  // interior doorway and shell wall being the entrances, covered approaches outside), and whether it has started down a level (`descending`: the hub's
-  // voice levels say so, including the air off the island's edge and HQ's entrance ramps while their
-  // zone still reads `outside`). A level crossing is excluded at any depth, however much surface the voice blend keeps.
+  // The hub's reason from its immediate zone, whether the body is inside the Sphere's shell (its wall being the
+  // entrance), and whether it has started down a level (`descending`: the hub's voice levels say so, including the air
+  // off the island's edge and HQ's entrance ramps while their zone still reads `outside`). A level crossing is excluded
+  // at any depth, however much surface the voice blend keeps. The caves' entrances on the island, up to the scene or
+  // level each leads to, are the island's surface (`outside`) and so public.
   const hubReason = (zone, inside, descending = false) => inside ? "interior" : descending || HUB_UNDER.has(zone) ? "descending"
-    : HUB_OUTDOOR.has(zone) ? "outdoor" : zone === "repos" ? "unscoped" : "unknown";
+    : HUB_OUTDOOR.has(zone) ? "outdoor" : "unknown";
   // DSB Land's: outdoors only with no room active, no entry or exit fading (an entry is excluded from its request on,
   // before the fade), and the arrival done. An unknown room is a room.
   const dsbReason = (travelling, transitioning, room) => travelling ? "transit" : transitioning ? "entering" : room ? "interior" : "outdoor";
