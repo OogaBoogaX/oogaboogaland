@@ -1,23 +1,32 @@
 name: Deploy Ooga Chat staging
 
-# Ooga Chat's staging edge (docs/ooga-chat-backend.md), by hand. It never redeploys the island's Worker: deploy
-# oogaboogaland-staging (its ChatBridge entrypoint) first with cloudflare-staging.yml when the bridge changed.
+# Ooga Chat's staging edge (docs/ooga-chat-backend.md). After each merge to rock it deploys the same commit once the
+# island's staging Worker (its ChatBridge entrypoint) has deployed it with cloudflare-staging.yml. By hand it never
+# redeploys the island's Worker: deploy oogaboogaland-staging first with cloudflare-staging.yml when the bridge changed.
 on:
+  workflow_run:
+    workflows: [Deploy Cloudflare staging]
+    types: [completed]
+    branches: [rock]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ooga-chat-staging
-  cancel-in-progress: false
-
 jobs:
   deploy:
+    # Only after the island's staging deploy of a push to rock succeeded, never after one run by hand.
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
+    # On the job, not the workflow, so a run this `if` skips never takes the slot or replaces a waiting deploy.
+    concurrency:
+      group: ooga-chat-staging
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
+          # The commit the island's staging deploy shipped: a workflow_run's own commit is rock's tip, which may be later.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v6
         with:

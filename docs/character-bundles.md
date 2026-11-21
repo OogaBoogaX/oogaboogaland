@@ -284,7 +284,8 @@ head must be a verified commit by that App.
 App merges trigger the existing post-merge workflows normally. The retained
 Actions-token fallback explicitly dispatches Pages after a bot merge and records
 a recovery marker; it cannot merge under the production branch restrictions.
-Cloudflare deployment stays manual.
+An App merge is a push to `rock`, so it deploys Cloudflare staging as any merge
+does. Production deployment stays manual.
 
 ## Operators and repository configuration
 

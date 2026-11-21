@@ -1,6 +1,10 @@
 name: Deploy Cloudflare staging
 
+# Every push to rock deploys staging: each merge, but not the artifact job's [skip ci] commit. Ooga Chat's staging
+# follows each such deploy (ooga-chat-staging.yml). By hand on any branch as before, until the next merge replaces it.
 on:
+  push:
+    branches: [rock]
   workflow_dispatch:
     inputs:
       catalog_preview:

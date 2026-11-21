@@ -45,7 +45,7 @@ release (#669).
 | Bridge (`OBL`) | `oogaboogaland-staging#ChatBridge` | `oogaboogaland-production#ChatBridge` |
 | Donations | `bananapayserver-staging#PageApi` (signet) | `bananapayserver-production#PageApi` (mainnet) |
 | Rate limiters | namespaces 2010–2014 | namespaces 1010–1014 |
-| Deploys | by hand (`ooga-chat-staging.yml`) | by hand on `rock` (`ooga-chat-production.yml`) |
+| Deploys | after each merge's island staging deploy, or by hand (`ooga-chat-staging.yml`) | by hand on `rock` (`ooga-chat-production.yml`) |
 
 Staging lives on workers.dev for now. `ooga.chat` is a zone in this account since 2026-11-15, on Cloudflare's
 nameservers. A Custom Domain can't be created over an existing DNS record for the same name, so the apex's records
