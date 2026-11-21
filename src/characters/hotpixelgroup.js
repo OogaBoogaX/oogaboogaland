@@ -142,10 +142,10 @@
         return { voxels: v, default: geo,
           rest: { x: 0.2, z: -0.05 }, carry: { x: 0.35, z: 0 } };
       },
-      crown(k, v) {
+      hat(k, v) {
         v.fill(-1, 7, 6, 7, -1, 6, k.color(CHARCOAL));
       },
-      headgear(k) {
+      hatNodes(k) {
         const dark = k.color(CHARCOAL);
         const green = k.color(GREEN), light = k.color("#2ee085"), shade = k.color("#13a356");
         const outline = [

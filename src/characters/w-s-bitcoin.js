@@ -115,7 +115,7 @@
         const U1 = [1.45, 10.4, lz], U2 = [3, 11.1, lz], L1 = [2.3, 9.3, lz], L2 = [3.75, 9.75, lz];
         H.both(leafGeo, [A, T, U2, U1], "#6ad040", "#3f9a2b");
         H.both(leafGeo, [A, L1, L2, T], "#4cae2e", "#398c27");
-        const head = (shut) => merge(apple, H.scaled(merge(face(shut), stalk, leafGeo), u));
+        const head = (shut) => merge(apple, H.scaled(k.traits.equipmentBare ? face(shut) : merge(face(shut), stalk, leafGeo), u));
         return { ...body, headOpen: head(false), headClosed: head(true) };
       },
       skull(k, v) {

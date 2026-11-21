@@ -63,7 +63,7 @@
         return true;
       },
 
-      crown(k, v) {
+      hat(k, v) {
         const helm   = k.color("#0d0d10");
         const helmLt = k.color("#2a2a30");
         const spike  = k.color("#111114");

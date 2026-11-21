@@ -318,7 +318,7 @@
         for (const x of [2, 3, 4]) v.set(x, 1, 6, lips);
         for (const x of [-1, 7]) v.set(x, 1, 5, gold);
       },
-      headgear(k) {
+      hatNodes(k) {
         const u = k.u, s = modelled() ? HEAD : 1, low = modelled() ? u * (s - NECK) : 0, size = { x: s, y: s, z: s };
         addChild(k.parts.head, createNode({ position: { x: 0, y: -low, z: 0 }, scale: size, geometry: crownGeometry(u) }));
         addChild(k.parts.head, createNode({ position: { x: 0, y: 9.7 * u * s - low, z: 3.5 * u * s }, scale: size, geometry: coinGeometry(u) }));
