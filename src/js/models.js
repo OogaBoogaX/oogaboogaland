@@ -1263,6 +1263,7 @@
   //   crown(k, v)  hats and hair over the head    eyes(k, v)   replaces the eyes
   //   mark(k, v)   face paint after the pupils
   //   headgear(k)  nodes on the head              extras(k)    nodes on the root, last
+  //   hat(k, v), hatNodes(k)  removable authored headwear, apart from hair, faces and anatomy
   //   tint(k, palette)  a second colourway: return an alternate palette and every
   //                     voxel part is baked again under it, paired in `tint`
   //   refine(k, part, v, side)  paints a part's fine map before it bakes (see FINE)
@@ -1500,6 +1501,7 @@
       }
       // Ears on a bare head; hair covers them otherwise.
       if (!hairy && !dress.skull) for (const x of [-1, 7]) v.fill(x, x, 2, 3, 2, 3, P.skinDk);
+      if (dress.hat && !traits.equipmentBare) dress.hat(k, v);
       if (dress.crown) dress.crown(k, v);
       // Ragged hair: a few exposed cells go. One cut out of the middle of a flat stretch of hair behind the face (a cell
       // with hair or head on every side but its outer one) is a hole, so it goes back once the pass is over; the draws
@@ -1563,6 +1565,9 @@
     parts.head = createNode({ position: { x: 0, y: 0.5 * h, z: 0.02 * h }, geometry: headOpen });
     parts.face = createNode({ position: { x: 0, y: 0, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
     addChild(parts.head, parts.face);
+    const beforeHat = parts.head.children.length;
+    if (dress.hatNodes && !traits.equipmentBare) dress.hatNodes(k);
+    parts.nativeHat = parts.head.children.slice(beforeHat);
     if (dress.headgear) dress.headgear(k);
     addChild(root, parts.legR, parts.legL, parts.torso, parts.armR, parts.armL, parts.head);
     if (dress.extras) dress.extras(k);
@@ -1978,7 +1983,7 @@
       if (STYLE === "R" && dress.model) wearing = () => BL.heroBody.wear(k, { ...authored, palette, P, loin: k.loin, strap: !traits.slim });
       const model = STYLE !== "R" ? null : dress.model ? dress.model(k, wearing) : worn = rewear(palette);
       // One that draws no head of its own gets the modelled body's head too.
-      if (model && !model.headOpen && !(dress.skull || dress.crown || dress.eyes || dress.mark || dress.refine)) Object.assign(model, BL.heroBody.head(k, { palette, P }));
+      if (model && !model.headOpen && !(dress.skull || dress.hat || dress.crown || dress.eyes || dress.mark || dress.refine)) Object.assign(model, BL.heroBody.head(k, { palette, P }));
       if (model) {
         parts.torso.geometry = model.torso;
         parts.torso.scale.x = parts.torso.scale.z = 1;
