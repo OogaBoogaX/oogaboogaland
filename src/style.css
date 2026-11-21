@@ -5849,6 +5849,32 @@ body.tess-touring #joy-look {
 
 .model-info .board-link { text-align: left; }
 
+/* The Genesis Museum's own colours (Abyss Aurora), as the Ember Den keeps its own: cream words on near-black panels,
+   a soft teal-blue for what can be pressed, gold for where a visitor stands in a run, Bitcoin's orange for the block. */
+.genesis-portal, .wp-reader, .model-modal {
+  --gn-text: #efe6d2; --gn-gold: #ffd66b; --gn-hint: #ffb04d; --gn-btc: #f7931a; --gn-teal: #3db8cc; --gn-teal-text: #9be4ef; --gn-paper: #15120f;
+  --gn-panel: color-mix(in srgb, var(--bg) 82%, transparent); --gn-wash: color-mix(in srgb, var(--fg) 7%, transparent); --gn-line: color-mix(in srgb, var(--fg) 18%, transparent);
+}
+/* The Genesis room's pop-ups (`theme: "genesis"`): every block of words on a dark, slightly translucent panel of its
+   own, so the cream type reads against the planks (body text on the panel is about 14:1 against it, well over AA's
+   4.5:1); links on a panel too. */
+.model-modal.model-genesis .model-info > .model-kicker,
+.model-modal.model-genesis .model-info > .model-name,
+.model-modal.model-genesis .model-info > .model-text,
+.model-modal.model-genesis .model-info > .board-note,
+.model-modal.model-genesis .model-info > .board-links {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--gn-panel);
+}
+.model-modal.model-genesis .model-info > .model-kicker { padding-bottom: 2px; border-radius: 8px 8px 0 0; margin-bottom: 0; }
+.model-modal.model-genesis .model-info > .model-name { border-radius: 0 0 8px 8px; padding-top: 2px; }
+.model-modal.model-genesis .model-info > .board-links { display: grid; gap: 6px; }
+.model-modal.model-genesis .model-stats:empty { display: none; }
+.model-modal.model-genesis .model-info > .board-links .board-link { background: var(--gn-wash); border-radius: 6px; padding: 4px 8px; }
+.model-modal.model-genesis .model-canvas.model-page { background: var(--gn-paper); cursor: default; touch-action: auto; aspect-ratio: 17 / 22; max-height: min(58vh, 560px); width: auto; max-width: 100%; margin: 0 auto; display: block; }
+
 @media (max-width: 720px) {
   .model-body { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .model-stats { grid-template-columns: minmax(0, 1fr); gap: 1px 0; }
@@ -13823,3 +13849,63 @@ body[data-active-scene] #cave-directory-button { min-height: 44px; }
 .duel-flash[hidden], .duel-count[hidden], .duel-result[hidden] { display: none; }
 .players-duel { grid-column: 1 / -1; justify-self: start; margin-top: 6px; }
 .players-duel[hidden] { display: none; }
+/* The Genesis room's portal panel: the prompt at the door, the riddle, the block header filling in, the nonce
+   dial and the open door's line, on the same dark panels as the room's pop-ups; a sheet at the foot on a phone. */
+.genesis-portal {
+  position: fixed; right: 16px; top: 84px; z-index: 40; width: min(380px, calc(100vw - 32px)); box-sizing: border-box;
+  padding: 10px 12px 12px; border-radius: 12px; background: var(--gn-panel); color: var(--gn-text); font-family: var(--mono);
+  font-size: 13px; line-height: 1.4; border: 1px solid var(--gn-line); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); backdrop-filter: blur(4px);
+}
+.genesis-portal[hidden] { display: none; }
+.genesis-portal .gp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.genesis-portal .gp-kicker { font-size: 10px; letter-spacing: 0.12em; opacity: 0.7; }
+.genesis-portal .gp-x { background: none; border: 0; color: inherit; font: inherit; font-size: 18px; line-height: 1; cursor: pointer; opacity: 0.6; padding: 0 2px; }
+.genesis-portal .gp-x:hover { opacity: 1; }
+.genesis-portal h3 { margin: 4px 0 6px; font-size: 15px; letter-spacing: 0.08em; }
+.genesis-portal p { margin: 0 0 8px; }
+.genesis-portal .gp-prog { font-size: 11px; letter-spacing: 0.1em; color: var(--gn-gold); margin-bottom: 6px; }
+.genesis-portal .gp-q { white-space: pre-line; font-size: 15px; line-height: 1.45; padding: 8px 10px; border-left: 3px solid var(--gn-gold); background: var(--gn-wash); border-radius: 0 8px 8px 0; }
+.genesis-portal .gp-how, .genesis-portal .gp-badge { font-size: 11px; opacity: 0.75; }
+.genesis-portal .gp-hint { color: var(--gn-hint); }
+.genesis-portal .gp-header { width: 100%; border-collapse: collapse; font-size: 11px; margin: 6px 0 8px; table-layout: fixed; }
+.genesis-portal .gp-header th { text-align: left; width: 88px; font-weight: normal; letter-spacing: 0.08em; opacity: 0.7; padding: 2px 6px 2px 0; vertical-align: top; }
+.genesis-portal .gp-header td { padding: 2px 0; word-break: break-all; }
+.genesis-portal .gp-header .gp-dim td { opacity: 0.35; }
+.genesis-portal .gp-header .gp-mined td { color: var(--gn-teal-text); }
+.genesis-portal .gp-header .gp-live td { color: var(--gn-gold); }
+.genesis-portal .gp-dial { padding: 8px 10px; border-radius: 8px; background: var(--gn-wash); margin-bottom: 8px; }
+.genesis-portal .gp-hash { font-size: 11px; word-break: break-all; color: var(--gn-gold); min-height: 2.8em; }
+.genesis-portal .gp-hash.gp-found { color: var(--gn-btc); }
+.genesis-portal .gp-zeros { font-size: 11px; opacity: 0.75; margin: 4px 0 8px; }
+.genesis-portal .gp-btn { display: block; width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--gn-line); background: var(--gn-btc); color: var(--ink); font: inherit; font-size: 13px; letter-spacing: 0.1em; cursor: pointer; touch-action: none; user-select: none; }
+.genesis-portal .gp-btn:hover { filter: brightness(1.08); }
+.genesis-portal .gp-btn.gp-quiet { background: var(--gn-wash); color: inherit; }
+@media (max-width: 720px) {
+  .genesis-portal { right: 8px; left: 8px; top: auto; bottom: 96px; width: auto; max-height: 46vh; overflow: auto; }
+}
+
+/* The whitepaper's large reader (the Genesis room): the nine pages as one strip filling the height, scrolled smoothly,
+   a page indicator, zoom, the bitcoin.org link; adapted from stacktoshi's monolith reader (#354, removed in #539). At
+   the phone's width the page fills the width. */
+.model-modal .model-actions { display: flex; gap: 8px; margin: 8px 0 2px; }
+.model-modal .model-actions[hidden], .model-modal .board-nav[hidden] { display: none; }
+.model-modal .model-button { flex: 1; display: block; box-sizing: border-box; font: inherit; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-align: center; text-decoration: none; cursor: pointer; padding: 10px 12px; border: 1px solid var(--gn-line); border-radius: 8px; background: var(--gn-btc); color: var(--ink); }
+.model-modal .model-button:hover { filter: brightness(1.1); }
+.model-modal .model-canvas.model-page.model-page-link { cursor: zoom-in; }
+.wp-reader { box-sizing: border-box; width: min(calc(100vw - 24px), 880px); height: calc(100dvh - 20px); max-width: none; max-height: none; margin: auto; padding: 0; border: 0; background: transparent; color: var(--gn-text); font-family: var(--mono); overflow: visible; }
+.wp-reader[open] { display: flex; flex-direction: column; gap: 8px; }
+.wp-reader::backdrop { background: color-mix(in srgb, var(--bg) 84%, transparent); }
+.wp-reader .wpr-panel { position: relative; flex: 1; min-height: 0; border-radius: 18px; overflow: hidden; background: var(--gn-paper); box-shadow: 0 0 0 1px var(--gn-line), 0 24px 80px rgba(0, 0, 0, 0.7); }
+.wp-reader .wpr-view { position: absolute; inset: 0; overflow: hidden; touch-action: none; cursor: grab; outline: none; }
+.wp-reader .wpr-view.wpr-held { cursor: grabbing; }
+.wp-reader .wpr-strip { display: block; max-width: none; height: auto; transform-origin: 0 0; will-change: transform; user-select: none; -webkit-user-drag: none; }
+.wp-reader .wpr-thumb { position: absolute; top: 0; right: 4px; width: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.55); opacity: 0; transition: opacity 0.35s; pointer-events: none; }
+.wp-reader .wpr-view.wpr-moving .wpr-thumb { opacity: 1; transition-duration: 0.08s; }
+.wp-reader .wpr-close { position: absolute; top: 10px; right: 14px; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--gn-line); background: var(--gn-panel); color: inherit; font: inherit; font-size: 18px; line-height: 1; cursor: pointer; }
+.wp-reader .wpr-close:hover { background: var(--gn-wash); }
+.wp-reader .wpr-foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; font-size: 11px; letter-spacing: 0.06em; }
+.wp-reader .wpr-page { color: var(--gn-gold); letter-spacing: 0.1em; white-space: nowrap; }
+.wp-reader .wpr-credit { opacity: 0.7; white-space: nowrap; }
+.wp-reader .wpr-site { color: var(--gn-teal-text); }
+.wp-reader .wpr-about { height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--gn-teal); background: var(--gn-panel); color: var(--gn-teal-text); font: inherit; font-size: 11px; letter-spacing: 0.08em; cursor: pointer; white-space: nowrap; }
+.wp-reader .wpr-about:hover { background: color-mix(in srgb, var(--gn-teal) 18%, transparent); }

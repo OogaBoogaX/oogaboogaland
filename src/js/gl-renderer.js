@@ -1114,7 +1114,10 @@ void main() {
   float emissive = max(clamp(vColor.a * max(0.0, vParams.x), 0.0, 1.0), ember * 0.9);
   base *= mix(voxelDetail(), 1.0, max(emissive, cloud));
   if (dot(vLocalNormal, vLocalNormal) > 20.0 && dot(vLocalNormal, vLocalNormal) < 30.0) base *= roadDetail();
-  vec3 lightFactor = lightFactorAt(n);
+  // A face that is all its own light shows none of the scene's (its lit colour is mixed away below), so it does not pay for
+  // the shadow's taps and the lamps: a hologram is such faces in dozens of layers of glass.
+  vec3 lightFactor = vec3(0.0);
+  if (emissive < 1.0) lightFactor = lightFactorAt(n);
   // Clouds are lit like cartoon cumulus: sky fill everywhere, the sun on every face that sees it, no hard shade.
   if (cloud > 0.5) lightFactor = uSky * 0.85 + uSun * uDirectStrength * (0.4 + 0.45 * max(dot(n, uLightDir), 0.0)) + vec3(0.18) * uDirectStrength;
   // Sky rim: a grazing view picks up the sky's fill, which lifts silhouettes off the ground behind them.
@@ -2807,9 +2810,9 @@ void main() {
       // Faces the plain shader variant can draw (no special water, no Matrix cave or glyph tags) lead, so a camera
       // pass draws that range through it and the rest through the full shader. Blended meshes keep their face order.
       const special = (f) => f.water || f.lake || f.matrixCave || f.matrixLocalGlyphSurface || f.matrixWorldGlyphSurface || f.matrixPermanentFallback;
-      let plainCount = 0;
+      let plainCount = 0, plainGlass = !!geometry.glass;
       if (dataOnly || geometry.glass || geometry.glassOpacity || geometry.matrixGlyph || geometry.matrixRevealBacking) {
-        for (let index = 0; index < faces.length; index++) writeFace(readFace(index));
+        for (let index = 0; index < faces.length; index++) { const f = readFace(index); if (plainGlass && special(f)) plainGlass = false; writeFace(f); }
       } else {
         for (let index = 0; index < faces.length; index++) { const f = readFace(index); if (!special(f)) writeFace(f); }
         plainCount = n;
@@ -2819,6 +2822,8 @@ void main() {
       const part = makePart(out, stride * 4, meshLayout(source ? [9, 3] : null), ibo, indices);
       part.voxel = gridded ? voxel : null;
       part.plainCount = plainCount;
+      // Glass with no such face: the plain variant can shade it too, whole and in its own order (`drawGlass`).
+      part.plainGlass = plainGlass;
       if (dynamic) part.dynamic = { floats, words, cornerOf, smooth, stride, revision: geometry.revision };
       return part;
     };
@@ -3844,25 +3849,35 @@ void main() {
       gl.depthMask(true);
       gl.disable(gl.BLEND);
     };
-    const drawGlass = (cull) => {
+    // `plain`: the frame is one the plain variant can shade (the camera's pass, no Matrix wave). The pass then goes
+    // through it when it can shade every pane there is, so the panes keep their order: glass is see-through layers,
+    // each fragment shaded and none hidden by depth, and the full shader's Matrix tests are most of what a layer
+    // costs.
+    const drawGlass = (cull, plain = false) => {
       let any = false;
-      for (let i = 0; i < activeRecords.length; i++) if (activeRecords[i].geometry.glass && activeRecords[i].count) { any = true; break; }
+      for (let i = 0; i < activeRecords.length; i++) {
+        const rec = activeRecords[i], g = rec.geometry;
+        if (!g.glass || !rec.count) continue;
+        any = true;
+        if (plain && (!rec.mesh || !rec.mesh.plainGlass || rec.living && !rec.livingClear || g.matrixCave || g.portalSurface || g.lakeBody || g.imageSurface)) plain = false;
+      }
       if (!any) return;
-      const mesh = programs.mesh;
+      const name = plain ? "plain" : "mesh", mesh = programs[name];
       gl.useProgram(mesh.prog);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.depthMask(false);
       glassPass = true;
       gl.cullFace(gl.FRONT);
-      drawParts("mesh", "mesh", true, cull);
+      drawParts("mesh", name, true, cull);
       gl.cullFace(gl.BACK);
-      drawParts("mesh", "mesh", true, cull);
+      drawParts("mesh", name, true, cull);
       glassPass = false;
       gl.uniform1f(mesh.u.uGlass, 1);
       gl.uniform1f(mesh.u.uLightBeam, 0);
       mesh.glass = 1;
       mesh.lightBeam = 0;
+      if (plain) gl.useProgram(programs.mesh.prog);
       gl.depthMask(true);
       gl.disable(gl.BLEND);
     };
@@ -3962,7 +3977,7 @@ void main() {
           program.fogPierce = pierce;
         }
         if (glassPass) {
-          const mesh = programs.mesh;
+          const mesh = program;
           if (g.glass !== mesh.glass) {
             gl.uniform1f(mesh.u.uGlass, g.glass);
             mesh.glass = g.glass;
@@ -5163,7 +5178,7 @@ void main() {
       drawMirrorSurface(camera);
       drawReflectors(camera);
       if (skyOn) drawSky(invViewProj, camera.position.y);
-      drawGlass(true);
+      drawGlass(true, plainFrame);
       drawBlended(true);
       // Ordinary surfaces first, then the effect-only black liner and native voxel glyphs; alpha follows the backing
       // shader's wave, depth still rejects hidden faces.

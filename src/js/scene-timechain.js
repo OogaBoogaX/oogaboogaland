@@ -66,7 +66,9 @@
         v = { room: id, mode: "solo", login: null, character: null, guided: false };
       }
       pending = v;
-      const loading = BL.deferred.load("timechain");
+      // The Genesis Museum's code, models, map and whitepaper pages are a group of their own on the rooms' group, so
+      // only a visit to that room downloads them.
+      const loading = BL.deferred.load(ROOMS.get(id).kind === "genesis" ? "timechain-genesis" : "timechain");
       return loading ? loading.then(() => null) : null;
     },
     enter(ctx) {

@@ -50,9 +50,9 @@
       { path: "oogaraid", scene: "raid", image: "oogaraid", title: "Ooga Raid",
         description: "Play your own Ooga side-on through eight stages, from the jungle shore to the Chairman's Engine, and drive out the Fiat Legion." },
       { path: "sphere", scene: "hub", place: "timechain", image: "sphere", title: "Timechain Sphere",
-        description: "The Timechain Sphere's doors: choose one of eight rooms at the keypad, from a planetarium and a conference room to a meditation temple, a block party, a mining museum and a movie theater." },
-      // The rooms, each its own kind of place and its own address (timechain-rooms.js), at their keypad numbers; 8 and 9
-      // are empty and have none.
+        description: "The Timechain Sphere's doors: choose one of nine rooms at the keypad, from a planetarium and a conference room to a meditation temple, a block party, a mining museum and a movie theater." },
+      // The rooms, each its own kind of place and its own address (timechain-rooms.js), at their keypad numbers; 9 is
+      // empty and has none.
       ...[
         ["Conference Room", "A round table for eight under a dome of live block and mining charts from mempool.space, the latest blocks round its base and the next block at the crown. The one room that locks."],
         ["Lecture Hall", "Lounge chairs on broad terraces facing a stage, with lectures on Bitcoin given on the dome: slides, a hand-drawn board and captions."],
@@ -61,7 +61,8 @@
         ["Proof of Work-out", "Exercise bikes facing a mountain sunrise: pedal to find a fake block and climb the gym's leaderboard."],
         ["Movie Theater", "Recliners on a steep rake facing a dome that is all picture, the biggest room in the Sphere."],
         ["Block Party", "Live dance radio in a club of light: an LED floor and wall that move to the music, lasers on the walls, and EDM Sessions live from the DJ booth. The latest block lights the scoreboard as it lands."],
-        ["Planetarium", "Tonight's sky over London on the whole dome, from reclining seats round the star projector."]
+        ["Planetarium", "Tonight's sky over London on the whole dome, from reclining seats round the star projector."],
+        ["Genesis Museum", "The road to Bitcoin, 1974 to 2009: the technologies and events before the genesis block on a ring of plinths, a hologram of Satoshi's statue in the middle that opens the whitepaper, Block 0 at the end of the walk, a glass floor over a living map of the network, and the timeline round the dome."]
       ].map(([name, what], i) => ({ path: `sphere-${i}`, scene: "timechain", place: String(i), title: `Timechain Sphere · ${name}`, description: `${name}, room ${i} of the Timechain Sphere. ${what}` }))
     ]
   };

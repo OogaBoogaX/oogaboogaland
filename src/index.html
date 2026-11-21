@@ -2278,6 +2278,17 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
         </div>
       </div>
     </dialog>
+    <aside class="genesis-portal" id="genesis-portal" aria-label="Proof of Knowledge" hidden>
+      <div class="gp-head"><span class="gp-kicker">MINING MUSEUM · PROOF OF KNOWLEDGE</span><button type="button" class="gp-x" data-action="genesis-portal-close" aria-label="Hide">&times;</button></div>
+      <div class="gp-body" id="genesis-portal-body"></div>
+    </aside>
+    <dialog class="wp-reader" id="wp-reader" aria-label="The Bitcoin whitepaper">
+      <div class="wpr-panel">
+        <div class="wpr-view" id="wp-reader-view" tabindex="0" aria-label="The pages: drag, swipe or scroll to read"><img class="wpr-strip" id="wp-reader-strip" alt="The whitepaper's nine pages, one below the other" draggable="false"><i class="wpr-thumb" id="wp-reader-thumb"></i></div>
+        <button type="button" class="wpr-close" data-action="reader-close" aria-label="Close the reader">&times;</button>
+      </div>
+      <div class="wpr-foot"><button type="button" class="wpr-about" id="wp-reader-about">ABOUT THIS PAPER</button><b class="wpr-page" id="wp-reader-page">PAGE 1 / 9</b><span class="wpr-credit">Source: bitcoin.org · MIT licence · <a class="wpr-site" href="https://bitcoin.org/en/bitcoin-paper" target="_blank" rel="noopener noreferrer">Read it on bitcoin.org</a></span></div>
+    </dialog>
     <dialog class="modal" id="sphere-exit" aria-labelledby="sphere-exit-title" aria-describedby="sphere-exit-note">
       <div class="panel-head">
         <h2 id="sphere-exit-title">Leave this room?</h2>
@@ -2865,6 +2876,11 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
   <script src="js/timechain-room-lecture.js" data-defer="timechain"></script>
   <script src="js/timechain-room-theater.js" data-defer="timechain"></script>
   <script src="js/timechain-interior.js" data-defer="timechain"></script>
+  <script src="js/whitepaper-pages.js" data-defer="timechain-genesis"></script>
+  <script src="js/timechain-genesis-first.js" data-defer="timechain-genesis"></script>
+  <script src="js/timechain-genesis-map.js" data-defer="timechain-genesis"></script>
+  <script src="js/timechain-genesis-models.js" data-defer="timechain-genesis"></script>
+  <script src="js/timechain-room-genesis.js" data-defer="timechain-genesis"></script>
   <script src="js/lecture-btc-01.js" data-defer="lecture-btc-a"></script>
   <script src="js/lecture-btc-01.timing.js" data-defer="lecture-btc-a"></script>
   <script src="js/lecture-btc-02.js" data-defer="lecture-btc-b"></script>

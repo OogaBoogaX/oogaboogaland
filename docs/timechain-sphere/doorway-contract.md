@@ -4,7 +4,7 @@ The shared doorway for [issue #235](https://github.com/OogaBoogaX/oogaboogaland/
 
 ## What it is for
 
-The Sphere has one doorway on the island (zone `sphere`) and its rooms behind it (zones `sphere-0` … `sphere-9`; 8 and 9 have no room yet). Signed-in players share it, so its short crossing is serialized and shown: an outside observer sees the doors part and the traveler walk into the dim passage and out of sight behind its curtain, and the doors close again. Only the crossing is serialized, never keypad use or loading: a page asks for the doorway only once its room is prepared (code loaded, picture taken), from the waiting spot square to the doors. The reservation coordinates presentation; the room does not simulate anyone's walk.
+The Sphere has one doorway on the island (zone `sphere`) and its rooms behind it (zones `sphere-0` … `sphere-9`; 9 has no room yet). Signed-in players share it, so its short crossing is serialized and shown: an outside observer sees the doors part and the traveler walk into the dim passage and out of sight behind its curtain, and the doors close again. Only the crossing is serialized, never keypad use or loading: a page asks for the doorway only once its room is prepared (code loaded, picture taken), from the waiting spot square to the doors. The reservation coordinates presentation; the room does not simulate anyone's walk.
 
 Signed-out (solo) visits never send any of this: their crossings are local and invisible to everyone else.
 
@@ -76,6 +76,10 @@ On the island a locked room's number wears a padlock. Pressing it scrolls `ENTER
 - The walk goes through the doorway onto the passage's axis, and the room's scene takes over without a fade a step past the doors (out of sight from the bridge), from the same eye: the zone goes to `none` there and to the room's once its Ooga stands in it.
 - The no-fade return applies when the hub is kept. Under the release policy the way out uses the ordinary fade while the island is rebuilt, then resumes the same guided walk; `timechain doorway release` covers that exception. An instant transition keeps the left scene playing during preparation and holds its last frame during construction; it is not a promise that loading takes no time.
 - On the way out the room hands over in its vestibule; the hub enters with the Ooga in the passage in front of the curtain, behind the shut doors, in zone `sphere`, waits a beat, asks for `out` when shared, then walks onto the bridge and sends `done` once the doors can close. The island's ordinary camera returns only after they have.
+
+## From one room into another
+
+The Genesis Museum (room 8) has a way of its own into the Mining Museum (room 2), a portal a visitor opens by a puzzle that is per viewer and local to the page. It adds nothing to this contract: the island's shared doorway is not crossed, so nothing is asked, granted or reserved; the page leaves room 8's zone and, once room 2 stands, sends the ordinary `zone` message for `sphere-2`, which the room checks as it checks any other (a locked room refuses it; only room 0 locks). A solo visit sends nothing, as ever. The room entered plays its ordinary guided arrival, and announces it with the ordinary `pass`.
 
 ## Zones, presence and voice
 

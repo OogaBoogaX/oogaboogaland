@@ -190,7 +190,7 @@
       node: (name, geometry, x = 0, y = 0, z = 0, o = {}) => {
         let geo = geometry;
         if (typeof geometry === "function") {
-          const sub = { L: into.L, room: into.room, body: [], glow: [], flat: [], nodes: into.nodes, solids: [], seats: [], lights: [], live: into.live, targets: into.targets };
+          const sub = { L: into.L, room: into.room, body: [], glow: [], flat: [], nodes: into.nodes, solids: [], seats: [], lights: [], live: into.live, targets: into.targets, geometries: into.geometries };
           geometry(kit(sub));
           geo = sub.body.length || sub.glow.length ? merge(...sub.body, ...sub.glow) : null;
           if (geo && !sub.body.length) noShadow(geo);
@@ -237,9 +237,13 @@
       // The room's light: overrides of the scene's render options (sky, ground, direct, ambient floor, bloom).
       render: (o) => { into.render = o; },
       wallColor: (c) => { into.wallColor = c; },
+      // The lit strip along the screen's lower edge, where a kind wants its own colour for it.
+      rimColor: (c) => { into.rimColor = c; },
       // A raked hall's colours: its terraces (alternating), their amber nosings and the doorway's landing.
       rakeColors: (o) => { if (o.terrace) into.terrace = o.terrace; if (o.nosing) into.nosing = o.nosing; if (o.landing) into.landing = o.landing; },
-      floorColor: (c) => { into.floorColor = c; }
+      floorColor: (c) => { into.floorColor = c; },
+      // An unpainted floor drawn as glass this opaque (over a kind's own under-floor), as the glass cases are.
+      floorGlass: (opacity) => { into.floorGlass = opacity; }
     };
     return K;
   };
@@ -400,7 +404,7 @@
       // The amber strip along the screen's lower edge, just inside it, and the skirting round the floor.
       const s0 = ROOMS.onSphere(L, a0, e0, 0.996), s1 = ROOMS.onSphere(L, a1, e1, 0.996);
       const strip = [[s0.x, s0.y - 0.04, s0.z], [s1.x, s1.y - 0.04, s1.z], [s1.x, s1.y + 0.04, s1.z], [s0.x, s0.y + 0.04, s0.z]];
-      for (const piece of outsideDoor(strip)) face(glowing, piece, C.amber, 1, inward(piece));
+      for (const piece of outsideDoor(strip)) face(glowing, piece, into.rimColor || C.amber, 1, inward(piece));
       const fy = L.yMin + 0.07, fr = ROOMS.radiusAt(L, fy) * 0.997;
       const skirt = [[fr * Math.sin(a0), fy - 0.02, -fr * Math.cos(a0)], [fr * Math.sin(a1), fy - 0.02, -fr * Math.cos(a1)], [fr * Math.sin(a1), fy + 0.02, -fr * Math.cos(a1)], [fr * Math.sin(a0), fy + 0.02, -fr * Math.cos(a0)]];
       for (const piece of outsideDoor(skirt)) face(glowing, piece, C.skirt, 0.8, inward(piece));
@@ -436,7 +440,7 @@
     if (canvas) {
       const F = floorMap(L, into.floorSize ? into.floorSize.scale : 0);
       geo.imageSurface = { canvas, version: 1, rect: [-F.rf, -F.rf, 2 * F.rf, 2 * F.rf], tessellated: true };
-    }
+    } else if (into.floorGlass) { geo.glassOpacity = into.floorGlass; noShadow(geo); }
     return geo;
   });
   // A raked hall's floor: the terraces stepping down round the focus, each with an amber nosing, the landing at the

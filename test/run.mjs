@@ -30264,12 +30264,12 @@ const timechainRoomChecks = async () => {
   const pilotSource = await readFile(new URL("../src/js/pilot.js", import.meta.url), "utf8");
   const pilotMod = { WALK: runInNewContext(pilotSource.match(/^  const WALK = .*;$/m)[0] + "\nWALK") };
   const R = context.window.BL.timechainRooms;
-  const good = [0, 1, 7, "0", "5", "7"].every(v => R.parse(v) === Number(v));
-  const bad = [8, 9, "8", "9", 10, 3.5, -1, "03", "3a", " 3", "", "sphere-3", null, undefined, NaN, {}, [3]].every(v => R.parse(v) === null);
+  const good = [0, 1, 7, 8, "0", "5", "7", "8"].every(v => R.parse(v) === Number(v));
+  const bad = [9, "9", 10, 3.5, -1, "03", "3a", " 3", "", "sphere-3", null, undefined, NaN, {}, [3]].every(v => R.parse(v) === null);
   const zones = R.ROOMS.map(r => r.zone), kinds = R.ROOMS.map(r => r.kind).join();
-  record("timechain rooms: only 0–7 resolve to rooms (8 and 9 are empty), each its own kind and undotted zone, and only the Conference Room locks",
+  record("timechain rooms: only 0–8 resolve to rooms (9 is empty), each its own kind and undotted zone, and only the Conference Room locks",
     good && bad && new Set(zones).size === 10 && zones.every((z, i) => z === `sphere-${i}` && !z.includes(".")) && R.get(0).name === "Conference Room" && R.get("7").kind === "planetarium"
-      && kinds === "conference,lecture,mining,temple,workout,theater,party,planetarium,," && R.OPEN.join() === "0,1,2,3,4,5,6,7" && R.LOCKABLE.join() === "0" && R.get(8) === null && R.get(12) === null
+      && kinds === "conference,lecture,mining,temple,workout,theater,party,planetarium,genesis," && R.OPEN.join() === "0,1,2,3,4,5,6,7,8" && R.LOCKABLE.join() === "0" && R.get(8).kind === "genesis" && R.get(9) === null && R.get(12) === null
       && R.ROOMS.every(r => r.empty || !!R.layout(r.id).lockPad === r.lockable), JSON.stringify({ good, bad, zones, kinds }));
   const rows = R.ROOMS.filter(r => !r.empty).map(({ id }) => {
     const L = R.layout(id), along = (a) => [+(L.doorZ - a.z).toFixed(9), a.x];
@@ -30322,6 +30322,29 @@ const timechainRoomChecks = async () => {
   }
   record("timechain recovery: a rejected guided departure returns inside facing the room before closing doors and releasing control, while ordinary departures keep their pose",
     recovery.every(row => row.restored && row.recovered), JSON.stringify(recovery));
+  // A kind's own way into another room (the Genesis Museum's door into the Mining Museum), on the production methods:
+  // the hand-over the keypad makes, and one the director refuses.
+  const handing = `${methods}\n${interior.slice(interior.indexOf("    const handOffTo ="), interior.indexOf("    const stay ="))}`;
+  const mining = R.ROOMS.find(r => r.kind === "mining").id, handed = [];
+  for (const shared of [false, true]) for (const goes of [true, false]) {
+    const from = R.ROOMS.find(r => r.kind === "genesis"), zones = [], bodies = [], calls = [], guide = { stage: "out", portal: { x: 0, z: 0, room: mining } };
+    let went = null;
+    const fixture = {
+      L: R.layout(from.id), shared, guide, doors: { want: 0 }, room: from, ROOMS: R, world: { sphereExit: null, sphereVisit: null }, leaving: false, guided: true, COARSE: false,
+      avatar: { traits: { name: "tester" } }, visit: { mode: shared ? "shared" : "solo", login: shared ? "tester" : null, jetpack: null },
+      BL: { net: { setZone: zone => zones.push(zone), setBody: body => bodies.push(body) } }, hud: { hint() {} },
+      go: (scene, place) => { went = `${scene},${place}`; return goes; },
+      people: { steer() { calls.push("stop"); } },
+      pilot: { navigate() { calls.push("arrive"); }, setActive() { calls.push("active"); }, viewState: () => ({}) }
+    };
+    runInNewContext(`${handing}\nhandOffTo(${mining});`, fixture);
+    const next = fixture.world.sphereVisit;
+    handed.push({ shared, goes, went, zones: zones.join(), body: bodies.length === 1 && bodies[0] === null,
+      visit: goes ? !!next && next.room === mining && next.mode === fixture.visit.mode && next.guided === true : next === null,
+      stayed: goes || !calls.includes("arrive") && guide.stage === null && guide.portal === null && !fixture.leaving });
+  }
+  record("timechain portal: a room's own way into another hands over as the keypad does (no body and zone none, the next visit in this one's mode and guided, so the room beyond sets its own zone), and one that cannot go leaves the visitor where they stand with their zone back",
+    handed.every(h => h.went === `timechain,${mining}` && h.body && h.visit && h.stayed && h.zones === (h.goes ? "none" : h.shared ? "none,sphere-8" : "none")), JSON.stringify(handed));
   // Regression: under a dome that widens over the floor a jump carried a body out past where it could stand, and it
   // came down held by the wall. Space at the Exit button then walked nowhere, ran out both of the walk's limits and
   // handed the island an eye still inside the room, which stood the Ooga in the ball off the passage and left it there.
@@ -30872,9 +30895,9 @@ const sphereBridgeKeypad = { name: "timechain bridge keypad", why: "rule: the ke
   };
   const read = `(() => { const B = __ooga, ${sphereLocal}, G = T.gate, a = B.pilot.player, p = a.root.position, cap = (k) => T.site.keys.find(x => x.key === k).node.geometry.faces[0].color.join();
     return { state: G.debug.state, remote: G.remote, busy: G.busy, selection: G.debug.selection, lens: G.debug.lens, along: +local(p).toFixed(2), act: !document.getElementById("act").hidden,
-      eight: cap("8"), three: cap("3"), five: cap("5"), board: document.getElementById("board-modal").open, caption: document.getElementById("board-caption").textContent }; })()`;
+      nine: cap("9"), three: cap("3"), five: cap("5"), board: document.getElementById("board-modal").open, caption: document.getElementById("board-caption").textContent }; })()`;
   await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.4", "19")} })()`);
-  await clickKey("8");
+  await clickKey("9");
   const empty = await b.evaluate(read);
   await clickKey("3");
   const chosen = await b.evaluate(read);
@@ -30887,7 +30910,7 @@ const sphereBridgeKeypad = { name: "timechain bridge keypad", why: "rule: the ke
   const listed = await b.evaluate(read);
   await clickRow(5);
   const unlisted = await b.evaluate(read);
-  await clickRow(8);
+  await clickRow(9);
   const emptyRow = await b.evaluate(read);
   await b.key("3");
   await b.evaluate(`__ooga.advance(0.2, 1 / 60)`);
@@ -30895,7 +30918,7 @@ const sphereBridgeKeypad = { name: "timechain bridge keypad", why: "rule: the ke
   await b.key("Escape");
   await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.4", "24")} B.advance(0.2, 1 / 60); })()`);
   const walkedOff = await b.evaluate(read);
-  // Regression: the empty rooms' 8 and 9 are a PIN's digits like any other, drawn plain while the keypad asks for one.
+  // Regression: the empty number 9 is a PIN's digit like any other, drawn plain while the keypad asks for one.
   await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; window.__lockedWas = BL.net.state.lockedRooms[0]; BL.net.state.lockedRooms[0] = 1; ${sphereStand("0.4", "19")} })()`);
   await clickKey("0");
   // Regression: the directory reopened while the keypad asks for the PIN chooses nothing and types no digit.
@@ -30904,7 +30927,7 @@ const sphereBridgeKeypad = { name: "timechain bridge keypad", why: "rule: the ke
   await b.key("5");
   const pinDirectory = await b.evaluate(`(() => { const r = ${read}, G = BL.scenes.hub.debug.timechainIsland.gate.debug; return { ...r, pin: G.pin }; })()`);
   await b.key("Escape");
-  await clickKey("8");
+  await clickKey("9");
   const pin = await b.evaluate(`(() => { const r = ${read}, G = BL.scenes.hub.debug.timechainIsland.gate.debug; return { ...r, pin: G.pin }; })()`);
   await clickKey("back");
   await clickKey("back");
@@ -30929,7 +30952,7 @@ const sphereBridgeKeypad = { name: "timechain bridge keypad", why: "rule: the ke
   await untilPage(b, 'window.__eyeGap.done', 25000);
   const out = await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}, a = B.pilot.player, p = a.root.position; return { ...window.__eyeGap, view: B.pilot.mode, along: +local(p).toFixed(2), state: T.gate.debug.state }; })()`);
   record("timechain bridge keypad: from the bridge's near half an empty number does nothing, a room's number is chosen with the Ooga and view still the player's, and walking off lets it go",
-    empty.state === "idle" && empty.eight === "34,30,27" && chosen.state === "keypad" && chosen.remote && !chosen.busy && chosen.selection === 3 && chosen.lens === null && chosen.act && Math.abs(chosen.along - 19) < 0.2
+    empty.state === "idle" && empty.nine === "34,30,27" && chosen.state === "keypad" && chosen.remote && !chosen.busy && chosen.selection === 3 && chosen.lens === null && chosen.act && Math.abs(chosen.along - 19) < 0.2
       && walkedOff.state === "idle" && walkedOff.selection === -1, JSON.stringify({ empty, chosen, walkedOff }));
   record("timechain bridge keypad: the chosen number clicked again clears it, and the directory's rows choose and clear the keypad's button the same way",
     unchosen.state === "keypad" && unchosen.remote && unchosen.selection === -1 && unchosen.three === "58,52,48"
@@ -30937,8 +30960,8 @@ const sphereBridgeKeypad = { name: "timechain bridge keypad", why: "rule: the ke
       && unlisted.board && unlisted.selection === -1 && unlisted.five === "58,52,48" && !unlisted.caption.startsWith("Room")
       && emptyRow.selection === -1 && typed.board && typed.selection === 3 && typed.three === "247,147,26",
     JSON.stringify({ unchosen, listed, unlisted, emptyRow, typed, clicks }));
-  record("timechain bridge keypad: while it asks for a locked room's PIN the empty rooms' 8 and 9 are digits like any other, drawn plain, and greyed out again after",
-    pin.state === "pin" && pin.pin === "8" && pin.eight === "58,52,48" && unpinned.state !== "pin" && unpinned.eight === "34,30,27", JSON.stringify({ pin, unpinned }));
+  record("timechain bridge keypad: while it asks for a locked room's PIN the empty number 9 is a digit like any other, drawn plain, and greyed out again after",
+    pin.state === "pin" && pin.pin === "9" && pin.nine === "58,52,48" && unpinned.state !== "pin" && unpinned.nine === "34,30,27", JSON.stringify({ pin, unpinned }));
   record("timechain bridge keypad: the directory reopened during a locked room's PIN chooses nothing, types no digit, and says to enter the PIN on the keypad",
     pinDirectory.board && pinDirectory.state === "pin" && pinDirectory.pin === "" && pinDirectory.caption.includes("PIN"), JSON.stringify(pinDirectory));
   record("timechain bridge keypad: Enter clicked from the bridge glides into the Ooga's eyes where it stands and walks the same Ooga into the chosen room",
@@ -31123,9 +31146,9 @@ const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out 
   })()`);
   record("timechain room: the controls reference omits intercepted R/F while retaining available movement controls", pitch.every(n => n === 0) && reference.open && reference.driven && !reference.keys.some(k => ["r", "f"].includes(k)) && reference.keys.includes("w") && !reference.text.includes("Tilt the view"), JSON.stringify({ pitch, reference }));
 } };
-const timechainRooms = { name: "timechain rooms", why: "rule: every room 0–7 builds its own kind around the same doorway, arrival and Exit button, only the Conference Room has a lock, the camera stays inside every sphere, and the raked halls walk down to the front", run: async (b) => {
+const timechainRooms = { name: "timechain rooms", why: "rule: every room 0–8 builds its own kind around the same doorway, arrival and Exit button, only the Conference Room has a lock, the camera stays inside every sphere, and the raked halls walk down to the front", run: async (b) => {
   const rows = [], bounds = [], walks = [];
-  for (const room of [7, 1, 2, 3, 4, 5, 6, 0]) {
+  for (const room of [7, 1, 2, 3, 4, 5, 6, 8, 0]) {
     await b.evaluate(roomGo(room));
     rows.push(await b.evaluate(`(() => { const B = __ooga, D = B.timechain, L = D.layout, a = B.pilot.player.root.position, w = B.pilot.player;
       return { room: D.room.id, kind: D.room.kind, radius: L.R, door: L.door.halfW, arrivalGap: +(L.doorZ - L.arrival.z).toFixed(6), at: +Math.hypot(a.x - L.arrival.x, a.z - L.arrival.z).toFixed(3),
@@ -31163,8 +31186,8 @@ const timechainRooms = { name: "timechain rooms", why: "rule: every room 0–7 b
     }
   }
   const same = (k) => rows.every(r => JSON.stringify(r[k]) === JSON.stringify(rows[0][k]));
-  record("timechain rooms: rooms 0–7 each build their own kind around the same doorway, arrival, Exit button and Ooga, solo and first person, each at its own address, with seats but in the Block Party and the Mining Museum, and only the Conference Room locks",
-    rows.map(r => r.kind).join() === "planetarium,lecture,mining,temple,workout,theater,party,conference" && rows.every(r => r.at < 0.4 && r.mode === "solo" && r.view === "first-person" && r.hash === "#/sphere-" + r.room && (r.seats > 0) === (r.kind !== "party" && r.kind !== "mining") && r.lock === (r.room === 0))
+  record("timechain rooms: rooms 0–8 each build their own kind around the same doorway, arrival, Exit button and Ooga, solo and first person, each at its own address, with seats but in the Block Party and the Mining Museum, and only the Conference Room locks",
+    rows.map(r => r.kind).join() === "planetarium,lecture,mining,temple,workout,theater,party,genesis,conference" && rows.every(r => r.at < 0.4 && r.mode === "solo" && r.view === "first-person" && r.hash === "#/sphere-" + r.room && (r.seats > 0) === (r.kind !== "party" && r.kind !== "mining") && r.lock === (r.room === 0))
       && ["door", "arrivalGap", "button", "height"].every(same), JSON.stringify(rows));
   record("timechain rooms: the final camera stays inside the sphere, the closed doors, the floor and the dome in every view and transition, in the smallest, the tallest raked and the conference room",
     bounds.every(r => r.frames >= 840 && r.outside === 0 && ["first-person", "shoulder", "orbit"].every(mode => r.modes.includes(mode))), JSON.stringify(bounds));
@@ -31207,12 +31230,145 @@ const timechainTrip = { name: "timechain round trip", why: "contract: a room lef
     laps.every(l => l.scene === "timechain" && l.room === 0 && l.timers === 0 && l.requests === 0) && grew.length === 0 && donated.scene === "timechain" && donated.donations === 1 && donated.sats === 2100 && donated.bananas === 1.25,
     JSON.stringify({ grew, donated, first: laps[0], second: laps[1] }));
 } };
+// The Genesis Museum's door into the Mining Museum, walked by a solo visitor, and the room left with its reader open and
+// with a block half mined.
+const timechainPortal = { name: "timechain portal", why: "contract: the Genesis Museum's door hands a solo visitor into the Mining Museum publishing nothing, and the room left with the reader open or a block half mined leaves nothing behind", run: async (b) => {
+  await b.evaluate(roomGo(8));
+  const through = await b.evaluate(`(() => { const B = window.__ooga, N = BL.net, G = BL.timechainGenesis, zones = [], bodies = [], zone = N.setZone, body = N.setBody, mining = BL.timechainRooms.ROOMS.find(r => r.kind === "mining").id;
+    N.setZone = (z) => { zones.push(z); return zone(z); }; N.setBody = (v) => { bodies.push(v); return body(v); };
+    G.portal.force("open"); G.portal.enter();
+    for (let i = 0; i < 1500 && !(B.scene === "timechain" && B.timechain.room.id === mining && !B.transitioning); i++) B.advance(1 / 30, 1 / 30);
+    B.advance(0.5, 1 / 30); N.setZone = zone; N.setBody = body;
+    return { room: B.timechain.room.id, mining, zones, bodies, panel: !document.getElementById("genesis-portal").hidden, rows: document.getElementById("genesis-portal-body").childElementCount, kept: ["portal", "live", "mark", "floorPoc", "readLarge"].filter(k => k in G) }; })()`);
+  const left = [], back = [];
+  for (const how of ["reader", "mine"]) {
+    await b.evaluate(roomGo(8));
+    await b.evaluate(`(() => { const B = window.__ooga, G = BL.timechainGenesis, P = G.portal;
+      if ("${how}" === "reader") G.readLarge(3);
+      else { P.force("riddles", 4); P.hit(G.PLINTHS.findIndex(p => p.id === P.state().riddles[4])); }
+      B.advance(0.2, 1 / 30); })()`);
+    await tourGo(b, "hub");
+    await new Promise(done => setTimeout(done, 1200));
+    left.push(await b.evaluate(`(() => { const B = window.__ooga, G = BL.timechainGenesis; B.advance(0.5, 1 / 30);
+      return { how: "${how}", scene: B.scene, reader: document.getElementById("wp-reader").open, strip: document.getElementById("wp-reader-strip").hasAttribute("src"), panel: !document.getElementById("genesis-portal").hidden, rows: document.getElementById("genesis-portal-body").childElementCount, kept: ["portal", "live", "mark", "floorPoc", "readLarge"].filter(k => k in G) }; })()`));
+    // Back in the room: the leave contract's counts, as the round trip reads them.
+    back.push(await b.evaluate(roomGo(8)));
+  }
+  record("timechain portal: the door walks a solo visitor into the Mining Museum with no zone or body published, and the room left with its reader open or a block half mined leaves no panel, reader, handle, timer or request behind",
+    through.room === through.mining && through.zones.length > 0 && through.zones.every(z => z === "none") && through.bodies.every(v => v === null) && !through.panel && through.rows === 0 && through.kept.length === 0
+      && left.every(l => l.scene === "hub" && !l.reader && !l.strip && !l.panel && l.rows === 0 && l.kept.length === 0)
+      && back.every(l => l.room === 8 && l.timers === 0 && l.requests === 0) && back[1].dom <= back[0].dom * 1.02 + 4 && back[1].nodes <= back[0].nodes * 1.02 + 4, JSON.stringify({ through, left, back }));
+} };
+// The hologram over the middle plinth is the way to the paper: a click on the figure and Space in front of it each
+// open the pop-up at the paper with its first page in the window (not a model), the pop-up's button opens the large
+// reader, and the piece before the paper is Satoshi's, the statue to turn beside its sources.
+const timechainHologram = { name: "timechain hologram", why: "contract: the hologram on the middle plinth opens the whitepaper's pop-up, showing the paper's page, by a click and by Space; the pop-up leads to the reader and stands next to Satoshi's piece", run: async (b) => {
+  await b.evaluate(genesisGo);
+  const at = await b.evaluate(`(() => { const B = window.__ooga; B.pilot.navigate({ position: { x: 0, y: 0, z: 3 }, yaw: 0, pitch: -0.3, dist: 0.6 }); B.pilot.enterClose(); B.advance(1, 1 / 30); const w = B.timechain.built.nodes.holoSpin.world, p = B.renderer.project(w[12], w[13] + 1.1, w[14]); return { x: p.x, y: p.y }; })()`);
+  // Whether the pop-up alone stands open on the paper's page (the pages may still be on their way), closed again for
+  // the next press.
+  const popup = `(async () => { const B = window.__ooga, m = document.getElementById("model-modal"); for (let i = 0; i < 60 && !m.open; i++) { B.advance(0.1, 1 / 30); await new Promise(r => setTimeout(r, 50)); } const open = m.open && !document.getElementById("wp-reader").open && document.getElementById("model-canvas").classList.contains("model-page") && /Peer-to-Peer/.test(document.getElementById("model-name").textContent); BL.modelViewer.close(); B.advance(0.3, 1 / 30); return open; })()`;
+  await b.click(at.x, at.y);
+  const click = await b.evaluate(popup);
+  await b.key(" ");
+  const space = await b.evaluate(popup);
+  const reader = await b.evaluate(`(async () => { const B = window.__ooga, G = BL.timechainGenesis, m = document.getElementById("model-modal"); G.readPaper(); for (let i = 0; i < 60 && !m.open; i++) { B.advance(0.1, 1 / 30); await new Promise(r => setTimeout(r, 50)); } const button = [...m.querySelectorAll("button")].find(e => /READ THE WHITEPAPER/.test(e.textContent)); if (button) button.click(); B.advance(0.3, 1 / 30); const open = document.getElementById("wp-reader").open; G.readerClose(); BL.modelViewer.close(); B.advance(0.3, 1 / 30); return !!button && open; })()`);
+  const satoshi = await b.evaluate(`(async () => { const B = window.__ooga, G = BL.timechainGenesis, m = document.getElementById("model-modal"); G.readPaper(); for (let i = 0; i < 60 && !m.open; i++) { B.advance(0.1, 1 / 30); await new Promise(r => setTimeout(r, 50)); } document.getElementById("model-prev").click(); await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); const links = [...document.getElementById("model-links").querySelectorAll("a")].map(a => a.href); const ok = document.getElementById("model-name").textContent === "Satoshi Nakamoto" && !document.getElementById("model-canvas").classList.contains("model-page") && BL.modelViewer.stats.drawn > 1000 && links.length === 5 && links.every(h => /^https:[^?#]+$/.test(h)) && /Picozzi/.test(document.getElementById("model-stats").textContent); BL.modelViewer.close(); B.advance(0.3, 1 / 30); return ok; })()`);
+  record("timechain hologram: a click on the figure over the middle plinth and Space in front of it each open the pop-up at the whitepaper showing its page, its button opens the reader, and the piece before it shows Satoshi's statue with its credit and five plain links",
+    click && space && reader && satoshi, JSON.stringify({ click, space, reader, satoshi }));
+} };
+// Up close a ring plinth trades its piece for the first version built for it, the plaque's band saying so; a few
+// metres back the piece is there again, and no other plinth has changed.
+const timechainFirst = { name: "timechain first version", why: "rule: up close a plinth shows its first version and its FIRST VERSION word in place of its piece, and stepping back brings the piece back, no other plinth changed", run: async (b) => {
+  await b.evaluate(genesisGo);
+  const r = await b.evaluate(`(() => { const B = window.__ooga, G = BL.timechainGenesis, N = B.timechain.built.nodes, i = G.PLINTHS.findIndex((p) => p.id === "egold"), s = G.spotOf(i), len = Math.hypot(s.x, s.z);
+    const at = (d) => { B.pilot.navigate({ position: { x: s.x - s.x / len * d, y: 0, z: s.z - s.z / len * d }, yaw: Math.atan2(-s.x, -s.z), pitch: 0.1, dist: 0.6 }); B.pilot.enterClose(); B.advance(1.5, 1 / 30); };
+    const read = () => ({ first: N["galleryFirst" + i].visible && N["galleryFirst" + i].scale.x > 0.99, piece: N["galleryPiece" + i].visible && N["galleryPieceGlass" + i].visible, tag: N["firstTag" + i].visible, others: G.PLINTHS.filter((_, j) => j !== i && (N["galleryFirst" + j].visible || N["firstTag" + j].visible)).length });
+    at(2.5); const near = read(); at(5); const back = read(); window.__firstHeld = N["galleryFirst" + i].geometry; return { near, back, builds: [...G.firstBuilds] }; })()`);
+  record("timechain first version: up close a ring plinth shows the first version built for it with FIRST VERSION on its plaque's band, and a few metres back today's piece is there again, no other plinth changed",
+    r.near.first && !r.near.piece && r.near.tag && r.near.others === 0 && !r.back.first && r.back.piece && !r.back.tag && r.back.others === 0, JSON.stringify(r));
+  // Entering the room again from inside the Sphere builds no first version again; leaving the Sphere lets every one go
+  // with the director's release of its scope (the room keeps none of its own), so the next visit builds each afresh.
+  const builds = () => b.evaluate(`[...BL.timechainGenesis.firstBuilds]`);
+  await b.evaluate(genesisGo);
+  const again = await builds();
+  await b.evaluate(`(async () => { const B = window.__ooga, t0 = performance.now(); B.go("lab"); while ((B.transitioning || B.scene !== "lab") && performance.now() - t0 < 60000) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); B.housekeep(); })()`);
+  await b.evaluate(genesisGo);
+  const after = await builds(), fresh = await b.evaluate(`(() => { const i = BL.timechainGenesis.PLINTHS.findIndex((p) => p.id === "egold"), fresh = window.__ooga.timechain.built.nodes["galleryFirst" + i].geometry !== window.__firstHeld; delete window.__firstHeld; return fresh; })()`);
+  record("timechain first version: entering the room again inside the Sphere builds no first version again, and leaving the Sphere releases all 26 with its scope, so the next visit builds each afresh",
+    again.every((n, k) => n === r.builds[k]) && after.every((n, k) => n === r.builds[k] + 1) && fresh, JSON.stringify({ first: r.builds, again, after, fresh }));
+} };
+// The ₿ over the crown leads to the site whose feed it draws: a press on it (window.open stubbed) opens mempool.space
+// in a new tab with no opener and no referrer, and its tip says so.
+const timechainMarkLink = { name: "timechain mark link", why: "rule: a press on the ₿ over the crown opens mempool.space in a new tab, with no handle back to the page and no referrer", run: async (b) => {
+  await b.evaluate(genesisGo);
+  const at = await b.evaluate(`(() => { const B = window.__ooga, live = B.timechain.built.live.find((l) => l.spec.id === "mark"), v = live.node.geometry.verts;
+    window.__markOpened = []; window.__markOpen = window.open; window.open = (...args) => { window.__markOpened.push(args); return null; };
+    B.pilot.navigate({ position: { x: 0, y: 0, z: 7 }, yaw: 0, pitch: -1.0, dist: 0.6 }); B.pilot.enterClose(); B.advance(1, 1 / 30);
+    let x = 0, y = 0, z = 0; for (let i = 0; i < v.length; i += 3) { x += v[i]; y += v[i + 1]; z += v[i + 2]; } const n = v.length / 3, m = live.node.world; x /= n; y /= n; z /= n;
+    const p = B.renderer.project(m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14]); return { x: p.x, y: p.y, tip: live.spec.tip }; })()`);
+  await b.click(at.x, at.y);
+  const r = await b.evaluate(`(() => { window.__ooga.advance(0.2, 1 / 30); const opened = window.__markOpened; window.open = window.__markOpen; delete window.__markOpen; delete window.__markOpened; return { opened }; })()`);
+  record("timechain mark link: a press on the ₿ over the crown opens mempool.space in a new tab with noopener and noreferrer, and its tip offers it",
+    r.opened.length === 1 && r.opened[0][0] === "https://mempool.space" && r.opened[0][1] === "_blank" && /noopener/.test(r.opened[0][2]) && /noreferrer/.test(r.opened[0][2]) && /mempool\.space/.test(at.tip), JSON.stringify({ at, ...r }));
+} };
+// Into the Genesis Museum, waiting across frames: its own code may still be on its way at a first arrival.
+const genesisGo = `(async () => { const B = window.__ooga, t0 = performance.now(); B.go("timechain", "8"); while ((B.transitioning || B.scene !== "timechain" || B.timechain.room.id !== 8) && performance.now() - t0 < 20000) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); B.housekeep(); })()`;
+const timechainMark = { name: "timechain mark", why: "regression: the stream's dots ended their flight in front of the mark's squares and a landing's spark swelled over its neighbours, so squares no dot had reached flashed yellow", run: async (b) => {
+  await untilPage(b, 'B.scene === "timechain" && B.timechain && !B.transitioning', 20000);
+  await b.evaluate(genesisGo);
+  // A minute after a block, the room on its own wall clock: most squares white, some turned, dots arriving. Every drawn
+  // frame is read in the task that drew it: each white square's middle pixel, where the dots are, how big a square is.
+  const r = await b.evaluate(`(async () => {
+    const B = window.__ooga, G = BL.timechainGenesis, N = B.timechain.built.nodes, R = B.renderer, c = document.getElementById("scene"), was = R.quality;
+    const clock = () => (BL.net && typeof BL.net.serverNow === "function" ? BL.net.serverNow() : Date.now()) / 1000, pause = (ms) => new Promise((done) => setTimeout(done, ms));
+    G.live.lastBlockAt = clock() - 60; R.setQuality("high");
+    B.pilot.navigate({ position: { x: 0, y: 0, z: 3.4 }, yaw: 0, pitch: -1.28, dist: 4 }); B.pilot.enterClose(); B.advance(0.3, 1 / 30);
+    // The dots at the mark's own height and over it (others cross the floor and climb the dome under the same spot).
+    const dots = Object.keys(N).filter((key) => key.startsWith("pocStream")).map((key) => N[key]), plane = N.btile0.position.y, top = plane + 0.07;
+    const over = () => dots.filter((n) => n.scale.x > 0.01 && Math.abs(n.position.x) < 3.1 && Math.abs(n.position.z) < 3.6 && Math.abs(n.position.y - plane) < 1.2);
+    // Two seconds for the mark to settle into that minute, and on until dots are arriving.
+    for (const t0 = performance.now(); (performance.now() - t0 < 2000 || !over().length) && performance.now() - t0 < 15000;) { R.setQuality("high"); B.advance(1 / 30, 1 / 30); await pause(30); }
+    const t = document.createElement("canvas"); t.width = c.width; t.height = c.height;
+    const x = t.getContext("2d", { willReadFrequently: true }), k = c.width / c.clientWidth, o = {}, at = [], seen = [], rest = [];
+    for (let i = 0; i < G.mark.count; i++) { const n = N["btile" + i], p = R.project(n.position.x, n.position.y - 0.08, n.position.z, o); at.push(p ? [Math.round(p.x * k), Math.round(p.y * k)] : null); seen.push([]); rest.push(0); }
+    const xs = at.filter(Boolean).map((p) => p[0]), ys = at.filter(Boolean).map((p) => p[1]), x0 = Math.min(...xs) - 2, y0 = Math.min(...ys) - 2, w = Math.max(...xs) - x0 + 3, h = Math.max(...ys) - y0 + 3;
+    let frames = 0, dotsOver = 0, inFront = 0, swollen = 0; const lit0 = G.mark.lit;
+    for (const t0 = performance.now(); frames < 100 && performance.now() - t0 < 30000;) {
+      await pause(30); R.setQuality("high"); B.advance(1 / 30, 1 / 30);
+      // Not while a block drops: its wave, its fall and the square it takes are another matter.
+      const td = clock() - G.live.dropAt; if (td > -3 && td < 12) continue;
+      x.drawImage(c, 0, 0); frames++;
+      const d = x.getImageData(x0, y0, w, h).data, near = over(); dotsOver += near.length;
+      for (const n of near) if (n.position.y < top) inFront++;
+      for (let i = 0; i < at.length; i++) {
+        const n = N["btile" + i], g = n.geometry, white = g.faces[g.faces.length - 1].color[2] === 234;
+        if (white) rest[i] = n.scale.x; else if (rest[i] && n.scale.x > rest[i] * 1.001) swollen++;
+        if (!white || !at[i]) continue;
+        const q = ((at[i][1] - y0) * w + at[i][0] - x0) * 4; seen[i].push(d[q], d[q + 1], d[q + 2]);
+      }
+    }
+    R.setQuality(was);
+    // Each square against its own middle colour over the frames it stayed white.
+    let worst = 0, squares = 0;
+    for (const s of seen) {
+      const m = s.length / 3; if (m < 10) continue; squares++;
+      for (let ch = 0; ch < 3; ch++) { const v = []; for (let j = 0; j < m; j++) v.push(s[j * 3 + ch]); const mid = v.slice().sort((p, q) => p - q)[m >> 1]; for (const q of v) worst = Math.max(worst, Math.abs(q - mid)); }
+    }
+    return { kind: R.kind, frames, squares, turned: G.mark.lit - lit0, dotsOver, inFront, swollen, worst };
+  })()`);
+  record("timechain mark: between landings every white square of the mark keeps its colour, no dot of the stream comes in front of the squares and no landing's spark grows past its own square",
+    r.frames >= 60 && r.squares > 200 && r.dotsOver > 0 && r.turned > 0 && r.inFront === 0 && r.swollen === 0 && r.worst <= 16, JSON.stringify(r));
+} };
 const timechainCanvas = { name: "timechain canvas2d", why: "rule: a room boots and paints its dome and live pictures on Canvas 2D", run: async (b) => {
   const painted = await untilPage(b, 'B.scene === "timechain" && B.timechain.slots.every(s => s.shown)', 20000);
   const r = await b.evaluate(`({ kind: __ooga.renderer.kind, drawn: __ooga.renderer.stats.drawn, room: __ooga.timechain.room.id, view: __ooga.pilot.mode })`);
   record("timechain canvas2d: the Lecture Hall, a raked hall, boots and paints every live picture on Canvas 2D", painted && r.kind === "canvas2d" && r.room === 1 && r.view === "first-person", JSON.stringify(r));
 } };
 scene("timechain", { url: roomPage(0), steps: [timechainRoom, timechainRooms, timechainWallJump, timechainTrip] });
+// The Genesis Museum's own checks in a session of their own, run by itself: the rooms' session keeps its time, and
+// the mark is read on the room's wall clock.
+scene("timechain", { label: "genesis", exclusive: true, url: roomPage(0), steps: [timechainMark, timechainMarkLink, timechainHologram, timechainFirst, timechainPortal] });
 scene("timechain", { label: "canvas2d", url: roomPage(1, "canvas2d=1"), steps: [timechainCanvas] });
 const timechainLectureScreens = {
   name: "timechain lecture screens", why: "regression: projected answers, screen focus, gestures, scrub holds, background sync and live popups follow the same lecture clock", run: async b => {
@@ -43796,7 +43952,11 @@ const raceRigChecks = async () => {
     // (to edd7c63c); both uniforms are 0 for every other geometry.
     // Observatory quality fades add uCanvasPrevious and uCanvasBlend (to a5600e80).
     // uCanvasBlend stays 0 outside a transitioning camera feed; ordinary output is unchanged.
-    "a5600e80e22eaa8b0c5f7bd50a087bf2165bc07401f73f41abea2cdf1aa59496",
+    // The Genesis Museum's hologram is some forty see-through layers of faces that are all their own light: such a
+    // face (emissive 1) now skips the scene's lighting, whose result was mixed away to nothing for it already (to
+    // e85db243 with the Block Party's uGlassGrazing and the Observatory's uniforms; 30c97593 without them); every
+    // other face is shaded as before.
+    "e85db2430f47dcf971ddda871bae804084ab6e724855c673c999a1f9431c888e",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));

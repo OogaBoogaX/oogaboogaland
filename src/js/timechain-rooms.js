@@ -1,6 +1,6 @@
 // The Timechain Sphere's rooms, each its own kind of place, numbered on the keypad's 0–9: 0 the Conference Room, 1 the
-// Lecture Hall, 2 the Mining Museum, 3 Satoshi's Temple, 4 Proof of Work-out, 5 the Movie Theater, 6 the Block Party and
-// 7 the Planetarium. 8 and 9 are empty: on the keypad and in the directory, greyed out and never chosen. A room is an
+// Lecture Hall, 2 the Mining Museum, 3 Satoshi's Temple, 4 Proof of Work-out, 5 the Movie Theater, 6 the Block Party,
+// 7 the Planetarium and 8 the Genesis Museum. 9 is empty: on the keypad and in the directory, greyed out and never chosen. A room is an
 // integer `id`, validated wherever one comes in (`parse`, which refuses an empty number): the keypad, a route, a history
 // entry, a stored visit.
 // Signed in, a room's zone (`sphere-<id>`, never a dotted name, which would fold every room into one voice group)
@@ -36,7 +36,7 @@
     { kind: "theater", name: "Movie Theater", tag: "The whole dome is the picture", R: 20 },
     { kind: "party", name: "Block Party", tag: "Dance under a dome of light", R: 20 },
     { kind: "planetarium", name: "Planetarium", tag: "Tonight's sky over London", R: 8 },
-    null,
+    { kind: "genesis", name: "Genesis Museum", tag: "The road to Bitcoin, 1974 to 2009", R: 21 },
     null
   ];
   // Every number on the keypad, an empty one (`empty`) named "Empty" with no kind. Only the Conference Room has a lock:
@@ -65,6 +65,8 @@
   // at the focus.
   const shapeOf = (kind, R) => {
     if (kind === "planetarium") return { c: 1.6, yMin: 0, P: 0, edge: { flat: 1.6 } };
+    // The Genesis Museum has no wall: its screen comes down to the floor, so the stars run from the glass's edge to the crown.
+    if (kind === "genesis") return { c: 0.3 * R, yMin: 0, P: 0, edge: { flat: 0.12 } };
     if (kind === "lecture") {
       const P = 0.26 * R;
       return { c: 0.1 * R, yMin: -P, P, edge: { A: [-R, -P + 2.3], B: [R, 3.7] }, rake: { focus: -0.45 * R, front: 0.94, back: 10, depth: 3.02, pitch: 2.9, psiMax: 58, seatTop: 0.42, aisleSteps: 2, dais: true, aisle: 1.1 } };
