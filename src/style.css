@@ -11525,6 +11525,11 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   .dsb-active .dsb-context:not(.big-context):not(.ink-context-browse) { position: fixed; left: 50%; top: auto; bottom: max(145px,calc(env(safe-area-inset-bottom) + 132px)); transform: translateX(-50%); max-width: 180px; min-height: 44px; padding: 8px; white-space: normal; }
 }
 
+/* Short desktop windows still need a clear click path to the carried Ooga. */
+@media (pointer:fine) and (max-height:520px) {
+  .dsb-active .dsb-context:not(.big-context):not(.ink-context-browse) { bottom: 15vh; }
+}
+
 /* Stackchain's publication styling uses the existing shared viewport/focus shell. */
 .stackchain-menu { color: #eee2c9; background: #20272b; border: 1px solid #b08b52; border-radius: 8px; }
 .stackchain-menu header { display: flex; align-items: center; justify-content: space-between; gap: 16px; background: #282a29; border-bottom: 3px solid #a68149; }
@@ -12330,6 +12335,21 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   }
 }
 
+/* Short portrait phones need the tally below the sticks, not over the look pad. */
+@media (pointer: coarse) and (max-width: 520px) and (min-height: 481px) and (max-height: 640px) {
+  .block-tally {
+    top: auto;
+    bottom: calc(16px + var(--safe-bottom));
+    left: calc(12px + var(--safe-left));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    min-height: 44px;
+    text-align: center;
+    align-content: center;
+  }
+  .block-tally span { grid-row: 1; }
+  .block-tally b { grid-row: 2; text-align: center; }
+}
+
 /* On a wide screen Block Frenzy's board sits on the left, leaving the right for the Ooga on show, with its name
    under it. */
 @media (min-width: 760px) {
@@ -12483,8 +12503,19 @@ body[data-active-scene] #environment-sound { display: flex; align-items: center;
 }
 .studio-side button { flex: 0 0 auto; padding: 0 10px; }
 .studio-wardrobe { display: grid; gap: 7px; margin: 12px 0; }
-.studio-wardrobe select { width: 100%; min-width: 0; min-height: 44px; padding: 7px; font-size: 12px; color: var(--paper); cursor: pointer; }
-.studio-wardrobe :is(select, input[type="range"]):focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.studio-hats { width: 100%; min-width: 0; margin: 0; padding: 0; border: 0; }
+.studio-hats legend { padding: 0; margin-bottom: 6px; }
+#studio-hat-choices { display: grid; gap: 5px; max-height: min(32vh, 240px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--wood-edge) rgba(0, 0, 0, 0.25); }
+.studio-hat-family { min-width: 0; padding: 3px; }
+.studio-hat-choice { display: flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 6px; border-radius: 4px; cursor: pointer; }
+.studio-hat-choice:has(input:checked) { background: rgba(216, 137, 43, 0.16); }
+.studio-hat-choice input { flex: 0 0 16px; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.studio-hat-choice span { min-width: 0; overflow-wrap: anywhere; }
+.studio-hat-name { display: block; color: var(--paper); font-size: 12px; line-height: 1.4; }
+.studio-hat-credit { display: block; color: rgba(243, 239, 228, 0.65); font-size: 10px; line-height: 1.4; }
+.studio-hat-variants { margin-left: 8px; padding-left: 6px; border-left: 1px solid var(--stone-dk); }
+.studio-hat-variants > summary { min-height: 44px; align-content: center; padding: 0 6px; color: var(--accent-text); font-size: 11px; cursor: pointer; overflow-wrap: anywhere; }
+.studio-wardrobe :is(input[type="radio"], input[type="range"], summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .studio-hat-size-label { display: flex; justify-content: space-between; gap: 8px; }
 .studio-hat-size-label output { color: var(--accent-text); font-variant-numeric: tabular-nums; }
 .studio-wardrobe input[type="range"] { width: 100%; min-width: 0; height: 44px; margin: 0; accent-color: var(--accent); cursor: pointer; }

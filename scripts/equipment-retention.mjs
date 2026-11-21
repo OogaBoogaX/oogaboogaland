@@ -32,16 +32,38 @@ const targetRegistry = root => {
   // An older target cannot silently opt into equipment without the retention-aware release tools.
   read(root, "scripts/equipment-retention.mjs", MAX_RESULT_BYTES);
   const catalog = parse(read(root, "src/equipment/hats/catalog.json", MAX_RESULT_BYTES), "invalid target catalog");
-  if (catalog.format !== 1 || !Array.isArray(catalog.items)) fail("invalid target catalog");
+  if (![1, 2].includes(catalog.format) || !Array.isArray(catalog.items) || catalog.items.length > 32) fail("invalid target catalog");
   // Only the approved tool's shared validator executes; target catalog/archive inputs stay JSON.
   const context = vm.createContext({ rows: JSON.stringify(catalog.items) });
   vm.runInContext(schema, context, { timeout: 1000 });
-  try { vm.runInContext("BL.equipmentHats.register(JSON.parse(rows))", context, { timeout: 1000 }); }
+  const archives = new Map(), revisions = {};
+  let count = 0;
+  for (const item of catalog.items) {
+    if (!item || typeof item.id !== "string" || !ITEM.test(item.id) || item.id.length > 64
+      || !Array.isArray(item.versions) || (count += item.versions.length) > MAX_VERSIONS) fail("invalid target registry");
+    for (const version of item.versions) {
+      if (!HASH.test(version || "")) fail("invalid target version");
+      const text = read(root, `src/equipment/hats/${version}.json`, context.BL.equipmentHats.MAX_BYTES);
+      if (createHash("sha256").update(text).digest("hex") !== version) fail("saved hat archive digest differs");
+      context.archive = text; context.item = item.id;
+      let archive;
+      try {
+        archive = vm.runInContext("BL.equipmentHats.validate(JSON.parse(archive),item)", context, { timeout: 1000 });
+        if (context.BL.equipmentHats.encode(archive) !== text) fail("saved hat archive is not canonical");
+      } catch { fail("saved hat archive is invalid or noncanonical"); }
+      archives.set(version, archive);
+      revisions[version] = { item: item.id, content: archive.format === 2 ? archive.content
+        : createHash("sha256").update(context.BL.equipmentHats.encode(context.BL.equipmentHats.contentOf(archive))).digest("hex"),
+      profile: archive.format === 2 ? archive.profile : context.BL.equipmentHats.legacyProfile(item.id), parent: archive.format === 2 ? archive.parent : null };
+    }
+  }
+  context.revisions = JSON.stringify(revisions);
+  try { vm.runInContext("BL.equipmentHats.register(JSON.parse(rows),JSON.parse(revisions))", context, { timeout: 1000 }); }
   catch { fail("invalid target registry"); }
-  return context;
+  return { context, archives };
 };
-const retain = (root, context, rows) => {
-  const seen = new Set();
+const retain = (root, { context, archives }, rows) => {
+  const seen = new Set(), contents = new Set();
   for (const row of rows) {
     if (!row || typeof row !== "object" || Object.keys(row).sort().join(",") !== "item,version"
       || typeof row.item !== "string" || row.item.length > 64 || row.item === "none" || !ITEM.test(row.item) || !HASH.test(row.version || ""))
@@ -50,13 +72,18 @@ const retain = (root, context, rows) => {
     if (seen.has(key)) fail("version pairs are not distinct");
     seen.add(key);
     if (!context.BL.equipmentHats.has(row.item, row.version)) fail("target omits a retained hat version");
-    const text = read(root, `src/equipment/hats/${row.version}.json`, context.BL.equipmentHats.MAX_BYTES);
-    if (createHash("sha256").update(text).digest("hex") !== row.version) fail("saved hat archive digest differs");
-    context.archive = text; context.item = row.item;
+    const archive = archives.get(row.version);
+    if (archive.format !== 2 || contents.has(archive.content)) continue;
+    // A retained revision is usable only with its complete geometry. The manifest hash also pins
+    // item, fit profile and parent, so a shared blob cannot silently refit or reparent a saved choice.
+    const text = read(root, `src/equipment/hats/${archive.content}.json`, context.BL.equipmentHats.MAX_BYTES);
+    if (createHash("sha256").update(text).digest("hex") !== archive.content) fail("saved hat content digest differs");
+    context.content = text;
     try {
-      if (vm.runInContext("BL.equipmentHats.encode(BL.equipmentHats.validate(JSON.parse(archive),item))", context, { timeout: 1000 }) !== text)
-        fail("saved hat archive is not canonical");
-    } catch { fail("saved hat archive is invalid or noncanonical"); }
+      if (vm.runInContext("BL.equipmentHats.encode(BL.equipmentHats.validateContent(JSON.parse(content)))", context, { timeout: 1000 }) !== text)
+        fail("saved hat content is not canonical");
+    } catch { fail("saved hat content is invalid or noncanonical"); }
+    contents.add(archive.content);
   }
   return seen.size;
 };

@@ -518,6 +518,7 @@
   const CLANKER_HIT = { node: null, owner: null, type: "none", distance: Infinity, x: 0, y: 0, z: 0 };
   const CLANKER_CAVITY = { floor: 0, ceiling: 0, caveIndex: 0 };
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
+  let bifrostWalk = null;
   let enteringTween = null, factoryDeparting = false, bifrostDeparting = false, factoryHeld = false;
   // The walk through the Lightning Factory's shield (factoryGlide): which way, the Ooga it walks, how long it has
   // walked, where the Ooga stood the frame before and whether it is through. `eyes` is the view through the walk, and
@@ -6368,8 +6369,8 @@
     w.phase = 0; w.through = false; w.seen = false;
     crew.steer(0, 0, 0, 0, 0);
     w.eyes.letGo(FOLLOW.min);
-    // A forward key held through the walk goes on walking; anything else waits to be let go, as the view has turned.
-    w.settle = player === w.cave && !pilot.controls.takeForward();
+    // The eye rig restores the view and movement still held when the walk releases it.
+    w.settle = false;
   };
   const factoryGlide = (dt, player, along, across, feet) => {
     const w = factoryWalk, G = BL.factoryWindow.GLIDE, m = factoryMouth.mouth, p = player.root.position;
@@ -6403,7 +6404,7 @@
     // Still played, so the crew never stands it up and turns it back out to work. The island's meshes stay on the GPU while
     // the visit lasts (`world.islandKeep`), so walking back out uploads nothing, and this frame, once drawn, is held over
     // the factory's first (`grab`).
-    world.factoryCrossing = { across, past: shield - along };
+    world.factoryCrossing = { across, past: shield - along, view: w.eyes.returnView, focused: w.eyes.focused };
     world.islandKeep = islandMeshes();
     w.phase = 0;
     w.grab = true;
@@ -6446,13 +6447,20 @@
   // Back out of the Factory's shield: the Ooga as far past it and as far across as the hall let it go, seen from its own
   // eyes facing the daylight, the Factory's last frame dissolving off it (when it was held over the crossing at all: an
   // island that had to be rebuilt fades in instead), and the walk on out of the tunnel.
+  const arriveFromBifrost = (c) => {
+    const p = bifrostIsle.site.portal, sr = Math.sin(p.ry), cr = Math.cos(p.ry), side = clamp(c.across, -p.halfW + 0.5, p.halfW - 0.5);
+    const at = (along) => ({ x: p.x + sr * along + cr * side, y: p.floorY, z: p.z + cr * along - sr * side });
+    bifrostWalk?.reset();
+    bifrostWalk = BL.factoryWindow.portalWalk(pilot, crew);
+    bifrostWalk.begin(at(p.fieldZ + 0.1), at(p.fieldZ + clamp(BL.factoryWindow.stopPast(0, c.view), 3, 6)), p.ry, c, bifrostIsle.site.groundAt);
+  };
   const arriveFromFactory = (c) => {
     const m = factoryMouth.mouth, sr = Math.sin(m.ry), cr = Math.cos(m.ry), G = BL.factoryWindow.GLIDE, player = pilot.player;
     const along = BL.factoryModels.SHIELD_Z + c.past, across = clamp(c.across, -1.2, 1.2), x = m.x + sr * along + cr * across, z = m.z + cr * along - sr * across;
     pilot.navigate({ position: { x, y: m.floorY, z }, yaw: m.ry + Math.PI, pitch: 0, dist: FOLLOW.min, framed: true });
-    factoryWalk.eyes.arrive(player, m.ry);
+    factoryWalk.eyes.arrive(player, m.ry, c);
     const p = player.root.position;
-    Object.assign(factoryWalk, { phase: FACTORY_WALK_OUT, cave: player, t: 0, x: p.x, z: p.z, seen: true, through: false, stop: BL.factoryWindow.stopPast(FOLLOW.min), still: c.held ? 1 : 0, hold: c.held ? G.still : 0 });
+    Object.assign(factoryWalk, { phase: FACTORY_WALK_OUT, cave: player, t: 0, x: p.x, z: p.z, seen: true, through: false, stop: BL.factoryWindow.stopPast(FOLLOW.min, c.view), still: c.held ? 1 : 0, hold: c.held ? G.still : 0 });
   };
   // Step out into the mainland's Arcade overhang, independent of the carried camera/combat mode.
   // This is a doorway arrival, not the map destination's exterior framing (which can be blocked).
@@ -6506,12 +6514,13 @@
       else BL.bifrostIsle.update(b.site, dt, b.effectsTime, NaN, NaN, NaN);
     }
     b.heimdall.update(dt, elapsed, at ? at.x : orbit.tx, at ? at.y - player.baseY : orbit.ty, at ? at.z : orbit.tz, !!player);
-    if (!player || entering) return;
+    if (!player || entering || bifrostWalk?.active) return;
     const sr = Math.sin(p.ry), cr = Math.cos(p.ry);
     const along = (at.x - p.x) * sr + (at.z - p.z) * cr, across = (at.x - p.x) * cr - (at.z - p.z) * sr;
     const feet = at.y - player.baseY - p.floorY;
     if (along > p.fieldZ || along < p.fieldZ - 2 || Math.abs(across) > p.halfW || feet < o.floorY - 0.12 || feet >= o.ceilingY) return;
     b.phase.ripples.pulse(across, feet + 1, 0);
+    world.bifrostCrossing = { ...BL.factoryWindow.doorView(pilot, p.ry + Math.PI), across };
     entering = bifrostDeparting = true;
     world.pilot = player.traits.name;
     b.snap = true;
@@ -8357,6 +8366,7 @@
     if (chalkboard.openNow) { if (chalkboardRefusal()) chalkboard.close(); }
     else if (clankerPlay.active) clankerPlay.update(dt);
     else if (!cloudHopper?.fallView()) pilot.update(dt);
+    bifrostWalk?.update(dt);
     // The doorway's views (the keypad's, the swoop into the eyes and back out) take over from the pilot's.
     if (!cloudPlaying()) timechainIsland.gate.view(dt);
     if (factoryMouth && !cloudPlaying()) factoryWalk.eyes.view(dt);
@@ -11107,6 +11117,7 @@
     }
   };
   const suspendHub = () => {
+    bifrostWalk?.reset(); bifrostWalk = null;
     architectCave?.suspend(); RENDER_OPTS.cameraFeeds = null;
     stopLazyBedding();
     // A kept hammock stays hung; its sitter gets up to go.
@@ -11257,13 +11268,16 @@
     BL.players.setCloudSpot(cloudSpotOf);
     spotPlace = ctx.place || "";
     const donate = ctx.place === "donate", routedPlace = donate || ctx.place === "cloud-hopper-return" ? null : ctx.place;
+    const bifrostCrossing = ctx.from === "bifrost" ? world.bifrostCrossing : null;
+    world.bifrostCrossing = null;
     const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
     world.sphereExit = null;
     const factoryCrossing = ctx.from === "factory" ? world.factoryCrossing : null;
     world.factoryCrossing = null;
     const arcadeCrossing = ctx.from === "arcade" ? world.arcadeCrossing : null, arcadeYard = world.arcadeYard;
     world.arcadeCrossing = world.arcadeYard = null;
-    if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
+    if (returningCharacter && bifrostCrossing && pilot.player && bifrostIsle) arriveFromBifrost(bifrostCrossing);
+    else if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
     else if (returningCharacter && factoryCrossing && pilot.player && factoryMouth) arriveFromFactory(factoryCrossing);
     else if (returningCharacter && arcadeYard && pilot.player && arcadeMouth) arcadeMouth.entrance.standAt(arcadeYard.slot);
     else if (returningCharacter && arcadeCrossing && pilot.player && arcadeMouth) { arcadeMouth.entrance.arrive(arcadeCrossing); factoryWalk.still = 1; factoryWalk.hold = BL.factoryWindow.GLIDE.still; }
@@ -12382,6 +12396,8 @@
     // greeting over the dialog.
     const donate = ctx.place === "donate", routedPlace = donate || resumed || ctx.place === "cloud-hopper-return" ? null : ctx.place;
     // Out of a Timechain room: behind the Sphere's curtain, to walk out through its doors.
+    const bifrostCrossing = ctx.from === "bifrost" ? world.bifrostCrossing : null;
+    world.bifrostCrossing = null;
     const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
     world.sphereExit = null;
     // Out of the Lightning Factory's shield on foot: in its light, walking on out of the mouth.
@@ -12389,7 +12405,8 @@
     world.factoryCrossing = null;
     const arcadeCrossing = ctx.from === "arcade" ? world.arcadeCrossing : null, arcadeYard = world.arcadeYard;
     world.arcadeCrossing = world.arcadeYard = null;
-    if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
+    if (returningCharacter && bifrostCrossing && pilot.player && bifrostIsle) arriveFromBifrost(bifrostCrossing);
+    else if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
     else if (returningCharacter && factoryCrossing && pilot.player && factoryMouth) arriveFromFactory(factoryCrossing);
     else if (returningCharacter && arcadeYard && pilot.player && arcadeMouth) arcadeMouth.entrance.standAt(arcadeYard.slot);
     else if (returningCharacter && arcadeCrossing && pilot.player && arcadeMouth) { arcadeMouth.entrance.arrive(arcadeCrossing); factoryWalk.still = 1; factoryWalk.hold = BL.factoryWindow.GLIDE.still; }
@@ -12605,13 +12622,14 @@
     entering = factoryDeparting = bifrostDeparting = false;
     factoryWalk.phase = 0; factoryWalk.seen = factoryWalk.through = factoryWalk.grab = false; factoryWalk.still = factoryWalk.hold = 0;
     if (factoryWalk.eyes) factoryWalk.eyes.reset();
-    world.factoryCrossing = world.islandKeep = null;
+    world.bifrostCrossing = world.factoryCrossing = world.islandKeep = null;
     if (factoryMouth) factoryMouth.snap = false;
     if (arcadeMouth) arcadeMouth.snap = false;
     if (bifrostIsle) bifrostIsle.snap = false;
     pilot.controls.reset(); input.reset(); pilot.setActive(true);
   };
   const leave = (destroy = false) => {
+    bifrostWalk?.reset(); bifrostWalk = null;
     if (arcadeMouth) arcadeMouth.entrance.unbind();
     // Left by Back or Forward, the logo or any other way than a door of its own (which handed its Ooga over and set
     // `entering`), the island hands on the Ooga driven, as every other scene does, so the next one plays the same one;

@@ -355,17 +355,19 @@
       && past > Math.max(-G.reach, d.plane - DOOR_IN + OUT_SLACK) && toward > G.moving;
   };
   // On in through the door's shield from the hall: as far to its side and as far past it as the Ooga went through the
-  // hall's, facing down the runway, the view square behind it, and the walk on.
+  // hall's, keeping the doorway-relative view while walking on.
   const walkIn = (c) => {
+    walk.view = c.doorView;
     const G = BL.factoryWindow.GLIDE, at = BL.factoryWindow.arrival(DOOR_WAY, clamp(c.side, -1.2, 1.2), clamp(c.past, 0, G.past), ARRIVE);
-    pilot.navigate({ yaw: at.yaw, pitch: clamp(c.pitch, FOLLOW.pitch[0], IN_PITCH), dist: clamp(c.dist, FOLLOW.min, IN_VIEW), position: { x: at.x, y: DOOR.y, z: at.z }, framed: true });
-    pilot.orbit.tDist = ARRIVAL.dist;
+    if (walk.view) BL.factoryWindow.restoreDoorView(pilot, Math.atan2(-DOOR_WAY.ox, -DOOR_WAY.oz), walk.view, { x: at.x, y: DOOR.y, z: at.z });
+    else pilot.navigate({ yaw: at.yaw, pitch: clamp(c.pitch, FOLLOW.pitch[0], IN_PITCH), dist: clamp(c.dist, FOLLOW.min, IN_VIEW), position: { x: at.x, y: DOOR.y, z: at.z }, framed: true });
     const p = avatar.root.position;
     Object.assign(walk, { phase: WALK_ON, t: 0, x: p.x, z: p.z, through: false });
+    pilot.setExternalControl(true, null, true);
   };
   // The walk, a frame at a time, after the pilot has read the visitor's input and before the crew moves, as the
-  // Factory's gate walks it: down the door's middle at an even pace, the view swinging round behind (coming in, turned as
-  // an arrival's is, `arrival`); out through the shield it stands a beat, then the hall takes over without a fade.
+  // Factory's gate walks it: down the door's middle at an even pace with the camera following;
+  // out through the shield it stands a beat, then the hall takes over without a fade.
   // Anything else moving the Ooga, or a walk that runs long, lets go; so does reaching where an arrival stands.
   const doorStep = (dt) => {
     const w = walk, G = BL.factoryWindow.GLIDE, d = DOOR_WAY, p = avatar.root.position, o = pilot.orbit, off = w.phase === WALK_OFF;
@@ -375,15 +377,19 @@
     if (people.player !== avatar || moved > 1.2 || w.t > G.limit || !off && d.plane - past >= DOOR_IN) {
       w.phase = 0;
       w.through = false;
-      w.settle = people.player === avatar;
+      w.settle = false;
       people.steer(0, 0, 0, 0, 0);
+      pilot.setExternalControl(false);
+      if (people.player === avatar) {
+        BL.factoryWindow.restoreDoorView(pilot, Math.atan2(off ? d.ox : -d.ox, off ? d.oz : -d.oz), w.view);
+        pilot.controls.takeMovement();
+      }
+      w.view = null;
       return;
     }
     w.x = p.x; w.z = p.z;
     const k = off ? G.ahead : -G.ahead, wx = d.ox * k + d.oz * side * 0.6, wz = d.oz * k - d.ox * side * 0.6, l = Math.hypot(wx, wz);
     people.steer(wx / l, wz / l, 0, 1, 0, G.speed);
-    const behind = off ? Math.atan2(-d.ox, -d.oz) : Math.atan2(d.ox, d.oz) + arrival().yaw;
-    o.tYaw = o.yaw + Math.atan2(Math.sin(behind - o.yaw), Math.cos(behind - o.yaw));
     if (!off) return;
     if (!w.through && past >= 0) {
       w.through = true;
@@ -396,13 +402,13 @@
       people.steer(0, 0, 0, 0, 0);
       return;
     }
-    world.hangarCrossing = BL.factoryWindow.crossing(d, p, o);
+    world.hangarCrossing = { ...BL.factoryWindow.crossing(d, p, o), doorView: w.view };
     w.phase = 0;
     w.grab = true;
     people.steer(0, 0, 0, 0, 0);
     leaveHangar(true);
     // A switch the director refuses (another under way) leaves the Ooga in the hangar.
-    if (!leaving) { world.hangarCrossing = null; w.through = w.grab = false; }
+    if (!leaving) { world.hangarCrossing = null; w.through = w.grab = false; pilot.setExternalControl(false); BL.factoryWindow.restoreDoorView(pilot, Math.atan2(d.ox, d.oz), w.view); pilot.controls.takeMovement(); w.view = null; }
   };
   // The network's life (`hangar-network.js`). It may play when the visitor's own Ooga walks up to the faint shape: on
   // foot, within 4.5 m, having come 3 m nearer since it formed, while it shows or in its afterimage's first 8 s, one
@@ -1919,14 +1925,8 @@
     // A movement ends Tess's tour before the pilot reads it, so it moves the Ooga this frame (hub-guide.js).
     s.guide.yieldToMovement();
     pilot.readInput(dt);
-    // The door's walk has the Ooga; once it is done the Ooga stands until the visitor lets go of moving, since the view
-    // has turned round behind it and a key still held may now mean the other way.
+    // The guide owns movement until it restores the doorway view and held keys.
     if (walk.phase) doorStep(dt);
-    else if (walk.settle) {
-      const a = pilot.controls.read();
-      if (people && people.player === avatar && (a.x || a.y)) people.steer(0, 0, 0, 0, 0);
-      else walk.settle = false;
-    }
     if (people) people.update(dt, elapsed);
     // The Ooga driven here never rests inside a crate or a chest (`hangarModels.pushOut`).
     if (drivenHere && !drivenHere.camp.seat) HM.pushOut(drivenHere.root.position, drivenHere.root.position.y - drivenHere.baseY, drivenHere.bodyRadius || 0.35);
@@ -2068,7 +2068,9 @@
         const p = pilot.player.root.position;
         if (walk.phase) { /* walking itself */ }
         else if (pilot.player === avatar && walkingOut(p, previousX, previousZ, dt)) {
+          walk.view = BL.factoryWindow.doorView(pilot, Math.atan2(DOOR_WAY.ox, DOOR_WAY.oz));
           Object.assign(walk, { phase: WALK_OFF, t: 0, x: p.x, z: p.z, through: false });
+          pilot.setExternalControl(true, null, true);
           pilot.controls.reset(); input.reset(); hud.tooltip.hide();
         } else if (through(p, p.y - pilot.player.baseY, 0)) leaveHangar();
       }
@@ -2088,6 +2090,7 @@
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   const leave = () => {
+    pilot.setExternalControl(false); walk.view = null;
     pilot.controls.borrowPitch(false);
     SEAT_VIEW.mode = null;
     // Left by Back or Forward rather than by its door, the hangar hands the Ooga on, so the next scene plays the same

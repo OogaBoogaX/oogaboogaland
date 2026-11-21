@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { authorEquipmentHats, checkEquipmentHatSources, extractHat, hatHash, HAT_SOURCES, writeEquipmentHats } from "../../scripts/equipment-hats.mjs";
+import { equipmentHats as hatContract } from "../src/equipment-hats.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const read = (path) => readFileSync(join(root, path), "utf8");
@@ -16,6 +17,31 @@ const catalog = JSON.parse(read("src/equipment/hats/catalog.json"));
 // removal and pet tests below still use live sources.
 const reviewedHeads = JSON.parse(read("worker/test/fixtures/equipment-authored-heads.json"));
 const archive = (row = catalog.items[0]) => JSON.parse(read(`src/equipment/hats/${row.current}.json`));
+const contentOf = (row) => {
+  const value = archive(row);
+  return value.format === 2 ? JSON.parse(read(`src/equipment/hats/${value.content}.json`)) : hatContract.contentOf(value);
+};
+const revisionFor = (row, content) => {
+  const pinned = hatContract.get(row.id, row.current), contentText = hatContract.encode(content), hash = hatHash(contentText);
+  const manifest = { format: 2, item: row.id, content: hash, profile: pinned.profile, parent: pinned.parent };
+  const text = hatContract.encode(manifest);
+  return { manifest, text, version: hatHash(text), contentText, hash };
+};
+// These first published v1 objects match reviewedHeads. Migration and malformed-v1 checks must stay
+// historical even after the live catalog advances to new v2 geometry or adds unrelated creators.
+const LEGACY_VERSIONS = [
+  "c6f85793cc6314e8e0ca023c21ebb925060400ed3b4bc499694c32daa050e8eb",
+  "84ceb32b39ae91eb06e1bfee4767d522c83125d88a0c5cd2bc484f650ef99d38",
+  "5fdd8f47b975be5461f88b2bb9464ad08a106a50064e2d783751ef96101aa86c",
+  "a02db307ac7533f5abf77304fa44dc0b4885afac7b6385eb5f822762c678386a",
+  "bb887370398cee83f57bf29838698ea76be7cccefb0422b43148f589709292d6",
+  "ca76d20012c00802760ddc7bb81bc42e47267ccd0bdc088f00c6f85aeda4aea9",
+  "048d285d3e63b63c9fbec5b033dacce22ce33dc83da5a4c2f5d20f739dfa397b",
+  "9ceae44a88cc91185ed244425aeb90ee564a503b36087aff09c01bc7a890d68d",
+  "b5f533f2a0fd0c7717438b8e9c3f192615e5110b8c59d5aa81f1c2ab91549257"
+];
+const legacyItems = HAT_SOURCES.map(([id, label, creator], i) => ({ id, label, creator,
+  current: LEGACY_VERSIONS[i], versions: [LEGACY_VERSIONS[i]] }));
 const fixture = (options = {}) => {
   const context = vm.createContext({ URLSearchParams, location: { search: "" }, crypto: webcrypto, TextDecoder, TextEncoder,
     AbortController, setTimeout, clearTimeout, fetch: options.fetch || (() => { throw new Error("unexpected fetch"); }) });
@@ -25,7 +51,12 @@ const fixture = (options = {}) => {
   for (const [, , handle] of HAT_SOURCES) vm.runInContext(options.reviewedHeads ? reviewedHeads.sources[handle] : read(`src/characters/${handle}.js`), context);
   for (const handle of ["natalievarty", "MrHodlX", "w-s-bitcoin"]) vm.runInContext(read(`src/characters/${handle}.js`), context);
   vm.runInContext("BL.characters.add({handle:'Normal',joined:1,lastCommit:1}); BL.characters.add({handle:'Slim',joined:1,lastCommit:1,look:{build:'slim'}})", context);
-  for (const name of ["roster-panel", "contributors", "equipment-hats", "equipment-hats.gen", "character-equipment"]) script(name);
+  for (const name of ["roster-panel", "contributors", "equipment-hats"]) script(name);
+  if (options.registry) {
+    context.registry = JSON.stringify(options.registry);
+    vm.runInContext("{ const r=JSON.parse(registry); BL.equipmentHats.register(r.items,r.revisions); }", context);
+  } else script("equipment-hats.gen");
+  script("character-equipment");
   if (options.seed !== false) script("equipment-hat-data.gen");
   if (options.pets) {
     vm.runInContext("BL.pilot = { WALK: { speed: 7.75, gravity: 9.8 } }", context);
@@ -71,6 +102,25 @@ const fittedPoints = (f, cave) => {
   }) : []);
 };
 const between = (value, min, max, label) => assert.ok(value >= min && value <= max, `${label}: ${value} outside [${min}, ${max}]`);
+const variantRegistry = () => {
+  const row = catalog.items.find(item => item.id === "bitcoin-bill-straw"), revision = archive(row), profile = hatContract.get(row.id, row.current).profile;
+  const full = contentOf(row), files = new Map();
+  const put = value => { const text = hatContract.encode(value), hash = hatHash(text); files.set(hash, text); return hash; };
+  const content = put(full), parent = { item: row.id, version: row.current };
+  files.set(row.current, hatContract.encode(revision));
+  const items = [{ ...row, parent: null, versions: [row.current] }];
+  const revisions = { [row.current]: { item: row.id, content, profile, parent: null } };
+  const add = (id, blob, fit = profile) => {
+    const manifest = { format: 2, item: id, content: blob, profile: fit, parent }, version = put(manifest);
+    items.push({ id, label: id, creator: "AnotherCreator", current: version, versions: [version], parent });
+    revisions[version] = { item: id, content: blob, profile: fit, parent };
+    return { item: id, version };
+  };
+  const duplicate = add("straw-copy", content), duplicate2 = add("straw-copy-two", content);
+  const changed = JSON.parse(hatContract.encode(full)); changed.nodes[0].geometry.faces[0].color = [230, 13, 41];
+  const variant = add("red-straw", put(changed)), differentFit = add("different-seat", content, profile === "top-hat" ? "straw" : "top-hat");
+  return { items, revisions, files, content, parent, duplicate, duplicate2, variant, differentFit };
+};
 const lowerFace = (geometry, unit) => {
   // Stalk and leaf start above this region. Compare the actual face, tusks, beard and apple shell below it,
   // independent of merge order or vertex indices in the authored and bare variants.
@@ -445,10 +495,10 @@ test("Bill's hat-riding pet follows no hat, immutable replacements and size chan
   Object.defineProperty(blinking.headClosed, "verts", { configurable: true, get() { closedReads++; return closedDescriptor.value; } });
   try { attach(blinking); } finally { Object.defineProperty(blinking.headClosed, "verts", closedDescriptor); }
   assert.equal(closedReads, 0, "a first measurement while blinking uses the canonical open head for its shared cache key");
-  const replacement = archive(row);
+  const replacement = contentOf(row);
   for (const node of replacement.nodes) node.position[1] += 0.15;
-  const version = hatHash(f.BL.equipmentHats.encode(replacement));
-  f.run(`BL.characterEquipment.seed(${JSON.stringify({ [version]: replacement })})`);
+  const next = revisionFor(row, replacement), version = next.version;
+  f.run(`BL.characterEquipment.seed(${JSON.stringify({ [version]: next.manifest })},${JSON.stringify({ [next.hash]: replacement })})`);
   assert.notDeepEqual(change({ item: row.id, version }), fittedPath, "a new immutable geometry version remeasures the visible support");
   assert.deepEqual(change(selected), fittedPath); assert.equal(ride.seat, fittedSeat);
   const helmet = catalog.items.find((item) => item.id === "johnstackton21m-helmet");
@@ -469,12 +519,17 @@ test("Bill's hat-riding pet follows no hat, immutable replacements and size chan
 });
 
 test("new versions load in old tabs with digest, schema and item verification; older worn geometry stays available", async () => {
-  const row = catalog.items[0], value = archive(row); value.nodes[0].geometry.faces[0].color = [240, 20, 30];
-  const f = fixture({ fetch: async () => { calls++; return new Response(text, { headers: { "content-type": "application/json" } }); } });
-  const text = f.BL.equipmentHats.encode(value), version = hatHash(text); let calls = 0;
+  const row = catalog.items[0], value = contentOf(row); value.nodes[0].geometry.faces[0].color = [240, 20, 30];
+  const next = revisionFor(row, value), version = next.version, calls = new Map();
+  const files = new Map([[version, next.text], [next.hash, next.contentText]]);
+  const f = fixture({ fetch: async url => {
+    const hash = /\/([a-f0-9]{64})\.json$/.exec(url)?.[1]; assert.ok(files.has(hash));
+    calls.set(hash, (calls.get(hash) || 0) + 1);
+    return new Response(files.get(hash), { headers: { "content-type": "application/json" } });
+  } });
   assert.equal(f.BL.equipmentHats.loaded(row.id, version), false);
   await Promise.all([f.BL.equipmentHats.load(row.id, version), f.BL.equipmentHats.load(row.id, version)]);
-  assert.equal(calls, 1); assert.equal(f.BL.equipmentHats.loaded(row.id, version), true);
+  assert.deepEqual([...calls.values()], [1, 1]); assert.equal(f.BL.equipmentHats.loaded(row.id, version), true);
   const a = f.cave("Normal");
   assert.equal(f.BL.characterEquipment.apply(a, { item: row.id, version: row.current }), true);
   const oldGeometry = a.equipmentHatNode.children[0].geometry;
@@ -482,11 +537,115 @@ test("new versions load in old tabs with digest, schema and item verification; o
   assert.notEqual(a.equipmentHatNode.children[0].geometry, oldGeometry);
   assert.equal(f.BL.characterEquipment.apply(a, { item: row.id, version: row.current }), true);
   assert.equal(a.equipmentHatNode.children[0].geometry, oldGeometry);
-  await f.BL.equipmentHats.load(row.id, row.current); assert.equal(calls, 1);
+  await f.BL.equipmentHats.load(row.id, row.current); assert.deepEqual([...calls.values()], [1, 1]);
 });
 
-test("malformed, oversized, substituted and noncanonical network archives cannot become equipment", async () => {
-  const row = catalog.items[0], other = catalog.items[1];
+test("duplicate revisions share one geometry download and mesh while preserving selection, fitting and live nodes", async () => {
+  const registry = variantRegistry(), calls = new Map();
+  const f = fixture({ registry, seed: false, fetch: async (url, options) => {
+    assert.equal(options.credentials, "omit"); assert.equal(options.redirect, "error");
+    const hash = /\/([a-f0-9]{64})\.json$/.exec(url)?.[1];
+    assert.ok(registry.files.has(hash), "only declared immutable objects are requested");
+    calls.set(hash, (calls.get(hash) || 0) + 1);
+    return new Response(registry.files.get(hash), { headers: { "content-type": "application/json" } });
+  } });
+  const hats = f.BL.equipmentHats, render = f.BL.characterEquipment;
+  await Promise.all([hats.load(registry.duplicate.item, registry.duplicate.version),
+    hats.load(registry.duplicate2.item, registry.duplicate2.version)]);
+  assert.equal(calls.get(registry.content), 1, "simultaneous aliases fetch the complete shared geometry once");
+  assert.equal(calls.size, 3, "two item-bound manifests plus their one full geometry blob");
+  const a = f.cave("Normal"), b = f.cave("Slim"), headA = a.parts.head, headB = b.parts.head;
+  a.root.position.x = 8; b.root.rotation.y = 1.2;
+  assert.equal(render.apply(a, registry.duplicate), true); assert.equal(render.apply(b, registry.duplicate2), true);
+  const mesh = a.equipmentHatNode.children[0].geometry;
+  assert.equal(b.equipmentHatNode.children[0].geometry, mesh);
+  assert.notEqual(a.equipmentHatNode, b.equipmentHatNode); assert.notEqual(a.equipmentHatNode.children[0], b.equipmentHatNode.children[0]);
+  assert.equal(a.parts.head, headA); assert.equal(b.parts.head, headB);
+  assert.equal(a.root.position.x, 8); assert.equal(b.root.rotation.y, 1.2);
+  assert.equal(render.selection(a).item, registry.duplicate.item); assert.equal(render.selection(b).item, registry.duplicate2.item);
+  const seat = a.equipmentHatNode.position.y;
+  await hats.load(registry.differentFit.item, registry.differentFit.version);
+  assert.equal(render.apply(a, registry.differentFit), true);
+  assert.equal(a.equipmentHatNode.children[0].geometry, mesh, "fit-specific transforms do not copy the shared mesh");
+  assert.notEqual(a.equipmentHatNode.position.y, seat, "identical geometry can retain a different reviewed fitting");
+  await hats.load(registry.parent.item, registry.parent.version);
+  assert.equal(render.apply(a, registry.parent), true);
+  assert.equal(a.equipmentHatNode.children[0].geometry, mesh, "current geometry and a v2 reuse share the same immutable mesh");
+  await hats.load(registry.variant.item, registry.variant.version);
+  assert.equal(render.apply(a, registry.variant), true); assert.notEqual(a.equipmentHatNode.children[0].geometry, mesh);
+  assert.equal(b.equipmentHatNode.children[0].geometry, mesh, "a variant cannot mutate another wearer's retained appearance");
+  assert.equal(render.apply(a, registry.duplicate), true); assert.equal(a.equipmentHatNode.children[0].geometry, mesh);
+  assert.equal(calls.get(registry.content), 1);
+});
+
+test("content groups show exact duplicates once, keep variants distinct and preserve an existing alias pin", () => {
+  const registry = variantRegistry(), f = fixture({ registry, seed: false }), hats = f.BL.equipmentHats;
+  const roots = hats.groups();
+  assert.equal(roots.length, 1);
+  assert.equal(roots[0].aliases.length, 3, "the original and two exact reuses occupy one choice");
+  assert.equal(roots[0].children.length, 2, "different color and different fitting remain separate variants");
+  const choice = hats.choiceFor(registry.duplicate);
+  assert.equal(choice, roots[0]); assert.equal(hats.groups(), roots, "steady UI reads reuse cached groups");
+  assert.deepEqual(JSON.parse(JSON.stringify(hats.selectionFor(choice, registry.duplicate))), registry.duplicate,
+    "saving the visible shared choice does not move an existing wearer to another creator's item");
+  assert.deepEqual(JSON.parse(JSON.stringify(hats.selectionFor(choice, null))), registry.parent);
+  assert.notEqual(hats.choiceFor(registry.differentFit), choice);
+  assert.notEqual(hats.choiceFor(registry.variant), choice);
+  assert.ok(Object.isFrozen(roots) && Object.isFrozen(choice) && Object.isFrozen(choice.aliases));
+});
+
+test("revision metadata rejects changed ownership, fitting and lineage without partially replacing the registry", () => {
+  const registry = variantRegistry(), f = fixture({ registry, seed: false });
+  const old = f.BL.equipmentHats.get(registry.duplicate.item, registry.duplicate.version);
+  f.context.item = registry.duplicate.item; f.context.version = registry.duplicate.version;
+  f.context.metadata = JSON.stringify(registry.revisions[registry.duplicate.version]);
+  assert.equal(f.run("BL.equipmentHats.accept(item,version,JSON.parse(metadata))"), old);
+  for (const field of ["item", "content", "profile", "parent"]) {
+    const value = { ...registry.revisions[registry.duplicate.version], [field]: field === "item" ? registry.variant.item
+      : field === "content" ? "f".repeat(64) : field === "profile" ? "standard" : null };
+    f.context.metadata = JSON.stringify(value);
+    assert.throws(() => f.run("BL.equipmentHats.accept(item,version,JSON.parse(metadata))"));
+    assert.equal(f.BL.equipmentHats.get(registry.duplicate.item, registry.duplicate.version), old);
+  }
+  const dangling = JSON.parse(JSON.stringify(registry));
+  dangling.items[1].parent.version = "f".repeat(64);
+  dangling.revisions[dangling.items[1].current].parent.version = "f".repeat(64);
+  assert.throws(() => fixture({ registry: dangling, seed: false }), /Invalid hat lineage/);
+});
+
+test("a manifest cannot install substituted or invalid full content, and rejection retains the previous geometry", async () => {
+  const original = variantRegistry();
+  for (const damage of ["missing", "digest", "noncanonical", "shape", "identity"]) {
+    const registry = variantRegistry(), files = new Map(registry.files);
+    let selected = registry.duplicate;
+    if (damage === "missing") files.delete(registry.content);
+    else if (damage === "digest") files.set(registry.content, files.get(registry.content) + " ");
+    else {
+      const manifest = JSON.parse(files.get(selected.version));
+      if (damage === "identity") manifest.item = registry.variant.item;
+      else {
+        const content = JSON.parse(files.get(registry.content));
+        if (damage === "shape") content.nodes[0].geometry.faces[0].i[0] = 999999;
+        const text = (damage === "noncanonical" ? " " : "") + hatContract.encode(content), hash = hatHash(text);
+        files.set(hash, text); manifest.content = hash;
+      }
+      const text = hatContract.encode(manifest), hash = hatHash(text); files.set(hash, text);
+      selected = { item: selected.item, version: hash };
+    }
+    const f = fixture({ registry, seed: false, fetch: async url => {
+      const hash = /\/([a-f0-9]{64})\.json$/.exec(url)?.[1], text = files.get(hash);
+      return text === undefined ? new Response(null, { status: 404 }) : new Response(text, { headers: { "content-type": "application/json" } });
+    } });
+    const a = f.cave("Normal"), render = f.BL.characterEquipment, head = a.headOpen;
+    await assert.rejects(f.BL.equipmentHats.load(selected.item, selected.version));
+    assert.equal(f.BL.equipmentHats.loaded(selected.item, selected.version), false);
+    assert.equal(render.apply(a, selected), false); assert.equal(a.headOpen, head); assert.equal(a.equipmentHatNode, undefined);
+    assert.equal(f.BL.equipmentHats.current(original.duplicate.item), original.duplicate.version);
+  }
+});
+
+test("malformed, oversized, substituted and noncanonical legacy network archives cannot become equipment", async () => {
+  const row = legacyItems[0], other = legacyItems[1];
   for (const mutate of [
     (v) => { v.item = other.id; }, (v) => { v.nodes[0].geometry.faces[0].i[0] = 1e9; },
     (v) => { v.nodes[0].geometry.faces[0].color[0] = -1; }, (v) => { v.nodes[0].scale[1] = -1; },
@@ -552,5 +711,67 @@ test("normal archive builds allow one-file character edits; explicit authoring r
     writeFileSync(oldFile, bytes + " "); assert.throws(() => writeEquipmentHats(folder), /hash\/size/); writeFileSync(oldFile, bytes);
     next.items[0].versions = [next.items[0].current]; writeFileSync(indexFile, JSON.stringify(next));
     assert.throws(() => writeEquipmentHats(folder), /removed from its catalog/);
+  } finally { rmSync(folder, { recursive: true, force: true }); }
+});
+
+test("authoring keeps legacy pins, reuses full content and preserves a variant's exact parent across later updates", () => {
+  const folder = mkdtempSync(join(tmpdir(), "ooga-hat-variants-"));
+  try {
+    mkdirSync(join(folder, "src/js"), { recursive: true }); mkdirSync(join(folder, "worker/src"), { recursive: true });
+    mkdirSync(join(folder, "src/characters"), { recursive: true });
+    for (const name of ["math", "scene", "models", "characters", "equipment-hats"])
+      cpSync(join(root, "src/js", name + ".js"), join(folder, "src/js", name + ".js"));
+    for (const [, , handle] of HAT_SOURCES) writeFileSync(join(folder, "src/characters", handle + ".js"), reviewedHeads.sources[handle]);
+    const directory = join(folder, "src/equipment/hats"); mkdirSync(directory, { recursive: true });
+    const indexFile = join(directory, "catalog.json"), sourcesFile = join(directory, "sources.json");
+    const before = { format: 1, items: legacyItems, sources: Object.fromEntries(HAT_SOURCES.map(([id, , handle]) => [id, hatHash(reviewedHeads.sources[handle])])) };
+    writeFileSync(indexFile, JSON.stringify(before));
+    writeFileSync(sourcesFile, JSON.stringify({ format: 1, items: HAT_SOURCES.map(([id, label, creator]) => ({ id, label, creator,
+      profile: hatContract.legacyProfile(id), parent: null, source: { kind: "character", handle: creator } })) }));
+    for (const version of LEGACY_VERSIONS) cpSync(join(root, "src/equipment/hats", version + ".json"), join(directory, version + ".json"));
+    const bytes = new Map(before.items.flatMap(row => row.versions.map(version => [version, readFileSync(join(directory, version + ".json"), "utf8")])));
+    authorEquipmentHats(folder);
+    const migrated = JSON.parse(readFileSync(indexFile, "utf8"));
+    assert.deepEqual(migrated.items.map(({ id, current, versions }) => ({ id, current, versions })),
+      before.items.map(({ id, current, versions }) => ({ id, current, versions })), "schema migration does not offer silent replacement versions");
+    for (const [version, text] of bytes) assert.equal(readFileSync(join(directory, version + ".json"), "utf8"), text);
+    const parent = { item: before.items[0].id, version: before.items[0].current };
+    const definitions = JSON.parse(readFileSync(sourcesFile, "utf8"));
+    definitions.items.push({ id: "straw-reuse", label: "Another straw", creator: "AnotherCreator",
+      profile: "straw", parent, source: { kind: "reuse", ...parent } });
+    definitions.items.push({ id: "straw-variant", label: "Red straw variant", creator: "VariantMaker",
+      profile: "straw", parent, source: { kind: "character", handle: "VariantMaker" } });
+    writeFileSync(sourcesFile, JSON.stringify(definitions));
+    const variantSource = "window.BL.characters.add({handle:'VariantMaker',joined:1,lastCommit:1,dress:{hat(k,v){v.fill(0,2,8,9,0,2,k.color('#ee1122'));}}});\n";
+    writeFileSync(join(folder, "src/characters/VariantMaker.js"), variantSource);
+    authorEquipmentHats(folder);
+    const addedText = readFileSync(indexFile, "utf8"), added = JSON.parse(addedText), reuse = added.items.find(row => row.id === "straw-reuse");
+    const variant = added.items.find(row => row.id === "straw-variant");
+    const reuseManifest = JSON.parse(readFileSync(join(directory, reuse.current + ".json"), "utf8"));
+    const variantManifest = JSON.parse(readFileSync(join(directory, variant.current + ".json"), "utf8"));
+    const shared = hatContract.encode(hatContract.contentOf(JSON.parse(bytes.get(parent.version))));
+    assert.equal(reuseManifest.format, 2); assert.equal(reuseManifest.content, hatHash(shared));
+    assert.equal(readFileSync(join(directory, reuseManifest.content + ".json"), "utf8"), shared);
+    assert.notEqual(variantManifest.content, reuseManifest.content);
+    assert.deepEqual(reuseManifest.parent, parent); assert.deepEqual(variantManifest.parent, parent);
+    const files = readdirSync(directory).sort(); authorEquipmentHats(folder);
+    assert.equal(readFileSync(indexFile, "utf8"), addedText); assert.deepEqual(readdirSync(directory).sort(), files, "idempotent authoring writes no duplicate objects");
+    const workerObjects = JSON.parse(readFileSync(join(folder, "worker/src/equipment-hat-data.gen.json"), "utf8"));
+    assert.equal(workerObjects[reuseManifest.content], shared, "the public immutable archive map retains the complete shared blob");
+    assert.equal(workerObjects[reuse.current], hatContract.encode(reuseManifest));
+    writeFileSync(join(folder, "src/characters/VariantMaker.js"), variantSource.replace("#ee1122", "#1111ee"));
+    const originalSource = join(folder, "src/characters/Bitcoin-Bill.js");
+    writeFileSync(originalSource, readFileSync(originalSource, "utf8").replace('"#d8c08a"', '"#d9c08a"'));
+    authorEquipmentHats(folder);
+    const updated = JSON.parse(readFileSync(indexFile, "utf8")), nextVariant = updated.items.find(row => row.id === variant.id);
+    assert.notEqual(updated.items[0].current, parent.version);
+    assert.equal(updated.items.find(row => row.id === reuse.id).current, reuse.current, "exact reuse does not follow its source's current pointer");
+    assert.notEqual(nextVariant.current, variant.current); assert.ok(nextVariant.versions.includes(variant.current));
+    assert.deepEqual(JSON.parse(readFileSync(join(directory, nextVariant.current + ".json"), "utf8")).parent, parent);
+    for (const [version, text] of bytes) assert.equal(readFileSync(join(directory, version + ".json"), "utf8"), text);
+    definitions.items = definitions.items.filter(row => row.id !== reuse.id); writeFileSync(sourcesFile, JSON.stringify(definitions));
+    authorEquipmentHats(folder);
+    assert.deepEqual(JSON.parse(readFileSync(indexFile, "utf8")).items.find(row => row.id === reuse.id),
+      updated.items.find(row => row.id === reuse.id), "removing an authoring source keeps its published item and every version available");
   } finally { rmSync(folder, { recursive: true, force: true }); }
 });

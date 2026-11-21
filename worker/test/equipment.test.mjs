@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import vm from "node:vm";
 import { deletePlayer } from "../src/db.js";
 import { equipmentHats, equipmentHatArchive } from "../src/equipment-hats.js";
 import { equipmentCommand, equipmentRecord, nextEquipment } from "../src/equipment-model.js";
@@ -14,6 +15,28 @@ const SITE = "https://equipment.test", NONE = { item: "none", version: null };
 const hat = () => ({ item: equipmentHats.items[0].id, version: equipmentHats.items[0].current });
 const helmet = () => ({ item: "johnstackton21m-helmet", version: equipmentHats.current("johnstackton21m-helmet") });
 const setup = async t => { const db = equipmentDatabase(); t.after(() => db.sql.close()); return { db, account: await equipmentAccount(db) }; };
+const variantModel = () => {
+  const base = equipmentHats.items.find(row => row.id === "johnstackton21m-helmet"), content = "c".repeat(64);
+  const profile = equipmentHats.legacyProfile(base.id), parent = { item: base.id, version: base.current };
+  const revision = (item, profile, parent, content) => {
+    const value = { format: 2, item, profile, parent, content };
+    return [createHash("sha256").update(equipmentHats.encode(value)).digest("hex"), { item, profile, parent, content }];
+  };
+  const [next, nextDescriptor] = revision(base.id, profile, null, content);
+  const [fork, forkDescriptor] = revision("another-space-helmet", profile, parent, content);
+  const [changed, changedDescriptor] = revision("another-space-helmet", equipmentHats.legacyProfile(equipmentHats.items[0].id), parent, "d".repeat(64));
+  const rows = [{ ...base, parent: null, current: next, versions: [base.current, next] },
+    { id: "another-space-helmet", label: "Another helmet", creator: "AnotherCreator", parent, current: changed, versions: [fork, changed] }];
+  const revisions = { [base.current]: { item: base.id, profile, parent: null, content: "e".repeat(64) },
+    [next]: nextDescriptor, [fork]: forkDescriptor, [changed]: changedDescriptor };
+  const context = vm.createContext({ rows: JSON.stringify(rows), revisions: JSON.stringify(revisions) });
+  vm.runInContext(readFileSync(new URL("../../src/js/equipment-hats.js", import.meta.url), "utf8"), context);
+  vm.runInContext("BL.equipmentHats.register(JSON.parse(rows),JSON.parse(revisions))", context);
+  const source = readFileSync(new URL("../src/equipment-model.js", import.meta.url), "utf8")
+    .replace(/import[^;]+;/, "").replace(/export const /g, "const ");
+  const model = vm.compileFunction(source + "\nreturn { equipmentRecord, equipmentCommand, nextEquipment };", ["equipmentHats"])(context.BL.equipmentHats);
+  return { ...model, base: parent, next, fork: { item: "another-space-helmet", version: fork }, changed };
+};
 
 test("equipment: SQL CAS admits one concurrent save and deletion cascades", async t => {
   const { db, account } = await setup(t), token = account.session.token_hash;
@@ -149,7 +172,37 @@ test("equipment: pinned version and declined update survive newer metadata", () 
   assert.equal(nextEquipment(record, { revision: 1, selection: null }), null);
   const apple = { ...record, selection: helmet(), size: 80, update: { ...helmet(), version: v3 } };
   assert.equal(nextEquipment(apple, { revision: 2, decline: v3 }, "w-s-bitcoin").size, 100);
-  assert.equal(nextEquipment(apple, { revision: 2, selection: apple.update }, "w-s-bitcoin").size, 100);
+});
+
+test("equipment: shared geometry keeps independent item pins and Accept or Keep choices", () => {
+  const f = variantModel();
+  const stored = { item: f.base.item, version: f.base.version, size: 110, revision: 7, declined: null };
+  const own = f.equipmentRecord(stored), fork = f.equipmentRecord({ ...stored, ...f.fork });
+  assert.deepEqual(own.selection, f.base);
+  assert.deepEqual(own.update, { item: f.base.item, version: f.next });
+  assert.deepEqual(fork.selection, f.fork);
+  assert.deepEqual(fork.update, { item: f.fork.item, version: f.changed });
+  const keep = f.nextEquipment(own, f.equipmentCommand({ revision: 7, decline: f.next }));
+  assert.deepEqual(keep, { selection: f.base, size: 110, declined: f.next });
+  assert.equal(f.equipmentRecord({ ...stored, revision: 8, declined: keep.declined }).update, null);
+  assert.throws(() => f.nextEquipment(fork, { revision: 7, decline: f.next }), /no longer offered/,
+    "a source item's decision cannot dismiss a variant's update");
+  const accept = f.nextEquipment(fork, f.equipmentCommand({ revision: 7, selection: fork.update }));
+  assert.deepEqual(accept, { selection: fork.update, size: 110, declined: null });
+  assert.deepEqual(own.selection, f.base, "accepting a variant never rewrites the source item's pin");
+  assert.equal(f.nextEquipment(fork, { revision: 6, selection: fork.update }), null);
+  assert.throws(() => f.equipmentCommand({ revision: 7, selection: { item: f.base.item, version: f.fork.version } }), /Unknown hat version/);
+});
+
+test("equipment: a variant's pinned fit profile governs minimum size before its update is accepted", () => {
+  const f = variantModel(), stored = { ...f.fork, size: 80, revision: 2, declined: null };
+  const record = f.equipmentRecord(stored);
+  const keep = f.nextEquipment(record, { revision: 2, decline: f.changed }, "w-s-bitcoin");
+  assert.equal(keep.size, 100, "the retained enclosing helmet keeps the safe apple minimum");
+  assert.deepEqual(keep.selection, f.fork);
+  const accept = f.nextEquipment(record, { revision: 2, selection: record.update }, "w-s-bitcoin");
+  assert.equal(accept.size, 80, "the newly accepted profile, not the item's latest metadata, controls fitting");
+  assert.equal(f.nextEquipment(record, { revision: 2, size: 80 }, "another-ooga").size, 80);
 });
 
 test("equipment: immutable selections reject unknown versions and unbounded/extra input", () => {

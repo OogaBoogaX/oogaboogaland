@@ -8,7 +8,7 @@ const exact = (value, keys) => plain(value) && Object.keys(value).length === key
 export const equipmentEnabled = env => env?.EQUIPMENT_ENABLED === "1";
 export const equipmentRevision = value => Number.isSafeInteger(value) && value >= 0 && value < Number.MAX_SAFE_INTEGER;
 export const equipmentSize = value => Number.isInteger(value) && value >= 80 && value <= 120;
-export const equipmentFitSize = (character, selection, size) => Math.max(size, equipmentHats.minimumSize(character, selection?.item));
+export const equipmentFitSize = (character, selection, size) => Math.max(size, equipmentHats.minimumSize(character, selection?.item, selection?.version));
 
 export const equipmentSelection = (value, hats = equipmentHats) => {
   if (value === null) return null;

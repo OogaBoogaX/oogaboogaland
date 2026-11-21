@@ -139,6 +139,7 @@
   };
 
   let renderer, canvas, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
+  let gateWalk = null;
   let people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, pictureTries = 0, pictureWait = 0, unsubscribeAccount = null, remotes = null, footsteps = null;
   let pictureEpoch = 0, pictureJob = 0, pictureIdle = false, pictureLoading = false, pictureIndex = 0;
   // DSB Land's geography (about 350 ms whole) is built for its picture in small slices during play, not in one task.
@@ -364,10 +365,12 @@
   };
 
   // Back out to the island's gate, as the same Ooga.
-  const leaveChamber = () => {
+  const leaveChamber = (physical = false) => {
     if (leaving) return;
     world.pilot = pilot.player ? pilot.player.traits.name : null;
+    world.bifrostCrossing = physical && pilot.player ? { ...BL.factoryWindow.doorView(pilot, 0), across: pilot.player.root.position.x } : null;
     leaving = go("hub");
+    if (!leaving) world.bifrostCrossing = null;
     if (leaving) audio.cue("leave");
   };
   // Through a window to its world, as the same Ooga, once a transition is free to start.
@@ -385,6 +388,7 @@
     stopPictures();
     pictureTries = PICTURE_TRIES; pictureWait = PICTURE_DELAY;
     leaving = false;
+    world.bifrostCrossing = null;
     pilot.setActive(true);
     audio.cue("stay");
   };
@@ -665,7 +669,7 @@
       // The visitor's view, combat and weapon come in from the last scene and go on to the next (pilot.js `carried`).
       carry: true,
       renderer, canvas, camera, hud, presets: PRESETS, landing: "entrance", pitch: PITCH, dist: DIST,
-      follow: FOLLOW, clampTarget, clampCamera, ceilingAt: () => HALL.wall + 2, coarse: COARSE, mayPossess,
+      follow: FOLLOW, clampTarget, clampCamera, preserveClampedLook: true, ceilingAt: () => HALL.wall + 2, coarse: COARSE, mayPossess,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: groundFor }
     });
     const tipFor = (hit) => {
@@ -726,6 +730,8 @@
     const picked = named || world.pilot && contributors.roster.find((c) => c.name === world.pilot)
       || assigned && contributors.roster.find((c) => c.name === assigned.handle) || null;
     const playerName = picked && !BL.net.mayDrive(picked.name) ? picked.name : null;
+    const crossing = ctx.from === "hub" ? world.bifrostCrossing : null;
+    world.bifrostCrossing = null;
     world.pilot = null;
     if (playerName) {
       // The visitor's weapons and rounds are the page's (`world.weapons`), so none come back refilled at the door.
@@ -749,7 +755,12 @@
       // the field at the tunnel's end.
       const from = scene.windows.find((w) => w.kind === "travel" && w.row.scene === ctx.from);
       if (from) standBefore(from, 2.8);
-      else if (ctx.from === "hub") pilot.navigate(GATE);
+      else if (ctx.from === "hub" && crossing) {
+        gateWalk = BL.factoryWindow.portalWalk(pilot, people, camera, clampCamera);
+        const x = clamp(crossing.across, -ENTRY.halfW + 0.5, ENTRY.halfW - 0.5);
+        // Clear the field at ordinary zooms without guiding a wide orbit through the central hall.
+        gateWalk.begin({ x, y: 0, z: ENTRY.field - 0.1 }, { x, z: ENTRY.field - clamp(BL.factoryWindow.stopPast(0, crossing.view), 3, 6) }, Math.PI, crossing);
+      } else if (ctx.from === "hub") pilot.navigate(GATE);
       else {
         const stood = stoodAt(ctx);
         if (stood) pilot.navigate({ position: stood, yaw: stood.yaw - Math.PI, pitch: GATE.pitch, dist: GATE.dist });
@@ -1025,6 +1036,7 @@
     pilot.readInput(dt);
     if (people) people.update(dt, elapsed);
     pilot.update(dt);
+    gateWalk?.update(dt);
     // The Ooga driven here goes to the room with where it stands and its health; other players here are shown.
     const drivenHere = people && people.player;
     BL.net.setBody(drivenHere ? drivenHere.traits.name : null);
@@ -1095,9 +1107,9 @@
     }
     dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
     // Out through the field, walked into.
-    if (!leaving && pilot.player) {
+    if (!leaving && pilot.player && !gateWalk?.active) {
       const p = pilot.player.root.position;
-      if (p.z > ENTRY.field && Math.abs(p.x) < ENTRY.halfW) leaveChamber();
+      if (p.z > ENTRY.field && Math.abs(p.x) < ENTRY.halfW) leaveChamber(true);
       else windowsFrame(previousX, previousY, previousZ);
     }
     stepTweens(dt);
@@ -1109,6 +1121,7 @@
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   const leave = () => {
+    gateWalk?.reset(); gateWalk = null;
     directory.dispose(); directory = null;
     stopPictures();
     // Left by Back or Forward rather than by a way out of its own, the chamber hands the Ooga on, so the next scene

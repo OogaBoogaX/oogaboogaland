@@ -1486,6 +1486,25 @@
         const at = loungeCount++ * 3;
         loungeSpots[at] = x; loungeSpots[at + 1] = y; loungeSpots[at + 2] = z;
       }
+      // The outer meadow ring can be fully reserved while the rest of an
+      // inactive cave's grassy clearing is empty. Include that same allowed
+      // ground in the bounded cache; all traffic and body checks still apply.
+      for (const area of loungeAreas) {
+        const cells = Math.ceil(area.radius / 0.75), width = cells * 2 + 1;
+        for (let n = 0; n < width * width && loungeCount < 320; n++) {
+          const x = area.x + (n % width - cells) * 0.75, z = area.z + (Math.floor(n / width) - cells) * 0.75;
+          const y = groundAt(x, z, 0);
+          if (!grass(x, y, z) || trafficAt(x, y, z) || caveAt(x, y, z) >= 0) continue;
+          let crowded = false;
+          for (let seat = roofCount; seat < loungeCount; seat++) {
+            const at = seat * 3;
+            if ((loungeSpots[at] - x) ** 2 + (loungeSpots[at + 2] - z) ** 2 < 1.5 ** 2) { crowded = true; break; }
+          }
+          if (crowded) continue;
+          const at = loungeCount++ * 3;
+          loungeSpots[at] = x; loungeSpots[at + 1] = y; loungeSpots[at + 2] = z;
+        }
+      }
     };
     const loungeReserved = (e, x, y, z, radius = WALK_RADIUS, partner = null) => {
       for (let i = 0; i < list.length; i++) {
@@ -1587,6 +1606,10 @@
       const roofTour = !spawn && onRoof && wantsRoof && !stayLevel && e.random() < 0.5;
       const currentRoof = roofTour ? roofAt(p.x, p.y, p.z) : -1;
       const pose = loungePose(e);
+      // A crowded frontage can have no free seat within the normal stroll
+      // radius. After two failed local choices, reuse the full meadow search
+      // instead of waiting in an invalid resting spot until relocation.
+      const walkingRange = stayLevel && e.roam.failedChoices >= 2 ? roamRadius * 2 : 12;
       e.compact = false; e.height = Math.max(height, 2.7);
       // Prefer a small group on some visits; a crowded group always falls back
       // to another empty resting spot instead of blocking a walk indefinitely.
@@ -1595,6 +1618,9 @@
       }
       for (let pass = 0; pass < 2; pass++) {
         const roof = pass ? !wantsRoof : wantsRoof;
+        // A rejected climb's walking-only cooldown also applies to the
+        // fallback pass; otherwise it immediately chooses another roof.
+        if (stayLevel && roof !== onRoof) continue;
         const count = roof ? roofCount : loungeCount - roofCount, from = roof ? 0 : roofCount;
         const local = !spawn ? 48 : 0, candidates = count + local;
         if (!candidates) continue;
@@ -1618,7 +1644,7 @@
           }
           // A walking-only outing may step off a rock or follow a sloped roof.
           // Its supported route, not equal endpoint heights, excludes climbs.
-          if (stayLevel && Math.hypot(x - p.x, z - p.z) > 12) continue;
+          if (stayLevel && Math.hypot(x - p.x, z - p.z) > walkingRange) continue;
           // Worker assignments can change after the resting-spot cache was
           // built. Recheck the live firing lanes for cached candidates too.
           if (trafficAt(x, y, z) || !chillCaveClear(x, y, z)) continue;
@@ -1628,7 +1654,7 @@
           // Let it reach the inactive frontage before choosing shorter outings,
           // and from the pile any lounge: a roof's included, or none is in reach.
           const tripLimit = e.roam.fromPile || !stayLevel && !onRoof && !roof && loungeAreas.length ? roamRadius * 2
-            : roofTour && roof ? 24 : !stayLevel && roof !== onRoof ? 18 : 12;
+            : roofTour && roof ? 24 : !stayLevel && roof !== onRoof ? 18 : walkingRange;
           if (!spawn && (distance < 2 || distance > tripLimit || loungeFailed(e, x, z))) continue;
           // Filter a future walking arrival, not the current reclining body's
           // large fallback circle. The exact new rest and rise are proved by
@@ -5096,6 +5122,12 @@
       if (inClimbArea(e) && (!roofTrip || roofWall && wallRectangleShare(e, p.x, p.y, p.z, heading) >= WALL_ENTER_SHARE)
         && Math.abs(e.goalY - p.y) >= 1 && caveAt(p.x, p.y, p.z) < 0) {
         if (tryClimb(e, heading, e.goalY < p.y) || holdClimbSearch(e)) { e.speed = 0; return; }
+        // A completed search that cannot fit the starting body has rejected
+        // this approach. Do not keep walking up its narrow risers and retry
+        // from a footing that cannot support a lounge or a climb.
+        if (roofTrip && e.climb.failure === "start") {
+          r.wall = true; e.climb.failure = ""; abandonRoam(e); return;
+        }
       }
       if (roofWall && r.runUp >= ROOF_RUN_UP && !r.jumpRetry && !e.fire.burning) {
         r.jumpRetry = 0.4;

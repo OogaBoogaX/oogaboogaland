@@ -37,9 +37,45 @@ muzzle lining is hidden. Closed hats tuck the apple's stalk and leaf away using
 a cached head variant. Open flame/ruby crowns, no hat and the original look
 restore them. The original head, face, tusks and blink geometry remain intact.
 
+## Shared hats and variants
+
+The catalog follow-up in [#831](https://github.com/OogaBoogaX/oogaboogaland/issues/831)
+keeps item identity separate from shared geometry. New revisions reuse identical
+geometry, and identical wearable choices appear together with their creator credits.
+An edited fork has its own item and update history, with a parent item and exact
+parent version. The Studio groups forks in expandable variants under the original.
+
+Each published geometry version is complete and immutable; loading it never
+requires applying patches to a parent. A parent update does not change its forks.
+Saved item/version choices, personal size and declined updates remain intact, and
+only an update to the selected item's own history offers Accept or Keep. Existing
+archives stay readable during the transition. Fitting rules remain explicit, so
+sharing geometry cannot accidentally change a helmet's minimum size or attachment.
+
+A new version is an immutable revision record containing its item, fitting profile,
+parent reference and content hash. That hash names a complete geometry object
+with transforms, faces and colors, independent of item identity. Both objects are
+validated and hash-checked; no runtime patch chain is involved. Two revisions can
+share the same content object and rendering buffers while keeping independent
+creator attribution, saved selections and update decisions. Geometry alone does
+not merge choices with different fitting profiles.
+
+The initial nine full archives and their current hashes are retained unchanged.
+Registering this catalog format therefore does not offer a cosmetic update when
+nothing changed. New clients can load either archive format. An older client
+that cannot load the new format keeps its old selection; refresh the page before
+accepting a newly published format-2 version.
+
+The Studio uses one credited radio row for identical current choices. Its original
+row stays selectable above a native **Variants** disclosure; forks can have their
+own nested variants. Restoring a saved variant opens its ancestors. Selecting a
+shared row preserves an already-saved member's exact item/version and update
+stream. A saved historical version stays available while trying other hats.
+The bounded, scrollable list leaves sizing and Save controls reachable on phones.
+
 ## Updating an authored hat
 
-The nine existing custom character files expose `dress.hat(k, v)` for hat-only
+The existing custom character files expose `dress.hat(k, v)` for hat-only
 voxels and, where needed, `dress.hatNodes(k)` for hat-only nodes attached to
 `k.parts.head`. Hair, glasses and facial details remain in their existing hooks.
 Contributors submit only their character file, including when changing a hat.
@@ -66,16 +102,29 @@ a hat. Normal builds and contributor CI do not run this source-executing check.
 The `sources` hashes in `catalog.json` record the files used at the last explicit
 authoring operation; they are provenance, not a build freshness requirement.
 
-Review every reported geometry change before publishing; both commands inspect
-all nine approved sources. Then run:
+Review every reported geometry change before publishing. The reviewed definitions
+in `src/equipment/hats/sources.json` identify each item's creator, fitting profile,
+parent item/version and source. A `character` source names the allowlisted character
+file whose hat hooks the authoring operation may execute. A `reuse` source names an
+existing item/version and reuses its complete geometry without executing that
+creator's file. Adding a creator does not approve an unreviewed custom recipient
+head for other hats.
+
+An edited fork gets a new stable item ID and its own creator, with its exact parent
+reference. Parentage is bounded, acyclic and validated against retained versions;
+parent updates never advance the fork. To publish reviewed sources, run:
 
 ```sh
 node scripts/equipment-hats.mjs --author
+# Or publish only a named reviewed definition:
+node scripts/equipment-hats.mjs --author <item-id>
 ```
 
-This loads the reviewed allowlisted character files and invokes their explicit
-hat builders in the local authoring process, writes immutable plain geometry under `src/equipment/hats/`,
-and advances that item's current version in `catalog.json`. The stable item ID
+This loads the selected reviewed definitions, invokes only the named character
+hat builders when needed, and writes complete immutable geometry and revision
+records under `src/equipment/hats/`. Identical content reuses its existing hash;
+a no-op authoring pass leaves the current version unchanged. A changed hat advances
+only that item's current version in `catalog.json`. The stable item ID
 does not change. All previous archives and their index entries stay committed.
 The maintainer commits the updated catalog and new archives in a separately
 reviewed change. A source edit alone never advances a wearable version.
@@ -136,7 +185,7 @@ takes its expected `revision` and either `selection` (with optional `size`),
 records and appearance messages without size default to 100.
 An original appearance is `selection: null`, and a bare head is
 `{ item: "none", version: null }`. Conflicts return 409 and the current record.
-The browser reads immutable geometry at `/api/equipment/hats/<sha256>.json`.
+The browser reads immutable revisions and full geometry at `/api/equipment/hats/<sha256>.json`. Shared content downloads and render buffers are reused; each wearer still owns their attachment nodes and saved item/version.
 Failed reads retry through one shared timer after 1, 4, 15 and then at most every
 30 seconds while that version is still selected. Hidden pages pause retries;
 removing or replacing a selection cancels its retry interest. Successful reads

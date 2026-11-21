@@ -137,7 +137,9 @@ export const renderCatalog = async ({ baselineDir, catalogFile, output }) => {
   await new Promise((done, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", done); });
   let browser, networkError = null;
   try {
-    browser = await launch({ w: 800, h: 600 });
+    // Fresh Linux jobs can publish DevTools just after the suite's 10 s discovery window.
+    // This allowance ends at discovery; setup commands and all portrait checks keep their bounds.
+    browser = await launch({ w: 800, h: 600, startupMs: 30000 });
     const origin = `http://127.0.0.1:${server.address().port}`;
     browser.on("Fetch.requestPaused", ({ requestId, request }) => {
       const allowed = request.url.startsWith(origin + "/") || request.url.startsWith("data:");

@@ -380,16 +380,17 @@
   // eyes to the visitor's own. Runs (`view`) once the camera is final for the frame. Allocates nothing a frame.
   const EYES_S = 0.45, EYE_AHEAD = 0.16, LET_GO_PITCH = 0.12, ARRIVE = 2.4, CLEAR_BACK = 0.7;
   const CALM = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
-  const stopPast = (dist) => Math.max(ARRIVE, dist * Math.cos(LET_GO_PITCH) + CLEAR_BACK);
+  const stopPast = (dist, view = null) => Math.max(ARRIVE, (view && view.view !== "first-person" ? view.distance : dist) * Math.cos(view ? view.pitch : LET_GO_PITCH) + CLEAR_BACK);
   const eyes = (pilot, camera) => {
     const IN_EYES = 1, GOING_BACK = 2, from = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, to = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
-    let mode = 0, cave = null, heading = 0, glide = 1, fromFov = 0, head = null, headWas = false;
+    let mode = 0, cave = null, heading = 0, glide = 1, fromFov = 0, head = null, headWas = false, returnView = null, focused = false;
     const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
     const eyePose = (out) => {
       const p = cave.root.position, ahead = EYE_AHEAD * cave.traits.height;
       out.x = p.x + Math.sin(heading) * ahead; out.z = p.z + Math.cos(heading) * ahead;
       out.y = p.y - cave.baseY + cave.headOffset * 0.95 + cave.viewLift;
-      out.yaw = heading; out.pitch = 0;
+      // Walking backwards or diagonally through a door must not turn the view down its axis.
+      out.yaw = heading + (returnView ? returnView.relYaw + Math.PI : 0); out.pitch = returnView ? -returnView.pitch : 0;
     };
     const read = (out) => {
       const p = camera.position, t = camera.target, dx = t.x - p.x, dy = t.y - p.y, dz = t.z - p.z;
@@ -407,11 +408,16 @@
       else if (!on && head) { head.cameraHidden = headWas; head = null; }
     };
     const enter = (walker, way) => {
+      returnView = pilot.viewState(); focused = pilot.captureControl({}).focused;
+      // The guide turns the body. Carry the look relative to the doorway instead,
+      // so backing into it or approaching at an angle cannot turn the restored camera.
+      if (returnView) returnView.relYaw += walker.root.rotation.y - way;
       cave = walker; heading = way; mode = IN_EYES; glide = CALM.matches ? 1 : 0; fromFov = camera.fov;
       read(from);
       pilot.setExternalControl(true);
     };
-    const arrive = (walker, way) => {
+    const arrive = (walker, way, crossing = null) => {
+      returnView = crossing?.view ? { ...crossing.view } : null; focused = !!crossing?.focused;
       cave = walker; heading = way; mode = IN_EYES; glide = 1; fromFov = 0;
       pilot.setExternalControl(true);
       hideHead(true);
@@ -423,9 +429,15 @@
       pilot.setExternalControl(false);
       read(from);
       fromFov = camera.fov; mode = GOING_BACK; glide = CALM.matches ? 1 : 0; cave = null;
+      const kept = returnView, focus = focused;
+      returnView = null; focused = false;
       if (pilot.player !== walker) return;
       const p = walker.root.position;
-      pilot.navigate({ position: { x: p.x, y: p.y - walker.baseY, z: p.z }, yaw: walker.root.rotation.y + Math.PI, pitch: LET_GO_PITCH, dist });
+      const yaw = kept ? heading + kept.relYaw : walker.root.rotation.y + Math.PI;
+      pilot.navigate({ position: { x: p.x, y: p.y - walker.baseY, z: p.z }, yaw: kept?.view === "first-person" ? yaw : walker.root.rotation.y + Math.PI, pitch: kept ? kept.pitch : LET_GO_PITCH, dist: kept ? kept.distance : dist });
+      if (kept) { kept.relYaw = yaw - walker.root.rotation.y; pilot.adopt(kept, false); }
+      if (focus) pilot.focusAim();
+      pilot.controls.takeMovement();
     };
     const view = (dt) => {
       if (mode === IN_EYES) {
@@ -446,9 +458,94 @@
     const reset = () => {
       if (mode === IN_EYES) pilot.setExternalControl(false);
       if (head) hideHead(false);
-      mode = 0; cave = null;
+      mode = 0; cave = null; returnView = null; focused = false;
     };
-    return { enter, arrive, letGo, view, reset, ahead: (walker) => EYE_AHEAD * walker.traits.height, get on() { return mode === IN_EYES; }, get there() { return mode === IN_EYES && glide >= 1; } };
+    return { enter, arrive, letGo, view, reset, ahead: (walker) => EYE_AHEAD * walker.traits.height, get returnView() { return returnView; }, get focused() { return focused; }, get on() { return mode === IN_EYES; }, get there() { return mode === IN_EYES && glide >= 1; } };
   };
-  BL.factoryWindow = { create, relief, grab, still, crossing, arrival, eyes, stopPast, AXIS, DEPTH, TINT, GLIDE };
+  // Keep the body and view relative to travel through the doorway, not the
+  // temporary heading a guided walk gives the Ooga.
+  const doorView = (pilot, heading) => {
+    const actor = pilot.player, view = pilot.viewState();
+    if (!actor || !view) return null;
+    view.relYaw += actor.root.rotation.y - heading;
+    return { view, bodyYaw: actor.root.rotation.y - heading, focused: pilot.captureControl({}).focused };
+  };
+  const restoreDoorView = (pilot, heading, state, position = null) => {
+    const actor = pilot.player;
+    if (!actor || !state?.view) return;
+    const p = actor.root.position, view = { ...state.view }, yaw = heading + view.relYaw;
+    pilot.navigate({ position: position || { x: p.x, y: p.y - actor.baseY, z: p.z },
+      yaw: view.view === "first-person" ? yaw : heading + state.bodyYaw - Math.PI,
+      pitch: view.pitch, dist: view.distance, framed: true });
+    view.relYaw = yaw - actor.root.rotation.y;
+    pilot.adopt(view, false);
+    if (state.focused) pilot.focusAim();
+  };
+  // A short portal landing with the body and retained camera translated together.
+  // It also works backwards: no guide turn, camera snap, or synthetic held key.
+  const portalWalk = (pilot, crew, camera = null, clampCamera = null) => {
+    const matrix = BL.math.mat4.create();
+    let walk = null;
+    const displayClamp = (undo = false) => {
+      if (!walk || !camera || !clampCamera) return;
+      const p = camera.position, t = camera.target, w = walk;
+      if (undo) {
+        p.x -= w.cx; p.y -= w.cy; p.z -= w.cz;
+        t.x -= w.cx; t.y -= w.cy; t.z -= w.cz;
+        w.cx = w.cy = w.cz = 0;
+      } else {
+        const x = p.x, y = p.y, z = p.z;
+        clampCamera(p);
+        w.cx = p.x - x; w.cy = p.y - y; w.cz = p.z - z;
+        t.x += w.cx; t.y += w.cy; t.z += w.cz;
+      }
+    };
+    const reset = (resume = false) => {
+      if (!walk) return;
+      const same = pilot.player === walk.actor, focused = walk.focused;
+      if (same) { crew.steer(0, 0); BL.crew.poseGait(walk.actor, BL.crew.GAIT.stand); }
+      walk = null;
+      pilot.setExternalControl(false);
+      if (same && resume) { if (focused) pilot.focusAim(); pilot.controls.takeMovement(); }
+    };
+    const begin = (from, to, heading, state, groundAt = null) => {
+      reset();
+      const actor = pilot.player;
+      if (!actor || !state) return;
+      // Build the retained view before this walk's display clamp owns it.
+      // Otherwise its initial wall correction becomes part of the translated
+      // eye and disappears abruptly when the ordinary camera resumes.
+      pilot.setExternalControl(true, null, true);
+      restoreDoorView(pilot, heading, state, from);
+      const p = actor.root.position;
+      walk = { actor, cx: 0, cy: 0, cz: 0, x: p.x, z: p.z, y: p.y, lastX: p.x, lastZ: p.z, dx: to.x - p.x, dz: to.z - p.z,
+        heading: actor.root.rotation.y, back: Math.cos(state.bodyYaw) < 0, focused: state.focused, groundAt, duration: Math.max(0.85, Math.hypot(to.x - p.x, to.z - p.z) / 4.5), time: 0 };
+      pilot.setExternalControl(true);
+      displayClamp();
+      crew.steer(0, 0);
+    };
+    const update = (dt) => {
+      if (!walk) return;
+      const w = walk, p = w.actor.root.position;
+      if (pilot.player !== w.actor || Math.hypot(p.x - w.lastX, p.z - w.lastZ) > 0.5 || Math.abs(p.y - w.y) > 1) { reset(true); return; }
+      displayClamp(true);
+      w.time = Math.min(1, w.time + dt / w.duration);
+      const k = w.time * w.time * (3 - 2 * w.time), x = w.x + w.dx * k, z = w.z + w.dz * k;
+      BL.math.mat4.identity(matrix);
+      const y = w.groundAt ? w.groundAt(x, z) + w.actor.baseY : w.y;
+      if (!Number.isFinite(y)) { reset(true); return; }
+      // The crew may already have adjusted the feet to a stair this frame; the
+      // retained camera still stands at last frame's height. Translate it once.
+      matrix[12] = x - w.lastX; matrix[13] = y - w.y; matrix[14] = z - w.lastZ;
+      p.x = w.lastX = x; p.y = w.y = y; p.z = w.lastZ = z;
+      w.actor.root.rotation.y = w.heading;
+      pilot.transformView(matrix, 0);
+      displayClamp();
+      BL.crew.poseGait(w.actor, BL.crew.GAIT.walk, Math.hypot(w.dx, w.dz) * k * 4 * (w.back ? -1 : 1));
+      BL.crew.poseCloseWalk(w.actor, 0, w.back);
+      if (w.time === 1) reset(true);
+    };
+    return { begin, update, reset, get active() { return !!walk; } };
+  };
+  BL.factoryWindow = { create, relief, grab, still, crossing, arrival, eyes, stopPast, doorView, restoreDoorView, portalWalk, AXIS, DEPTH, TINT, GLIDE };
 })();

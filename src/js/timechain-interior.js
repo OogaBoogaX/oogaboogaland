@@ -28,7 +28,7 @@
   // The doors take DOOR_TIME to slide; a guided walk goes at WALK_SPEED of a walk (the island's doorway's own, so a
   // crossing keeps its pace through the hand over) and gives up after GUIDE_LIMIT.
   // The way out stands still EXIT_HOLD at the handover point before the island takes over.
-  const DOOR_TIME = 0.7, WALK_SPEED = 0.6, GUIDE_LIMIT = 7, TURN_RATE = 6, EXIT_HOLD = 0.12;
+  const DOOR_TIME = 0.7, WALK_SPEED = 0.6, GUIDE_LIMIT = 7, TURN_RATE = 6, LOOK_SPEED = Math.PI / 3, EXIT_HOLD = 0.12;
   // What the HUD's jetpack button shows in here: no pack at all, but in a room whose kind says `jetpack` (the Block
   // Party), the visitor's own (`JETPACK`, written in place).
   const NO_JETPACK = { owned: false, equipped: false, fuel: 1, blocked: false }, JETPACK = { owned: true, equipped: false, fuel: 1, blocked: false };
@@ -1200,15 +1200,17 @@
       const p = avatar.root.position, dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz), o = pilot.orbit, k = Math.min(1, dt * TURN_RATE);
       o.pitch = o.tPitch = o.pitch + (pitch - o.pitch) * k;
       if (d < 0.12) { people.steer(0, 0, 0, 0, 0); return true; }
-      people.steer(dx / d, dz / d, 0, 1, 0, WALK_SPEED);
+      // Match the island guide: a long frame cannot step past the stopping point.
+      const speed = Math.min(WALK_SPEED, d / (pilotMod.WALK.speed * Math.max(dt, 1e-6)));
+      people.steer(dx / d, dz / d, 0, 1, 0, speed);
       const yaw = Math.atan2(-dx, -dz);
-      o.yaw = o.tYaw = o.yaw + Math.atan2(Math.sin(yaw - o.yaw), Math.cos(yaw - o.yaw)) * k;
+      o.yaw = o.tYaw = o.yaw + clamp(Math.atan2(Math.sin(yaw - o.yaw), Math.cos(yaw - o.yaw)) * k, -LOOK_SPEED * dt, LOOK_SPEED * dt);
       return false;
     };
     // Square to the doors and level, the view with the body.
     const faceDoor = (dt) => {
       const o = pilot.orbit, k = Math.min(1, dt * TURN_RATE), r = avatar.root.rotation;
-      o.yaw = o.tYaw = o.yaw + Math.atan2(Math.sin(Math.PI - o.yaw), Math.cos(Math.PI - o.yaw)) * k;
+      o.yaw = o.tYaw = o.yaw + clamp(Math.atan2(Math.sin(Math.PI - o.yaw), Math.cos(Math.PI - o.yaw)) * k, -LOOK_SPEED * dt, LOOK_SPEED * dt);
       o.pitch = o.tPitch = o.pitch * (1 - k);
       r.y += Math.atan2(Math.sin(-r.y), Math.cos(-r.y)) * k;
     };
@@ -1228,7 +1230,13 @@
           doors.want = 0;
           finishGuide();
           // In, the view and mode the visitor walked up to the keypad in (first person and carry only for the walk).
-          if (visit.view) pilot.adopt(visit.view);
+          if (visit.view) {
+            // First person normally keeps the guide's look on adopt. Restore its
+            // chosen pitch before handing back the camera and held movement.
+            if (visit.view.view === "first-person") pilot.navigate({ position: { x: p.x, y: p.y - avatar.baseY, z: p.z }, yaw: pilot.orbit.yaw, pitch: visit.view.pitch, dist: visit.view.distance });
+            pilot.adopt(visit.view);
+          }
+          pilot.controls.takeMovement();
         }
       } else if (guide.stage === "toDoor") {
         if (steerTo(L.doorStep.x, L.doorStep.z, dt) || guide.t > GUIDE_LIMIT) {
