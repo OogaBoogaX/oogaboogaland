@@ -71,7 +71,8 @@
     updateLocal(node);
     if (parentWorld) mat4.multiply(node.world, parentWorld, node.local);
     else node.world.set(node.local);
-    for (const child of node.children) updateWorld(child, node.world);
+    const children = node.children;
+    for (let i = 0; i < children.length; i++) updateWorld(children[i], node.world);
   };
   const traverseVisible = (node, fn) => {
     if (!node.visible) return;

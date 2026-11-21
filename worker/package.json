@@ -11,6 +11,13 @@
     "deploy:staging": "npm --prefix .. run build:site && wrangler d1 migrations apply DB --remote --config ../wrangler.staging.jsonc && wrangler deploy --config ../wrangler.staging.jsonc",
     "deploy:production": "npm --prefix .. run build:site && wrangler d1 migrations apply DB --remote --config ../wrangler.production.jsonc && wrangler deploy --config ../wrangler.production.jsonc",
     "migrate:local": "wrangler d1 migrations apply DB --local --config ../wrangler.staging.jsonc",
+    "lectures:staging": "node lectures-upload.mjs staging",
+    "lectures:production": "node lectures-upload.mjs production",
+    "lectures:local": "node lectures-upload.mjs local",
+    "dev:chat":"node chat/stage.mjs && wrangler dev --config ../wrangler.ooga-chat.staging.jsonc --port 8788 --var SITE_ORIGIN:http://localhost:8788",
+    "deploy:chat:staging": "node chat/stage.mjs && wrangler d1 migrations apply DB --remote --config ../wrangler.ooga-chat.staging.jsonc && wrangler deploy --config ../wrangler.ooga-chat.staging.jsonc",
+    "deploy:chat:production": "node chat/stage.mjs && wrangler d1 migrations apply DB --remote --config ../wrangler.ooga-chat.production.jsonc && wrangler deploy --config ../wrangler.ooga-chat.production.jsonc",
+    "migrate:chat:local": "wrangler d1 migrations apply DB --local --config ../wrangler.ooga-chat.staging.jsonc",
     "test": "node --test \"test/**/*.test.mjs\"",
     "eval": "npm --prefix .. run build:site --silent && node eval/run.mjs"
   },

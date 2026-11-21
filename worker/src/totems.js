@@ -71,7 +71,7 @@ const scan = async (index, url, cache, token) => {
   throw new Error("GitHub scan exceeded its page budget");
 };
 
-export const handleTotems = async (request, url, env) => {
+export const handleTotems = async (request, url, env, ctx) => {
   const match = /^\/api\/totems\/([0-3])$/.exec(url.pathname);
   if (!match) return json({ error: "not found" }, 404);
   if (request.method !== "GET") return json({ error: "method not allowed" }, 405, { allow: "GET" });
@@ -87,6 +87,8 @@ export const handleTotems = async (request, url, env) => {
           return result;
         }).finally(() => running.delete(id));
       running.set(id, job);
+      // Other visitors wait on this scan: it must outlive the request that started it, which can be cancelled.
+      if (ctx) ctx.waitUntil(job.catch(() => {}));
     }
     summary = await running.get(id);
   }

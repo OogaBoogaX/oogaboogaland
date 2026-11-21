@@ -1,0 +1,72 @@
+name: Resume deferred PR checks
+
+on:
+  workflow_run:
+    workflows: [Commit the built page, Deploy Cloudflare staging, Deploy Cloudflare production, Unit tests]
+    types: [in_progress, completed]
+  # Recover delayed completion events, late-yielding jobs and interrupted recovery.
+  schedule:
+    - cron: '7,27,47 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: ci-priority-${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Unit tests' && format('unit-{0}', github.event.workflow_run.head_sha) || 'recovery' }}
+  cancel-in-progress: false
+  queue: single
+
+jobs:
+  unit-status:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.name == 'Unit tests' && github.event.workflow_run.event == 'pull_request')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+      statuses: write
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Read trusted status reporter
+        run: |
+          set -o pipefail
+          gh api "repos/$GITHUB_REPOSITORY/contents/scripts/ci-priority.mjs?ref=rock" --jq .content | base64 --decode > "$RUNNER_TEMP/ci-priority.mjs"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Publish the required unit validation status
+        run: node "$RUNNER_TEMP/ci-priority.mjs" --report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIORITY_RUN_ID: ${{ github.event.workflow_run.id }}
+
+  resume:
+    if: github.event_name != 'workflow_run' || (github.event.action == 'completed' && github.event.workflow_run.name != 'Unit tests')
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Read trusted priority coordinator
+        # Fetch one file from rock; no PR checkout, artifacts or cache inputs.
+        run: |
+          set -o pipefail
+          gh api "repos/$GITHUB_REPOSITORY/contents/scripts/ci-priority.mjs?ref=rock" --jq .content | base64 --decode > "$RUNNER_TEMP/ci-priority.mjs"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Resume only jobs that yielded to a release
+        run: node "$RUNNER_TEMP/ci-priority.mjs" --resume
+        env:
+          GH_TOKEN: ${{ github.token }}

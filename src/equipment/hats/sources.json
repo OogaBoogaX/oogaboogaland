@@ -1,0 +1,104 @@
+{
+  "format": 1,
+  "items": [
+    {
+      "id": "bitcoin-bill-straw",
+      "label": "Straw hat",
+      "creator": "Bitcoin-Bill",
+      "profile": "straw",
+      "parent": null,
+      "source": {
+        "kind": "character",
+        "handle": "Bitcoin-Bill"
+      }
+    },
+    {
+      "id": "global-dsb-spiked-helmet",
+      "label": "Spiked helmet",
+      "creator": "Global-DSB",
+      "profile": "closed-cap",
+      "parent": null,
+      "source": {
+        "kind": "character",
+        "handle": "Global-DSB"
+      }
+    },
+    {
+      "id": "bc1gui-green-beanie",
+      "label": "Green Bitcoin beanie",
+      "creator": "bc1gui",
+      "profile": "closed-cap",
+      "parent": null,
+      "source": {
+        "kind": "character",
+        "handle": "bc1gui"
+      }
+    },
+    {
+      "id": "hotpixelgroup-flame-crown",
+      "label": "Green flame crown",
+      "creator": "hotpixelgroup",
+      "profile": "open-cap",
+      "parent": null,
+      "source": {
+        "kind": "character",
+        "handle": "hotpixelgroup"
+      }
+    },
+    {
+      "id": "itsliran-taproot-cap",
+      "label": "Taproot cap",
+      "creator": "itsLiran",
+      "profile": "closed-cap",
+      "parent": null,
+      "source": {
+        "kind": "character",
+        "handle": "itsLiran"
+      }
+    },
+    {
+      "id": "johnstackton21m-helmet",
+      "label": "Gold space helmet",
+      "creator": "johnstackton21m",
+      "profile": "space-helmet",
+      "parent": null,
+      "source": {
+        "kind": "character",
+        "handle": "johnstackton21m"
+      }
+    },
+    {
+      "id": "midy-machete-crown",
+      "label": "Ruby crown",
+      "creator": "midy-machete",
+      "profile": "ruby-crown",
+      "parent": null,
+      "source": {
+        "kind": "character",
+        "handle": "midy-machete"
+      }
+    },
+    {
+      "id": "rules-without-rulers-top-hat",
+      "label": "Orange-band top hat",
+      "creator": "rules-without-rulers",
+      "profile": "top-hat",
+      "parent": null,
+      "source": {
+        "kind": "character",
+        "handle": "rules-without-rulers"
+      }
+    },
+    {
+      "id": "timechainb-gold-crown",
+      "label": "Gold crown",
+      "creator": "timechainb",
+      "profile": "closed-cap",
+      "parent": null,
+      "source": {
+        "kind": "character",
+        "handle": "timechainb"
+      }
+    }
+  ]
+}

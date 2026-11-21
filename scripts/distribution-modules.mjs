@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 const hash = (text, encoding) => createHash("sha256").update(text, "utf8").digest(encoding);
-export function externalizeModules(html, out, deferred, block, terrainWorker = null, transform = (src, text) => text, inline = []) {
+export function externalizeModules(html, out, deferred, block, terrainWorker = null, transform = (src, text) => text, inline = [], micFilter = null) {
   const script = html.match(/<script>([\s\S]*?)<\/script>/);
   if (!script) throw new Error("distribution: no inline script");
   const oldPolicy = `script-src 'sha256-${hash(script[1], "base64")}'`;
@@ -45,7 +45,8 @@ export function externalizeModules(html, out, deferred, block, terrainWorker = n
     body = body.split(text).join(transform(src, text));
   }
   const worker = terrainWorker ? `window.BL.terrainWorker = ${JSON.stringify(terrainWorker)};\n` : "";
-  const updated = `\nwindow.BL = window.BL || {};\nwindow.BL.deferredScripts = ${JSON.stringify(named)};\n${worker}${body.replace(/^\n/, "")}`;
+  const filter = micFilter ? `window.BL.micFilter = ${JSON.stringify(micFilter)};\n` : "";
+  const updated = `\nwindow.BL = window.BL || {};\nwindow.BL.deferredScripts = ${JSON.stringify(named)};\n${worker}${filter}${body.replace(/^\n/, "")}`;
   return html.replace(script[0], () => `<script>${updated}</script>`)
     .replace(oldPolicy, `script-src 'self' 'sha256-${hash(updated, "base64")}'`);
 }
@@ -81,13 +82,15 @@ export function externalizePage(html, out, block, data = []) {
     .replace(scriptHash, "").replace(stylePolicy, "style-src 'self'");
 }
 
-// The DSB rooms' pictures (article thumbnails, product covers, profile previews), the whitepaper poster and Cloud
-// Hopper's title and result art are data URIs in these modules; the DSB ones and the poster travel in deferred
-// bundles (dsb, whitepaper), Cloud Hopper's in the page's own script. Each picture is set as an image's src either way,
+// The DSB rooms' pictures (article thumbnails, product covers, profile previews), Cloud Hopper's title and result
+// art and the Halloween herald's three views are data URIs in these modules; the DSB ones travel in the deferred dsb
+// bundle, the herald's in arcade-scene, Cloud Hopper's in the page's own script. Each picture is set as an image's src either way,
 // under `img-src 'self' data:`. Each becomes art/<module>-<sha256>.<ext> holding the same bytes, so a bundle or the
-// page carries only the address, and the picture is fetched only when a menu, the monolith or a title card shows it.
+// page carries only the address, and the picture is fetched only when a menu or a title card shows it.
 export const PICTURE_MODULES = ["js/without-rulers-data.js", "js/stackchain-art.js", "js/proof-of-ink-data.js", "js/meme-factory-data.js",
-  "js/whitepaper-poster-data.js", "js/cloud-hopper-art.js"];
+  "js/cloud-hopper-art.js",
+  "js/ghost-herald-data.js", // HALLOWEEN: the herald's views; goes with the ghost hunt.
+];
 export function externalizePictures(src, text, out) {
   mkdirSync(join(out, "art"), { recursive: true });
   let count = 0;

@@ -1190,8 +1190,6 @@
     o.dist = o.tDist = THIRD.dist;
     o.pitch = o.tPitch = THIRD.pitch;
   };
-  const controlsToast = () => hud.toast(COARSE ? `You are ${BL.characters.displayOf(crew.crew[0].name)} · the stick walks, WORK works on what is next to you, View looks round the cave`
-    : `You are ${BL.characters.displayOf(crew.crew[0].name)} · W A S D walk, mouse or Q E turn, Space works on what is next to you, C cracks a rock, V looks round`);
   // The overview lets the camera off the Ooga to a chamber's preset (`view`, else the chamber he
   // stands in); the stick or a step brings it back behind him.
   const setOverview = (on, view) => {
@@ -1546,6 +1544,7 @@
   const finish = () => {
     if (phase === "results") return;
     phase = "results";
+    hud.setPanelsHidden(false);
     smother.unit = -1;
     mhud.center("", 1);
     const improved = game.recordMine({ sats: s.minedSats, seconds: Math.max(1, Math.round(s.time)), ending: s.reason, won: s.won, score: s.score, continued: s.continued > 0 });
@@ -1587,10 +1586,10 @@
       scoreRuns.set(sim, { ticket, id: ticket ? BL.net.state.me.id : 0, epoch: BL.net.state.logoutEpoch });
     }
     phase = "run";
+    hud.setPanelsHidden(true);
     mhud.setSection("run");
     audio.activate();
     showAct(true);
-    controlsToast();
   };
 
   const onAction = (action) => {
@@ -1627,6 +1626,7 @@
         const ranked = scoreRuns.get(sim), account = BL.net.state;
         if (ranked && ranked.id && ranked.id === account.me?.id && ranked.epoch === account.logoutEpoch) ranked.ticket = BL.highscores?.begin("mine") || null;
         phase = "run";
+        hud.setPanelsHidden(true);
         mhud.setSection("run");
         showAct(true);
         hud.toast("Back to work. The debts are gone; the score keeps what you mined, and wears no medal.");
@@ -1688,7 +1688,7 @@
   };
 
   const onKey = (e) => {
-    if (e.key === "Escape") {
+    if (BL.controls.matches(e, "escape")) {
       if (selection.type) {
         selection.type = "";
         mhud.showCard(null);
@@ -1697,12 +1697,12 @@
       return;
     }
     if (e.repeat) return;
-    if (e.key === "0") setOverview(true, "den");
-    else if ((e.key === "v" || e.key === "V") && phase === "run") setOverview(!overview);
+    if (BL.controls.matches(e, "resetView")) setOverview(true, "den");
+    else if (BL.controls.matches(e, "mineView") && phase === "run") setOverview(!overview);
     else if ((e.key === "s" || e.key === "S") && e.shiftKey && phase === "run") sellSats();
-    else if ((e.key === "c" || e.key === "C") && phase === "run") crackNearest();
-    else if ((e.key === "p" || e.key === "P") && phase === "run") pause(!s.paused);
-    else if (e.key === "Enter" && phase === "intro") start();
+    else if (BL.controls.matches(e, "crack") && phase === "run") crackNearest();
+    else if (BL.controls.matches(e, "pause") && phase === "run") pause(!s.paused);
+    else if (BL.controls.matches(e, "start") && phase === "intro") start();
   };
 
   // What the log says happened since the last frame, turned into sound and words. Only runs when the
@@ -2055,7 +2055,7 @@
     phase = s.over ? "results" : s.time > 0 ? "run" : "intro";
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
 
-    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     // Space and the WORK button both come through the pilot's action: whatever is beside the Ooga.
@@ -2191,7 +2191,6 @@
     paidShown = Math.floor(s.minedSats / 1e6);
     halvingDim = 0;
     halvingShown = -1;
-    if (phase === "run") controlsToast();
     // Tapping an Ooga takes him over.
     for (const op of crew.crew) for (const key of ["torso", "head"]) target(op.cave.parts[key], { kind: "ooga", id: op.index });
 
@@ -2220,7 +2219,7 @@
     hud.onPreset(pilot.goPreset);
     hud.onAction(onAction);
     hud.setStats(game.state);
-    hud.foldPanels();
+    hud.setPanelsHidden(phase === "run");
 
     mhud.setSection(phase);
     if (phase === "results") mhud.results(s, false, game.state.mine.best, !s.won && s.reason !== "time" && s.reason !== "left");
@@ -2363,7 +2362,22 @@
   };
 
   const mineScene = BL.deferred.scene("mine", {
-    id: "mine", enter, update, overlay, onDonation, onKey, onLootCleared: () => {}, renderOpts: RENDER_OPTS,
+    controlsHelp(touch) {
+      const H = BL.controlsHelp, rows = [];
+      if (phase === "intro") rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("start"), "Start mining", touch ? "Start button" : ""));
+      else {
+        rows.push(touch ? H.row([], "Walk", "Left stick") : H.movement("Walk"), H.row(touch ? [] : BL.controls.keysFor("yawLeft", "yawRight"), "Turn", touch ? "Drag" : "Mouse"));
+        for (const [action, text] of [["mineView", "Overview"], ["crack", "Crack nearby rock"], ["pause", "Pause / resume"]]) rows.push(H.row(touch ? [] : BL.controls.shortcutKeys(action), text, touch ? (action === "mineView" ? "View button" : action === "crack" ? "Crack rocks button" : "Pause button") : ""));
+        rows.push(H.row(touch ? [] : [" "], "Work on the object beside you", touch ? "WORK button" : ""));
+        if (!touch) rows.push(H.row(["shift", "s"], "Sell sats"));
+      }
+      if (!touch) rows.push(H.row(BL.controls.shortcutKeys("resetView"), "Reset to den overview"));
+      rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("escape"), touch ? "Leave Ooga Mine" : "Close selection / pause / leave", touch ? "Back button" : ""));
+      return { title: "Ooga Mine", rows };
+    },
+    controlsHelpHold() { pilot.controls.reset(); },
+    get cabinetMenu() { return phase === "intro"; },
+    id: "mine", padContext: "mine", enter, update, overlay, onDonation, onKey, renderOpts: RENDER_OPTS,
     leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() {

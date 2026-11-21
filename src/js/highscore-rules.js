@@ -1,11 +1,17 @@
 // The score contract, shared by the page and its Worker. Machine IDs are permanent: a moved cabinet keeps its ID.
 // Only completed player games belong here; the jackpot wheel pays tickets but has no high-score record.
+// Cloud Hopper keeps one attributed board per level (`cloudHopperLevels`' `board`). Its single board from before the
+// levels is `retired`: its records still read, and keep following renames and deletions, but never take a new score.
 (() => {
   "use strict";
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
   const games = {
-    "cloud-hopper": { scoreType: "ooga", direction: "asc", unit: "milliseconds", max: 3600000, machines: ["cloud-hopper-1"] },
+    "cloud-hopper": { scoreType: "ooga", direction: "asc", unit: "milliseconds", max: 3600000, machines: ["cloud-hopper-1"], retired: true },
+    "cloud-hopper-l1": { scoreType: "ooga", direction: "asc", unit: "milliseconds", max: 3600000, machines: ["cloud-hopper-l1"] },
+    "cloud-hopper-l2": { scoreType: "ooga", direction: "asc", unit: "milliseconds", max: 3600000, machines: ["cloud-hopper-l2"] },
+    "cloud-hopper-l3": { scoreType: "ooga", direction: "asc", unit: "milliseconds", max: 3600000, machines: ["cloud-hopper-l3"] },
+    "cloud-hopper-l4": { scoreType: "ooga", direction: "asc", unit: "milliseconds", max: 3600000, machines: ["cloud-hopper-l4"] },
     race: { direction: "asc", unit: "milliseconds", max: 3599999, machines: [
       "race-1-bay-lap", "race-1-bay-race", "race-1-bay-m-lap", "race-1-bay-m-race",
       "race-1-gorge-lap", "race-1-gorge-race", "race-1-gorge-m-lap", "race-1-gorge-m-race",
@@ -18,7 +24,6 @@
     hoops: { max: 9999, machines: ["hoops-1", "hoops-2"] },
     shy: { max: 999, machines: ["shy-1"] },
     claw: { max: 400, machines: ["claw-1", "claw-2", "claw-3"] },
-    hockey: { max: 200, machines: ["hockey-1", "hockey-2", "hockey-3"] },
     billiards: { max: 200, machines: ["billiards-1", "billiards-2"] },
     darts: { max: 540, machines: ["darts-1", "darts-2"] },
     pinball: { max: 9999999, machines: ["pinball-1", "pinball-2"] },
@@ -44,7 +49,10 @@
   const get = id => Object.hasOwn(games, id) ? games[id] : null;
   const valid = (id, machine, score) => {
     const game = get(id);
-    return !!game && game.machines.includes(machine) && Number.isSafeInteger(score) && score > 0 && score <= game.max;
+    return !!game && !game.retired && game.machines.includes(machine) && Number.isSafeInteger(score) && score > 0 && score <= game.max;
   };
-  BL.highscoreRules = { games, get, valid, MAX_PLAYERS: 1024 };
+  const arcade = Object.freeze(["skee", "hoops", "shy", "claw", "billiards", "darts", "pinball", "ride",
+    "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"]);
+  const cabinets = Object.freeze(["drop", "orbit", "mine", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"]);
+  BL.highscoreRules = { games, get, valid, arcade, cabinets, MAX_PLAYERS: 1024 };
 })();

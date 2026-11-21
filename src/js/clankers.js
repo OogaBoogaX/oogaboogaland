@@ -5,6 +5,14 @@
   const BL = window.BL = window.BL || {};
   const { clamp, damp, mulberry32, fnv1a } = BL.math;
   const { addChild } = BL.scene;
+  // Cached object shapes must not own a getter closure over a departed world.
+  // Keep the dynamic policy behind its receiver's weak key instead.
+  const interactionPolicies = new WeakMap();
+  const interactionProperty = { get() { return interactionPolicies.get(this)(); } };
+  const interactionGetter = (object, name, read) => {
+    interactionPolicies.set(object, read);
+    Object.defineProperty(object, name, interactionProperty);
+  };
   // The tallest shootable meadow rocks reach 1.11; a prop step must clear their real mesh.
   const SCALE = 1, SPEED = 2.7, CHILL_SPEED = 0.9, STEP = 0.52, PROP_STEP = 1.16, JUMP_BUFFER = 0.18, PLAYER_SMASH_RECOVER = 0.12;
   const RAGE_SPEED = 12, RAGE_STEP = 0.1;
@@ -50,6 +58,8 @@
   const OFFICE_WORK = { type: [5, 9], look: [1, 2], abacus: [3, 5] }, OFFICE_NEXT = { type: "look", look: "abacus", abacus: "type" };
   const create = (ctx) => {
     const { crew, sites, groundAt, clear } = ctx;
+    // The Hub opts its crew into passive NPCs; their companions follow suit.
+    const passiveNpcs = ctx.npcPassive === true || crew.passiveNpcs === true;
     let combatEnabled = ctx.combatEnabled === true;
     const footprint = BL.agent.footprint, torso = BL.agent.torso;
     const pointSupportAt = ctx.pointSupportAt || groundAt;
@@ -67,6 +77,7 @@
         || walkingRampAt(p.x, p.y, p.z, heading);
     };
     const inClimbArea = (e) => !ctx.climbAreaAt || ctx.climbAreaAt(e.root.position.x, e.root.position.y, e.root.position.z);
+    const sleepBeam = ctx.sleep ? BL.sleepBeam.create({ root: ctx.root, capacity: ctx.sleep.slots.length }) : null;
     const list = [], byOwner = new Map(), portals = new Array(sites.length).fill(null);
     // Stations are authored once in world space: { x, y, z, heading, kind,
     // side, enabled? }. labInside owns the entrance plane, independently of assignment.
@@ -113,7 +124,16 @@
     const alive = (cave) => cave.state === "working" || cave.state === "chilling";
     // Every gorilla nobody drives away at once (`setAway`, the hub's GAME MODE), as if its Ooga were; back after.
     let allAway = false;
-    const setAway = (on) => { allAway = !!on; };
+    const setAway = (on) => {
+      on = !!on;
+      if (on === allAway || disposed) return;
+      allAway = on;
+      if (on) { cancelSleepBeams(); return; }
+      // An island event has released the population. Reconcile hidden companions now,
+      // including sleepers, rather than waiting for another simulation frame.
+      if (ctx.sleep) bedsToday();
+      for (const e of list) if (!e.active && !e.remoteControlled) updateEntry(e, 0);
+    };
     // Asleep is the Ooga's standing state, by its contributions: not the moment it stirs to eat a donation or
     // flee a fire, which would send its gorilla home over the bridge and straight back. One standing in for an
     // Ooga somebody else is driving is away, not asleep.
@@ -130,6 +150,12 @@
       e.portal = -1;
     };
     const claimPortal = (e, site) => {
+      // A passive companion passes through every doorway at once: it never takes,
+      // holds or waits on the shared portal, and drops any stale claim of its own.
+      if (e.nonInteractive && !e.controlled) {
+        releasePortal(e); e.portalWait = false;
+        return true;
+      }
       if (portals[site] === e) {
         if (e.route !== "exit" && e.route !== "enter" && !e.jump.active && caveAt(e.root.position.x, e.root.position.y, e.root.position.z) !== site
           && elapsed - e.portalSince > 18) {
@@ -330,6 +356,7 @@
     // Surface NPCs reserve their trunks against peers, leaving arms and
     // shoulders free to overlap. Player movement keeps centre clearance.
     const occupied = (e, x, y, z, destinations = true, heading = e.heading) => {
+      if (e.nonInteractive) return false;
       // Workers pass companions through the entrance and shared lab aisles.
       // Equipment claims keep their work positions distinct; scenery stays solid.
       if (enteringCave(e) || labWorker(e)) return false;
@@ -340,7 +367,7 @@
       if (!e.motion.lab && !e.planningLabTraffic && !e.climb.active) {
         for (let i = 0; i < list.length; i++) {
           const other = list[i];
-          if (other === e || !other.active) continue;
+          if (other.nonInteractive || other === e || !other.active) continue;
           const p = other.root.position, dx = x - p.x, dz = z - p.z;
           if (!e.controlled) {
             const shape = torso || footprint;
@@ -357,7 +384,7 @@
       }
       for (let i = 0; i < list.length; i++) {
         const other = list[i];
-        if (other === e || !other.active) continue;
+        if (other.nonInteractive || other === e || !other.active) continue;
         const p = e.planningLabTraffic ? labFuture(other, e.labPlanTime, labFuturePoint) : other.root.position;
         const otherHeading = e.planningLabTraffic ? p.heading : other.heading;
         const margin = e.motion.lab || other.motion.lab ? 0.03 : SPACE, radius = e.radius + other.radius + margin;
@@ -722,6 +749,13 @@
     };
     const labGoal = (e, x, y, z, heading, partial = false) => {
       const job = e.lab, p = e.root.position;
+      // A passive companion walks straight to its authored lab point: no
+      // route search around benches, equipment or coworkers.
+      if (e.nonInteractive && !e.controlled) {
+        job.pathCount = job.pathIndex = 0; job.pathFixed = false; job.targetX = x; job.targetY = y; job.targetZ = z;
+        setGoal(e, x, y, z);
+        return true;
+      }
       if (job.targetX !== x || job.targetY !== y || job.targetZ !== z) {
         job.pathCount = job.pathIndex = 0; job.pathAt = job.coordinationUntil = job.trafficWait = 0; job.pathPartial = false;
       }
@@ -866,6 +900,7 @@
       e.speed = step / dt * (dx * Math.sin(heading) + dz * Math.cos(heading) < 0 ? -1 : 1); e.blocked = 0;
     };
     const requestLabPass = (requester, tx, tz) => {
+      if (requester.nonInteractive) return false;
       if (enteringCave(requester) || labWorker(requester) || elapsed < labPassAt || labSite < 0) return false;
       // Ask for clearance along the route actually being walked. The straight
       // chord to a distant workstation may cross an unrelated occupied desk.
@@ -877,7 +912,7 @@
       let nearest = Infinity, blocker = null;
       for (let i = 0; i < list.length; i++) {
         const other = list[i], q = other.root.position;
-        if (other === requester || !other.active || other.controlled || other === labEscape || other.site !== labSite || other.phase !== "work"
+        if (other.nonInteractive || other === requester || !other.active || other.controlled || other === labEscape || other.site !== labSite || other.phase !== "work"
           || other.lab.yielding || !other.motion.lab || other.climb.active || other.fire.rolling) continue;
         // A worker already following its reservation is about to clear this
         // space. Do not cancel that plan by asking it to yield mid-crossing.
@@ -970,6 +1005,12 @@
     };
     const yieldLab = (e, dt) => {
       const job = e.lab, p = e.root.position, point = job.yieldPoint;
+      // A passive companion yields to nobody: clear any stale request, no route search.
+      if (e.nonInteractive && !e.controlled) {
+        job.yielding = 0; job.yieldFor = null; job.yieldStation = -1; job.yieldReady = false;
+        job.coordinationUntil = job.trafficWait = 0;
+        return;
+      }
       if (job.item >= 0) { workLab(e, dt); return; }
       e.motion.labWork = ""; e.motion.labReach = 0; e.motion.labSqueeze = false;
       if (!e.gorilla.labWalkCompact) { e.speed = 0; return; }
@@ -1087,7 +1128,8 @@
         // Changing jobs is optional. Keep the current desk productive until a
         // complete route is reserved; staging in its aisle would release the
         // old job before we know how to reach the new one.
-        if (moving && !planLabPath(e, destination.x, destination.y, destination.z, destination.heading)) continue;
+        // A passive companion walks lab points directly, so it needs no route proof.
+        if (moving && !(e.nonInteractive && !e.controlled) && !planLabPath(e, destination.x, destination.y, destination.z, destination.heading)) continue;
         chosen = index; chosenPickup = pickup; break;
       }
       e.radius = radius; e.height = height; e.compact = compact; e.footprintMode = mode; e.planningLab = false; e.planningLabWork = ""; e.planningLabStation = -1;
@@ -1444,6 +1486,25 @@
         const at = loungeCount++ * 3;
         loungeSpots[at] = x; loungeSpots[at + 1] = y; loungeSpots[at + 2] = z;
       }
+      // The outer meadow ring can be fully reserved while the rest of an
+      // inactive cave's grassy clearing is empty. Include that same allowed
+      // ground in the bounded cache; all traffic and body checks still apply.
+      for (const area of loungeAreas) {
+        const cells = Math.ceil(area.radius / 0.75), width = cells * 2 + 1;
+        for (let n = 0; n < width * width && loungeCount < 320; n++) {
+          const x = area.x + (n % width - cells) * 0.75, z = area.z + (Math.floor(n / width) - cells) * 0.75;
+          const y = groundAt(x, z, 0);
+          if (!grass(x, y, z) || trafficAt(x, y, z) || caveAt(x, y, z) >= 0) continue;
+          let crowded = false;
+          for (let seat = roofCount; seat < loungeCount; seat++) {
+            const at = seat * 3;
+            if ((loungeSpots[at] - x) ** 2 + (loungeSpots[at + 2] - z) ** 2 < 1.5 ** 2) { crowded = true; break; }
+          }
+          if (crowded) continue;
+          const at = loungeCount++ * 3;
+          loungeSpots[at] = x; loungeSpots[at + 1] = y; loungeSpots[at + 2] = z;
+        }
+      }
     };
     const loungeReserved = (e, x, y, z, radius = WALK_RADIUS, partner = null) => {
       for (let i = 0; i < list.length; i++) {
@@ -1473,7 +1534,7 @@
       e.motion.sitLookTarget = e.motion.sitShiftTarget = 0;
       if (!e.loungeDepart) e.lounge = "";
       e.phase = "chill"; e.motion.groom = 0; e.roam.arrived = false; e.roam.failedChoices = 0; e.roam.pose = partner ? "sit" : pose || loungePose(e);
-      e.roam.departPending = false;
+      e.roam.departPending = false; e.roam.fromPile = false;
     };
     const loungeSeatSpace = (e, x, y, z, heading, partner = e.loungePartner) => {
       const compact = e.compact, mode = e.footprintMode, radius = e.radius, height = e.height;
@@ -1489,6 +1550,7 @@
         || elapsed < r.wallFailedUntil && (x - r.wallFailedX) ** 2 + (z - r.wallFailedZ) ** 2 < 4;
     };
     const nearbyLounge = (e, roof, spawn, stayLevel = false) => {
+      if (e.nonInteractive) return false;
       const first = Math.floor(e.random() * Math.max(1, list.length));
       for (let i = 0; i < list.length; i++) {
         const other = list[(first + i) % list.length];
@@ -1544,6 +1606,10 @@
       const roofTour = !spawn && onRoof && wantsRoof && !stayLevel && e.random() < 0.5;
       const currentRoof = roofTour ? roofAt(p.x, p.y, p.z) : -1;
       const pose = loungePose(e);
+      // A crowded frontage can have no free seat within the normal stroll
+      // radius. After two failed local choices, reuse the full meadow search
+      // instead of waiting in an invalid resting spot until relocation.
+      const walkingRange = stayLevel && e.roam.failedChoices >= 2 ? roamRadius * 2 : 12;
       e.compact = false; e.height = Math.max(height, 2.7);
       // Prefer a small group on some visits; a crowded group always falls back
       // to another empty resting spot instead of blocking a walk indefinitely.
@@ -1552,6 +1618,9 @@
       }
       for (let pass = 0; pass < 2; pass++) {
         const roof = pass ? !wantsRoof : wantsRoof;
+        // A rejected climb's walking-only cooldown also applies to the
+        // fallback pass; otherwise it immediately chooses another roof.
+        if (stayLevel && roof !== onRoof) continue;
         const count = roof ? roofCount : loungeCount - roofCount, from = roof ? 0 : roofCount;
         const local = !spawn ? 48 : 0, candidates = count + local;
         if (!candidates) continue;
@@ -1575,16 +1644,17 @@
           }
           // A walking-only outing may step off a rock or follow a sloped roof.
           // Its supported route, not equal endpoint heights, excludes climbs.
-          if (stayLevel && Math.hypot(x - p.x, z - p.z) > 12) continue;
+          if (stayLevel && Math.hypot(x - p.x, z - p.z) > walkingRange) continue;
           // Worker assignments can change after the resting-spot cache was
           // built. Recheck the live firing lanes for cached candidates too.
           if (trafficAt(x, y, z) || !chillCaveClear(x, y, z)) continue;
           const distance = Math.hypot(x - p.x, z - p.z);
           if (roofTour && !pass && roof && roofAt(x, y, z) === currentRoof) continue;
           // A former worker may start on the opposite side of the island.
-          // Let it reach the inactive frontage before choosing shorter outings.
-          const tripLimit = !stayLevel && !onRoof && !roof && loungeAreas.length ? roamRadius * 2
-            : roofTour && roof ? 24 : !stayLevel && roof !== onRoof ? 18 : 12;
+          // Let it reach the inactive frontage before choosing shorter outings,
+          // and from the pile any lounge: a roof's included, or none is in reach.
+          const tripLimit = e.roam.fromPile || !stayLevel && !onRoof && !roof && loungeAreas.length ? roamRadius * 2
+            : roofTour && roof ? 24 : !stayLevel && roof !== onRoof ? 18 : walkingRange;
           if (!spawn && (distance < 2 || distance > tripLimit || loungeFailed(e, x, z))) continue;
           // Filter a future walking arrival, not the current reclining body's
           // large fallback circle. The exact new rest and rise are proved by
@@ -1630,6 +1700,7 @@
     };
     const spawnLounge = (e) => chooseChill(e, true);
     const groomLounge = (e, dt) => {
+      if (e.nonInteractive) { e.loungePartner = null; e.motion.groom = 0; }
       const partner = e.loungePartner, p = e.root.position;
       const seated = e.lounge === "sit" && Math.abs(e.speed) < 0.05 && !e.fire.burning;
       let near = false;
@@ -2007,6 +2078,7 @@
     };
     const activate = (e, atPosition = false) => {
       if (e.remoteControlled) return;
+      e.pileFirst = false;
       if (rage) rage.cancel(e, "respawn");
       if (ctx.rageRelease) ctx.rageRelease(e);
       clearWallSearch(e);
@@ -2023,8 +2095,9 @@
       e.climb.debugTraverse = e.climb.debugStuck = false; e.climb.debugRole = -1;
       e.debugMove.active = e.debugMove.cancelled = e.debugMove.wallPending = false; e.debugMove.status = "";
       e.climb.traverseStart = e.climb.traverseEnd = 0;
-      e.climb.retry = e.climb.airAttachAfter = e.climb.handoffDirection = d.climbAxis = d.climbSide = 0; e.roam.count = e.roam.index = 0; e.roam.departPending = e.roam.propDeparture = false;
-      e.actionControlled = e.motion.smash = false; e.startled.active = false;
+      e.climb.stallX = NaN; e.climb.stallTime = 0;
+      e.climb.retry = e.climb.airAttachAfter = e.climb.handoffDirection = d.climbAxis = d.climbSide = 0; e.roam.count = e.roam.index = 0; e.roam.departPending = e.roam.propDeparture = e.roam.fromPile = false;
+      e.actionControlled = e.motion.smash = false;
       releaseLab(e); e.motion.lab = false; releaseOffice(e);
       e.mode = e.owner.state; e.site = e.owner.work.plannedSite >= 0 ? e.owner.work.plannedSite : e.owner.work.site;
       e.parked = e.mode === "working"; e.parkFor = 0; e.exitFootprint = false;
@@ -2074,8 +2147,8 @@
       if (ctx.track && !e.tracked) { ctx.track(e); e.tracked = true; }
       if (e === debugShuttle) { debugShuttleAt = elapsed + 4; debugShuttleUntil = 0; }
     };
-    for (let i = 0; i < crew.list.length; i++) {
-      const owner = crew.list[i], seed = fnv1a(`office/${owner.traits.name || i}`);
+    const makeEntry = (owner, i) => {
+      const seed = fnv1a(`office/${owner.traits.name || i}`);
       const gorilla = BL.agent.create({ managed: true, groundAt, groundPlaneAt: ctx.groundPlaneAt, torsoClearAt: ctx.climbTorsoClear, scale: SCALE, coatClip,
         suitClip, suitColor: seed % BL.agent.SUIT_COLORS });
       gorilla.poseManaged(0.6, 0, 0, 0, i * 2.39996323, 0, false, false);
@@ -2084,13 +2157,12 @@
         animation: { due: true, dt: 0, pending: 0, at: 0, interval: 0, settle: 0, phase: "", lounge: "", work: "", office: "", updates: 0 },
         health: { value: BL.crew.HEALTH_MAX * 2, max: BL.crew.HEALTH_MAX * 2, delay: 0 }, index: i,
         rage: BL.clankerRage.state(),
-        startled: { active: false, planned: false, time: 0, heading: 0, fromY: 0 },
         radius: WALK_RADIUS, height: 2.7, foot: FOOT, minY: 0, biped: false, compact: owner.state === "working" && gorilla.compact, footprintMode: "walk",
         active: false, tracked: false, mode: "", phase: "", route: "", entryTurn: false, planningEntry: false, site: -1, fromSite: -1, portal: -1,
         hasSlot: false, slotIndex: -1, slotX: 0, slotY: 0, slotZ: 0, goalX: 0, goalY: 0, goalZ: 0,
         random: mulberry32(fnv1a(`clanker/${owner.id || owner.traits.name || i}`)),
         // Its bed while its Ooga sleeps: see `updateSleep`.
-        sleep: { stage: "", slot: -1, leg: 0, count: 0, path: new Float64Array(SLEEP_POINTS * 2), mark: 0, pose: "", stall: 0, near: Infinity },
+        sleep: { stage: "", slot: -1, home: -1, leg: 0, count: 0, path: new Float64Array(SLEEP_POINTS * 2), mark: 0, pose: "", stall: 0, near: Infinity, stuck: -1, tries: 0, forwardLeg: -1, forwardNear: Infinity, retrying: false, retryX: 0, retryZ: 0, beamTime: 0, beamWait: 0, beamForm: "", beamNative: false },
         // Its desk or wait spot in B.C.A. and where it is in the routine: see `workOffice`.
         office: { stage: "", desk: -1, wait: -1, time: 0, count: 0, index: 0, path: new Float64Array(OFFICE_POINTS * 2), seed,
           cycle: 0, work: "", left: 0, stroke: 0, turn: 0, held: 0 },
@@ -2110,7 +2182,7 @@
           targetX: NaN, targetY: NaN, targetZ: NaN, order: 0, waitUntil: 0, blocked: 0, obstacle: null, waitPeer: null, waitX: 0, waitZ: 0,
           plans: 0, arrived: false, pose: "", poseWait: 0, lastPose: "", transition: 0, nextChoice: 0, failedChoices: 0, runUp: 0, jumpRetry: 0,
           departPending: false, departAt: 0, departX: 0, departY: 0, departZ: 0, riseAdmitted: false,
-          wallFailedX: NaN, wallFailedZ: NaN, wallFailedUntil: 0,
+          wallFailedX: NaN, wallFailedZ: NaN, wallFailedUntil: 0, fromPile: false,
           levelOnlyUntil: 0, planAt: 0, progressTime: 0, progressX: NaN, progressZ: NaN, progressDistance: Infinity, progressTurn: Infinity, progressCursor: -1, progressClaim: 0, backoutX: NaN, backoutZ: NaN, alignTime: 0, failedX: NaN, failedZ: NaN, failedUntil: 0 },
         controlled: false, remoteControlled: false, pendingSite: -1, actionControlled: false,
         debugMove: { active: false, cancelled: false, status: "", reason: "", target: { x: 0, y: 0, z: 0 },
@@ -2140,7 +2212,7 @@
         climb: { active: false,
           panel: { x: 0, y: 0, z: 0, heading: 0, nx: 0, nz: 1, u: 0, v: 0, depth: 0 },
           autoDirection: -1, descending: false, progress: 0, length: 0, lowerY: 0, upperY: 0, climbs: 0,
-          count: 0, index: 0, heading: 0, topHeading: 0, exitHeading: 0, fromTop: false, basePrepEnd: 0, lowerGroundDistance: 0, bottomTurn: 0, mount: 0, finish: 0, retry: 0, blocked: 0, mantleStart: 0, mantleRiseEnd: 0, autoTo: -1, waitRelease: false, lowerExit: true, minimum: 0, attempts: 0, failure: "", blockX: 0, blockY: 0, blockZ: 0,
+          count: 0, index: 0, heading: 0, topHeading: 0, exitHeading: 0, fromTop: false, basePrepEnd: 0, lowerGroundDistance: 0, bottomTurn: 0, mount: 0, finish: 0, retry: 0, blocked: 0, mantleStart: 0, mantleRiseEnd: 0, autoTo: -1, stallX: NaN, stallY: NaN, stallZ: NaN, stallTime: 0, waitRelease: false, lowerExit: true, minimum: 0, attempts: 0, failure: "", blockX: 0, blockY: 0, blockZ: 0,
           searchPending: false, searchDeferred: false, searchCursor: 0, searchIndex: 0, searchBudget: 0,
           searchX: 0, searchY: 0, searchZ: 0, searchHeading: 0, searchDescending: false,
           searchGoalX: 0, searchGoalY: 0, searchGoalZ: 0,
@@ -2163,18 +2235,30 @@
           toX: 0, toY: 0, toZ: 0, lift: 0, wall: false, caveExit: false,
           points: new Float64Array((JUMP_SAMPLES + 1) * 3) }
       };
+      // Non-enumerable, like the crew's: a driven or remote gorilla keeps normal interactions.
+      // A separate player body (`entry.npc`) is never a passive companion, from its first placement check on.
+      interactionGetter(entry, "nonInteractive", () => passiveNpcs && !entry.npc && !entry.controlled && !entry.remoteControlled);
       entry.motion.supportEntry = entry;
       gorilla.root.visible = false;
       gorilla.root.matrixNative = false;
       gorilla.root.matrixLiving = true;
       addChild(ctx.root, gorilla.root);
+      return entry;
+    };
+    for (let i = 0; i < crew.list.length; i++) {
+      const owner = crew.list[i], entry = makeEntry(owner, i);
       list.push(entry); byOwner.set(owner, entry);
     }
     const sync = () => {
       if (disposed) return;
-      for (let i = 0; i < list.length; i++) if (!list[i].active && alive(list[i].owner)) activate(list[i]);
+      if (passiveNpcs && ctx.sleep) bedsToday();
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].nonInteractive) beamStatus(list[i], 0);
+        else if (!list[i].active && alive(list[i].owner)) activate(list[i]);
+      }
     };
-    sync();
+    // Passive companions are placed by their first update's status beam.
+    if (!passiveNpcs) sync();
     const startLabShuttle = (owner) => {
       const e = byOwner.get(owner);
       if (labSite < 0 || !e) return false;
@@ -2259,6 +2343,11 @@
       jump.active = true; jump.wall = wall; jump.caveExit = false; jump.progress = 0; jump.reverse = false; jump.blocked = 0; e.jumps++;
       return true;
     };
+    // Ground more than a terrace lower within a metre past a landing, sampled finer than the half-metre voxels.
+    const saddleAhead = (x, y, z, sx, sz) => {
+      for (let d = 0.2; d <= 1.001; d += 0.2) if (ctx.surfaceAt(x + sx * d, z + sz * d) < y - 0.3) return true;
+      return false;
+    };
     const tryRoofHop = (e, heading, destination) => {
       const p = e.root.position, previousHeading = e.heading;
       if (Math.cos(heading - previousHeading) < 0.85) return false;
@@ -2268,8 +2357,11 @@
       // bounds the gravity arc and sweeps every segment against live scenery.
       for (let distance = 2; distance <= MAX_JUMP; distance += 0.4) {
         const x = p.x + sx * distance, z = p.z + sz * distance, y = ctx.surfaceAt(x, z);
+        // A landing on the saddle's last step, lower ground just ahead, would step back down into the saddle:
+        // land past it, on the upper level.
         if (roofAt(x, y, z) !== destination
-          || Math.abs(pointSupportAt(x, z, y + 0.02, e) - y) > 0.05) continue;
+          || Math.abs(pointSupportAt(x, z, y + 0.02, e) - y) > 0.05
+          || saddleAhead(x, y, z, sx, sz)) continue;
         if (prepareJump(e, x, y, z, 0, false, true)) {
           e.roam.runUp = 0; e.motion.takeoff = 1; return true;
         }
@@ -2410,6 +2502,8 @@
         && !ctx.climbPeersClear(e, x, y, z, nx, ny, nz, heading, heading)) return false;
       if (e.motion.dragging && ctx.rageCarryClear
         && !ctx.rageCarryClear(e, x, y, z, nx, ny, nz, heading, heading)) return false;
+      // Other players hold the visitor's gorilla off on a wall as they do on foot (the scene's `playersClear`).
+      if (e.controlled && ctx.playersClear && !ctx.playersClear(e, x, y, z, nx, ny, nz)) return false;
       // The upright rectangle owns wall support. On the wall, only the core
       // and actual props are swept; individual stone voxels are not blockers.
       const radius = wallTravel || e.controlled ? 0.12 : 0.42;
@@ -2420,6 +2514,7 @@
     const climbWalkClear = (e, x, y, z, nx, ny, nz, heading, actors = true) => {
       if (autonomousChill(e) && !chillCaveClear(x, y, z, nx, ny, nz, true)) return false;
       if (actors && ctx.climbPeersClear && !ctx.climbPeersClear(e, x, y, z, nx, ny, nz, heading, heading)) return false;
+      if (e.controlled && ctx.playersClear && !ctx.playersClear(e, x, y, z, nx, ny, nz)) return false;
       return ctx.climbClear ? ctx.climbClear(e, x, y + 0.65, z, nx, ny + 0.65, nz,
         0.42, 0.5, false, actors, !ctx.climbPeersClear)
         : clear(x, y + 0.65, z, nx, ny + 0.65, nz, 0.42, 0.5, e);
@@ -2443,6 +2538,7 @@
       return CLIMB_GROUND_POINT;
     };
     const climbClaimOccupied = (e, x, y, z, heading, owner) => {
+      if (e.nonInteractive || owner.nonInteractive) return false;
       const c = owner.climb;
       if (!c.active || c.free) return false;
       const planning = owner.planningRoam, height = owner.height;
@@ -4124,6 +4220,28 @@
       // heights/angles describe the actual footing available at a handoff.
       if (ctx.groundPlaneAt) ctx.groundPlaneAt(p.x, p.y, p.z, e.heading, m.groundRects.angled, m);
       if (c.debugStuck) { c.holdPose = true; e.speed = 0; return; }
+      // A resting gorilla's climb that makes no headway (a crest it cannot mount, a blocked or held step, either way
+      // up the wall) releases outward onto clear ground below, as a blocked descent does, rather than hanging until the
+      // stall recovery moves it. A lounge it was climbing to is given up for another; it is not caught again in the fall.
+      if (autonomousChill(e)) {
+        if (!(Math.hypot(p.x - c.stallX, p.y - c.stallY, p.z - c.stallZ) < 0.1)) {
+          c.stallX = p.x; c.stallY = p.y; c.stallZ = p.z; c.stallTime = 0;
+        } else if ((c.stallTime += dt) > 2) {
+          const sx = Math.sin(e.heading), sz = Math.cos(e.heading);
+          const x = p.x - sx * 1.5, z = p.z - sz * 1.5, floor = pointSupportAt(x, z, p.y + 0.02, e);
+          if (Number.isFinite(floor) && floor <= p.y && floor >= p.y - 12 && actorLanding(e, x, floor, z)
+            && chillCaveClear(p.x, p.y, p.z, x, floor, z, true)
+            && climbClear(e, p.x, p.y, p.z, x, p.y, z, e.heading, true, true)) {
+            const r = e.roam;
+            if (e.goalY > p.y + 0.55) { r.failedX = e.goalX; r.failedZ = e.goalZ; r.failedUntil = elapsed + 60; }
+            r.count = r.index = 0; r.detour = false;
+            c.stallTime = 0;
+            dropRectangleClimb(e, true, 4); c.airAttachAfter = Infinity; d.resume = false;
+            setGoal(e, x, floor, z); e.rest = 0;
+            return;
+          }
+        }
+      }
       if (c.free) { updateRectangleClimb(e, dt); return; }
       // An autonomous route may walk up to the wall, but the upright
       // rectangle owns travel once stone actually supports it. The old rail
@@ -4388,9 +4506,26 @@
             setGoal(e, POINT.x, POINT.y, POINT.z);
             return true;
           }
+          // A passive walk from work visits its Ooga's pile slot before a lounge.
+          if (e.pileFirst) {
+            e.pileFirst = false; e.route = "pile";
+            // Its Ooga's loading slot; else the pile's loading ring, in its own direction.
+            const slot = e.owner.slot, angle = Math.atan2(p.x, p.z), ring = ctx.pileRingRadius ? ctx.pileRingRadius() : 6;
+            const x = slot ? slot.x : Math.sin(angle) * ring, z = slot ? slot.z : Math.cos(angle) * ring;
+            const y = groundAt(x, z, Infinity);
+            setGoal(e, x, Number.isFinite(y) ? y : p.y, z);
+            return true;
+          }
           e.phase = "chill"; e.route = ""; e.exitFootprint = true;
           return chooseChill(e, true);
         }
+      }
+      if (e.route === "pile") {
+        if (Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.5) return true;
+        e.phase = "chill"; e.route = ""; e.exitFootprint = true;
+        // The pile is the island's middle, farther from every rooftop lounge than an ordinary outing's reach.
+        e.roam.fromPile = true;
+        return chooseChill(e, true);
       }
       if (e.route === "island") {
         if (Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.3) return true;
@@ -4510,6 +4645,7 @@
           p.x + sx * 2, p.y, p.z + sz * 2, e.heading, heading);
     };
     const separateSurfacePeers = (e, dt) => {
+      if (e.nonInteractive) return false;
       if (enteringCave(e) || e.controlled || e.motion.lab || e.climb.active || e.jump.active || e.drive.airborne
         || e.lounge || e.loungeDepart || e.fire.burning || e.fire.rolling || e.pound || e.beat
         || e.gorilla.motionActive) return false;
@@ -4561,6 +4697,44 @@
       }
       setSupportY(e, y, x, z, heading, dt * 3); p.x = x; p.z = z; e.heading = heading;
       e.speed = step / dt; e.blocked = 0;
+    };
+    // A passive companion's travel steps straight at its authored goal (exit,
+    // apron, entry, slot or pile). A working gorilla heading for a work cave
+    // walks straight to its apron wherever it set out from (another cave or the
+    // meadow), retargets and retries included, and a gorilla leaving work walks
+    // straight to its Ooga's pile slot, over the pile itself, so no lane aims it
+    // round the pile ring while the ordinary controller aims at the slot. Only
+    // an apron leg outside work travel follows the authored spokes and pile
+    // ring (`ctx.npcFixedPaths`, `passivePlanned`). Support and clearance are
+    // terrain and cave walls only. A step a wall refuses goes to the ordinary
+    // controller, which owns wall climbs and roof descents.
+    const PASSIVE_WALKER = { pathing: null, root: null };
+    const passivePlanned = (e) => e.route === "apron" && !(e.phase === "travel" && e.mode === "working");
+    const movePassive = (e, dt, speed, planned) => {
+      const p = e.root.position;
+      let tx = e.goalX, tz = e.goalZ;
+      if (planned && ctx.npcFixedPaths && ctx.npcPathState) {
+        e.pathing = e.pathing || ctx.npcPathState();
+        PASSIVE_WALKER.pathing = e.pathing; PASSIVE_WALKER.root = e.root;
+        ctx.npcFixedPaths.target(PASSIVE_WALKER, e.goalX, e.goalZ);
+        tx = e.pathing.targetX; tz = e.pathing.targetZ;
+      } else if (e.pathing) {
+        // A straight leg leaves the planned lane behind: the next planned leg plans afresh from wherever the
+        // gorilla then stands, even to the same goal (`fixed.target` replans only on a new goal or map), in
+        // the same state and buffers.
+        e.pathing.tx = NaN;
+      }
+      const dx = tx - p.x, dz = tz - p.z, distance = Math.hypot(dx, dz);
+      if (distance < 0.02) { e.speed = 0; return; }
+      const desired = Math.atan2(dx, dz), turn = Math.atan2(Math.sin(desired - e.heading), Math.cos(desired - e.heading));
+      const heading = e.heading + clamp(turn, -dt * 7, dt * 7), step = Math.min(distance, speed * dt);
+      const x = p.x + dx / distance * step, z = p.z + dz / distance * step;
+      const y = support(e, x, z, p.y, PROP_STEP, heading);
+      if (!Number.isFinite(y) || Math.abs(y - p.y) > PROP_STEP || !groundStepClear(e, p.x, p.y, p.z, x, y, z, e.heading, heading)) {
+        move(e, dt, speed); return;
+      }
+      setSupportY(e, y, x, z, heading, dt * 3); p.x = x; p.z = z; e.heading = heading;
+      e.speed = step / dt; e.blocked = e.stuckTime = 0;
     };
     const move = (e, dt, speed) => {
       if (e.recover > 0) { e.speed = 0; return; }
@@ -4920,56 +5094,6 @@
       c.departurePlanning = departurePlanning;
       d.x = d.z = 0; d.run = false;
     };
-    // A nearby lightning strike sends rooftop NPCs towards a clear lower landing. The existing running ledge
-    // controller owns takeoff, the swept body, gravity and landing; this never moves a player-controlled gorilla.
-    const startleHill = (x, y, z, heading) => {
-      const roof = roofAt(x, y, z);
-      for (const e of list) {
-        const p = e.root.position, s = e.startled;
-        if (!e.active || !e.root.visible || e.controlled || e.remoteControlled || e.sleep.stage || sleeps(e.owner)
-          || e.rage.active || e.fire.burning || e.fire.rolling || e.climb.active || e.jump.active || e.drive.airborne
-          || e.actionControlled || (p.x - x) ** 2 + (p.z - z) ** 2 > 12 ** 2
-          || (roof >= 0 ? roofAt(p.x, p.y, p.z) !== roof : Math.abs(p.y - y) > 2)) continue;
-        s.active = true; s.planned = false; s.time = 0; s.heading = heading; s.fromY = p.y;
-        e.rest = e.pound = e.beat = e.stand = 0;
-        if (e.lounge) leaveLounge(e);
-      }
-    };
-    const updateStartled = (e, dt) => {
-      const s = e.startled, p = e.root.position;
-      s.time += dt;
-      if (!e.drive.airborne && (p.y < s.fromY - 1.5 || s.time > 20)) {
-        s.active = false; e.drive.x = e.drive.z = 0; e.drive.run = false;
-        resumeEntry(e); return;
-      }
-      if (!s.planned) {
-        // Share the ordinary planning budget so a crowd does not all search in the strike's frame.
-        if (!roamBudget) { e.speed = 0; return; }
-        roamBudget--;
-        let best = Infinity, gx = 0, gy = 0, gz = 0;
-        for (const turn of STEERING) {
-          const heading = s.heading + turn, sx = Math.sin(heading), sz = Math.cos(heading);
-          for (let distance = 6; distance <= 16; distance += 2) {
-            const x = p.x + sx * distance, z = p.z + sz * distance, y = ctx.surfaceAt(x, z);
-            const cost = distance + Math.abs(turn) * 4;
-            if (cost >= best || !Number.isFinite(y) || y > p.y - 2 || !ctx.onLand(x, z)
-              || !actorLanding(e, x, y, z) || !staticClear(e, x, y, z, x, y, z, heading, heading)
-              || ctx.fireClear && !ctx.fireClear(e, p.x, p.y, p.z, x, y, z, e.heading, heading)) continue;
-            best = cost; gx = x; gy = y; gz = z;
-          }
-        }
-        if (!Number.isFinite(best)) { s.active = false; resumeEntry(e); return; }
-        cancelDebugMove(e); clearWallSearch(e);
-        releasePortal(e); releaseLab(e); releaseOffice(e);
-        e.hasSlot = false; e.parked = false; e.phase = "startled"; e.route = "";
-        e.roam.count = e.roam.index = 0; e.roam.departPending = false;
-        setGoal(e, gx, gy, gz); s.planned = true;
-      }
-      e.motion.walkGait = "gallop";
-      if (e.loungeDepart) { departLounge(e, dt); return; }
-      if (e.drive.airborne) updateDriven(e, dt);
-      else runDownhill(e, dt, Math.atan2(e.goalX - p.x, e.goalZ - p.z));
-    };
     const moveRoam = (e, dt) => {
       const p = e.root.position, r = e.roam;
       if (r.targetX !== e.goalX || r.targetY !== e.goalY || r.targetZ !== e.goalZ) {
@@ -4998,6 +5122,12 @@
       if (inClimbArea(e) && (!roofTrip || roofWall && wallRectangleShare(e, p.x, p.y, p.z, heading) >= WALL_ENTER_SHARE)
         && Math.abs(e.goalY - p.y) >= 1 && caveAt(p.x, p.y, p.z) < 0) {
         if (tryClimb(e, heading, e.goalY < p.y) || holdClimbSearch(e)) { e.speed = 0; return; }
+        // A completed search that cannot fit the starting body has rejected
+        // this approach. Do not keep walking up its narrow risers and retry
+        // from a footing that cannot support a lounge or a climb.
+        if (roofTrip && e.climb.failure === "start") {
+          r.wall = true; e.climb.failure = ""; abandonRoam(e); return;
+        }
       }
       if (roofWall && r.runUp >= ROOF_RUN_UP && !r.jumpRetry && !e.fire.burning) {
         r.jumpRetry = 0.4;
@@ -5206,10 +5336,52 @@
       player.climb.searchPending = player.climb.searchDeferred = player.climb.claimPending = player.climb.crestPending = false;
       player.climb.claimFor = -1; player.climb.claimOwnerOrder = player.climb.claimOrder = 0;
     };
+    // Separate bodies (the hub, `ctx.separateBodies`): driving a companion builds the visitor a gorilla of its own with
+    // the same constructor, where the NPC stands and as it faces, never in the roster list. The NPC keeps its track,
+    // office desk, lab station and bed. The body goes, with everything it held, when it is let go.
+    const separateBodies = ctx.separateBodies === true;
+    const BODY_RING = [0, 1.2, 2];
+    // Null when no candidate is clear (checked as a driven gorilla is, never with the passive shortcuts): nothing is
+    // activated, tracked or announced, and the NPC is untouched.
+    const spawnBody = (npc) => {
+      // Its own scheduling and claim identity (`index`): one past the roster, never its NPC's, so neither consumes the
+      // other's wall-search, lab-route or roam turn or climb claim. The roster list itself is unchanged.
+      const body = makeEntry(npc.owner, list.length);
+      body.npc = npc;
+      const from = npc.root.position, heading = npc.heading;
+      let placed = false;
+      for (let r = 0; r < BODY_RING.length && !placed; r++) for (let k = 0; k < (r ? 8 : 1) && !placed; k++) {
+        const a = heading + k * Math.PI / 4, x = from.x + Math.sin(a) * BODY_RING[r], z = from.z + Math.cos(a) * BODY_RING[r];
+        const y = support(body, x, z, from.y + STEP, STEP, heading);
+        if (!Number.isFinite(y) || ctx.clear && !ctx.clear(x, y, z, x, y, z, WALK_RADIUS, WALK_HEIGHT, body)) continue;
+        Object.assign(body.root.position, { x, y, z }); placed = true;
+      }
+      if (!placed) { body.npc = null; body.gorilla.dispose(); return null; }
+      npc.localBody = body;
+      body.heading = heading;
+      activate(body, true);
+      if (ctx.onBody) ctx.onBody(body, true);
+      return body;
+    };
+    const disposeBody = (body) => {
+      if (rage) rage.cancel(body, "respawn");
+      if (ctx.rageRelease) ctx.rageRelease(body);
+      releasePortal(body); releaseLab(body); releaseOffice(body); releaseBed(body);
+      clearWallSearch(body);
+      if (body.tracked && ctx.untrack) ctx.untrack(body);
+      body.tracked = body.active = false;
+      if (ctx.onBody) ctx.onBody(body, false);
+      sleepBeamLook(body, false);
+      body.gorilla.dispose();
+      if (body.npc && body.npc.localBody === body) body.npc.localBody = null;
+    };
     const release = () => {
       if (!player) return false;
       const e = player;
+      // Released into the passive Hub policy: nothing it carried may keep burning or raging.
+      if (passiveNpcs) clearCombatEffects(e, true);
       cancelInput(); player = null; e.controlled = false;
+      if (e.npc) { disposeBody(e); return true; }
       if (sleeping(e)) { e.drive.resume = false; return true; }
       if (e.sleep.slot >= 0 && !sleeps(e.owner)) releaseBed(e);
       e.drive.resume = true;
@@ -5305,12 +5477,23 @@
       return true;
     };
     const possess = (value) => {
-      const e = entryFor(value);
+      let e = entryFor(value);
       if (!e || e.remoteControlled || !e.active || !e.root.visible) return false;
-      if (player === e) return true;
+      if (player === e || player && player.npc === e) return true;
+      if (separateBodies && !e.npc && list.includes(e)) {
+        // Someone else's driven companion (a ghost track) is never taken over.
+        if (e.ghostTrack && !e.localBody) return false;
+        const body = spawnBody(e);
+        if (!body) return false;
+        if (!body.active) { disposeBody(body); return false; }
+        // The previous driven body goes only once this one has a checked place.
+        release();
+        e = body;
+      }
       if (rage) rage.cancel(e, "possession");
       if (ctx.rageRelease) ctx.rageRelease(e);
       release(); player = e; e.controlled = true; e.drive.resume = false;
+      cancelSleepBeam(e);
       const asleep = sleeping(e);
       // Selecting a settled sleeper keeps its bed and pose until an explicit wake.
       if (e.sleep.stage && !asleep) { e.sleep.stage = ""; e.gorilla.chest.scale.y = 1; e.exitFootprint = false; }
@@ -5425,25 +5608,27 @@
       e.climb.searchPending = e.climb.searchDeferred = e.climb.claimPending = e.climb.crestPending = false;
       return true;
     };
+    const supportLost = (e) => {
+      if (!e.active || !e.root.visible || e.climb.active || e.jump.active || e.drive.airborne) return;
+      const p = e.root.position, floor = support(e, p.x, p.z, p.y, PROP_STEP);
+      if (floor >= p.y - 0.05) return;
+      const d = e.drive;
+      // A controlled walker keeps its horizontal pace while the destroyed
+      // support falls away; gravity handles the short drop separately.
+      if (!e.controlled) d.vx = d.vz = 0;
+      d.vy = 0;
+      d.airborne = d.passiveFall = true; d.grounded = d.motionEnvelope = false;
+      d.motionRecover = 0; d.resume = !e.controlled;
+      e.lounge = ""; e.motion.takeoff = 0;
+    };
     const supportRemoved = () => {
-      for (let i = 0; i < list.length; i++) {
-        const e = list[i];
-        if (!e.active || !e.root.visible || e.climb.active || e.jump.active || e.drive.airborne) continue;
-        const p = e.root.position, floor = support(e, p.x, p.z, p.y, PROP_STEP);
-        if (floor >= p.y - 0.05) continue;
-        const d = e.drive;
-        // A controlled walker keeps its horizontal pace while the destroyed
-        // support falls away; gravity handles the short drop separately.
-        if (!e.controlled) d.vx = d.vz = 0;
-        d.vy = 0;
-        d.airborne = d.passiveFall = true; d.grounded = d.motionEnvelope = false;
-        d.motionRecover = 0; d.resume = !e.controlled;
-        e.lounge = ""; e.motion.takeoff = 0;
-      }
+      for (let i = 0; i < list.length; i++) supportLost(list[i]);
+      // The visitor's separate body is no roster entry, but stands on scenery all the same.
+      if (player && player.npc) supportLost(player);
     };
     const ignite = (value) => {
       const e = entryFor(value);
-      if (!combatEnabled || !e || !e.active || !e.root.visible || e.fire.burning || e.fire.rolling || e.fire.cooldown > 0) return false;
+      if (!combatEnabled || !e || e.nonInteractive || !e.active || !e.root.visible || e.fire.burning || e.fire.rolling || e.fire.cooldown > 0) return false;
       const f = e.fire;
       f.burning = true; f.requested = f.escaping = false; f.retry = f.escapeRetry = 0; f.age = 0; f.heat = 0.05; f.reaction = 1 + e.random() * 2;
       f.panic.active = false; fireThreatsActive = true;
@@ -6151,8 +6336,8 @@
       if (e.drive.motionEnvelope && !e.gorilla.motionActive && !e.drive.airborne
         && !e.drive.motionRecover && !e.fire.rolling && !e.fire.rollRecover) e.drive.motionEnvelope = false;
       labEnvelope(e);
-      if (combatEnabled && ctx.fireContact && ctx.fireContact(e, beforeX, beforeY, beforeZ)) ignite(e);
-      if (ctx.onMove && (beforeX !== p.x || beforeY !== p.y || beforeZ !== p.z)) ctx.onMove(e, beforeX, beforeY, beforeZ, dt);
+      if (combatEnabled && !e.nonInteractive && ctx.fireContact && ctx.fireContact(e, beforeX, beforeY, beforeZ)) ignite(e);
+      if (!e.nonInteractive && ctx.onMove && (beforeX !== p.x || beforeY !== p.y || beforeZ !== p.z)) ctx.onMove(e, beforeX, beforeY, beforeZ, dt);
     };
     const shareLabStation = (e) => {
       // A completed job releases its desk for an interior coworker. Keep the
@@ -6308,37 +6493,48 @@
     };
     // Sleep. A gorilla sleeps when its Ooga does and where the scene keeps beds (`ctx.sleep`: `slots`, each with its
     // root point, heading and `nest`, and `path(slot, out)`, the dry way there from the home island as x, z pairs).
-    // It reserves a bed before it sets out and keeps it through the walk, the sleep, the waking and the walk
-    // home; beds are dealt for the day by a hash of the roster's names (`bedsToday`), so the choice is random,
-    // reproducible, the same on every page, and never reshuffled under a sleeper. Stages: "go" along the path, "settle" turning onto the bed, "asleep", then "return" back
+    // It reserves a bed before it sets out and keeps it through the walk and sleep, releasing it on waking.
+    // The daily name hash deals free beds among current sleepers, never reshuffling an occupied bed.
+    // Stages: "go" along the path, "settle" turning onto the bed, "asleep", then "return" back
     // along the path once its Ooga wakes, after which the ordinary work and chill machinery takes over.
+    // Walking retries share a two-second no-forward-progress budget. If they fail, a sleeper beams to its
+    // reserved bed in two 90 ms pulses. A waking gorilla still walks home or hands over to chill where it is.
     // Selection keeps a settled sleeper in bed until Space wakes it. A release while its Ooga still sleeps
     // walks an awakened gorilla back to bed from where it stands.
-    const SLEEP_POSES = ["left", "right", "back"], SLEEP_REACH = 1.1, SLEEP_ARRIVE = 0.3, SLEEP_STALL = 25, SLEEP_MARK = 1.9, DAY_MS = 86400000;
-    // Who sleeps where today: every gorilla's bed, worked out once a day from the roster's names alone. Each takes
-    // the first bed still free in its own shuffled order, in roster order, so the answer never depends on who
-    // happened to fall asleep first, and every page looking at the island sees the same gorilla in the same bed
-    // without a word passing between them. A bed already taken is kept past midnight until its sleeper leaves it.
+    const SLEEP_POSES = ["left", "right", "back"], SLEEP_REACH = 1.1, SLEEP_ARRIVE = 0.3, SLEEP_STALL = 25, SLEEP_BLOCKED = 2, SLEEP_PROGRESS = 0.05, SLEEP_BEAM = 0.09, SLEEP_TRIES = 2, SLEEP_MARK = 1.9, DAY_MS = 86400000;
+    // Only current sleepers take part in the daily deal. Keep occupied beds stable
+    // across activity changes and midnight. A driven gorilla keeps its existing bed
+    // until release, even if its owner wakes; only sleepers get new reservations.
+    // The authored 20 beds remain the capacity: excess sleepers stay hidden until a
+    // bed is released, rather than overlapping another sleeper or inventing new ground.
     let bedDay = -1;
-    const bedOf = [];
+    const bedOf = new Int16Array(list.length).fill(-1), bedSleeping = new Uint8Array(list.length);
+    const bedUsed = new Uint8Array(ctx.sleep ? ctx.sleep.slots.length : 0);
     const bedsToday = () => {
       const day = Math.floor(Date.now() / DAY_MS), beds = ctx.sleep.slots.length;
-      if (day === bedDay && bedOf.length === list.length) return bedOf;
-      bedDay = day;
-      const taken = new Uint8Array(beds);
-      bedOf.length = list.length;
+      let changed = day !== bedDay;
       for (let i = 0; i < list.length; i++) {
+        const asleep = sleeps(list[i].owner) && !list[i].remoteControlled ? 1 : 0;
+        if (bedSleeping[i] !== asleep) changed = true;
+        bedSleeping[i] = asleep;
+      }
+      if (!changed) return;
+      bedDay = day; bedUsed.fill(0); bedOf.fill(-1);
+      for (let i = 0; i < list.length; i++) {
+        const slot = list[i].sleep.slot;
+        if (slot >= 0) { bedOf[i] = slot; bedUsed[slot] = 1; }
+      }
+      for (let i = 0; i < list.length; i++) {
+        if (!bedSleeping[i] || bedOf[i] >= 0) continue;
         const name = list[i].owner.traits.name;
         let best = -1, lowest = Infinity;
-        // The bed with the lowest hash for this name and day among those still free: a shuffle without a list.
         for (let b = 0; b < beds; b++) {
-          const order = taken[b] ? Infinity : fnv1a(`bed/${day}/${name}/${b}`);
+          const order = bedUsed[b] ? Infinity : fnv1a(`bed/${day}/${name}/${b}`);
           if (order < lowest) { lowest = order; best = b; }
         }
         bedOf[i] = best;
-        if (best >= 0) taken[best] = 1;
+        if (best >= 0) bedUsed[best] = 1;
       }
-      return bedOf;
     };
     const bedTaken = (slot, but) => {
       for (const other of list) if (other !== but && other.sleep.slot === slot) return true;
@@ -6346,14 +6542,15 @@
     };
     const releaseBed = (e) => {
       const s = e.sleep;
-      s.stage = ""; s.slot = -1;
+      cancelSleepBeam(e);
+      s.stage = ""; s.slot = -1; s.beamWait = 0; s.retrying = false; bedDay = -1;
       e.gorilla.chest.scale.y = 1;
     };
     const reserveBed = (e) => {
       const s = e.sleep, beds = ctx.sleep.slots;
       if (s.slot >= 0) return true;
-      let slot = bedsToday()[e.index];
-      // Its own bed, unless a sleeper from before midnight still lies in it: then the first one nobody has.
+      let slot = bedOf[e.index];
+      // A reservation made since the last deal wins; use another free bed if needed.
       if (slot >= 0 && bedTaken(slot, e)) {
         slot = -1;
         for (let b = 0; b < beds.length && slot < 0; b++) if (!bedTaken(b, e)) slot = b;
@@ -6377,6 +6574,89 @@
       const s = e.sleep, bed = ctx.sleep.slots[s.slot];
       e.heading = bed.heading; e.speed = 0; e.lounge = s.pose; e.loungeDepart = false; e.loungeHeading = bed.heading;
       e.footprintMode = "sit"; s.stage = "asleep"; s.mark = SLEEP_MARK * 0.5;
+    };
+    // A leg that stalls is walked again from the point it came from (`back`: -1 toward home, +1 toward the bed).
+    // The tries count until it gets past the leg it first stalled on; false once they are spent.
+    const retryLeg = (e, back) => {
+      const s = e.sleep;
+      s.stall = 0; s.near = Infinity;
+      if (s.stuck < 0) s.stuck = s.leg;
+      if (++s.tries > SLEEP_TRIES) return false;
+      s.leg = Math.min(s.count - 1, Math.max(0, s.leg + back));
+      return true;
+    };
+    // While it beams it shows the Agent's original green code form (as rage does), drawn native so no Matrix mode
+    // repaints it; only this rig changes. `s.beamForm` holds the form it wore before, "" when nothing is held. The
+    // end restores that form and native flag exactly, unless something else (rage) has since changed its look.
+    const sleepBeamLook = (e, on) => {
+      const s = e.sleep, g = e.gorilla, root = g.root;
+      if (on === !!s.beamForm) return;
+      if (on) {
+        s.beamForm = g.form || "ape"; s.beamNative = !!root.matrixNative;
+        g.setForm("code"); root.matrixNative = true;
+        return;
+      }
+      if (!e.rage?.active && g.form === "code" && root.matrixNative === true) { g.setForm(s.beamForm); root.matrixNative = s.beamNative; }
+      s.beamForm = ""; s.beamNative = false;
+    };
+    const cancelSleepBeam = (e) => {
+      const s = e.sleep;
+      sleepBeamLook(e, false);
+      if (sleepBeam && s.slot >= 0) sleepBeam.hide(s.slot);
+      if (s.stage === "beamOut") s.stage = "go";
+      else if (s.stage === "beamIn") s.stage = "asleep";
+      s.beamTime = 0;
+    };
+    const cancelSleepBeams = () => {
+      for (const e of list) if (e.sleep.beamForm || e.sleep.stage === "beamOut" || e.sleep.stage === "beamIn") cancelSleepBeam(e);
+      if (sleepBeam) sleepBeam.clear();
+    };
+    // Recheck the destination at the transfer too: another player may enter it during departure.
+    const sleepLandingClear = (e) => {
+      const s = e.sleep, bed = ctx.sleep.slots[s.slot];
+      return !!bed && !bedTaken(s.slot, e) && (!ctx.restPoseClear
+        || ctx.restPoseClear(e, 2, s.pose, true, bed.x, bed.y, bed.z, bed.heading, null, 0, bed));
+    };
+    let sleepBeamBudget = 1, sleepBeamBusy = false;
+    // Share one recovery across the population, including catch-up substeps. A
+    // blocked bed spends this frame's check too, then its usual retry delay lets
+    // other sleepers through. Queued gorillas hold their position instead of
+    // repeatedly collision-testing the same stalled route while another beams.
+    const beginSleepFrame = () => {
+      sleepBeamBudget = 1; sleepBeamBusy = false;
+      for (const e of list) if (e.sleep.stage === "beamOut" || e.sleep.stage === "beamIn") { sleepBeamBusy = true; break; }
+    };
+    const beginSleepBeam = (e) => {
+      const s = e.sleep;
+      if (sleepBeamBusy || sleepBeamBudget <= 0) return;
+      sleepBeamBudget--;
+      if (e.controlled || e.remoteControlled || e.rage?.active || e.fire?.burning || e.fire?.rolling || !sleepLandingClear(e)) { s.beamWait = 1; return; }
+      sleepBeamBusy = true;
+      s.stage = "beamOut"; s.beamTime = 0; e.speed = 0;
+    };
+    const updateSleepBeam = (e, dt) => {
+      const s = e.sleep, p = e.root.position;
+      if (e.rage?.active || e.fire?.burning || e.fire?.rolling) { cancelSleepBeam(e); return; }
+      s.beamTime += dt;
+      if (s.stage === "beamOut" && s.beamTime >= SLEEP_BEAM) {
+        // Admission may have spent this rendered frame's clearance check in an
+        // earlier physics substep. Hold departure until the next frame's check.
+        if (sleepBeamBudget <= 0) { s.beamTime = SLEEP_BEAM; return; }
+        sleepBeamBudget--;
+        if (!sleepLandingClear(e)) { cancelSleepBeam(e); s.beamWait = 1; return; }
+        const bed = ctx.sleep.slots[s.slot];
+        p.x = bed.x; p.y = bed.y; p.z = bed.z;
+        e.motion.supportOffset = e.motion.takeoff = e.motion.landing = 0;
+        e.recover = 0; e.exitFootprint = false;
+        layDown(e);
+        // This is a deliberate discontinuity, never a walk swept from the source to the bed.
+        e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, false, e.lounge, e.motion);
+        s.stage = "beamIn"; s.beamTime -= SLEEP_BEAM;
+      }
+      if (s.stage === "beamIn" && s.beamTime >= SLEEP_BEAM) { cancelSleepBeam(e); return; }
+      // Reduced motion (read live) keeps both the glyphs and the color flicker off.
+      sleepBeamLook(e, !!sleepBeam && !sleepBeam.still);
+      if (sleepBeam) sleepBeam.show(s.slot, p.x, p.y, p.z, e.heading, s.beamTime / SLEEP_BEAM, s.stage === "beamIn", e.gorilla.root);
     };
     // True while sleep owns the entry this frame. False hands it back to the caller: to hide it (no bed to be had)
     // or to let the ordinary update walk it out of a cave, down from a roof or back to its bench first.
@@ -6409,14 +6689,29 @@
         if (e.lounge) { leaveLounge(e); e.lounge = ""; e.loungeDepart = false; e.recover = Math.max(e.recover, 0.65); }
         e.mode = "sleeping"; e.phase = "sleep"; e.route = ""; e.exitFootprint = true;
         s.count = site.path(s.slot, s.path);
-        s.leg = s.stage === "return" ? Math.min(s.count - 1, s.leg + 1) : sleepLegFrom(e);
-        s.stage = "go"; s.stall = 0; s.near = Infinity;
+        // A newly dealt bed has a different path; the old return leg belongs only to its old bed.
+        s.leg = s.stage === "return" && s.home === s.slot ? Math.min(s.count - 1, s.leg + 1) : sleepLegFrom(e);
+        s.stage = "go"; s.stall = 0; s.near = Infinity; s.stuck = -1; s.tries = 0;
+        s.forwardLeg = s.leg; s.forwardNear = Infinity; s.beamWait = 0; s.retrying = false;
       }
+      if (s.stage === "beamOut" || s.stage === "beamIn") { updateSleepBeam(e, dt); return true; }
       if (s.stage === "go") {
-        const last = s.leg >= s.count - 1, gx = s.path[s.leg * 2], gz = s.path[s.leg * 2 + 1], d = Math.hypot(gx - p.x, gz - p.z);
-        if (d < (last ? SLEEP_ARRIVE : SLEEP_REACH)) {
-          if (last) { s.stage = "settle"; e.speed = 0; }
-          else { s.leg++; s.near = Infinity; }
+        s.beamWait = Math.max(0, s.beamWait - dt);
+        if (s.stall >= SLEEP_BLOCKED && !s.beamWait && !e.jump.active && !e.climb.active && e.recover <= 0) {
+          e.speed = 0;
+          beginSleepBeam(e);
+          // Hold the last safe pose too; animating it would repeat full body
+          // collision checks for every queued sleeper in every substep.
+          return true;
+        }
+        const last = !s.retrying && s.leg >= s.count - 1, gx = s.retrying ? s.retryX : s.path[s.leg * 2], gz = s.retrying ? s.retryZ : s.path[s.leg * 2 + 1], d = Math.hypot(gx - p.x, gz - p.z);
+        if (d < (last || s.retrying ? SLEEP_ARRIVE : SLEEP_REACH)) {
+          if (s.retrying) { s.retrying = false; s.stall += dt; }
+          else {
+            if (s.leg >= s.forwardLeg) { s.stall = 0; s.stuck = -1; s.tries = 0; }
+            if (last) { s.stage = "settle"; e.speed = 0; }
+            else { s.leg++; s.near = Infinity; }
+          }
         } else {
           // The first two points are the home island's own ground: a goal known to lie below lets a sleeper that
           // starts on a roof climb or hop down to it, as a stroller bound for the meadow does.
@@ -6424,26 +6719,30 @@
           // A hop it has begun is finished, and it gets to its feet before it walks, as on any other errand.
           // A blocked walk marks itself as waiting at a doorway, which forbids a climb: a sleeper has no doorway.
           e.route = "";
+          const waiting = e.jump.active || e.climb.active || e.recover > 0;
           if (e.jump.active) updateJump(e, dt);
           else if (e.recover > 0) { e.recover = Math.max(0, e.recover - dt); e.speed = 0; }
           else move(e, dt, SPEED);
-          // A way that cannot be walked is not a reason to stand in the forest all night: after a long stall the
-          // sleeper is simply found in its bed.
-          if (d < s.near - 0.25) { s.near = d; s.stall = 0; }
-          else if (s.stall > 3 && !last && !e.jump.active && !e.climb.active && e.recover <= 0 && e.retry <= 0 && p.y > e.goalY + 0.8) {
-            // Held up on high ground with the way on below it: hop down, as a stroller leaving a roof does.
+          // Count lack of forward progress, not journey length or the distance gained by a backtrack.
+          // Jumps, climbs and getting to its feet are deliberate waits and do not spend this budget.
+          const distance = Math.hypot(gx - p.x, gz - p.z);
+          if (!s.retrying && (s.leg > s.forwardLeg || s.leg === s.forwardLeg && distance < s.forwardNear - SLEEP_PROGRESS)) {
+            s.forwardLeg = s.leg; s.forwardNear = distance; s.stall = 0; s.tries = 0; s.stuck = -1;
+          } else if (!waiting && !e.jump.active && !e.climb.active) s.stall += dt;
+          if (s.stall > 3 && !last && !e.jump.active && !e.climb.active && e.recover <= 0 && e.retry <= 0 && p.y > e.goalY + 0.8) {
             const desired = Math.atan2(gx - p.x, gz - p.z);
             e.retry = 1.2;
             for (let i = 0; i < STEERING.length; i++) if (tryJump(e, desired + STEERING[i] * e.turn)) { e.heading = desired + STEERING[i] * e.turn; break; }
-            s.stall += dt;
           }
-          else if ((s.stall += dt) > SLEEP_STALL) {
-            // Placed, not walked: the pose is set outright, as a spawn's is, with no step to certify.
-            const bed = site.slots[s.slot];
-            p.x = bed.x; p.y = bed.y; p.z = bed.z; e.jump.active = false;
-            layDown(e);
-            e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, false, e.lounge, e.motion);
-            return true;
+          if (!waiting && !e.jump.active && !e.climb.active) {
+            if (s.stall >= SLEEP_BLOCKED && !s.beamWait) beginSleepBeam(e);
+            else if (!s.retrying && s.tries < SLEEP_TRIES && s.stall >= SLEEP_BLOCKED * (s.tries + 1) / (SLEEP_TRIES + 1)) {
+              // A short backstep can finish within this budget; walking an entire earlier leg often cannot.
+              // Keep the forward waypoint and its best distance, so a retry never masquerades as progress.
+              const at = Math.max(0, s.leg - 1), dx = s.path[at * 2] - p.x, dz = s.path[at * 2 + 1] - p.z;
+              const distance = Math.hypot(dx, dz), scale = distance > 0 ? Math.min(1, distance) / distance : 0;
+              s.retryX = p.x + dx * scale; s.retryZ = p.z + dz * scale; s.retrying = distance > SLEEP_ARRIVE; s.tries++;
+            }
           }
         }
       }
@@ -6470,25 +6769,30 @@
     const updateWake = (e, dt, beforeX, beforeY, beforeZ) => {
       const s = e.sleep, p = e.root.position;
       if (s.stage !== "return") {
+        cancelSleepBeam(e);
+        // The path home is stored separately; a waking gorilla no longer owns a bed.
+        s.home = s.slot; s.slot = -1; bedDay = -1;
         e.gorilla.chest.scale.y = 1;
         if (e.lounge) { e.lounge = ""; e.loungeDepart = false; e.recover = Math.max(e.recover, 1.2); }
         e.footprintMode = "walk";
         // Back along the path from the point nearest where it stands: its bed if it reached it.
         const at = sleepLegFrom(e);
         s.leg = Math.max(0, Math.hypot(s.path[at * 2] - p.x, s.path[at * 2 + 1] - p.z) < SLEEP_REACH ? at - 1 : at);
-        s.stage = "return"; s.stall = 0; s.near = Infinity;
+        s.stage = "return"; s.retrying = false; s.stall = 0; s.near = Infinity; s.stuck = -1; s.tries = 0;
       }
       const gx = s.path[s.leg * 2], gz = s.path[s.leg * 2 + 1], d = Math.hypot(gx - p.x, gz - p.z);
-      if (d < SLEEP_REACH || (s.stall += dt) > SLEEP_STALL) {
+      let over = false;
+      if (d < SLEEP_REACH) {
         s.stall = 0;
+        if (s.leg === s.stuck) { s.stuck = -1; s.tries = 0; }
         // Home is the first point of the path, down the approach stair in the meadow: a gorilla is not left
         // standing at the bridge's head, where the walkers come and go.
-        if (s.leg <= 0) {
-          releaseBed(e);
-          e.exitFootprint = false; e.mode = ""; e.phase = "chill"; e.route = ""; e.rest = 0;
-          return false;
-        }
-        s.leg--; s.near = Infinity;
+        if (s.leg <= 0) over = true;
+        else { s.leg--; s.near = Infinity; }
+      } else if ((s.stall += dt) > SLEEP_STALL && !e.jump.active) {
+        // A leg it cannot walk is walked again from the point it came from. Failing that it stops where it is and the
+        // ordinary chill takes over there, rather than skipping on to a point of the way it never reached.
+        over = !retryLeg(e, 1);
       } else {
         if (d < s.near - 0.25) { s.near = d; s.stall = 0; }
         setGoal(e, gx, p.y, gz);
@@ -6496,6 +6800,11 @@
         if (e.jump.active) updateJump(e, dt);
         else if (e.recover > 0) { e.recover = Math.max(0, e.recover - dt); e.speed = 0; }
         else move(e, dt, SPEED);
+      }
+      if (over) {
+        releaseBed(e);
+        e.exitFootprint = false; e.mode = ""; e.phase = "chill"; e.route = ""; e.rest = 0;
+        return false;
       }
       poseEntry(e, dt, beforeX, beforeY, beforeZ);
       return true;
@@ -6714,12 +7023,80 @@
         syncLab(e);
       }
     });
+    // A passive companion's status change is a relocation, never a journey:
+    // straight into its bed, out of sight while away, or onto the pile's
+    // ground for work. The scene's status beams present the move.
+    const beamStatus = (e, dt) => {
+      if (!e.nonInteractive || e.remoteControlled || e.controlled) return false;
+      const state = allAway ? "away" : e.owner.state, s = e.sleep, p = e.root.position;
+      if (state === "away") {
+        if (e.mode === "away" && !e.active && !s.stage) return true;
+        releaseBed(e); releasePortal(e); releaseLab(e); releaseOffice(e); clearWallSearch(e);
+        e.mode = "away"; e.active = e.root.visible = e.hasSlot = false;
+        e.jump.active = e.climb.active = e.drive.airborne = false;
+        e.drive.vx = e.drive.vy = e.drive.vz = e.speed = 0;
+        if (e.tracked && ctx.untrack) ctx.untrack(e);
+        e.tracked = false;
+        return true;
+      }
+      if (state === "sleeping" && s.stage === "asleep" && e.active) return false;
+      // Clanking to chilling in view is a walk, not a beam: out of its cave by the
+      // authored exit (climbs and wall descents included), to its Ooga's pile
+      // slot, then a lounge (travelGoal's "pile" route). A climb, jump or fall
+      // in progress finishes first.
+      if (state === "chilling" && e.mode === "working" && e.active && e.root.visible && !s.stage) {
+        if (e.climb.active || e.jump.active || e.drive.airborne || e.fire.rolling) return false;
+        releaseLab(e); releaseOffice(e); releasePortal(e); clearWallSearch(e);
+        e.mode = "chilling"; e.fromSite = caveAt(p.x, p.y, p.z); e.phase = "leave"; e.route = "exit";
+        e.pileFirst = true; e.hasSlot = false; e.entryTurn = false; e.pound = e.beat = e.stand = e.rest = 0;
+        return false;
+      }
+      if (state !== "sleeping" && !s.stage && e.active && e.mode === state) return false;
+      if (e.retry > 0) { e.retry = Math.max(0, e.retry - dt); return true; }
+      releasePortal(e); releaseLab(e); releaseOffice(e); clearWallSearch(e);
+      if (state === "sleeping") {
+        if (!ctx.sleep || !reserveBed(e)) { e.active = e.root.visible = false; e.retry = 1; return true; }
+        activate(e, true);
+        if (!sleepLandingClear(e)) { e.active = e.root.visible = false; e.retry = 1; return true; }
+        const bed = ctx.sleep.slots[s.slot];
+        p.x = bed.x; p.y = bed.y; p.z = bed.z;
+        s.count = s.leg = 0; s.retrying = false; s.beamWait = 0;
+        e.mode = "sleeping"; e.phase = "sleep"; e.route = ""; e.parked = e.biped = false;
+        layDown(e);
+        e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, false, e.lounge, e.motion);
+        return true;
+      }
+      releaseBed(e);
+      if (state === "chilling") { activate(e); return true; }
+      // Working starts at the pile, including an away actor returning. Use a
+      // bounded endpoint search with the actual body/terrain clearance, never
+      // a sweep across the entire island or another actor's saved position.
+      activate(e, true);
+      const slot = e.owner.slot;
+      let placed = false;
+      for (let i = 0; slot && i < 33; i++) {
+        const a = (i - 1) * Math.PI / 8 + e.index * 0.61803398875;
+        const r = i ? 0.75 + Math.floor((i - 1) / 16) * 0.75 : 0;
+        const x = slot.x + Math.sin(a) * r, z = slot.z + Math.cos(a) * r;
+        const y = groundAt(x, z, Infinity);
+        if (!Number.isFinite(y) || !landing(x, y, z) || !staticClear(e, x, y, z)) continue;
+        p.x = x; p.y = y; p.z = z; placed = true; break;
+      }
+      if (!placed) { e.active = e.root.visible = false; e.retry = 1; return true; }
+      e.phase = "chill"; e.route = ""; e.rest = 0;
+      if (sites[e.site]) beginTravel(e, e.site);
+      e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, false, "", e.motion);
+      return true;
+    };
     const updateEntry = (e, dt) => {
-      if (e.remoteControlled) { e.startled.active = false; return; }
-      if (e.controlled || e.rage.active || e.fire.burning || e.fire.rolling || !e.active) e.startled.active = false;
+      if (beamStatus(e, dt)) return;
+      if ((e.sleep.stage === "beamOut" || e.sleep.stage === "beamIn")
+        && (e.remoteControlled || e.controlled || allAway || !sleeps(e.owner) || e.fire.burning || e.fire.rolling
+          || e.climb.active || e.jump.active || e.drive.airborne || e.rage.active)) cancelSleepBeam(e);
+      if (e.remoteControlled) return;
       // Expiry, health and account/activity cancellation precede regeneration
       // and every movement controller, including swimming or climbing.
-      if (combatEnabled && rage) rage.check(e, elapsed);
+      if (combatEnabled && !e.nonInteractive && rage) rage.check(e, elapsed);
       // A certified cliff warp during check starts a new local movement step;
       // its final pose must not sweep or roll back to the previous location.
       const p = e.root.position, beforeX = p.x, beforeY = p.y, beforeZ = p.z;
@@ -6768,7 +7145,7 @@
         || e.jump.active || e.drive.airborne || e.debugMove.active)) releaseOffice(e);
       if (e.sleep.stage && !sleeps(e.owner) && alive(e.owner) && !e.controlled && !e.drive.airborne && !e.fire.rolling && !e.fire.burning && !e.climb.active
         && updateWake(e, dt, beforeX, beforeY, beforeZ)) return;
-      if (combatEnabled && ctx.fireContact && ctx.fireContact(e, p.x, p.y, p.z)) ignite(e);
+      if (combatEnabled && !e.nonInteractive && ctx.fireContact && ctx.fireContact(e, p.x, p.y, p.z)) ignite(e);
       if (combatEnabled) updateFire(e, dt);
       if (rage && e.rage.active && e.fire.burning) rage.check(e, elapsed);
       if (rage && e.rage.active && e.rage.warpWaiting && !e.climb.active && !e.jump.active && !e.drive.airborne) {
@@ -6786,9 +7163,8 @@
         } else updateClimb(e, dt);
         poseEntry(e, dt, beforeX, beforeY, beforeZ); return;
       }
-      if (e.startled.active) {
-        updateStartled(e, dt); poseEntry(e, dt, beforeX, beforeY, beforeZ); return;
-      }
+      // Off the wall the no-headway watch forgets its spot, so a later climb from the same place gets its full time.
+      e.climb.stallX = NaN;
       if (e.controlled || e.drive.airborne || e.drive.resume) {
         updateDriven(e, dt); poseEntry(e, dt, beforeX, beforeY, beforeZ); return;
       }
@@ -6809,7 +7185,7 @@
           && liveFloor >= p.y - STEP && liveFloor <= p.y + PROP_STEP) setSupportY(e, liveFloor, p.x, p.z, e.heading, dt * 3);
       }
       if (e.fire.rolling || escapeForRoll(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
-      if (combatEnabled && fleeFire(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
+      if (combatEnabled && !e.nonInteractive && fleeFire(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
       if (rage && e.rage.active) {
         e.phase = "rage"; e.biped = false;
         let advanced = false;
@@ -6947,7 +7323,9 @@
           if (!e.jump.active) {
             // A short prop can lift the feet above the ground-level goal too.
             // Keep its supported exit on the ordinary steered walker.
-            if (e.route === "apron" && p.y > e.goalY + 0.8 && !raisedSupport(e) && caveAt(p.x, p.y, p.z) < 0)
+            if (e.nonInteractive && !e.climb.active && !e.drive.airborne)
+              movePassive(e, dt, e.mode === "chilling" ? CHILL_SPEED : SPEED, passivePlanned(e));
+            else if (e.route === "apron" && p.y > e.goalY + 0.8 && !raisedSupport(e) && caveAt(p.x, p.y, p.z) < 0)
               runDownhill(e, dt, Math.atan2(e.goalX - p.x, e.goalZ - p.z));
             else if (enteringAisle(e)) moveEntryAisle(e, dt);
             else if (e.motion.lab && !e.motion.labRunIn && (e.fromSite === labSite && e.route === "exit"
@@ -7166,6 +7544,8 @@
     };
     const update = (dt) => {
       if (disposed || !(dt > 0)) return;
+      beginSleepFrame();
+      if (ctx.sleep && !allAway) bedsToday();
       if (combatEnabled && rage) rage.frame(elapsed);
       if (labEscape && (!labEscape.active || labEscape.controlled || labEscape.fire.burning
         || labEscape.climb.active || labEscape.jump.active || labEscape.drive.airborne)) {
@@ -7202,12 +7582,17 @@
         list[i].climb.searchBudget = 2;
         if (!list[i].remoteControlled && !list[i].rage.warpWaiting) pendingClimbSearch(list[i]);
       }
-      for (let i = 0; i < list.length; i++) {
-        const index = (climbNext + i) % list.length, e = list[index], c = e.climb;
+      // The visitor's separate body steps as a driven roster companion would, with its own turn key (`index`).
+      const body = player && player.npc ? player : null;
+      if (body) { body.climb.searchBudget = 2; if (!body.rage.warpWaiting) pendingClimbSearch(body); }
+      // The separate body takes its place in the same rotation, after the roster, so its wall searches get their turn.
+      const turns = list.length + (body ? 1 : 0);
+      for (let i = 0; i < turns; i++) {
+        const index = (climbNext + i) % turns, e = index < list.length ? list[index] : body, c = e.climb;
         if (!e.active || e.rage.warpWaiting || c.active || !c.searchPending || c.retry > remaining || e.recover > 0 || e.jump.active || e.drive.airborne
           || e.pound || e.beat || e.parked || e.fire.rolling) continue;
         if (e.controlled ? Math.hypot(e.drive.x, e.drive.z) <= 0.05 : Math.hypot(e.goalX - e.root.position.x, e.goalZ - e.root.position.z) <= 0.18) continue;
-        climbTurn = index; climbNext = (index + 1) % list.length;
+        climbTurn = e.index; climbNext = (index + 1) % turns;
         break;
       }
       while (remaining > 1e-8) {
@@ -7226,7 +7611,11 @@
         }
         for (let i = 0; i < list.length; i++) {
           updateEntry(list[i], step);
-          if (!list[i].remoteControlled && !list[i].rage.active && !list[i].startled.active) recoverStall(list[i], step);
+          if (!list[i].remoteControlled && !list[i].rage.active) recoverStall(list[i], step);
+        }
+        if (body && player === body) {
+          updateEntry(body, step);
+          if (!body.rage.active) recoverStall(body, step);
         }
       }
     };
@@ -7254,41 +7643,48 @@
     };
     const hit = (cave) => {
       const e = byOwner.get(cave);
-      if (!e || !e.active) return false;
+      if (!e || !e.active || e.nonInteractive) return false;
       e.activity = Math.min(9, e.activity + 1); e.hits++;
       if (e.site !== labSite && !officeOf[e.site] && e.activity >= 3) e.rest = Math.min(e.rest, 0.7);
       return true;
     };
     const damage = (entry, power) => {
-      if (!combatEnabled || !entry || !entry.active || !(power > 0)) return false;
+      if (!combatEnabled || !entry || entry.nonInteractive || !entry.active || !(power > 0)) return false;
       entry.health.value = Math.max(0, entry.health.value - power * 4);
       entry.health.delay = BL.crew.HEALTH_REGEN_DELAY;
       if (rage && entry.health.value === 0) rage.cancel(entry, "health");
       return true;
     };
-    const bananaHit = (entry, source, serial) => combatEnabled && !!rage && !!entry && rage.bananaHit(entry, source, serial);
-    const debugRage = (entry, on = true) => !disposed && (!on || combatEnabled) && !!rage && rage.debugRage(entryFor(entry), on);
+    const bananaHit = (entry, source, serial) => combatEnabled && !!rage && !!entry && !entry.nonInteractive && rage.bananaHit(entry, source, serial);
+    const debugRage = (entry, on = true) => !disposed && !entryFor(entry)?.nonInteractive && (!on || combatEnabled) && !!rage && rage.debugRage(entryFor(entry), on);
+    // Ends rage, smash and fire at once. A passive release also drops the
+    // flame look, since the Hub no longer runs a passive gorilla's fire effects.
+    const clearCombatEffects = (e, visuals = false) => {
+      if (rage) rage.cancel(e, "game-ended");
+      if (ctx.rageRelease) ctx.rageRelease(e);
+      e.health.value = e.health.max; e.health.delay = 0;
+      if (e.actionControlled || e.motion.smash) {
+        e.pound = e.recover = 0; e.poundHit = true;
+        e.actionControlled = e.motion.smash = false;
+        e.gorilla.cancelSmash();
+      }
+      const f = e.fire, m = e.motion;
+      f.burning = f.contactBurning = f.rolling = f.requested = f.escaping = f.panic.active = false;
+      f.retry = f.escapeRetry = f.age = f.heat = f.soot = f.cooldown = f.rollRecover = 0;
+      m.poundCharge = m.throwProgress = m.roll = m.rollAngle = m.rollSide = 0;
+      m.dragging = m.rage = false;
+      if (!visuals) return;
+      if (e.renderParts) for (const part of e.renderParts) part.ember = part.scorch = 0;
+      if (e.fireFX.spread) e.fireFX.spread.fill(0);
+      e.fireFX.burning = false;
+    };
     const setCombatEnabled = (on) => {
       on = on === true;
       if (on === combatEnabled) return;
       combatEnabled = on;
       if (on) return;
       fireThreatsActive = false;
-      for (const e of list) {
-        if (rage) rage.cancel(e, "game-ended");
-        if (ctx.rageRelease) ctx.rageRelease(e);
-        e.health.value = e.health.max; e.health.delay = 0;
-        if (e.actionControlled || e.motion.smash) {
-          e.pound = e.recover = 0; e.poundHit = true;
-          e.actionControlled = e.motion.smash = false;
-          e.gorilla.cancelSmash();
-        }
-        const f = e.fire, m = e.motion;
-        f.burning = f.contactBurning = f.rolling = f.requested = f.escaping = f.panic.active = false;
-        f.retry = f.escapeRetry = f.age = f.heat = f.soot = f.cooldown = f.rollRecover = 0;
-        m.poundCharge = m.throwProgress = m.roll = m.rollAngle = m.rollSide = 0;
-        m.dragging = m.rage = false;
-      }
+      for (const e of list) clearCombatEffects(e);
     };
     const stats = () => {
       let active = 0, working = 0, chilling = 0, overflow = 0, airborne = 0, hits = 0, pounds = 0, beats = 0, stuck = 0, replans = 0, recoveries = 0;
@@ -7303,14 +7699,21 @@
       }
       return { capacity: list.length, active, working, chilling, overflow, airborne, hits, pounds, beats, stuck, replans, recoveries, elapsed };
     };
-    const liveGeometry = (set) => { for (let i = 0; i < list.length; i++) if (list[i].active) list[i].gorilla.liveGeometry(set); };
+    const liveGeometry = (set) => {
+      if (sleepBeam) sleepBeam.liveGeometry(set);
+      for (let i = 0; i < list.length; i++) if (list[i].active) list[i].gorilla.liveGeometry(set);
+      if (player && player.npc) player.gorilla.liveGeometry(set);
+    };
     const dispose = () => {
+      if (player && player.npc) { const body = player; player = null; body.controlled = false; disposeBody(body); }
+      if (sleepBeam) sleepBeam.dispose();
       if (rage) rage.dispose();
       disposed = true; player = null;
       if (wallSearch) wallSearch.owner = null;
       for (let i = 0; i < list.length; i++) {
         const e = list[i];
         if (e.tracked && ctx.untrack) ctx.untrack(e);
+        sleepBeamLook(e, false);
         e.gorilla.dispose(); e.active = e.tracked = e.debugMove.active = false;
       }
       list.length = 0; byOwner.clear();
@@ -7331,9 +7734,9 @@
       }
       return spots;
     };
-    return { list, sync, update, startleHill, target, companionTarget, hit, damage, bananaHit, debugRage, setCombatEnabled, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
+    return { list, sync, update, target, companionTarget, hit, damage, bananaHit, debugRage, setCombatEnabled, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
       debugLoungeSpots, wallSupported,
-      possess, release, sleeping, wake, setAway, setRemote, createRemote, respawn, travelRefusal, travel, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
+      possess, release, sleeping, wake, setAway, cancelSleepBeams, setRemote, createRemote, respawn, travelRefusal, travel, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
       get combatEnabled() { return combatEnabled; }, get player() { return player; } };
   };
   BL.clankers = { create, rageCarrying, WALK_RADIUS, WALK_HEIGHT, PROP_STEP, RAGE_SPEED };

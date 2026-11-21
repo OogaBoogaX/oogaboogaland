@@ -6,7 +6,8 @@ import { cookieNames, isSecureOrigin, parseCookies, serializeCookie } from "./co
 import { randomToken, sameString } from "./crypto.js";
 import { createSession, deleteAllSessions, deleteSession, SESSION_SECONDS, upsertPlayerFromGitHub } from "./db.js";
 import { allowed, clientIp, fromSite, getSessionForRemoval, redirect, safeNext, text } from "./http.js";
-import { contributorFor } from "./contributor-access.js";
+import { contributorDecision, contributorForEnv } from "./contributor-access.js";
+import { oogatron } from "./contributor-policy.js";
 
 const STATE_SECONDS = 600;
 const GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize";
@@ -79,13 +80,21 @@ const callback = async (request, env, url) => {
   if (!Number.isSafeInteger(profile.id) || typeof profile.login !== "string" || profile.type !== "User") {
     return text("GitHub sent an unexpected profile.", 502, { "set-cookie": clearState });
   }
-  if (!(await contributorFor(profile.login))) {
+  const decision = await contributorDecision(contributorForEnv(env), profile.login, profile.id, oogatron(env));
+  if (!decision.character && !decision.fresh) return text("Character sign-in is temporarily unavailable. Try again shortly.", 503, { "set-cookie": clearState, "retry-after": "60" });
+  if (!decision.character) {
     const destination = new URL(next, env.SITE_ORIGIN);
     destination.searchParams.set("signin", "contributor-required");
     return redirect(destination.pathname + destination.search + destination.hash, [clearState]);
   }
 
-  const player = await upsertPlayerFromGitHub(env.DB, { id: profile.id, login: profile.login, avatar_url: profile.avatar_url });
+  let player;
+  try {
+    player = await upsertPlayerFromGitHub(env.DB, { id: profile.id, login: profile.login, avatar_url: profile.avatar_url });
+  } catch (error) {
+    if (!String(error.message).includes("identity collision")) throw error;
+    return text("This username needs an account migration review. Your records have been preserved. Try again after the account owner refreshes their sign-in.", 409, { "set-cookie": clearState });
+  }
   if (player.banned_at) return text("This account cannot sign in.", 403, { "set-cookie": clearState });
   const session = await createSession(env.DB, player.id, request.headers.get("user-agent"));
   return redirect(next, [clearState, serializeCookie(names.session, session, { maxAge: SESSION_SECONDS, secure })]);

@@ -18,6 +18,13 @@
     }
     return Math.max(floor, Math.min(l.max, amount));
   };
+  // Three chip stacks under the pot number, each at most eight chips high.
+  const potChips = (pot, out) => {
+    out[0] = pot > 0 ? Math.min(8, Math.ceil(pot / 25)) : 0;
+    out[1] = pot > 0 ? Math.min(8, Math.floor(pot / 200)) : 0;
+    out[2] = pot > 0 ? Math.min(8, Math.floor(pot / 1600)) : 0;
+    return out;
+  };
   const position = (seat, own) => (seat - Math.max(0, own) + R.SEATS) % R.SEATS;
   const resultText = s => {
     if (!s.result) return "";
@@ -30,7 +37,15 @@
     }
     return lines.join(" / ");
   };
-  const create = (action, select) => {
+  // The Emote button's press reaches the visit's outside-press close before its click: one on either Emote button leaves
+  // the menu to the button's own toggle, so that press closes an open menu rather than closing and reopening it. The mark
+  // lives for that one press: the close and the button's click each clear it, or the HUD's Escape, which calls the same
+  // close, would find it still set and leave the menu open.
+  let pressOnEmote = false;
+  const notePress = e => { pressOnEmote = e.target instanceof Element && !!e.target.closest('[data-poker="emote"]'); };
+  // `emote(id)` sends one of BL.pokerEmotes' ten and answers whether it went; `hud` is the visit's HUD, whose outside
+  // presses close the emote menu. Both are optional: without `emote` the Emote buttons never show.
+  const create = (action, select, faceFor, emote, hud) => {
     const el = document.getElementById("poker"), lobby = document.getElementById("poker-panel"), edge = el.querySelector(".panel-edge");
     const by = name => el.querySelector(`[data-poker="${name}"]`);
     const focus = by("focus"), seatRoot = el.querySelector(".poker-seats"), rows = [], seats = [];
@@ -40,11 +55,14 @@
     const themeSelects = Array.from(el.querySelectorAll("[data-poker-theme-select]")), themeButtons = [];
     const auto = el.querySelector('[data-poker-option="auto"]'), sound = el.querySelector('[data-poker-option="sound"]');
     const history = Array.from({ length: 10 }, () => []), recorded = new Int32Array(10);
+    const soundChannel = BL.sound.channel("poker");
     let snapshot = null, lastIndex = -1, lastHand = -1, turnKey = "", focused = false, paused = false, audio = null, lastClock = "", lastHistory = "";
     let live = null;
     let filter = "all", viewBusy = false, lastLog = "", viewerId = null;
     const filterButtons = Array.from(el.querySelectorAll("[data-poker-filter]"));
     const tableSelect = by("table-select"), tableOptions = [];
+    const dealer = el.querySelector(".poker-dealer"), endDeal = () => { dealTimer = 0; dealer.removeAttribute("data-dealing"); };
+    let dealTimer = 0;
     const make = (tag, className, parent) => { const n = document.createElement(tag); if (className) n.className = className; if (parent) parent.appendChild(n); return n; };
     for (const theme of BL.pokerThemes.themes) {
       for (const picker of themeSelects) { const option = make("option", "", picker); option.value = theme.id; option.textContent = theme.name; }
@@ -57,7 +75,7 @@
       const theme = BL.pokerThemes.get(id), p = theme.ui;
       el.dataset.theme = theme.id;
       for (const [key, value] of Object.entries(p)) el.style.setProperty("--pk-" + key, value);
-      for (const [key, value] of Object.entries({ felt: theme.felt, line: p.accent + "66", soft: p.accent + "22", glow: p.accent + "55", surfaceSoft: p.surface + "aa", haloSoft: p.halo + "77", haloGlass: p.halo + "f2", deepGlass: p.deep + "f7" })) el.style.setProperty("--pk-" + key, value);
+      for (const [key, value] of Object.entries({ felt: theme.felt, line: p.accent + "66", soft: p.accent + "22", glow: p.accent + "55", surfaceSoft: p.surface + "aa", haloSoft: p.halo + "77", haloGlass: p.halo + "f2", deepGlass: p.deep + "f7", haloVeil: p.halo + "8c", deepVeil: p.deep + "d9" })) el.style.setProperty("--pk-" + key, value);
       for (const picker of themeSelects) picker.value = theme.id;
       for (const b of themeButtons) b.setAttribute("aria-pressed", String(b.dataset.pokerTheme === theme.id));
       by("theme-name").textContent = theme.name.toUpperCase();
@@ -74,9 +92,56 @@
     for (let i = 0; i < R.SEATS; i++) {
       const wrapper = make("div", "poker-seat", seatRoot), b = make("button", "poker-seat-button", wrapper);
       b.type = "button"; b.dataset.seat = i;
+      // The seated character's face, painted only when the character at the seat changes.
+      const face = make("canvas", "poker-face", b); face.width = face.height = 96; face.hidden = true; face.setAttribute("aria-hidden", "true");
       const badge = make("span", "poker-position", b), name = make("strong", "poker-player", b), stack = make("span", "poker-stack", b), last = make("small", "poker-last-action", b);
       const cards = make("div", "poker-seat-cards", wrapper), bet = make("span", "poker-bet", wrapper);
-      seats.push({ wrapper, b, badge, name, stack, last, cards, bet });
+      // An emote the seat's player sent, over the face; the scene times it and clears it.
+      const emoteNode = make("span", "poker-seat-emote", wrapper); emoteNode.setAttribute("aria-hidden", "true"); emoteNode.hidden = true;
+      seats.push({ wrapper, b, face, faceKey: "", badge, name, stack, last, cards, bet, emote: emoteNode, emoji: "" });
+    }
+    // The emote menu is static markup, so its ten buttons are built on the page's first visit and kept.
+    const emoteButtons = Array.from(el.querySelectorAll('[data-poker="emote"]')), emoteMenu = by("emote-menu");
+    if (!emoteMenu.firstChild) for (const e of BL.pokerEmotes.EMOTES) {
+      const b = make("button", "", emoteMenu); b.type = "button"; b.dataset.emote = e.id;
+      const glyph = make("span", "poker-emote-glyph", b); glyph.textContent = e.emoji; glyph.setAttribute("aria-hidden", "true");
+      make("span", "", b).textContent = e.name;
+    }
+    let emoteOn = false, notSent = false;
+    const emoteLabel = failed => {
+      if (failed === notSent) return;
+      notSent = failed;
+      for (const b of emoteButtons) { b.textContent = failed ? "Not sent" : "Emote"; if (failed) b.setAttribute("aria-label", "Emote: not sent"); else b.removeAttribute("aria-label"); }
+    };
+    const closeEmoteMenu = () => {
+      if (emoteMenu.hidden) return false;
+      emoteMenu.hidden = true; for (const b of emoteButtons) b.setAttribute("aria-expanded", "false");
+      return true;
+    };
+    const openEmoteMenu = () => { emoteLabel(false); emoteMenu.hidden = false; for (const b of emoteButtons) b.setAttribute("aria-expanded", "true"); };
+    const setEmoteAvailable = on => {
+      if (!!on === emoteOn) return;
+      emoteOn = !!on; emoteLabel(false);
+      for (const b of emoteButtons) b.hidden = !emoteOn;
+      if (!emoteOn) closeEmoteMenu();
+    };
+    const pickEmote = id => {
+      const sent = !!emote && emote(id);
+      closeEmoteMenu(); if (!sent) emoteLabel(true);
+    };
+    // Each set, the same emoji again included, swaps the animation's name, which restarts the pop and fade.
+    const showEmote = (seat, emoji) => {
+      const n = seats[seat];
+      if (!n || !emoji && !n.emoji) return;
+      if (emoji !== n.emoji) { n.emoji = emoji; n.emote.textContent = emoji; n.emote.hidden = !emoji; }
+      if (emoji) n.emote.dataset.beat = n.emote.dataset.beat === "a" ? "b" : "a";
+    };
+    if (hud) { window.addEventListener("pointerdown", notePress, true); hud.dismissOutside(emoteMenu, () => { if (!pressOnEmote) closeEmoteMenu(); pressOnEmote = false; }); }
+    const potRoot = by("pot-chips"), chipStacks = [], chipHeights = [0, 0, 0], chipScratch = [0, 0, 0];
+    for (let i = 0; i < 3; i++) {
+      const stack = make("span", "poker-chip-stack", potRoot);
+      for (let j = 0; j < 8; j++) make("i", "", stack).hidden = true;
+      chipStacks.push(stack);
     }
     const cards = (target, list, placeholders = false, reset = false) => {
       if (reset) target.replaceChildren();
@@ -97,7 +162,7 @@
       oscillator.type = "sine"; oscillator.frequency.setValueAtTime(kind === "turn" ? 660 : kind === "win" ? 880 : 260, now);
       oscillator.frequency.exponentialRampToValueAtTime(kind === "win" ? 1174 : 220, now + 0.11);
       gain.gain.setValueAtTime(0.0001, now); gain.gain.exponentialRampToValueAtTime(0.035, now + 0.008); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
-      oscillator.connect(gain); gain.connect(BL.sound.output(audio)); oscillator.start(now); oscillator.stop(now + 0.15);
+      oscillator.connect(gain); gain.connect(soundChannel.node(audio)); oscillator.start(now); oscillator.stop(now + 0.15);
       oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
     };
     const setAmount = (value, preset = "") => {
@@ -123,7 +188,9 @@
     };
     const onClick = e => {
       const b = e.target.closest("button"); if (!b || b.disabled || !el.contains(b)) return;
-      if (b.dataset.watch !== undefined) select(Number(b.dataset.watch));
+      if (b.dataset.poker === "emote") { pressOnEmote = false; if (!closeEmoteMenu()) openEmoteMenu(); }
+      else if (b.dataset.emote) pickEmote(b.dataset.emote);
+      else if (b.dataset.watch !== undefined) select(Number(b.dataset.watch));
       else if (b.dataset.pokerFilter) { filter = b.dataset.pokerFilter; filterRows(); }
       else if (b.dataset.pokerTheme) action("theme", b.dataset.pokerTheme);
       else if (b.dataset.seat !== undefined) action("seat", Number(b.dataset.seat));
@@ -153,6 +220,8 @@
     el.addEventListener("click", onClick); el.addEventListener("input", onInput); el.addEventListener("change", onChange);
     const setFocused = value => {
       focused = !!value; focus.hidden = !focused; lobby.hidden = edge.hidden = focused;
+      // The emote menu goes with the table view, however it was left (Walk the floor from the keyboard presses nothing outside it).
+      if (!focused) closeEmoteMenu();
       el.dataset.tableView = String(focused);
       if (focused) { document.body.dataset.pokerTableView = "true"; by("title").focus({ preventScroll: true }); }
       else { document.body.removeAttribute("data-poker-table-view"); lobby.removeAttribute("data-folded"); if (lastIndex >= 0) rows[lastIndex].b.focus({ preventScroll: true }); }
@@ -191,6 +260,12 @@
       el.dataset.yourTurn = String(!!legal && !paused && !pendingStand && !blocked);
       by("pot-label").textContent = s.result ? "LAST POT" : "TOTAL POT";
       by("pot").textContent = chips(s.result ? s.lastPot : s.pot);
+      potChips(s.result ? s.lastPot : s.pot, chipScratch);
+      for (let i = 0; i < 3; i++) {
+        if (chipScratch[i] === chipHeights[i]) continue;
+        chipHeights[i] = chipScratch[i];
+        for (let j = 0; j < 8; j++) chipStacks[i].children[j].hidden = j >= chipHeights[i];
+      }
       const community = s.board.slice(); while (community.length < 5) community.push(null);
       cards(board, community, true, fresh); cards(hand, own?.cards.length ? own.cards : [null, null], !own?.cards.length, fresh);
       by("street").textContent = streetName[s.phase];
@@ -204,6 +279,8 @@
         node.wrapper.classList.toggle("folded", !!p?.folded);
         node.wrapper.classList.toggle("winner", winner);
         node.wrapper.classList.toggle("empty", !p);
+        const f = faceFor(i, p);
+        if ((f ? f.key : "") !== node.faceKey) { node.faceKey = f ? f.key : ""; node.face.hidden = !f; if (f) f.paint(node.face); }
         node.name.textContent = p ? `${p.name}${p.bot ? " · Bot" : ""}` : `Seat ${i + 1}`;
         node.stack.textContent = p ? chips(p.stack) : idle && !viewer ? "Sit here" : "Open";
         node.last.textContent = !p ? "" : winner ? `+${chips(s.result.awards[i])} collected` : p.folded ? "Folded" : p.inHand && !p.stack ? "All in" : p.lastAction || (i === s.turn ? "Thinking" : "");
@@ -253,6 +330,8 @@
       }
       auto.checked = autoDeal;
       by("pause").textContent = paused ? "Resume practice" : "Pause practice"; by("pause").setAttribute("aria-pressed", String(paused));
+      // A new hand at the table shown, not one met by switching tables or on the visit's first update: the dealer deals.
+      if (!switched && previous && s.hand !== lastHand) { clearTimeout(dealTimer); dealer.dataset.dealing = ""; dealTimer = setTimeout(endDeal, 700); }
       if (!paused && !switched && previous) {
         if (s.result && !previous.result) cue("win");
         else if (legal && !previous.legal) cue("turn");
@@ -266,6 +345,9 @@
       by("countdown").classList.toggle("urgent", !!live && seconds >= 0 && seconds <= 15);
     };
     const setLive = value => {
+      // Joining or leaving the live tables swaps every table's state, so the next update counts as a switch: no deal.
+      // So does coming back live after connecting, reconnecting or a stopped connection's retry, which brings a new session.
+      if (!value !== !live || value && value.connection === "live" && live?.connection !== "live") lastIndex = -1;
       live = value; by("fairness").hidden = !live;
       const connection = viewBusy ? "connecting" : live?.connection || "practice";
       el.dataset.connection = connection;
@@ -289,13 +371,19 @@
         by("verify").disabled = by("export").disabled = !live.exportable || live.busy || connection !== "live";
       }
     };
-    return { update, countdown, setFocused, setTheme, setLive, setConnecting(value) { viewBusy = !!value; setLive(live); }, notice: noticeText, get focused() { return focused; }, dispose() {
+    // The dealer's face, painted once a visit from the room's own gorilla (every table's dealer looks the same).
+    const setDealer = agent => BL.hud.renderFaceIcon(by("dealer-face"), null, agent, 144);
+    return { update, countdown, setFocused, setTheme, setLive, setDealer, setEmoteAvailable, closeEmoteMenu, showEmote, setConnecting(value) { viewBusy = !!value; setLive(live); }, notice: noticeText, get focused() { return focused; }, dispose() {
+      clearTimeout(dealTimer); endDeal();
+      closeEmoteMenu(); for (let i = 0; i < seats.length; i++) showEmote(i, "");
+      emoteOn = false; emoteLabel(false); for (const b of emoteButtons) b.hidden = true;
+      if (hud) window.removeEventListener("pointerdown", notePress, true);
       el.removeEventListener("click", onClick); el.removeEventListener("input", onInput); el.removeEventListener("change", onChange);
-      by("tables").replaceChildren(); seatRoot.replaceChildren(); board.replaceChildren(); hand.replaceChildren(); by("history").replaceChildren();
+      by("tables").replaceChildren(); seatRoot.replaceChildren(); board.replaceChildren(); hand.replaceChildren(); potRoot.replaceChildren(); by("history").replaceChildren();
       by("theme-choices").replaceChildren(); for (const picker of themeSelects) picker.replaceChildren();
       tableSelect.replaceChildren(); el.removeAttribute("data-your-turn"); el.removeAttribute("data-connection");
-      sound.checked = false; setFocused(false); if (audio) { audio.close().catch(() => {}); audio = null; }
+      sound.checked = false; setFocused(false); soundChannel.release(); if (audio) { audio.close().catch(() => {}); audio = null; }
     } };
   };
-  BL.pokerHud = { create, betAmount, position, resultText };
+  BL.pokerHud = { create, betAmount, potChips, position, resultText };
 })();

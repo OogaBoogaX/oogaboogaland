@@ -18,17 +18,17 @@
 
   // How to play, on the lobby: each line its keys and what they do, for a keyboard and mouse, for touch or for a pad.
   const INTRO = {
-    keys: [[["W", "A", "S", "D"], "Move your Ooga"], [["Mouse"], "Aim, and click to fire"], [["G"], "Switch weapons"]],
+    keys: [[["W", "A", "S", "D"], "Move your Ooga"], [["Mouse"], "Aim, and click to fire"]],
     touch: [[["Left stick"], "Move your Ooga"], [["Ready"], "Start in combat mode"], [["Hold fire"], "Shoot the ghosts"]],
-    pad: [[["Left stick"], "Move your Ooga"], [["Right stick", "RT"], "Aim, and pull to fire"], [["Y"], "Switch weapons"], [["A"], "Ready"]]
+    pad: [[["Left stick"], "Move your Ooga"], [["Right stick", "RT"], "Aim, and pull to fire"], [["A"], "Ready"]]
   };
   const pad = BL.gamepad.state;
   /**
    * The HUD; `coarse` for touch words, `onMusic` when the visitor flips the mini player's switch, `onSkip` when they
    * skip to the next track, `onReady` and `onDecline` from the lobby, `onLobby` when its menu opens or closes,
-   * `onSpectate(mode)` and `onSpectateNext` from the spectator menu while the visitor is down.
+   * `onSpectateNext` from the spectator bar's Next while the visitor is down.
    */
-  const create = ({ coarse = false, onMusic = null, onSkip = null, onReady = null, onDecline = null, onLobby = null, onSpectate = null, onSpectateNext = null } = {}) => {
+  const create = ({ coarse = false, onMusic = null, onSkip = null, onReady = null, onDecline = null, onLobby = null, onSpectateNext = null } = {}) => {
     loadFace();
     const el = {
       hud: document.getElementById("ghost-hud"),
@@ -39,8 +39,7 @@
       topbar: document.querySelector(".topbar"), equipment: document.getElementById("equipment-hud"),
       lobby: document.getElementById("ghost-lobby"), lobbyGoal: document.getElementById("ghost-lobby-goal"), lobbyPlayers: document.getElementById("ghost-lobby-players"),
       lobbyNote: document.getElementById("ghost-lobby-note"), lobbyHow: document.getElementById("ghost-lobby-how"), lobbyReady: document.getElementById("ghost-lobby-ready"), lobbyDecline: document.getElementById("ghost-lobby-decline"),
-      spec: document.getElementById("ghost-spectate"), specModes: document.querySelectorAll("#ghost-spectate [data-spec]"),
-      specWatch: document.getElementById("ghost-spectate-watch"), specName: document.getElementById("ghost-spectate-name"), specNext: document.getElementById("ghost-spectate-next"),
+      spec: document.getElementById("ghost-spectate"), specName: document.getElementById("ghost-spectate-name"), specNext: document.getElementById("ghost-spectate-next"),
       scores: document.getElementById("ghost-scores"), results: document.getElementById("ghost-results"), halving: document.getElementById("ghost-halving"),
       resultsGoal: document.getElementById("ghost-results-goal"), resultsPlayers: document.getElementById("ghost-results-players"),
       steps: [1, 2, 3].map((place) => document.querySelector(`#ghost-podium [data-place="${place}"]`)),
@@ -48,10 +47,8 @@
       introText: document.getElementById("ghost-intro-text"), introArt: document.querySelectorAll("#ghost-intro .ghost-intro-art canvas:not(.ghost-intro-solo)"),
       introSolo: document.querySelectorAll("#ghost-intro .ghost-intro-solo")
     };
-    // The spectator menu's buttons, let go of after a press so the turn keys keep working.
-    const pickSpec = (e) => { if (onSpectate) onSpectate(e.currentTarget.dataset.spec); e.currentTarget.blur(); };
+    // The spectator bar's Next, let go of after a press so the turn keys keep working.
     const nextSpec = () => { if (onSpectateNext) onSpectateNext(); el.specNext.blur(); };
-    for (const b of el.specModes) b.addEventListener("click", pickSpec);
     el.specNext.addEventListener("click", nextSpec);
     // The lobby's buttons, and its own keys (inside a dialog the island leaves keys alone): Enter or R readies, Escape
     // declines.
@@ -86,7 +83,7 @@
     el.playerToggle.addEventListener("click", flip);
     const skip = () => { if (onSkip) onSkip(); el.playerSkip.blur(); };
     el.playerSkip.addEventListener("click", skip);
-    const last = { shown: false, title: null, sub: null, win: false, high: false, intro: null, introPicture: null, boss: -1, player: null, playing: null, on: null, skips: null, spec: null, specName: null };
+    const last = { shown: false, title: null, sub: null, win: false, high: false, intro: null, introPicture: null, boss: -1, player: null, playing: null, on: null, skips: null, spec: null, specName: null, specNext: null };
     const text = (node, key, value) => {
       if (last[key] === value) return;
       last[key] = value;
@@ -156,34 +153,9 @@
     // The halving notice, shown while an hourglass stands (`on`).
     const halving = (on) => { if (el.halving.hidden === on) el.halving.hidden = !on; };
     // The hunters' scoreboard: `rows` (`cave` the Ooga whose face shows, `name`, `points`, `lead` for the point leader)
-    // of which `count` show; null hides it. The caller passes rows only when something on it changed. Each place's face
-    // is painted again only when the Ooga in it changes.
-    const scoreRows = [];
-    const scores = (rows, count = 0) => {
-      if (rows === null) { el.scores.hidden = true; return; }
-      el.scores.hidden = false;
-      while (scoreRows.length < count) {
-        const li = document.createElement("li"), canvas = document.createElement("canvas"), points = document.createElement("b");
-        li.className = "ghost-score";
-        canvas.setAttribute("aria-hidden", "true");
-        li.append(canvas, points);
-        scoreRows.push({ li, canvas, points, cave: null });
-      }
-      for (let i = 0; i < scoreRows.length; i++) {
-        const r = scoreRows[i];
-        if (i >= count) { if (r.li.parentNode) r.li.remove(); continue; }
-        const row = rows[i];
-        if (!r.li.parentNode) el.scores.append(r.li);
-        if (r.cave !== row.cave) {
-          r.cave = row.cave;
-          if (row.cave) BL.hud.renderFaceIcon(r.canvas, row.cave, null, 68);
-          else r.canvas.getContext("2d").clearRect(0, 0, r.canvas.width, r.canvas.height);
-        }
-        r.points.textContent = String(row.points);
-        r.li.title = row.name;
-        r.li.toggleAttribute("data-lead", !!row.lead);
-      }
-    };
+    // of which `count` show; null hides it. The caller passes rows only when something on it changed. The rows are the
+    // shared `BL.hud.faceScores`, which Block Frenzy's live tally uses too.
+    const scoreList = BL.hud.faceScores(el.scores), scores = scoreList.set;
     // A won hunt's results card: `goal` its line, the podium's three steps from `top` (`cave`, `name`, `points`, first
     // to third; a step past `rows`' count stands empty), and every hunter's tally from `rows` (`name`, `foes` the
     // enemies they killed, `points`), best first, of which `count` show; null takes it down. Each on the podium stands
@@ -216,16 +188,12 @@
       }
       el.results.hidden = false;
     };
-    // The spectator menu, bottom centre while the visitor is down: `mode` the view they watch from ("grave", "free" or
-    // "players"; null hides it) and, watching players, `name` the one watched.
-    const spectate = (mode, name = "") => {
-      if (mode === last.spec && name === last.specName) return;
-      if (mode !== last.spec) {
-        if (mode === null || last.spec === null) el.spec.hidden = mode === null;
-        for (const b of el.specModes) b.setAttribute("aria-pressed", b.dataset.spec === mode ? "true" : "false");
-        el.specWatch.hidden = mode !== "players";
-        last.spec = mode;
-      }
+    // The spectator bar, bottom centre while the visitor is down (`on`): `name` the hunter they follow, and Next only
+    // while there is one (`following`) to move on from.
+    const spectate = (on, name = "", following = false) => {
+      on = !!on;
+      if (on !== last.spec) { el.spec.hidden = !on; last.spec = on; }
+      if (following !== last.specNext) { el.specNext.hidden = !following; last.specNext = following; }
       if (name !== last.specName) { last.specName = name; el.specName.textContent = name; }
     };
     // The banner: `title` (null hides it) over `sub`, green instead of red for a `win`, smaller and higher when `high`
@@ -330,15 +298,13 @@
       el.lobbyReady.removeEventListener("click", readyUp);
       el.lobbyDecline.removeEventListener("click", decline);
       el.lobby.removeEventListener("keydown", lobbyKey);
-      for (const b of el.specModes) b.removeEventListener("click", pickSpec);
       el.specNext.removeEventListener("click", nextSpec);
       spectate(null);
       hideLobby(false);
       // The rows go with the visit: the next one's card makes its own, and these would stand beside them.
       for (const r of lobbyRows) r.li.remove();
       lobbyRows.length = 0;
-      for (const r of scoreRows) r.li.remove();
-      scoreRows.length = 0;
+      scoreList.clear();
       for (const r of resultRows) r.li.remove();
       resultRows.length = 0;
       el.banner.removeAttribute("data-win");

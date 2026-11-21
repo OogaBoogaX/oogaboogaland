@@ -8,6 +8,8 @@
   // Approximate near-side outlines, north up and east right, matching SKY_FS.
   // USGS feature centers: https://planetarynames.wr.usgs.gov/
   // NASA visual reference: https://science.nasa.gov/resource/colorful-moon/
+  // Canvas filters for a hazy moon, a whole pixel of blur each, made once.
+  const MOON_BLURS = Array.from({ length: 13 }, (_, px) => px ? `blur(${px}px)` : "none");
   const MOON_BASINS = [
     -0.72, 0.25, 0.19, 0.38, // Oceanus Procellarum's joined western lobes
     -0.59, 0.53, 0.19, 0.23,
@@ -51,12 +53,13 @@
   // wave tint across that surface for the frame, an accepted Canvas quality trade-off. Light is keyed as the 8-bit values the
   // paint uses (`shade`), so a sun creeping across the sky repaints only when the pixels would change. Eight reusable
   // slots share a 2,097,152-pixel budget, so the largest board (1200x540) fits beside the smaller ones; an evicted
-  // slot of the same size keeps its backing store. Oversized surfaces keep a single grow-only scratch image.
+  // slot of the same size keeps its backing store. Oversized surfaces (a Timechain room's 4096x1024 dome) keep a single
+  // grow-only scratch image, shaded once a frame for the surface its first face asks for, then reused by its other faces.
   const createSurfaceShadeCache = (paint) => {
     const MAX_PIXELS = 2048 * 1024;
     const entries = Array.from({ length: 8 }, () => ({ canvas: null, context: null, geometry: null, source: null, pixels: 0, used: 0, frame: -1,
       version: 0, w: 0, h: 0, sourceW: 0, sourceH: 0, br: 0, bg: 0, bb: 0, r: 0, g: 0, b: 0, ar: 0, ag: 0, ab: 0 }));
-    const fallback = { canvas: null, context: null };
+    const fallback = { canvas: null, context: null, geometry: null, source: null, frame: -1, version: 0, w: 0, h: 0, sourceW: 0, sourceH: 0, br: 0, bg: 0, bb: 0 };
     const shade = { r: 0, g: 0, b: 0, ar: 0, ag: 0, ab: 0 };
     let pixels = 0, clock = 0, frame = 0;
     const clear = entry => {
@@ -66,6 +69,10 @@
     };
     const channel = value => value > 0 ? Math.round(value * 255) : 0;
     const added = value => value > 0 ? Math.min(255, Math.round(value)) : 0;
+    // What an entry was shaded from, light aside: the surface, its content version and every dimension it is drawn at.
+    const holds = (entry, geometry, surface, source, w, h, br, bg, bb) => entry.geometry === geometry && entry.source === source
+      && entry.version === surface.version && entry.w === w && entry.h === h && entry.sourceW === source.width && entry.sourceH === source.height
+      && entry.br === br && entry.bg === bg && entry.bb === bb;
     const get = (geometry, rec, coverage) => {
       const surface = geometry.imageSurface, source = surface.canvas, w = surface.width || source.width, h = surface.height || source.height;
       const background = surface.background, br = background ? background[0] : -1, bg = background ? background[1] : -1, bb = background ? background[2] : -1;
@@ -73,14 +80,13 @@
       shade.ar = added(rec.canvasAddR); shade.ag = added(rec.canvasAddG); shade.ab = added(rec.canvasAddB);
       for (let i = 0; i < entries.length; i++) {
         const entry = entries[i];
-        if (entry.geometry === geometry && entry.source === source && entry.version === surface.version && entry.w === w && entry.h === h
-          && entry.sourceW === source.width && entry.sourceH === source.height
-          && entry.br === br && entry.bg === bg && entry.bb === bb
+        if (holds(entry, geometry, surface, source, w, h, br, bg, bb)
           && (entry.frame === frame || entry.r === shade.r && entry.g === shade.g && entry.b === shade.b
             && entry.ar === shade.ar && entry.ag === shade.ag && entry.ab === shade.ab)) {
           entry.used = ++clock; entry.frame = frame; return entry.canvas;
         }
       }
+      if (fallback.frame === frame && holds(fallback, geometry, surface, source, w, h, br, bg, bb)) return fallback.canvas;
       let entry = fallback;
       if (w * h <= MAX_PIXELS) {
         // This surface's own slot first, else the least recently used: forgetting a key keeps its backing store.
@@ -109,21 +115,24 @@
         if (entry.canvas.height !== h) entry.canvas.height = h;
       }
       paint(entry.canvas, entry.context, surface, shade, coverage);
+      entry.geometry = geometry; entry.source = source; entry.version = surface.version; entry.w = w; entry.h = h;
+      entry.sourceW = source.width; entry.sourceH = source.height;
+      entry.br = br; entry.bg = bg; entry.bb = bb; entry.frame = frame;
       if (entry !== fallback) {
-        entry.geometry = geometry; entry.source = source; entry.version = surface.version; entry.w = w; entry.h = h;
-        entry.sourceW = source.width; entry.sourceH = source.height;
-        entry.br = br; entry.bg = bg; entry.bb = bb;
         entry.r = shade.r; entry.g = shade.g; entry.b = shade.b;
         entry.ar = shade.ar; entry.ag = shade.ag; entry.ab = shade.ab;
-        entry.pixels = w * h; pixels += entry.pixels; entry.used = ++clock; entry.frame = frame;
+        entry.pixels = w * h; pixels += entry.pixels; entry.used = ++clock;
       }
       return entry.canvas;
     };
     return { get,
       // Called once a frame before any surface draws.
       frame: () => { frame++; },
-      release: live => { for (const entry of entries) if (entry.geometry && !live.has(entry.geometry)) clear(entry); },
-      dispose: () => { for (const entry of entries) clear(entry); if (fallback.canvas) fallback.canvas.width = fallback.canvas.height = 0; },
+      release: live => {
+        for (const entry of entries) if (entry.geometry && !live.has(entry.geometry)) clear(entry);
+        if (fallback.geometry && !live.has(fallback.geometry)) fallback.geometry = fallback.source = null;
+      },
+      dispose: () => { for (const entry of entries) clear(entry); if (fallback.canvas) fallback.canvas.width = fallback.canvas.height = 0; fallback.geometry = fallback.source = null; },
       get pixels() { return pixels; }, get size() { let n = 0; for (const entry of entries) if (entry.geometry) n++; return n; } };
   };
   const createRenderer = (canvas, { width: fixedW = 0, height: fixedH = 0, transparent = false, environmentCapture = false } = {}) => {
@@ -148,6 +157,10 @@
     let cutawayCloudY = 0, cutawayCloudMix = 0;
     const pool = [];
     let poolUsed = 0, suppressed = 0, rippleSurfaces = 0, rippleWaves = 0;
+    // The WebGL renderer's `stats.info`, in the same shape: here a call is one painted polygon, all in the main pass.
+    // Triangles, instances, GL calls and GPU time do not apply to Canvas 2D and stay null.
+    const info = { calls: 0, triangles: null, instances: null, passes: {}, gl: null, gpuMs: null, gpuMsMean: null };
+    for (const name of ["shadow", "capture", "main", "post"]) info.passes[name] = { calls: 0, triangles: null, instances: null };
     let matrixActive = 0, matrixRadius = 0, matrixTime = 0, matrixDensity = 0, matrixOriginX = 0, matrixOriginZ = 0, matrixSurfaces = 0, matrixLivingSurfaces = 0, matrixArea = 0, matrixSamples = 0, matrixSampleStep = 1, matrixCulled = 0;
     let matrixCaves = null, matrixCaveBounds = null, matrixCaveNear = Infinity, matrixPermanentCave = 0, matrixPermanentPlane = null, matrixAperture = DEFAULT_MATRIX_APERTURE, matrixLivingGlobal = 1, matrixPointX = 0, matrixPointY = 0;
     const MATRIX_MASKS = new Int32Array([630678, 497559, 988959, 495513, 1009263, 288049, 456438, 616809]);
@@ -185,7 +198,7 @@
     }
     const acquire = (vertices = 16) => {
       if (poolUsed === pool.length) {
-        pool.push({ pts: new Float32Array(32), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1, mirror: false, mirrorNode: null, imageNode: null, imageA: 0, imageB: 0, imageC: 0, imageD: 0, canvasR: 1, canvasG: 1, canvasB: 1, canvasAddR: 0, canvasAddG: 0, canvasAddB: 0, mirrorMinX: 0, mirrorMaxX: 0, mirrorMinY: 0, mirrorMaxY: 0, portal: false, matrix: 0, matrixGlyph: false, matrixGlyphOpacity: 1, matrixWall: 0, matrixNx: 0, matrixNy: 0, matrixNz: 0, matrixPlane: 0, matrixCenterDepth: 0, matrixMinX: 0, matrixMaxX: 0, matrixMinY: 0, matrixMaxY: 0, matrixRed: 0, matrixGreen: 0, matrixBlue: 0, matrixCave: 0, matrixLocal: false, matrixLiving: false, matrixDynamic: false, matrixPermanentOnly: false, matrixPartial: false, matrixBacking: false, matrixFaceNx: 0, matrixFaceNy: 0, matrixFaceNz: 0, matrixFacePlane: 0, scrMinX: 0, scrMinY: 0, scrMaxX: 0, scrMaxY: 0 });
+        pool.push({ pts: new Float32Array(32), n: 0, depth: 0, depthOffset: false, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1, mirror: false, mirrorNode: null, imageNode: null, imageA: 0, imageB: 0, imageC: 0, imageD: 0, canvasR: 1, canvasG: 1, canvasB: 1, canvasAddR: 0, canvasAddG: 0, canvasAddB: 0, mirrorMinX: 0, mirrorMaxX: 0, mirrorMinY: 0, mirrorMaxY: 0, portal: false, matrix: 0, matrixGlyph: false, matrixGlyphOpacity: 1, matrixWall: 0, matrixNx: 0, matrixNy: 0, matrixNz: 0, matrixPlane: 0, matrixCenterDepth: 0, matrixMinX: 0, matrixMaxX: 0, matrixMinY: 0, matrixMaxY: 0, matrixRed: 0, matrixGreen: 0, matrixBlue: 0, matrixCave: 0, matrixLocal: false, matrixLiving: false, matrixDynamic: false, matrixPermanentOnly: false, matrixPartial: false, matrixBacking: false, matrixFaceNx: 0, matrixFaceNy: 0, matrixFaceNz: 0, matrixFacePlane: 0, scrMinX: 0, scrMinY: 0, scrMaxX: 0, scrMaxY: 0 });
       }
       const rec = pool[poolUsed++];
       if (rec.pts.length < vertices * 2) rec.pts = new Float32Array(CLIP_VERTICES * 2);
@@ -859,6 +872,7 @@
               }
               rec.n = clipped;
               rec.depth = zsum / clipped - (node.depthBias || 0);
+              rec.depthOffset = !!node.geometry.depthOffset;
               rec.line = false;
               rec.smokeOpacity = faceOpacity;
               rec.mirror = mirrorFace;
@@ -922,7 +936,8 @@
               const cg = lerp(c[1] * scorch, heat * (0.12 + ember * 0.85), ember * 0.9);
               const cb = lerp(c[2] * scorch, heat * (0.01 + ember * ember * ember * 0.74), ember * 0.9);
               const tip = node.tip > 1.5 ? 0 : node.tip || 0;
-              const fog = localMatrixGlyph ? smooth((glyphDistance - fogNear) / (fogFar - fogNear)) : Math.min(1, Math.max(0, (-rec.depth - fogNear) / (fogFar - fogNear)));
+              const fog = (localMatrixGlyph ? smooth((glyphDistance - fogNear) / (fogFar - fogNear)) : Math.min(1, Math.max(0, (-rec.depth - fogNear) / (fogFar - fogNear))))
+                * (1 - (node.geometry.fogPierce || 0));
               const beam = localMatrixGlyph ? 0 : spotEnergy(centerX, centerY, centerZ, nx, ny, nz) * (1 - Math.min(1, emissive));
               let pointR = 0, pointG = 0, pointB = 0;
               if (!localMatrixGlyph) for (let i = 0; i < pointLightCount; i++) {
@@ -1115,6 +1130,7 @@
             rec.n = 2;
             rec.depth = (CLIP_OUT[2] + CLIP_OUT[5]) / 2 - (node.depthBias || 0);
             rec.line = true;
+            rec.depthOffset = false;
             rec.smokeOpacity = opacity;
             rec.imageNode = null;
             rec.mirror = false;
@@ -1844,7 +1860,7 @@
         imageVertices[at + 3] = (localX - rect[0]) / rect[2] * sw;
         imageVertices[at + 4] = (1 - (localY - rect[1]) / rect[3]) * sh;
       }
-      ctx.save(); ctx.clip(); ctx.imageSmoothingEnabled = false;
+      ctx.save(); ctx.clip(); ctx.imageSmoothingEnabled = !!surface.smooth;
       for (let y = 0; y < rows; y++) for (let x = 0; x < columns; x++) {
         const a = (y * (columns + 1) + x) * 5, b = a + 5, c = a + (columns + 1) * 5, d = c + 5;
         drawImageTriangle(shaded, imageVertices, a, b, d, 0, 0, width, height);
@@ -1903,6 +1919,7 @@
           (imageVertices[10] - imageVertices[0]) * scale / imageHeight,
           -(imageVertices[11] - imageVertices[1]) * scale / imageHeight, x, y);
         ctx.drawImage(image, 0, 0);
+        dimPicture(surface);
         ctx.restore();
         return;
       }
@@ -1911,10 +1928,23 @@
         drawImageTriangle(image, imageVertices, a, b, d, 0, 0, width, height);
         drawImageTriangle(image, imageVertices, a, d, c, 0, 0, width, height);
       }
+      dimPicture(surface);
       ctx.restore();
     };
+    // A picture, all but light added to the view, as dim as the scene asks (`pictureDim`): darkened inside its clip.
+    const dimPicture = (surface) => {
+      if (pictureDim >= 1 || surface.blend === "add") return;
+      const alpha = ctx.globalAlpha;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = alpha * (1 - pictureDim);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      ctx.globalAlpha = alpha;
+    };
+    let pictureDim = 1;
     const render = (root, camera, opts = {}) => {
       canvasShades.frame();
+      pictureDim = opts.pictureDim === undefined ? 1 : Math.max(0, Math.min(1, opts.pictureDim));
       cutawayMaxY = opts.cutawayMaxY < 1e6 ? opts.cutawayMaxY : Infinity;
       cutawayFade = Math.max(0, Math.min(1, Number.isFinite(opts.cutawayFade) ? opts.cutawayFade : opts.birdsEyeCutaway ? 1 : 0));
       cutawayCloudY = opts.cutawayCloudY || 0;
@@ -1965,7 +1995,7 @@
       fogNear = 1e8;
       fogFar = 1e8 + 1;
       }
-      const gradientSky = !!(horizon && zenith);
+      const gradientSky = !!(horizon && zenith) && !opts.viewRoots;
       if (gradientSky) buildSky(horizon, zenith);
       if (clear !== clearRef) {
         clearRef = clear;
@@ -2009,8 +2039,12 @@
       gatheredMirror = null;
       mirrorComposeNode = null;
       const viewActor = !environmentCapture && opts.beforeView?.();
-      updateWorld(root, null);
-      traverseVisible(root, gatherNode);
+      if (opts.viewRoots) {
+        for (const node of opts.viewRoots) {
+          updateWorld(node, node.parent?.world || null);
+          traverseVisible(node, gatherNode);
+        }
+      } else { updateWorld(root, null); traverseVisible(root, gatherNode); }
       const mirrorNode = gatheredMirror;
       if (viewActor) { opts.afterView?.(); updateWorld(viewActor.root, viewActor.root.parent?.world || null); }
       if (!environmentCapture && mirrorNode && mirrorDebug.shardsDrawn) updateEnvironment(root, mirrorNode, camera, opts);
@@ -2029,10 +2063,13 @@
           if (plane < 0) plane = matrixPlaneSlot(rec.matrixNx, rec.matrixNy, rec.matrixNz, rec.matrixPlane + 0.015, false, 0);
           if (plane >= 0 && rec.depth <= matrixPlaneDepths[plane]) rec.depth = matrixPlaneDepths[plane] + 0.0001 + (rec.depth - rec.matrixCenterDepth) * 0.001;
         }
-        sortIds[i] = i; sortKeys[i] = rec.depth;
+        // Painter fallback for the GL surface bias: near-equal face depths favor the overlay, without
+        // changing projection, fog or genuinely nearer occluders. Lines never inherit a pooled face's bias.
+        sortIds[i] = i; sortKeys[i] = rec.depth + (rec.depthOffset ? 0.0001 : 0);
       }
       sortByKey(sortIds, 0, poolUsed, sortKeys, 1, 0, sortWork);
       for (let i = 0; i < poolUsed; i++) active[i] = pool[sortIds[i]];
+      info.calls = info.passes.main.calls = poolUsed;
       matrixSampleStep = Math.max(1, Math.ceil(Math.sqrt(matrixArea / MATRIX_SAMPLE_BUDGET)));
       if (matrixArea) {
         let samples;
@@ -2066,6 +2103,11 @@
               const k = -facing;
               ctx.save();
               ctx.translate(cx, cy);
+              // Haze diffuses the moon: low in the haze bank, behind thin cloud or washed out by day, it blurs (where the
+              // browser filters a canvas) and its markings fade.
+              const low = Math.min(1, Math.max(0, (moon.y - 0.02) / 0.38));
+              const moonHaze = Math.min(1, Math.max(1 - low * low * (3 - 2 * low), 0.5 * (1 - (opts.stars || 0))) + 0.5 * (opts.clouds || 0));
+              ctx.filter = MOON_BLURS[Math.min(12, Math.round(moonHaze * radius * 0.08))];
               // Clip the moon's lower limb at the physical horizon, independent
               // of the lowered haze gradient and of camera pitch or roll.
               const horizonSlope = Math.hypot(view[4], view[5]);
@@ -2081,14 +2123,12 @@
               const phaseAngle = Math.atan2(-sy, sx);
               ctx.rotate(phaseAngle);
               const moonNight = opts.stars || 0, moonAlpha = 0.3 + 0.7 * moonNight;
-              // Faint earthshine keeps the shadowed hemisphere visible at night.
-              if (moonNight > 0) {
-                ctx.globalAlpha = moonNight * moonAlpha;
-                ctx.fillStyle = "#202227";
-                ctx.beginPath();
-                ctx.arc(0, 0, radius, 0, Math.PI * 2);
-                ctx.fill();
-              }
+              // Earthshine keeps the shadowed hemisphere visible at night, and faintly by day too.
+              ctx.globalAlpha = (0.45 + 0.55 * moonNight) * moonAlpha;
+              ctx.fillStyle = "#202227";
+              ctx.beginPath();
+              ctx.arc(0, 0, radius, 0, Math.PI * 2);
+              ctx.fill();
               ctx.globalAlpha = moonAlpha;
               ctx.fillStyle = "#d4d2cc";
               ctx.beginPath();
@@ -2107,7 +2147,7 @@
               const northScreenY = view[1] * northX + view[5] * northY + view[9] * northZ;
               ctx.rotate(Math.atan2(northScreenX, northScreenY) - phaseAngle);
               ctx.scale(radius, radius);
-              ctx.globalAlpha = moonAlpha * 0.34;
+              ctx.globalAlpha = moonAlpha * 0.34 * (1 - 0.6 * moonHaze);
               ctx.fillStyle = "#666568";
               ctx.beginPath();
               for (let i = 0; i < MOON_BASINS.length; i += 4) {
@@ -2116,7 +2156,7 @@
                 ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
               }
               ctx.fill();
-              ctx.globalAlpha = moonAlpha * 0.2;
+              ctx.globalAlpha = moonAlpha * 0.2 * (1 - 0.6 * moonHaze);
               ctx.fillStyle = "#dedbd4";
               ctx.strokeStyle = "#f0ece6";
               ctx.lineWidth = 0.006;
@@ -2259,6 +2299,7 @@
       project,
       ray,
       setQuality: () => { },
+      setScale: () => { },
       releaseGeometry: () => { },
       prepareScene: () => { },
       prepareGeometry: () => true,
@@ -2288,7 +2329,7 @@
         return "low";
       },
       get stats() {
-        return { waterTextures: 0, records: 0, active: 0, mirrorResources: mirrorDebug.resources, imageTextures: 0, rippleBodyTextures: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, rippleSurfaces, rippleWaves, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength };
+        return { waterTextures: 0, records: 0, active: 0, mirrorResources: mirrorDebug.resources, imageTextures: 0, rippleBodyTextures: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, rippleSurfaces, rippleWaves, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength, info };
       },
       get mirror() {
         return mirrorDebug;

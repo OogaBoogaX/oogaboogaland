@@ -1,0 +1,325 @@
+/* Ooga Chat's own layout. The look (tokens, sign lettering, slabs, chips, the amber button) comes from ../native.css,
+   which the island shares, and every panel wears the island's own rules (src/style.css, taken by scripts/ooga-chat.mjs
+   ISLAND_RULES); this file only places them: native tabs on top of one plank frame, the island's drawer, sized for a
+   phone first and centred on wider screens. */
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-text-size-adjust: 100%;
+}
+
+.oc [hidden] { display: none !important; }
+
+.oc {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-width: 620px;
+  height: 100vh;
+  height: min(100dvh, 900px);
+  min-height: 520px;
+  margin: 0 auto;
+  padding: calc(16px + var(--safe-top)) calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));
+}
+
+.oc > * { flex: none; }
+
+.oc-tabs {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 6px;
+  padding: 0 6px;
+}
+
+.oc-tab {
+  width: 58px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.oc-tab-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 6px 13px 4px;
+  border: 3px solid var(--wood-edge);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: linear-gradient(180deg, var(--wood), var(--wood-dk));
+  box-shadow: 0 -2px 0 rgba(0, 0, 0, 0.2) inset;
+}
+
+.oc-tab svg { display: block; width: 100%; height: auto; filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5)); }
+.oc-tab:hover .oc-tab-face { background: linear-gradient(180deg, var(--plank), var(--wood)); }
+/* The chosen tab's face runs on over the frame's top border, so it reads as part of the frame. */
+.oc-tab[aria-selected="true"] .oc-tab-face {
+  height: calc(100% + 3px);
+  background: linear-gradient(180deg, #b8844a, var(--plank));
+  box-shadow: none;
+}
+.oc-tab:focus-visible { outline: none; }
+.oc-tab:focus-visible .oc-tab-face { outline: 2px solid var(--accent); outline-offset: -3px; }
+
+.oc > .oc-frame {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+}
+
+/* The page's name, for assistive technology: what shows is each panel's own carved title, as on the island. */
+.oc-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.oc-slab { padding: 20px 22px; }
+
+.oc-signin {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.oc-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  border-radius: 6px;
+}
+
+/* The sign-in's words, as the design has them: a quiet sans line over the buttons, in the note and under it. */
+.oc-lede,
+.oc-role,
+.oc-foot,
+.oc-note span {
+  margin: 0;
+  color: #bbb4a6;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.oc-foot { text-align: center; }
+
+.oc-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  color: var(--accent-text);
+}
+
+.oc-status-line .link,
+.oc-notice .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.oc-providers {
+  display: grid;
+  gap: 11px;
+  margin-top: 12px;
+}
+
+/* A sign-in button, the design's: the plank's wood, its edge and nail shadow, the label in the panels' own type. */
+.oc-provider {
+  min-height: 51px;
+  padding: 9px 12px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(var(--plank), var(--wood));
+  color: var(--paper);
+  font: inherit;
+  font-weight: 600;
+  box-shadow: 0 3px 0 var(--nail);
+  cursor: pointer;
+}
+
+.oc-provider:hover:not(:disabled) { filter: brightness(1.12); }
+.oc-provider:focus-visible { outline: 2px solid #ffd9a0; outline-offset: 2px; }
+.oc-provider:disabled { opacity: 0.4; cursor: default; }
+
+.oc-note {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 1px;
+  padding: 13px;
+  border: 1px solid #51483b;
+  border-radius: 5px;
+  background: #24211d;
+}
+
+.oc-note strong { color: #ffd9a0; font-size: 12px; }
+
+/* In the account row, the sign-in button spans the panel as it does on the sign-in screen. */
+.account > .oc-account-signin { flex: 1 1 100%; }
+
+/* A notice that needs the visitor: an expired sign-in, a failed check, an unconfirmed sign-out, with its retry. */
+.oc-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(216, 137, 43, 0.42);
+  border-radius: 6px;
+  background: rgba(216, 137, 43, 0.08);
+  color: var(--paper);
+}
+
+/* Read by assistive technology only: why a disabled control is off. */
+.oc-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* One height for every tab, as the island's drawer has: the frame takes the page's height, each tab's panel the frame's,
+   and inside it the slab takes what the panel's fixed parts leave and scrolls its own overflow (native.css .panel). */
+.oc-views,
+.oc-view { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
+/* The Ooga Chat panel shows its space only while signed in, and only its footer while signing out. */
+.oc-chat[data-space="off"] > :is(.cloud-status, .cloud-roster, .oc-chat-foot),
+.oc-chat[data-space="foot"] > :is(.cloud-status, .cloud-roster) { display: none; }
+.oc-pending p { margin: 0; color: rgba(243, 239, 228, 0.7); }
+
+.oc-players { padding: 12px 14px; }
+.oc-roster-note { margin: 0; }
+
+/* The grid's names open the island's Volume row below it, wide enough to adjust on a phone. */
+.oc-volume-toggle {
+  display: flex;
+  justify-content: center;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.oc-volume-toggle:disabled { cursor: default; }
+.oc-volume-toggle:hover:not(:disabled) { color: var(--accent-text); }
+.oc-volume-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.oc-volume-head { display: flex; align-items: center; gap: 12px; }
+.oc-volume-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.oc-chat[data-space="off"] > .oc-volume,
+.oc-chat[data-space="foot"] > .oc-volume { display: none; }
+
+/* Feed the Oogas: the island's donation dialog (donation-popup.js), framed as the island frames its dialogs (style.css
+   `.modal`, `.modal-close`, `.donation-popup`). The kiosk draws the name and message on its own screen; their fields
+   only take the typing, so they stay in the page, focusable, a phone's keyboard able to open on them, but out of
+   sight; 16px keeps iOS from zooming in. */
+.donation-popup {
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  margin: auto;
+  padding: 16px 18px 18px;
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+  font: inherit;
+}
+.donation-popup::backdrop { background: rgba(0, 0, 0, 0.6); }
+.donation-popup .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.donation-popup h2 { margin: 0 0 12px; font-size: 14px; color: var(--paper); filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5)); }
+.donation-popup .modal-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -4px -4px 0 0;
+  padding: 0;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--paper);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.donation-popup .modal-close:hover,
+.donation-popup .modal-close:focus-visible { background: rgba(0, 0, 0, 0.38); }
+#donation-fields {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+#donation-fields input { font-size: 16px; }
+#donation-screen { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 6px; }
+#donation-screen:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.donation-popup .help {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  background: var(--tablet);
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font-size: 11px;
+  line-height: 1.5;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.oc-device { display: grid; gap: 6px; margin: 12px 4px 0; color: rgba(243, 239, 228, 0.78); font-size: 12px; }
+.oc-device-line { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; }
+
+.oc-error {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: #241810;
+  color: var(--paper);
+}
+
+.oc-fixture-note { margin: 12px 4px 0; color: var(--faint); font-size: 11px; }
+
+@media (max-width: 420px) {
+  .oc { padding: calc(8px + var(--safe-top)) calc(8px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(8px + var(--safe-left)); }
+  .oc-tabs { gap: 4px; padding: 0 4px; }
+  .oc-tab { width: 52px; height: 42px; }
+  .oc-tab-face { padding: 6px 11px 4px; }
+  .oc-slab { padding: 14px 16px; }
+}

@@ -1,0 +1,655 @@
+/* The World Map page (/map, map.js), in the Hum app's palette: light is sand and cream with navy ink and one blue,
+   dark is neutral greys with the same blue brightened, each token light-dark(light, dark). Which applies is
+   `color-scheme` on :root: <html data-theme> when this browser chose Light or Dark (theme.js, the switch in map.js),
+   else the system's. Staged after src/native.css, whose dark island tokens it sets aside here. The lands are told
+   apart by shades of the one blue on their cards' edges and connectors; no font is fetched, so text is the system's
+   sans. */
+
+:root {
+  color-scheme: light;
+  --map-bg: light-dark(#ede5d8, #1f1f1f);
+  --map-surface: light-dark(#faf6ef, #111111);
+  /* Dark paints each surface with a black gradient, so cards sit as darker layers on the grey page. */
+  --map-surface-image: none;
+  --map-field: light-dark(#f1eadf, #2a2a2a);
+  --map-line: light-dark(#ddd2c1, #3a3a3a);
+  --map-line-soft: light-dark(#e8dfd1, #2e2e2e);
+  --map-stroke: light-dark(#e2d8c8, #262626);
+  --map-grid: light-dark(color-mix(in srgb, #ddd2c1 55%, transparent), rgba(255, 255, 255, 0.05));
+  --map-ink: light-dark(#141b2d, #f2f2f0);
+  --map-ink-hover: light-dark(#0a1020, #ffffff);
+  --map-on-ink: light-dark(#ffffff, #111111);
+  --map-muted: light-dark(#675f52, #a3a3a0);
+  --map-faint: light-dark(#877e70, #6b6b6b);
+  --map-accent: light-dark(#399fe3, #4fabe8);
+  --map-accent-hover: light-dark(#2a8fd4, #6bbaee);
+  --map-accent-soft: light-dark(#d7e9f7, #15324a);
+  --map-accent-halo: light-dark(#e8f2fa, #10243a);
+  --map-accent-text: light-dark(#1a5f94, #8ccbf3);
+  --map-sky: light-dark(#a9d3f0, #5b9fcf);
+  --map-sky-soft: light-dark(#dceefa, #1e3446);
+  --map-thread: light-dark(#2480c0, #4fabe8);
+  --map-live: light-dark(#1f8a4c, #2ea062);
+  --map-danger: light-dark(#b42318, #e0634f);
+  --map-stone: light-dark(#e5dccd, #383838);
+  --map-stone-text: light-dark(#3d372d, #e2e2e0);
+  /* The tooltip: navy in light, black edged in grey in dark. */
+  --map-bubble: light-dark(#141b2d, #111111);
+  --map-bubble-text: #f2f2f0;
+  --map-bubble-stroke: light-dark(transparent, #3d3d3d);
+  --map-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --map-radius: 16px;
+  --map-shadow-card: 0 0 0 1px var(--map-stroke), 0 1px 2px light-dark(rgba(20, 27, 45, 0.03), rgba(0, 0, 0, 0.3)),
+    0 10px 28px -18px light-dark(rgba(20, 27, 45, 0.14), rgba(0, 0, 0, 0.5));
+  --map-shadow-float: 0 0 0 1px var(--map-stroke), 0 2px 4px light-dark(rgba(20, 27, 45, 0.04), rgba(0, 0, 0, 0.35)),
+    0 20px 48px -16px light-dark(rgba(20, 27, 45, 0.2), rgba(0, 0, 0, 0.6));
+  --map-shadow-pill: 0 0 0 1px var(--map-stroke), 0 1px 2px light-dark(rgba(20, 27, 45, 0.03), rgba(0, 0, 0, 0.3));
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --map-surface-image: linear-gradient(180deg, #181818 0%, #0a0a0a 100%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --map-surface-image: linear-gradient(180deg, #181818 0%, #0a0a0a 100%);
+  }
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* Every land in one blue, from the deep blue of the island's own to the pale sky of the worlds past ₿IFRÖST; dark
+   mode lifts each shade so it still reads on black. */
+.land-island { --land: light-dark(#1a5f94, #8ccbf3); }
+.land-bifrost { --land: light-dark(#2480c0, #6bbaee); }
+.land-dsb { --land: light-dark(#399fe3, #4fabe8); }
+.land-ember { --land: light-dark(#2a8fd4, #5fb3ec); }
+.land-external { --land: light-dark(#877e70, #6b6b6b); }
+.land-factory { --land: light-dark(#1f6fae, #7cc2f0); }
+.land-arcade { --land: light-dark(#2b86cc, #5aaee8); }
+.land-haunt { --land: light-dark(#4a7fb0, #8fb4d6); }
+.land-block { --land: light-dark(#5aaee8, #a9d3f0); }
+.land-rainforest { --land: light-dark(#3a92cf, #66b4e6); }
+.land-hq { --land: light-dark(#5d7790, #9aaabb); }
+.land-repos { --land: light-dark(#2f7fb8, #74b8e6); }
+.land-sphere { --land: light-dark(#1b74b8, #5ba7e0); }
+.land-bca { --land: light-dark(#4b9bd6, #8cc4ec); }
+.land-lab { --land: light-dark(#6cb5e8, #a9d3f0); }
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background-color: var(--map-bg);
+  /* The Hum page's faint 32-pixel grid. */
+  background-image: linear-gradient(var(--map-grid) 1px, transparent 1px), linear-gradient(90deg, var(--map-grid) 1px, transparent 1px);
+  background-size: 32px 32px;
+  color: var(--map-ink);
+  font: 14px/1.45 var(--map-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--map-accent-text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--map-accent);
+  outline-offset: 2px;
+}
+
+.map-top {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "home heading tools theme" "status status status status";
+  align-items: center;
+  gap: 6px 20px;
+  padding: calc(16px + var(--safe-top)) calc(20px + var(--safe-right)) 12px calc(20px + var(--safe-left));
+  background: color-mix(in srgb, var(--map-bg) 88%, transparent);
+  border-bottom: 1px solid var(--map-line-soft);
+}
+
+.map-home {
+  grid-area: home;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--map-surface);
+  box-shadow: var(--map-shadow-pill);
+  color: var(--map-ink);
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.map-home:hover {
+  background: var(--map-accent-halo);
+}
+
+.map-heading {
+  grid-area: heading;
+  min-width: 0;
+}
+
+.map-title {
+  margin: 0;
+  color: var(--map-ink);
+  font-size: 28px;
+  line-height: 1;
+}
+
+.map-sub {
+  margin: 8px 0 0;
+  color: var(--map-muted);
+}
+
+.map-tools {
+  grid-area: tools;
+  display: flex;
+  gap: 8px;
+}
+
+.map-tools button {
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--map-surface);
+  box-shadow: var(--map-shadow-pill);
+  color: var(--map-ink);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.map-tools button:hover {
+  background: var(--map-accent-halo);
+}
+
+.map-tools button[data-map="fit"] {
+  background: var(--map-ink);
+  box-shadow: none;
+  color: var(--map-on-ink);
+}
+
+.map-tools button[data-map="fit"]:hover {
+  background: var(--map-ink-hover);
+}
+
+.map-status {
+  grid-area: status;
+  margin: 0;
+  min-height: 1.45em;
+  color: var(--map-muted);
+  font-size: 13px;
+}
+
+.map-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+  /* A press and drag pans the diagram (map.js), so it never selects the cards' text or drags a link away. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.map-view a {
+  -webkit-user-drag: none;
+}
+
+.map-view.dragging {
+  cursor: grabbing;
+}
+
+.map-stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+
+.map-edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.edge {
+  fill: none;
+  stroke: var(--land);
+  stroke-opacity: 0.55;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.edge-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--map-surface);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--land) 35%, var(--map-stroke));
+  color: var(--map-accent-text);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.node {
+  position: absolute;
+  padding: 10px 12px 11px 14px;
+  border-left: 4px solid var(--land);
+  border-radius: var(--map-radius);
+  background: var(--map-surface);
+  box-shadow: var(--map-shadow-card);
+  cursor: default;
+}
+
+.node:hover,
+.node:focus-within {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--land) 45%, var(--map-stroke)), 0 2px 4px rgba(20, 27, 45, 0.04), 0 16px 32px -16px rgba(20, 27, 45, 0.22);
+}
+
+/* The island, root of everything: navy, as the Hum app's main pill. */
+.kind-island {
+  border-left-color: var(--map-accent);
+  background: var(--map-ink);
+  color: var(--map-on-ink);
+}
+
+.kind-island .node-name,
+.kind-island a.node-name {
+  color: var(--map-on-ink);
+  font-size: 17px;
+  text-decoration-color: var(--map-accent);
+}
+
+.kind-island a.node-name:hover {
+  color: var(--map-sky);
+}
+
+.kind-island .node-meta,
+.kind-island .node-objects {
+  color: var(--map-sky);
+}
+
+.kind-island .chip {
+  background: color-mix(in srgb, var(--map-on-ink) 12%, transparent);
+  box-shadow: none;
+  color: var(--map-on-ink);
+}
+
+.kind-island .node-fold {
+  background: color-mix(in srgb, var(--map-on-ink) 12%, transparent);
+  color: var(--map-on-ink);
+}
+
+.kind-games {
+  background: var(--map-field);
+}
+
+.kind-room {
+  background: color-mix(in srgb, var(--map-surface) 70%, var(--map-accent-halo));
+}
+
+.kind-external {
+  background: var(--map-field);
+}
+
+.node-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.node-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--map-ink);
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+a.node-name {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--land) 55%, transparent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+a.node-name:hover {
+  color: var(--map-accent-text);
+}
+
+.node-fold {
+  flex: none;
+  min-width: 32px;
+  padding: 1px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--map-accent-soft);
+  color: var(--map-accent-text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.node-fold:hover {
+  background: var(--map-sky);
+}
+
+.node-meta {
+  margin: 3px 0 0;
+  color: var(--map-muted);
+  font-size: 11.5px;
+}
+
+/* The connector says how a place is reached on the wide layout; the outline has no labels, so its cards say it. */
+.node-via {
+  display: none;
+}
+
+.map-narrow .node-via {
+  display: inline;
+}
+
+.map-narrow .node-via + .node-where::before {
+  content: " · ";
+}
+
+/* A place reached only by its connector, on the wide layout, keeps no empty line. */
+.node-meta:not(:has(.node-where)) {
+  display: none;
+}
+
+.map-narrow .node-meta {
+  display: block;
+}
+
+.node-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  margin: 7px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.node-item {
+  color: var(--map-muted);
+}
+
+a.node-item {
+  color: var(--map-accent-text);
+  font-weight: 600;
+}
+
+.node-note {
+  margin-left: 4px;
+  color: var(--map-danger);
+  font-size: 11px;
+}
+
+.node-live {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.badge,
+.chip {
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.badge.here {
+  background: color-mix(in srgb, var(--map-live) 14%, var(--map-surface));
+  color: var(--map-live);
+}
+
+.badge.here::before {
+  content: "● ";
+}
+
+.badge.inside {
+  background: var(--map-stone);
+  color: var(--map-stone-text);
+}
+
+/* A player's name keeps to one line and ends in an ellipsis, its whole name its title. */
+.chip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+  background: var(--map-sky-soft);
+  color: var(--map-accent-text);
+}
+
+.chip.more {
+  background: var(--map-ink);
+  color: var(--map-on-ink);
+}
+
+.node-objects {
+  margin: 8px 0 0;
+  padding: 7px 0 0;
+  border-top: 1px dashed var(--map-line);
+  list-style: none;
+  color: var(--map-accent-text);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.map-tip {
+  position: fixed;
+  z-index: 3;
+  max-width: 320px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: var(--map-bubble);
+  box-shadow: 0 0 0 1px var(--map-bubble-stroke), var(--map-shadow-float);
+  color: var(--map-bubble-text);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.map-objects {
+  position: fixed;
+  right: calc(16px + var(--safe-right));
+  bottom: calc(16px + var(--safe-bottom));
+  z-index: 2;
+  width: min(380px, calc(100vw - 32px));
+  max-height: 40vh;
+  overflow: auto;
+  padding: 12px 16px;
+  border-radius: var(--map-radius);
+  background: var(--map-surface);
+  box-shadow: var(--map-shadow-float);
+}
+
+.map-objects-title {
+  color: var(--map-accent-text);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.map-objects[open] .map-objects-title {
+  margin-bottom: 8px;
+}
+
+.map-objects-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--map-ink);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.map-objects-list li + li {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--map-line-soft);
+}
+
+/* The list a reader without scripts gets, and what a search engine reads. */
+.map-list {
+  padding: 16px 24px 40px;
+  overflow: auto;
+  height: 100%;
+}
+
+.map-list ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.map-list li {
+  margin: 4px 0;
+}
+
+.map-list .via {
+  color: var(--map-muted);
+}
+
+/* The outline, on a narrow screen: the page scrolls, nothing pans. */
+.map-narrow {
+  display: block;
+  min-height: 0;
+}
+
+.map-narrow .map-top {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "home" "heading" "tools" "theme" "status";
+  justify-items: start;
+}
+
+.map-narrow .map-heading {
+  justify-self: stretch;
+}
+
+.map-narrow .map-tools {
+  flex-wrap: wrap;
+}
+
+.map-narrow .map-title {
+  font-size: 24px;
+}
+
+.map-narrow .map-tools button[data-map="fit"] {
+  display: none;
+}
+
+.map-narrow .map-view {
+  overflow: visible;
+  touch-action: auto;
+  cursor: auto;
+  -webkit-user-select: auto;
+  user-select: auto;
+}
+
+.map-narrow .map-stage {
+  position: relative;
+}
+
+.map-narrow .map-objects {
+  position: static;
+  width: auto;
+  max-height: none;
+  margin: 0 16px 20px;
+}
+
+/* The appearance switch, as the Hum app's: System, Light or Dark on a sunken track, the chosen one raised. */
+.map-theme {
+  grid-area: theme;
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--map-field);
+}
+
+.map-theme button {
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--map-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.map-theme button:hover {
+  color: var(--map-ink);
+}
+
+.map-theme button[aria-checked="true"] {
+  background-color: var(--map-surface);
+  background-image: var(--map-surface-image);
+  box-shadow: var(--map-shadow-pill);
+  color: var(--map-ink);
+}
+
+/* The estimated CPU a place costs its object (worker/src/cpu-model.js): a model, so it says so. */
+.node-cpu {
+  margin: 6px 0 0;
+  color: var(--map-muted);
+  font-size: 11px;
+}
+
+.node-cpu b {
+  color: var(--map-accent-text);
+  font-weight: 700;
+}
+
+.kind-island .node-cpu,
+.kind-island .node-cpu b {
+  color: var(--map-sky);
+}
+
+/* Dark paints each surface with its gradient over the colour; the cards tinted on purpose keep their tint. */
+.map-home,
+.map-tools button,
+.edge-label,
+.node,
+.map-objects {
+  background-image: var(--map-surface-image);
+}
+
+.kind-island,
+.kind-games,
+.kind-room,
+.kind-external,
+.map-tools button[data-map="fit"] {
+  background-image: none;
+}

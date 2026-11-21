@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ede5d8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1f1f1f" media="(prefers-color-scheme: dark)">
+  <title>World Map · Ooga Booga Land</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="64x64" href="/favicon-64.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <script src="__MAP_THEME__"></script>
+  <link rel="stylesheet" href="__MAP_CSS__">
+  <script src="__MAP_JS__" defer></script>
+  <!-- head -->
+</head>
+<body>
+  <header class="map-top">
+    <a class="map-home" href="/"><span aria-hidden="true">←</span> The island</a>
+    <div class="map-heading">
+      <h1 class="map-title" data-sign>World Map</h1>
+      <p class="map-sub">Every place in Ooga Booga Land, from the island down to the rooms inside its lands.</p>
+    </div>
+    <div class="map-tools" id="map-tools" hidden>
+      <button type="button" data-map="expand">Expand all</button>
+      <button type="button" data-map="collapse">Collapse all</button>
+      <button type="button" data-map="fit">Fit</button>
+    </div>
+    <div class="map-theme" id="map-theme" role="radiogroup" aria-label="Appearance" hidden>
+      <button type="button" role="radio" data-choice="system">System</button>
+      <button type="button" role="radio" data-choice="light">Light</button>
+      <button type="button" role="radio" data-choice="dark">Dark</button>
+    </div>
+    <p class="map-status" id="map-status" role="status" aria-live="polite"></p>
+  </header>
+  <main class="map-view" id="map-view">
+    <nav class="map-list" id="map-list" aria-label="Every place in Ooga Booga Land"><!-- tree --></nav>
+  </main>
+  <details class="map-objects" id="map-objects" hidden>
+    <summary class="map-objects-title" id="map-objects-title">Durable Objects</summary>
+    <ul class="map-objects-list" id="map-objects-list"></ul>
+  </details>
+  <div class="map-tip" id="map-tip" role="tooltip" hidden></div>
+</body>
+</html>

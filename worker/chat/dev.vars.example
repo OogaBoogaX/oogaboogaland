@@ -1,0 +1,9 @@
+# Ooga Chat's edge Worker: the names of its secrets, never their values (docs/ooga-chat-backend.md).
+# Deployed: `npx wrangler secret put <NAME> --config ../wrangler.ooga-chat.<env>.jsonc` from worker/, each value kept
+# in the owner's password manager. Local: copy this file to worker/chat/.dev.vars (gitignored) and pass it to
+# `npm run dev:chat -- --env-file chat/.dev.vars`; the island's own .dev.vars at the root is a different app's.
+#
+# The GitHub OAuth App registered for Ooga Chat in this environment (its client id is GITHUB_CLIENT_ID in the config).
+GITHUB_CLIENT_SECRET=
+# The X app's OAuth 2.0 client secret (confidential web app; its client id is X_CLIENT_ID in the config).
+X_CLIENT_SECRET=

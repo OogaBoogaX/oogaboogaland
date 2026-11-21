@@ -18,6 +18,7 @@
   const create = () => {
     let ctx = null, master = null, noise = null, ready = false, muted = false;
     muted = BL.sound.muted;
+    const soundChannel = BL.sound.channel("mine");
     const voices = [];
     let voiceNext = 0;
     const layers = { drone: null, droneGain: null, droneFilter: null, hiss: null, hissGain: null, hissFilter: null, hum: null, humGain: null };
@@ -28,7 +29,7 @@
       ctx = new AudioContext();
       master = ctx.createGain();
       master.gain.value = muted ? 0 : MASTER;
-      master.connect(ctx.destination);
+      master.connect(soundChannel.node(ctx));
       const gain = (value, to) => {
         const g = ctx.createGain();
         g.gain.value = value;
@@ -222,7 +223,7 @@
         return state;
       },
       dispose() {
-        offSound();
+        offSound(); soundChannel.release();
         document.removeEventListener("visibilitychange", onVisibility);
         if (!ctx) return;
         quiet();

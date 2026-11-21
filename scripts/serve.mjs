@@ -1,17 +1,18 @@
 // Builds and stages the site (scripts/site.mjs into untracked/site) and serves it locally; --watch rebuilds
-// on every change under src/. Everything outside `/src/` uses Worker-style audio and picture assets, so
+// on every change under src/, staging beside the site and swapping it in whole, so a page open meanwhile never
+// finds a file gone and a failed build leaves the last good site in place. Everything outside `/src/` uses Worker-style audio and picture assets, so
 // /rally answers from rally.html and an unknown path from 404.html; `/src/` is the unbundled source tree,
 // which gives DevTools real file names while the same flags apply to both.
 import { previewResponse } from "./preview-response.mjs";
 import { spawn } from "node:child_process";
-import { readFileSync, statSync, watch } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, statSync, watch } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const build = join(root, "scripts", "site.mjs");
-const site = join(root, "untracked", "site");
+const site = join(root, "untracked", "site"), next = `${site}-next`, old = `${site}-old`;
 const src = join(root, "src");
 const watching = process.argv.includes("--watch");
 const port = Number(process.env.PORT) || 8080;
@@ -29,6 +30,7 @@ const TYPES = {
   ".jpg": "image/jpeg",
   ".webp": "image/webp",
   ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
   ".xml": "application/xml; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
   ".mp4": "video/mp4",
@@ -47,10 +49,19 @@ function rebuild() {
   }
   building = new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(process.execPath, [build, site, "--audio-assets", "--image-assets"], { cwd: root, stdio: "inherit" });
+    const child = spawn(process.execPath, [build, next, "--audio-assets", "--image-assets"], { cwd: root, stdio: "inherit" });
     child.on("exit", (code) => {
-      if (code !== 0) console.log(`build failed (exit ${code}); serving the previous page`);
-      else console.log(`rebuilt in ${Date.now() - started} ms`);
+      if (code !== 0) {
+        rmSync(next, { recursive: true, force: true });
+        console.log(`build failed (exit ${code}); serving the previous page`);
+      } else {
+        // Two renames, so the site is missing only between them, not for the whole build.
+        rmSync(old, { recursive: true, force: true });
+        if (existsSync(site)) renameSync(site, old);
+        renameSync(next, site);
+        rmSync(old, { recursive: true, force: true });
+        console.log(`rebuilt in ${Date.now() - started} ms`);
+      }
       building = null;
       if (queued) {
         queued = false;
@@ -71,7 +82,7 @@ function send(res, status, body, type) {
   res.end(body);
 }
 
-// A rebuild restages the site, so a file can be gone between the check and the read: that is a 404, never a crash.
+// A rebuild swaps the site in, so a file can be gone between the check and the read: that is a 404, never a crash.
 function readOrNull(path) {
   try {
     return statSync(path).isFile() ? readFileSync(path) : null;
@@ -81,7 +92,7 @@ function readOrNull(path) {
 }
 
 function respond(req, res, path, body) {
-  const extension = extname(path), response = previewResponse(body, TYPES[extension] || "application/octet-stream", req, extension === ".mp4" || extension === ".webm");
+  const extension = extname(path), response = previewResponse(body, TYPES[extension] || "application/octet-stream", req, extension === ".mp4" || extension === ".webm" || extension === ".m4a");
   res.writeHead(response.status, response.headers);
   res.end(response.body);
 }
@@ -92,6 +103,49 @@ function serveFile(req, res, path) {
   respond(req, res, path, body);
 }
 
+// Public, read-only totem feeds use the deployed Worker's edge cache. Never forward local cookies,
+// credentials, query strings or arbitrary paths; sign-in and every write API remain unavailable here.
+async function totemFeed(req, res, pathname) {
+  if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "method not allowed");
+  try {
+    const headers = { Accept: "application/json" };
+    if (req.headers["if-none-match"]) headers["If-None-Match"] = req.headers["if-none-match"];
+    const response = await fetch(`https://oogabooga.land${pathname}`, { headers, redirect: "error", signal: AbortSignal.timeout(10000) });
+    const outgoing = { "Content-Type": "application/json", "Cache-Control": "no-cache" };
+    for (const name of ["etag", "retry-after"]) if (response.headers.has(name)) outgoing[name] = response.headers.get(name);
+    if (response.status === 304) { res.writeHead(304, outgoing); res.end(); return; }
+    if (!response.headers.get("content-type")?.includes("application/json")) throw new Error("feed unavailable");
+    const body = await response.text();
+    res.writeHead(response.status, outgoing);
+    res.end(req.method === "HEAD" ? undefined : body);
+  } catch {
+    res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "60", "Cache-Control": "no-store" });
+    res.end(req.method === "HEAD" ? undefined : '{"error":"totem feed unavailable"}');
+  }
+}
+
+// A lecture's recording (docs/lectures.md): the copy `npm run lecture:script -- --import` keeps in untracked/lectures/,
+// else the one the production Worker serves from R2, asked for with the browser's range and nothing else of its request.
+const lectureFile = /^\/media\/lectures\/([a-z]+-\d\d-[0-9a-f]{16}\.m4a)$/;
+async function lectureAudio(req, res, file) {
+  if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "method not allowed");
+  const kept = readOrNull(join(root, "untracked", "lectures", file));
+  if (kept) return respond(req, res, file, kept);
+  try {
+    const headers = {};
+    if (req.headers.range) headers.Range = req.headers.range;
+    const response = await fetch(`https://oogabooga.land/media/lectures/${file}`, { method: req.method, headers, redirect: "error", signal: AbortSignal.timeout(30000) });
+    if (response.headers.get("content-type") !== "audio/mp4") return send(res, 404, "not found");
+    const outgoing = { "Content-Type": "audio/mp4", "Cache-Control": "no-store", "Accept-Ranges": "bytes" };
+    for (const name of ["content-length", "content-range"]) if (response.headers.has(name)) outgoing[name] = response.headers.get(name);
+    const body = req.method === "HEAD" ? null : Buffer.from(await response.arrayBuffer());
+    res.writeHead(response.status, outgoing);
+    res.end(body || undefined);
+  } catch {
+    send(res, 503, "lecture recording unavailable");
+  }
+}
+
 const server = createServer((req, res) => {
   // A malformed escape such as `/src/%` throws here; that is the request's fault, not the server's.
   let pathname;
@@ -100,7 +154,10 @@ const server = createServer((req, res) => {
   } catch {
     return send(res, 400, "bad request");
   }
-  if (pathname === "/") return serveFile(req, res, join(site, "index.html"));
+  if (pathname === "/api/repo-totems" || /^\/api\/totems\/[0-3]$/.test(pathname)) return void totemFeed(req, res, pathname);
+  const lecture = lectureFile.exec(pathname);
+  if (lecture) return void lectureAudio(req, res, lecture[1]);
+  if (pathname === "/")return serveFile(req, res, join(site, "index.html"));
   if (pathname === "/src" || pathname === "/src/") return serveFile(req, res, join(src, "index.html"));
   if (pathname.startsWith("/src/")) {
     // Resolve inside src/ only; a normalized path that escapes it is refused.

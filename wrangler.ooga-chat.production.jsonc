@@ -1,0 +1,63 @@
+{
+  // Ooga Chat's production edge (docs/ooga-chat-backend.md): the staged app and its server routes on https://ooga.chat.
+  // It shares nothing with oogaboogaland-production but the private bridge below: its own D1, OAuth apps, cookies and
+  // rate counters. Deploy only from rock (.github/workflows/ooga-chat-production.yml).
+  "name": "ooga-chat-production",
+  "main": "worker/chat/src/index.js",
+  "compatibility_date": "2026-10-02",
+  "account_id": "1e5c1e8f7c343bf6cabced151b1ae2c6",
+  // ooga.chat must be a zone on this account for the custom domain; until it is, this deploy fails at the route, which
+  // is the intended fail-closed state. www.ooga.chat is a proxied record a Redirect Rule sends to the apex, as for
+  // oogabooga.land. No workers.dev copy: one production origin for cookies and OAuth callbacks.
+  "routes": [{ "pattern": "ooga.chat", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false,
+  // Invocation logs off: they would hold each request's URL (an OAuth callback's code and state). The edge writes its own
+  // fixed-schema lines instead (worker/chat/src/metrics.js, docs/ooga-chat-operations.md).
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  "assets": {
+    "directory": "./untracked/ooga-chat",
+    "binding": "ASSETS",
+    "html_handling": "drop-trailing-slash",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/api/*", "/auth/*", "/donations/*"]
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "SITE_ORIGIN": "https://ooga.chat",
+    // Comma-separated: github, x, listen, speak, feed, commons, cloud. Turned on in stages by the release runbook.
+    // Production: GitHub sign-in, listening and speaking (speakers on the island's clouds), Feed the Oogas and The Commons.
+    "FEATURES": "github,listen,speak,cloud,feed,commons",
+    // OogaBoogaX's "Ooga Chat" OAuth App (callback https://ooga.chat/auth/github/callback). A client id is public.
+    "GITHUB_CLIENT_ID": "Ov23lilwmHOnCXhvwsKJ",
+    // @w_s_bitcoin's "Ooga Chat" X app, OAuth 2.0 confidential client (callbacks for both environments). Public.
+    "X_CLIENT_ID": "SkNWYXRycmFpLWt4Z1hHSUl6RzM6MTpjaQ"
+    // Secrets, never here: GITHUB_CLIENT_SECRET, X_CLIENT_SECRET.
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ooga-chat-production",
+      "database_id": "c4a02871-70e4-4c75-ac3a-239f58817d95",
+      "migrations_dir": "worker/chat/migrations"
+    }
+  ],
+  "services": [
+    { "binding": "OBL", "service": "oogaboogaland-production", "entrypoint": "ChatBridge" },
+    { "binding": "DONATIONS", "service": "bananapayserver-production", "entrypoint": "PageApi" },
+    // Oogatron, for the contributors panel's stats: a Worker cannot fetch another of this account's workers.dev
+    // addresses, so it is reached by binding (worker/chat/src/public.js).
+    { "binding": "OOGATRON", "service": "oogatron" }
+  ],
+  // Daily: purge expired sessions and abandoned sign-ins.
+  "triggers": { "crons": ["15 4 * * *"] },
+  // Namespaces are per account: the island's production counters use 1001-1009, Ooga Chat's production 1010-1014.
+  "ratelimits": [
+    { "name": "CHAT_PUBLIC_LIMITER", "namespace_id": "1010", "simple": { "limit": 120, "period": 60 } },
+    { "name": "CHAT_AUTH_LIMITER", "namespace_id": "1011", "simple": { "limit": 10, "period": 60 } },
+    { "name": "CHAT_SOCKET_LIMITER", "namespace_id": "1012", "simple": { "limit": 20, "period": 60 } },
+    { "name": "CHAT_MEDIA_LIMITER", "namespace_id": "1013", "simple": { "limit": 120, "period": 60 } },
+    { "name": "CHAT_AVATAR_LIMITER", "namespace_id": "1014", "simple": { "limit": 120, "period": 60 } }
+  ]
+}

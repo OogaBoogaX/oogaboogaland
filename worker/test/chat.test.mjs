@@ -8,36 +8,42 @@ import * as protocol from "../src/protocol.js";
 import { sha256Hex } from "../src/crypto.js";
 import { getPlayer } from "../src/db.js";
 import { sfuClient } from "../src/sfu.js";
+import { deliverHighscores } from "../src/highscore-store.js";
 import * as studio from "../src/studio-policy.js";
 
 const { CHAT_BURST, CHAT_FRAME_MAX, CHAT_HZ, CHAT_KEEP, CHAT_MAX, CHAT_RETRY_KEEP, MESSAGE_MAX, chatLog, parseClientMessage, sanitizeChat, takeToken } = protocol;
 const chat = (text) => JSON.stringify({ t: "chat", text });
 
-test("a chat line is sanitized text of 1 to CHAT_MAX characters; anything else is ignored, never fatal", () => {
+test("a chat line is lossless text of 1 to CHAT_MAX UTF-16 units; anything else is ignored, never fatal", () => {
   assert.deepEqual(parseClientMessage(chat("Ooga booga!")), { t: "chat", text: "Ooga booga!" });
   assert.deepEqual(parseClientMessage(chat("  padded  ")), { t: "chat", text: "padded" });
-  for (const bad of ["", "   ", "\n\t", "<>{}[]", "🍌🍌"]) assert.equal(parseClientMessage(chat(bad)), null, JSON.stringify(bad));
+  for (const bad of ["", "   ", "\n\t", "x\u0000", "x\u202e", "\ud800", "\udc00"]) assert.equal(parseClientMessage(chat(bad)), null, JSON.stringify(bad));
   for (const bad of [{ t: "chat" }, { t: "chat", text: 42 }, { t: "chat", text: null }, { t: "chat", text: ["hi"] }]) assert.equal(parseClientMessage(JSON.stringify(bad)), null);
   assert.deepEqual(parseClientMessage(chat("a".repeat(CHAT_MAX))), { t: "chat", text: "a".repeat(CHAT_MAX) });
   assert.equal(parseClientMessage(chat("a".repeat(CHAT_MAX + 1))), null, "one over the limit is dropped, not cut");
-  // The limit counts what is left after sanitizing.
-  assert.deepEqual(parseClientMessage(chat("a".repeat(CHAT_MAX - 10) + "<>".repeat(40))), { t: "chat", text: "a".repeat(CHAT_MAX - 10) });
+  // No stripping can conceal an overlong message.
+  assert.equal(parseClientMessage(chat("a".repeat(CHAT_MAX - 10) + "<>".repeat(40))), null);
+  assert.equal(parseClientMessage(chat("🍌".repeat(80))).text.length, 160);
+  assert.equal(parseClientMessage(chat("🍌".repeat(80) + "x")), null);
 });
 
 test("client-supplied names and ids are dropped: a chat parses to its text alone", () => {
   assert.deepEqual(parseClientMessage(JSON.stringify({ t: "chat", text: "hi", login: "satoshi", name: "Satoshi", id: 1, at: 0 })), { t: "chat", text: "hi" });
 });
 
-test("sanitize keeps the donation message character set and strips markup", () => {
-  assert.equal(sanitizeChat('<img src=x onerror="alert(1)">hi'), "img srcx onerroralert1hi");
-  assert.equal(sanitizeChat("gm @ooga #1: it's 4:20, ok? yes! a-b_c."), "gm @ooga #1: it's 4:20, ok? yes! a-b_c.");
-  assert.equal(sanitizeChat("café ünïcode\u0000\u202e"), "caf ncode");
-  // The same rule as donations.sanitize, read from the page's own module.
+test("shared chat policy preserves Unicode and markup as data; donations keep their own policy", () => {
   const context = { window: {} };
-  runInNewContext(readFileSync(new URL("../../src/js/donations.js", import.meta.url), "utf8"), context);
-  const donation = context.window.BL.donations.sanitize;
-  const samples = [String.fromCharCode(...Array.from({ length: 128 }, (_, i) => i)), "  <b>bold</b> & \"quotes\"  ", "émoji 🍌 and ✓", "a\nb\tc"];
-  for (const s of samples) assert.equal(sanitizeChat(s), donation(s, Infinity), JSON.stringify(s));
+  for (const f of ["chat-policy", "donations"]) runInNewContext(readFileSync(new URL(`../../src/js/${f}.js`, import.meta.url), "utf8"), context);
+  const policy = context.window.BL.chatPolicy;
+  const samples = ["it’s working", "hello & welcome", "https://oogabooga.land", "café", "hello 🍌", "a+b=a", "👩‍👩‍👧‍👦", "✈️", "e\u0301", "中文 العربية", '<img src=x onerror="alert(1)">', "javascript:alert(1)", "'); DROP TABLE chat;--"];
+  for (const text of samples) {
+    assert.equal(policy.error(text), null);
+    assert.equal(sanitizeChat(text), text);
+    assert.equal(parseClientMessage(chat(text)).text, text);
+  }
+  for (const text of ["a\nb", "x\u0085", "x\u202e", "x\u2066", "\ud800", "\udc00", "x\u2028y"])
+    assert.equal(sanitizeChat(text), "", JSON.stringify(text));
+  assert.equal(context.window.BL.donations.sanitize("café 🍌", Infinity), "caf");
 });
 
 test("a long chat frame is ignored, not closed; every other frame keeps MESSAGE_MAX", () => {
@@ -46,8 +52,8 @@ test("a long chat frame is ignored, not closed; every other frame keeps MESSAGE_
   assert.equal(parseClientMessage(long), null, "a chat frame over MESSAGE_MAX is read and its overlong line dropped");
   assert.equal(parseClientMessage(chat("a".repeat(CHAT_FRAME_MAX))), null, "past CHAT_FRAME_MAX it is dropped unread");
   assert.equal(parseClientMessage(chat("a".repeat(1 << 20))), null);
-  // A raw line that sanitizes under the limit still arrives, even in a frame over MESSAGE_MAX.
-  assert.deepEqual(parseClientMessage(chat("hello " + "\u2603".repeat(300))), { t: "chat", text: "hello" });
+  // Unicode counts toward the same limit; it is never stripped to make a line fit.
+  assert.equal(parseClientMessage(chat("hello " + "\u2603".repeat(300))), null);
   // Everything else as before.
   assert.equal(parseClientMessage(" ".repeat(MESSAGE_MAX + 1)), false);
   assert.equal(parseClientMessage(JSON.stringify({ t: "zone", name: "x".repeat(MESSAGE_MAX) })), false);
@@ -105,17 +111,27 @@ const host = (clock = Date, env = {}) => {
     .replace(/import\s+[\s\S]*?from\s+"[^"]+";/g, "")
     .replace("export class Room", "class Room") + "\nglobalThis.Room = Room;";
   const context = {
-    ...protocol, ...studio, sfuClient, sha256Hex, getPlayer, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }, { handle: "bc1gui", github_login: "ottoz0r" }],
+    ...protocol, ...studio, deliverHighscores, sfuClient, sha256Hex, getPlayer, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }, { handle: "bc1gui", github_login: "ottoz0r" }],
     DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } },
     WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, crypto, Date: clock, Map, Set, setTimeout, clearTimeout, console,
   };
   runInNewContext(source, context);
+  let restoring;
   const ctx = {
-    setWebSocketAutoResponse() {}, blockConcurrencyWhile: (fn) => fn(), acceptWebSocket: (ws) => accepted.push(ws),
+    setWebSocketAutoResponse() {}, blockConcurrencyWhile: (fn) => (restoring = fn()), acceptWebSocket: (ws) => accepted.push(ws),
     getWebSockets: () => accepted.filter((ws) => !ws.closed),
     storage: { get: async (key) => Array.isArray(key) ? new Map() : undefined, put: async () => {}, getAlarm: async () => 0, setAlarm: async () => {} },
   };
-  const room = () => new context.Room(ctx, env);
+  const room = () => {
+    const r = new context.Room(ctx, env), ready = restoring;
+    // Cloudflare does not deliver requests or alarms until blockConcurrencyWhile has completed.
+    // Waiting on that barrier avoids making sweep behavior depend on the number of restore awaits.
+    for (const name of ["fetch", "alarm"]) {
+      const handle = r[name];
+      r[name] = async function (...args) { await ready; return handle.apply(this, args); };
+    }
+    return r;
+  };
   const upgrade = (r, id, login, display, contributor = true) => r.fetch({ url: "https://island.invalid/room", headers: new Headers({ upgrade: "websocket", "x-player-id": String(id), "x-player-login": login, "x-player-display": display, "x-player-contributor": contributor ? "1" : "0" }) });
   // Ordinary chat fixtures represent contributors vouched for by the Worker.
   const join = async (r, id, login, display, contributor = true) => {
@@ -123,7 +139,7 @@ const host = (clock = Date, env = {}) => {
     await upgrade(r, id, login, display, contributor);
     return accepted[before];
   };
-  return { room, join, upgrade, accepted };
+  return { room, join, upgrade, accepted, restored: () => restoring };
 };
 const said = (ws) => ws.sent.filter((m) => m.t === "chat");
 
@@ -248,18 +264,19 @@ test("room: a joiner gets welcome then the held lines; a line goes to everyone, 
   const a = await join(r, 1, "ooga", "Ooga");
   assert.deepEqual(a.sent.map((m) => m.t).slice(0, 2), ["welcome", "chat-history"], "history follows welcome as its own message");
   assert.deepEqual(a.sent[1].messages, []);
+  assert(a.sent[0].features.includes(protocol.CHAT_FEATURE), "welcome advertises the lossless policy");
   const b = await join(r, 2, "booga", "Booga");
-  await r.webSocketMessage(a, JSON.stringify({ t: "chat", text: "hi <b>all</b>", login: "satoshi", name: "Satoshi", id: 7 }));
+  await r.webSocketMessage(a, JSON.stringify({ t: "chat", text: "it’s café 🍌 & https://oogabooga.land <b>all</b>", login: "satoshi", name: "Satoshi", id: 7 }));
   for (const ws of [a, b]) {
     const [m] = said(ws);
     assert.equal(m.login, "ooga");
     assert.equal(m.name, "Ooga");
-    assert.equal(m.text, "hi ballb");
+    assert.equal(m.text, "it’s café 🍌 & https://oogabooga.land <b>all</b>");
     assert.ok(Number.isSafeInteger(m.id) && m.id !== 7 && Number.isFinite(m.at));
     assert.deepEqual(Object.keys(m).sort(), ["at", "id", "login", "name", "t", "text"]);
   }
   const c = await join(r, 3, "late", "Late");
-  assert.deepEqual(c.sent[1].messages.map((m) => [m.login, m.name, m.text]), [["ooga", "Ooga", "hi ballb"]]);
+  assert.deepEqual(c.sent[1].messages.map((m) => [m.login, m.name, m.text]), [["ooga", "Ooga", "it’s café 🍌 & https://oogabooga.land <b>all</b>"]]);
 });
 
 test("room: a joiner gets exactly the last CHAT_KEEP lines in order; ids only grow", async () => {
@@ -519,4 +536,37 @@ test("room: async hashing ignores a socket replaced before acceptance", async ()
   assert.equal(r.chatAccepted.size, 0);
   await r.webSocketMessage(newer, requestLine("replaced-during-hash"));
   assert.equal(said(newer).length, 1);
+});
+
+test("room: score RPC reads D1, deduplicates, survives hibernation, and alarm recovers a missed notification", async () => {
+  let revision = 1, pending = true, reads = 0;
+  const DB = { prepare(query) { let args; return { bind(...values) { args = values; return this; },
+    async all() { reads++; return { results: pending ? [{ game_id: "darts", revision }] : [] }; },
+    async first() {
+      if (query.includes("FROM players")) return { id: 1, login: "YellowBrokeIt", banned_at: null };
+      return { game_id: "darts", highscores: JSON.stringify({ "darts-1": revision * 100 }), achieved: '{"darts-1":1000}',
+        score_type: "machine", direction: "desc", unit: "points", rules_version: 1, revision };
+    },
+    async run() { if (revision <= args[1]) pending = false; return { meta: { changes: 1 } }; },
+  }; } };
+  const { room, join, restored } = host(Date, { DB }), r = room();
+  await r.refreshHighscores("darts"); assert.equal(reads, 0, "no subscribers means no recovery reads");
+  const one = await join(r, 1, "YellowBrokeIt", "Yellow"), two = await join(r, 2, "ottoz0r", "Other");
+  await r.webSocketMessage(one, JSON.stringify({ t: "highscore", game: "darts", revision: 999, highscores: { "darts-1": 999 } }));
+  assert.equal(one.sent.filter(m => m.t === "highscore").length, 0, "client-announced scores are ignored");
+  assert.equal((await r.fetch({ url: "https://island.invalid/highscores", headers: new Headers() })).status, 426);
+  await Promise.all([r.refreshHighscores("darts"), r.refreshHighscores("darts")]);
+  for (const ws of [one, two]) {
+    const updates = ws.sent.filter(m => m.t === "highscore");
+    assert.equal(updates.length, 1); assert.equal(updates[0].board.highscores["darts-1"], 100);
+  }
+  revision = 2; pending = true;
+  const woke = room(); // attachments rehydrate the two existing hibernatable sockets
+  await restored(); // Set the alarm deadline only after the host has restored its saved deadline.
+  woke.ctx.getWebSocketAutoResponseTimestamp = () => new Date();
+  woke.sweepAt = 0;
+  await woke.alarm();
+  for (const ws of [one, two]) assert.equal(ws.sent.filter(m => m.t === "highscore").at(-1).board.revision, 2);
+  assert.equal(pending, false);
+  assert.equal(woke.flushTimer, 0, "no recurring score timer prevents hibernation");
 });

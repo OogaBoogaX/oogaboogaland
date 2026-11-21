@@ -254,12 +254,19 @@
     let held = false, paused = false;
     let ctx = null, master = null, noise = null, rainGain = null, windGain = null, surfGain = null, thunderGain = null, thunderFilter = null, muted = false, audioConnected = false;
     muted = BL.sound.muted;
+    const rainChannel = BL.sound.channel("rain"), windChannel = BL.sound.channel("wind"), thunderChannel = BL.sound.channel("thunder");
+    const surfChannel = presentation ? BL.sound.channel("surf") : null;
+    // On the sound panel's list only while this weather can be heard.
+    const listSounds = () => {
+      const on = exterior && !held && !paused;
+      rainChannel.show(on); windChannel.show(on); thunderChannel.show(on); surfChannel?.show(on);
+    };
     const initAudio = () => {
       if (!exterior || held || paused || ctx || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
       ctx = new AudioContext();
       master = ctx.createGain();
       master.gain.value = muted || !exterior || held || paused ? 0 : MASTER;
-      master.connect(ctx.destination); audioConnected = true;
+      master.connect(BL.sound.output(ctx)); audioConnected = true;
       const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
       const data = buffer.getChannelData(0);
       for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
@@ -274,7 +281,7 @@
       rainGain.gain.value = 0;
       noise.connect(hiss);
       hiss.connect(rainGain);
-      rainGain.connect(master);
+      rainGain.connect(rainChannel.node(ctx, master));
       // The gale rides the same loop through a low band, so the wind howls without a second buffer.
       const howl = ctx.createBiquadFilter();
       howl.type = "bandpass";
@@ -284,15 +291,15 @@
       windGain.gain.value = 0;
       noise.connect(howl);
       howl.connect(windGain);
-      windGain.connect(master);
+      windGain.connect(windChannel.node(ctx, master));
       // One reusable thunder voice, never a timeout or a new graph per strike.
       thunderFilter = ctx.createBiquadFilter(); thunderFilter.type = "lowpass"; thunderFilter.Q.value = 1.2;
       thunderGain = ctx.createGain(); thunderGain.gain.value = 0;
-      noise.connect(thunderFilter); thunderFilter.connect(thunderGain); thunderGain.connect(master);
+      noise.connect(thunderFilter); thunderFilter.connect(thunderGain); thunderGain.connect(thunderChannel.node(ctx, master));
       if (presentation) {
         const surf = ctx.createBiquadFilter(); surf.type = "lowpass"; surf.frequency.value = 580;
         surfGain = ctx.createGain(); surfGain.gain.value = 0;
-        noise.connect(surf); surf.connect(surfGain); surfGain.connect(master);
+        noise.connect(surf); surf.connect(surfGain); surfGain.connect(surfChannel.node(ctx, master));
       }
       noise.start();
       // Optional scene source shares this context and the exact exterior master gate.
@@ -555,14 +562,14 @@
     const setMuted = (on) => {
       if (muted === !!on) return;
       muted = !!on;
-      audioLayer?.setEnabled?.(exterior && !muted && !held && !paused);
+      audioLayer?.setEnabled?.(exterior && !muted && !held && !paused); listSounds();
       if (master) master.gain.setTargetAtTime(muted || !exterior || held || paused ? 0 : MASTER, ctx.currentTime, 0.05);
     };
     const offSound = BL.sound.subscribe(setMuted);
     const setExterior = (on) => {
       if (exterior === !!on) return;
       exterior = !!on;
-      audioLayer?.setEnabled?.(exterior && !muted && !held && !paused);
+      audioLayer?.setEnabled?.(exterior && !muted && !held && !paused); listSounds();
       if (!exterior) {
         thunderAt = -1; count = 0; node.instanceCount = node.drawInstanceCount = 0; node.instanceVersion++;
         if (thunderGain) { thunderGain.gain.cancelScheduledValues(ctx.currentTime); thunderGain.gain.setValueAtTime(0, ctx.currentTime); }
@@ -571,7 +578,7 @@
         // Disconnect the one exterior bus as well as zeroing its envelope. AudioParam.value
         // can lag a render quantum; a closed gate must not depend on that clock boundary.
         if (!exterior && audioConnected) { master.disconnect(); audioConnected = false; }
-        if (exterior && !held && !paused && !audioConnected) { master.connect(ctx.destination); audioConnected = true; }
+        if (exterior && !held && !paused && !audioConnected) { master.connect(BL.sound.output(ctx)); audioConnected = true; }
         master.gain.cancelScheduledValues(ctx.currentTime);
         master.gain.setValueAtTime(muted || !exterior || held || paused ? 0 : MASTER, ctx.currentTime);
       }
@@ -601,10 +608,10 @@
         state = STEPS[stepAt = stepFor(storm, stepAt)];
         wet = wetAt(storm);
       }
-      audioLayer?.setEnabled?.(exterior && !muted && !held && !paused);
+      audioLayer?.setEnabled?.(exterior && !muted && !held && !paused); listSounds();
       if (master) {
         if (paused && audioConnected) { master.disconnect(); audioConnected = false; }
-        if (!paused && exterior && !held && !audioConnected) { master.connect(ctx.destination); audioConnected = true; }
+        if (!paused && exterior && !held && !audioConnected) { master.connect(BL.sound.output(ctx)); audioConnected = true; }
         master.gain.cancelScheduledValues(ctx.currentTime);
         master.gain.setValueAtTime(muted || !exterior || held || paused ? 0 : MASTER, ctx.currentTime);
       }
@@ -615,14 +622,14 @@
       node.visible = !held && !paused;
       if (held) clearEffects();
       for (let i = 0; i < cloudN; i++) clouds[i].visible = !held && i < cloudShown;
-      audioLayer?.setEnabled?.(exterior && !muted && !held && !paused);
+      audioLayer?.setEnabled?.(exterior && !muted && !held && !paused); listSounds();
       if (master) {
-        if (!held && exterior && !paused && !audioConnected) { master.connect(ctx.destination); audioConnected = true; }
+        if (!held && exterior && !paused && !audioConnected) { master.connect(BL.sound.output(ctx)); audioConnected = true; }
         master.gain.setTargetAtTime(muted || !exterior || held || paused ? 0 : MASTER, ctx.currentTime, 0.05);
       }
     };
     const dispose = () => {
-      offSound();
+      offSound(); rainChannel.release(); windChannel.release(); thunderChannel.release(); surfChannel?.release();
       removeChild(root, node);
       removeChild(root, boltNode);
       for (const cloud of clouds) removeChild(root, cloud);
@@ -688,5 +695,6 @@
     };
   };
 
-  BL.weather = { STEPS, CLEAR_NIGHT, CLEAR_DAY, STORM_TAU, ARRIVALS_FRESH_MS, stepFor, wetAt, cloudFor, create };
+  // `rainDrop` is also Cloud Hopper's storm rain (cloud-hopper-sky.js).
+  BL.weather = { STEPS, CLEAR_NIGHT, CLEAR_DAY, STORM_TAU, ARRIVALS_FRESH_MS, stepFor, wetAt, cloudFor, create, rainDrop };
 })();

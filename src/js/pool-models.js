@@ -1247,10 +1247,11 @@
       if (ch === " ") { cursor += 2.4; continue; }
       const glyph = glyphs[ch];
       if (!glyph) { cursor += 4; continue; }
+      const sx = 3 / glyph[0].length;
       for (let row = 0; row < glyph.length; row++) {
         for (let col = 0; col < glyph[row].length; col++) {
           if (glyph[row][col] !== "1") continue;
-          geos.push(box({ w: cell, h: cell, d: 0.08, color, emissive, offset: { x: (cursor + col) * cell, y: -(row * cell), z: CARVE_Z } }));
+          geos.push(box({ w: cell * sx, h: cell, d: 0.08, color, emissive, offset: { x: (cursor + (col + 0.5) * sx - 0.5) * cell, y: -(row * cell), z: CARVE_Z } }));
         }
       }
       cursor += 4;

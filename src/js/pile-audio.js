@@ -53,13 +53,14 @@
     let ctx = null, master = null, zone = null, buffer = null, source = null;
     let startedAt = 0, startOffset = 0, checkIn = 0, level = -1, muted = false;
     muted = BL.sound.muted;
+    const soundChannel = BL.sound.channel("pile");
 
     const open = () => {
       if (ctx || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
       ctx = new AudioContext();
       master = ctx.createGain();
       master.gain.value = muted ? 0 : MASTER;
-      master.connect(ctx.destination);
+      master.connect(soundChannel.node(ctx));
       zone = ctx.createGain();
       zone.gain.value = 0;
       zone.connect(master);
@@ -130,7 +131,7 @@
     const offSound = BL.sound.subscribe(setMuted);
 
     const dispose = () => {
-      offSound();
+      offSound(); soundChannel.release();
       if (ctx) ctx.close();
       ctx = master = zone = buffer = source = null;
       level = -1;

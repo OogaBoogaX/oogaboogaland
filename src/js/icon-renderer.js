@@ -29,7 +29,7 @@
     let poolUsed = 0, lastF = 1, near = 0.1, eye = null;
     let sortCapacity = 0, sortIds = new Uint32Array(0), sortKeys = new Float64Array(0), sortWork = sortScratch(0);
     const acquire = () => {
-      if (poolUsed === pool.length) pool.push({ pts: new Float32Array(144), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1 });
+      if (poolUsed === pool.length) pool.push({ pts: new Float32Array(144), n: 0, depth: 0, depthOffset: false, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1 });
       return pool[poolUsed++];
     };
     const styleFor = (r, g, b) => {
@@ -116,6 +116,7 @@
         }
         if (maxX < -2 || minX > width + 2 || maxY < -2 || minY > height + 2) { poolUsed--; continue; }
         rec.n = clipped; rec.depth = zsum / clipped - (node.depthBias || 0);
+        rec.depthOffset = !!node.geometry.depthOffset;
         rec.line = false; rec.smokeOpacity = opacity;
         const emissive = Math.max((face.emissive || 0) * materialGlow, ember * 0.9);
         const diffuse = Math.max(0, nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2]);
@@ -147,6 +148,7 @@
         }
         if (Math.max(rec.pts[0], rec.pts[2]) < -7 || Math.min(rec.pts[0], rec.pts[2]) > width + 7 || Math.max(rec.pts[1], rec.pts[3]) < -7 || Math.min(rec.pts[1], rec.pts[3]) > height + 7) { poolUsed--; continue; }
         rec.n = 2; rec.depth = (CLIP_OUT[2] + CLIP_OUT[5]) / 2 - (node.depthBias || 0);
+        rec.depthOffset = false;
         rec.line = true; rec.smokeOpacity = opacity;
         rec.lineGlow = Math.max((line.emissive || 0) * materialGlow, ember * 0.9);
         const c = line.color, heat = 255 * (0.72 + (c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722) / 255 * scorch * 0.28);
@@ -169,7 +171,8 @@
         while (sortCapacity < poolUsed) sortCapacity *= 2;
         sortIds = new Uint32Array(sortCapacity); sortKeys = new Float64Array(sortCapacity); sortWork = sortScratch(sortCapacity);
       }
-      for (let i = 0; i < poolUsed; i++) { sortIds[i] = i; sortKeys[i] = pool[i].depth; }
+      // Match the scene Canvas renderer's surface tie-break without moving portrait geometry.
+      for (let i = 0; i < poolUsed; i++) { sortIds[i] = i; sortKeys[i] = pool[i].depth + (pool[i].depthOffset ? 0.0001 : 0); }
       sortByKey(sortIds, 0, poolUsed, sortKeys, 1, 0, sortWork);
       ctx.clearRect(0, 0, width, height); ctx.lineJoin = "round";
       let lastFill = null, lastStroke = null, lastWidth = 0, lastAlpha = NaN;

@@ -5,13 +5,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' https://stream.noderunnersradio.com; connect-src 'self' https: wss:; worker-src 'self'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' https://stream.noderunnersradio.com https://s2.radio.co; connect-src 'self' https: wss:; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
-  <title>Ooga Booga Land · an island of caves where bananas feed EntropyLab contributors</title>
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="OogaBoogaLand">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <title>Ooga Booga Land · a virtual world for open-source contributors</title>
   <link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAEyklEQVR42tVX/U+TVxh9+YgMi22BRWAyOlyGMhFnNpFNFJ2iySII1ClIoRX6BZkRFERlDCpIQ6mABUrp2w9bIAItW8bmki3ZTIzDzcy17Jf9J/v17N5bWtGKLRNJdpOTJu/7POece2/v89yX4/6PQ5Ai4CQfvo3tBRKCLGzfJ8EbWxI2zkDekVzUT1ZD6amBak4GzZwcWXuysGEGPikvhPKujBiQQeWphXZOgV1Fu16/gQ8O5INCeqkSylk5Goi4kkBFDHymPI49B3YjGEPj4+Pj1kf4K8cVuHwWuH1WTPl5DD3UQ/vNeTR4AwbUXgWGFvVw/jmOO74JuP1WtAxegChVtHaxmJiYsGe37xkIsYWYsGLSRwz80o+mO0qobAoGjb0eww/64XhihpPEURP9c70oLClY+7bEkWXTe3UYWLiJgW9vwkBgfxycGY8pnx3G+X6cUVUx8lMyKcrrpBi6Z2QxFE4C/tEojN/rCUcfjAt9uOH+EjGxMZENbErYxDn/GIfLP8FmHSR1EfH+KX3EGd3gdWQrLAwsl2yHe4kH/3AMcXFx0a1Au+EqOm51oHusG+afTYHZL9lwxdQW0UBTt4bE0xXjYX1gRsdgJ0NrbxtiY2PX/h8wePVwkRlM/mVD+/DliAYau4iBJTprO0w/3H71o6m93ogevge9th5Uq6uiIuyx0/heNOsuvt7a0PFFHihemYgue4IgIYRoRv5OMf75u4ohL0cUlYmVGs+cCFGakGuaJ+fZK4fGUwctKSzq6boXkma9JcChgq2orcgOGZCVZ7Nn72QKwnIy3ktHvaOGcWo8cqbRSLTEGc8VKTURZmWV/Ko9CmhnzmO1ZQ8KP4/u5vywnJ37cqGZVjBO1bIG1QojVnkDLwMgJoiB3P3vhwV2Xdy9JgM5H+2AihhQep7yU60wA+r5OlbbG7yky5Ff9azipfv6riQpJFy4982XxjIDy9xUg2o9EyBKFnOqNi2UrWq0DDRj8L4eI4tGXBtfvfCsNED/kKvFUY7RX42M8/KtFqZBtcSpySuqHymRaWnpXFp6Bney+iSspI7TMmy5b8KJMyfwX49hyekSxkG5KGe5vBxUg2qtWpYPlx7ExOII62q2381oN7eiUnsKh0qLUHj844jHreDofhSXHUSFpozlUg7KRTmPSY9FPq5HSosDBkgzcrKGRMqqz4Zpvx09js6IBJ3mqyyW5tDcIA8zUBmlAeujMTiIa2aAdDMXaSyTfhv63LqIBN3WDhZLc2gu5XCwLRhDSVQGyorB/zZGGspEyL2TtWQeBm9fRILeaR2LpTmhVSRclLMkmi2gY/C7AYz+NMww8uMwS3aS5XTRmT3h8an0MLL3SpCes5UhY0caiiuK2DsaQ2P5x2aWG+ShnFGJb8vcFvaMtmSn3xK4XBCBmktnIR8/h2qTFOeGpZCZTuPshc/Zu8CyWzC4YAgTzJRkRTYQHx/PCUUiTixODqHLfp31eHovcJN7gfxaLRq/rl8u3bWsf9S0VrN3NIbG9t3VISU1NcRBOSn3ug3VjCJUWmmTifaCuy5DmCLklDN17LuggfYN8mWUJE7auE8zKtYwK3ta28kKbBZu3jgDiYLE8MtG4gZ+nNI6vkUo5IRCUQhR3XhfMP4FS1+IzsKOtQkAAAAASUVORK5CYII=">
   <link rel="icon" type="image/png" sizes="64x64" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAALUElEQVR42u2b+1NU5xnH8dZqJIlGmzLtVGM6neqAIt460YoZBBUVRVDUALssewUcNRpiI1HUBLwr972esywsxnKtcabTGmO81AsoVzvT/6S/Pn2e5z1nOQtyKZ5RXLMzzyyw5zzv9/m8z/ues89ziIr6+fXz65W9ZvxyelT03NlR0R+82GbPfSfqF7NmRC6A+NQ4sH9nANv1bLD8NQcs+G4l+y4H3w1gwc/W7l8NEQtgRdoyKGgxgr0tF6ytOWAja8kGW3MuvhvA3pIHG4zrIhfApvxkDNLAwVswcEtLDpibcfYRAP3dhnAyitMjF8BmSzLPNgVvbh4EYNMAyCzeFbkAUiwbwYpBiwzIZbO2Gjj9rbwMjLC7OCOCAeASsLYawdwqAh80I1oeAjDhEniDMyDvGO7oJ/LAWmoCW2k+m/2UGWxojtMWOCIf5GAtbQYw4+xT+lv4HYHgBmhDCIcbisBSilBOIpRS9HVS8XUqn/3Q75+krJl8kJKzPgXvwwoI9Dihsc8Njb0etmCfF5r6fRBEO3/vDM84A8AsIBNLwSAyoM0Ip+58BVJPDfjRT32vmy3Q54GGfuGnsccDuUf3TT4AmdadIHVWo2AnBEg0Bt8QgoDC0S7cPwO2dgIggje3hC8FBvDjX8DXUw3Ss1r05QqD0IgQGnq9cOCMY/IByD24H+SntQxAFU4gBAAJM0BCAKfB3oGp3Y6Bt+NS0OwFFLyjwwSlCEDqrQGpuzYsC1QIAcyoLy4dfrUApkyZEjVr9qyoWdEjm6XYiAAwdXudg2mLYil4Xg7488X730BBswkczXnguG5ks6HZr+fx3wubzXD61nGQu+s4eJkMYfo1EPw9LjhW8QUMHf8djdHvur5+81FMlPtuFfg7cWa73CA/cYL0GMU9cbHR3wPdXlz/Ls1MCQCNPPs+uNYvw8XG82PO3Mm6kyKD+pwYLIJ4AYD6Zx6of4o/d6nj42doAbQGNOlhDUS/H60vBLmrFjcisRmpAarBaoPWWkMPZkCPBE29Mtu5+rIxAZRc/VrA7FV8qIErVt9DNrg3EGTVCDRtlIFnbnh3js4AAt0uBjAYoFtZ664hAHy8Tr33a+HE1RMvvVZLrpSA75GSCZrAQ/BRU71ylWgc8LER+HkffqAvAJoJAWDwXaSqK5QFQhTOBs6C606NbhuV61417wlaAKEx+wUELYDGXh/M//U8fQFUdFyEyu8vQhVa5Y1LUHHjClT97QrIXQTBzbMghPkYQN0PlfoBuFvBsAV0MloiXpAeOKHqZgVUf6/YzUqoQau6cRnmzpurX/Bz5ozsrBJB1PcrADg7JFyPPqi9VaFjBlQpmUbB0+aKV5YBGc7K50YcY+bMmfoBmD07epTMuASBAVwSA142EtaIEOpu6ZcB7vvVCmT1hqgeGp/XwxnPNyOOMWPGK6osXWwuh4bnuO4HyMQaDA5Iui4B7/0aAZnWOkPGS+u/ZTh64ejrvyM8f60ML0uY/t0evj7TJYx24Zp/XNVNnPN2lbi9Rr80TgOOQRvd52WHIverc8S/Etd8CFp7q4LPy/wY/vuffWFmyFj09kDISV80DED2zo9eP4CEzctg+Za4QUuNg/gtsbBscxxaLMSnxkJC6lKITVryUmL3pS0cBmDv9oUv5TP208WsjTSSVtJM2imGBE1MFOOIToraTFDUjl9L0RytxjAraMtjK2ozg8n7GSxKmLjgrG0LhgHYnbpgwv5+F/tbMNTtY22qzqH6KSaKjWIcFQCdbMcTbGwGpWFBTvLYClrzwSLnwpJPFo9b8PHCWCg5EBeypop1wwAEr64NO4ZsvP7/sPL3kO/JZm2qTtJM2jkGjMWuTOKoAApbBDmbUqVRS9e2ZiN3bez8OUIKmmF1yqpxCxwa7HhtvP6XJ8aDI5DP2lSdpDms9I7GmYCfjejIwZVZY1jwwoxs1lbhvCCYD6s3rZxEAJYyANJGGlW92hisSiY4RgNQoFRmtSdSydrcbODKLTm1E+XGfFgziQDEIwBbvYm1icANrNncnBsWC9cdW0cBUIjrgw5SM4Dq9qqFKNIxmAGrUiYPgGXrl4I1YGJto2vHJTDqHoAf2tsRQJuBK7aidI0OqJVFjml/wI3EFsyDhI0rxi1w6F3f4fzFw4ItL14OE707XLouTgGQxxqF1hzWTqV3rj5jTBTbqAAOdOA6akdS7UZN8wKdtGYrpWxyggCaEEBSwoQvWxvXxuh6HxCrACBtpJG0kmahPZdjoZgotiKMcWQA5UVQdNYBheUFaA6wl9vBXmaHo75D8O3tEii78zWU3y2Fs7dPwZErB+Gzool1aF4EYP+OiQEgDYfOH4BzP5xmbaTx2x9LWDNppxgoFoqJYqMY/+9Bjl/+CuTOGvza6+SKLHd8qAI74J+Q6JQ/x+j2XYA0kBbSxNVi6iV01gJp1u0W2XHcDlJXnabjIxodwX5ZNwD0BWkivkgDaSFNol7oQq1OIM26Adhjz9QAcHFxooFKU33Sa/8CQxpIS6B3sExPWkmzfgBsu8H3RO3YKhC4COqFDNPr6+dvy0plDaJELnSRRgmXAGnWbaDd1kzwIAC51wn+Prfo1yml8FBnppda17LSBZKg9p9X4E9Jq3QRUXnzAvsk3zQGjcVj9ntZg1YTafR21QJp1hWAD6mqAFQTpXC1D+iDYJ/MPUAy5+0KSNqx4aVFJG5ZB9V/vxzyS2M0cPfJExpfq4k00hLQFcAeKy2B4QBCILhR4RNtcLSmfgnkB3Wwff+2lxaRsisZvD/VsE/VP2UAjfkiLQygE/cAq45LIAudSU+cmjRzhQ2q9u0blAchBIBa2LZ3qy4ivD9VQ5PimztP6rrv92gCH9Qm41UgS08ARFPqFC0wf59rGABx+REQ1IchBIBU3QAElQygMeqVS174zAtdpFF+6tI3A2hHpWsrd2dCFj4D/lDTUnSHPQhgqw4AknYmgftuNfsk36FWuQpf0aHVJj9z6nsVyLLvRqoCgGiDDQleBcAbo5dN7nLDl1VHId2chrYD0vPTxi2Ijt1l2cnnHrl8CJefK+S3vi8cgICg1YV/68YlYNcRwF7HHn4wQR1k0LyaGUAg3Kv3sXEm9OCsdeMNU7fEtiIxfkxRS1b9MXQ8ncs+FJ9kfs14ZKInOUQXAiLNugFIN6SD9x49EuMG6bELfA/xbusR/vzIA9JDN/j+5cSrRF3Y/YFIWTR+akPm2+bE7YljilqVtJKPpXPoXNWP9nrvw+VIY9LYMmlALazpsYs1+h44gTS/0ruyL8uOgZdulvpcYVcGmr0gA5Bgh207FLWboaDDBA6lAFvUms9W2GqCA21m2G5J5WMZQJ8KQAkefXvpi86FksnXRDl86gh4UJy/38VXCoYQeqbIx88N7LSngaNdfG+n6gxXa1sM4FCMytZp9lQ+VpzjZR9+5epDvj14l1dcXjz5AGzO2syz4+9XNyW8L3ju45Z5w3OJ37MO7gF7W174c8It4klxsgIEsvdIZtg55EPsNW727UMAGZZJ+Ej9lqxNfAMS0D4rgEGoRoHsQQDammOoWKkAIMv6PJOPDTuXQCgPYPjxEpdhfoP/p4DK1kMBWFsGl0NyZvKbGdyChR+N6zgb1e7VomtLTqjvYGUAubB+6/o3EwA9Tjt9+nR+NudFNm3adD6O9oBQwZXK16EmhsiA+A3xMG3atBH9kE2dOvWNXQFR3HhRnhbP57K12nShzdAEcWuXRPZzAgygXQHAZXeDqOMzAPNbAID+X6AjG7MgR2RCm/gHCnp8nhqYsREPIIgBX8Pg6b0JsyGIe0ITboxNeHcYNMHi1YsjF8D7c+aMeUxMTEzkzv6777035jHz5/8qolcAXy5Hs1f9+h++gsISmEorAAAAAABJRU5ErkJggg==">
+  <link rel="stylesheet" href="native.css">
   <link rel="stylesheet" href="style.css">
 </head>
 
@@ -155,32 +161,34 @@
     <header class="topbar">
       <div class="brand">
         <h1><a class="home-link" href="./" title="Back to the island"><span data-sign>Ooga Booga Land</span></a></h1>
-        <p data-scene="hub" id="subtitle">an island of caves</p>
-        <p data-scene="dsb" hidden>DSB LAND</p>
-        <p data-scene="poker" hidden>EMBER DEN</p>
-        <p data-scene="lab" hidden>EntropyLab cave</p>
-        <p data-scene="factory" hidden>Lightning Factory</p>
-        <p data-scene="hangar" hidden>Lightning Jet Hangar</p>
-        <p data-scene="bifrost" hidden>₿IFRÖST</p>
+        <p data-scene="hub" id="subtitle" data-zone-line>The Island of Caves</p>
+        <p data-scene="dsb" data-zone-line hidden>DSB LAND</p>
+        <p data-scene="poker" data-zone-line hidden>EMBER DEN</p>
+        <p data-scene="lab" data-zone-line hidden>EntropyLab cave</p>
+        <p data-scene="studio" hidden>Studio</p>
+        <p data-scene="factory" data-zone-line hidden>Lightning Factory</p>
+        <p data-scene="hangar" data-zone-line hidden>Lightning Jet Hangar</p>
+        <p data-scene="bifrost" data-zone-line hidden>₿IFRÖST</p>
         <p data-scene="timechain" id="sphere-subtitle" hidden>Timechain Sphere</p>
-        <p data-scene="arcade" hidden>Ooga Arcade</p>
-        <p data-scene="skee" hidden>Ooga Arcade · Thro-ball</p>
-        <p data-scene="hoops" hidden>Ooga Arcade · Hoop Shot</p>
-        <p data-scene="shy" hidden>Ooga Arcade · Coconut Toss</p>
-        <p data-scene="claw" hidden>Ooga Arcade · Claw Machine</p>
-        <p data-scene="hockey" hidden>Ooga Arcade · Air Hockey</p>
-        <p data-scene="billiards" hidden>Ooga Arcade · Pool</p>
-        <p data-scene="darts" hidden>Ooga Arcade · Darts</p>
-        <p data-scene="pinball" hidden>Ooga Arcade · Pinball</p>
-        <p data-scene="ride" hidden>Ooga Arcade · Beast Ride</p>
-        <p data-scene="invaders" hidden>Ooga Arcade · Coconut Invaders</p>
-        <p data-scene="snake" hidden>Ooga Arcade · Banana Snake</p>
-        <p data-scene="pong" hidden>Ooga Arcade · Ooga Pong</p>
-        <p data-scene="stampede" hidden>Ooga Arcade · Mammoth Stampede</p>
-        <p data-scene="flap" hidden>Ooga Arcade · Ptero Flap</p>
-        <p data-scene="breaker" hidden>Ooga Arcade · Rock Breaker</p>
-        <p data-scene="dash" hidden>Ooga Arcade · Dino Dash</p>
-        <p data-scene="stacker" hidden>Ooga Arcade · Stone Stacker</p>
+        <p data-scene="arcade" data-zone-line hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr></p>
+        <p data-scene="skee" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Thro-ball</p>
+        <p data-scene="hoops" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Hoop Shot</p>
+        <p data-scene="shy" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Coconut Toss</p>
+        <p data-scene="claw" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Claw Machine</p>
+        <p data-scene="hockey" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Air Hockey</p>
+        <p data-scene="billiards" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Pool</p>
+        <p data-scene="darts" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Darts</p>
+        <p data-scene="pinball" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Pinball</p>
+        <p data-scene="ride" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Beast Ride</p>
+        <p data-scene="invaders" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Coconut Invaders</p>
+        <p data-scene="snake" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Banana Snake</p>
+        <p data-scene="pong" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Ooga Pong</p>
+        <p data-scene="stampede" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Mammoth Stampede</p>
+        <p data-scene="flap" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Ptero Flap</p>
+        <p data-scene="breaker" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Rock Breaker</p>
+        <p data-scene="dash" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Dino Dash</p>
+        <p data-scene="stacker" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Stone Stacker</p>
+        <p data-scene="raid" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Ooga Raid</p>
       </div>
       <time class="world-clock" id="world-clock"></time>
       <div class="world-block" id="world-block" aria-live="polite" aria-label="Bitcoin block height unavailable">
@@ -290,6 +298,8 @@
         <button type="button" data-preset="skee">Thro</button>
         <button type="button" data-preset="shy">Coconuts</button>
         <button type="button" data-action="arcade-mute">Sound</button>
+        <!-- HALLOWEEN: out of the ghost hunt under way, back to the arena's hallway (scene-arcade.js shows it while hunting). -->
+        <button type="button" class="leave" data-action="ghost-exit" id="ghost-exit" hidden>Exit<span> hunt</span></button>
         <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
       </nav>
       <nav class="presets" aria-label="Race" data-scene="race" hidden>
@@ -297,28 +307,67 @@
         <button type="button" data-action="mute" id="race-mute" aria-label="Mute sound" aria-pressed="false">Sound</button>
         <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
       </nav>
+      <button type="button" class="mode-hud controls-help-button" id="controls-help-button"
+        data-action="controls-help" aria-label="Controls" title="Controls" aria-haspopup="dialog" aria-controls="controls-help">
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 6h8c2.5 0 3.6 1.4 4.2 3.6l1.3 5c.5 2-.6 3.4-2.1 3.4-1 0-1.7-.5-2.4-1.3l-1.5-1.2h-7L7 16.7c-.7.8-1.4 1.3-2.4 1.3-1.5 0-2.6-1.4-2.1-3.4l1.3-5C4.4 7.4 5.5 6 8 6z"/>
+          <path stroke-width="1.5" d="M8 9.25v3.5M6.25 11h3.5"/>
+          <circle cx="15" cy="12.25" r="1" fill="currentColor" stroke="none"/>
+          <circle cx="17" cy="10.25" r="1" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
       <button type="button" class="mode-hud environment-sound" id="environment-sound"
-        aria-label="Mute environment sounds" title="Mute environment sounds · M" aria-pressed="false">
+        aria-label="Sound levels" title="Sound levels · M mutes game sounds" data-muted="false"
+        aria-haspopup="dialog" aria-controls="sound-mixer" aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path fill="currentColor" d="M3 9h4l5-4v14l-5-4H3z"/>
           <path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>
           <path class="sound-muted" d="m16 9 6 6m0-6-6 6"/>
         </svg>
       </button>
+      <!-- Sign in with GitHub, and out again, left of the controls button wherever the page has a backend (hud.js
+           showAccount, which sets its action): the same two actions as the Contributing Oogas panel's account row. -->
+      <button type="button" class="mode-hud account-top" id="account-top" data-action="account-login" data-signed="false" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+          <path class="account-in" d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M3 12h11m-4-4 4 4-4 4"/>
+          <path class="account-out" d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M9 12h12m-4-4 4 4-4 4"/>
+        </svg>
+      </button>
       <nav class="presets" aria-label="Timechain Sphere room" data-scene="timechain" hidden>
-        <span class="sphere-mode" id="sphere-mode" role="status"></span>
+        <button type="button" data-action="lecture-programme" id="lecture-programme" hidden>Lectures</button>
+        <button type="button" data-action="lecture-start" id="lecture-start" hidden>Start lecture 1</button>
+        <button type="button" data-action="lecture-back" id="lecture-back" aria-label="Back a section" title="Back a section" hidden>&#x23EE;</button>
+        <button type="button" data-action="lecture-toggle" id="lecture-toggle" hidden>Pause</button>
+        <button type="button" data-action="lecture-next" id="lecture-next" aria-label="On a section" title="On a section" hidden>&#x23ED;</button>
+        <button type="button" data-action="lecture-speed" id="lecture-speed" aria-label="Playback speed: 1×. Change speed" title="Playback speed · 1×, 1.25×, 1.5×, 2×" hidden>1×</button>
+        <button type="button" data-action="lecture-stop" id="lecture-stop" hidden>Stop</button>
         <button type="button" class="leave" data-action="leave">Leave<span> room</span></button>
       </nav>
       <nav class="presets" aria-label="₿IFRÖST" data-scene="bifrost" hidden>
+        <button type="button" data-action="cave-directory" id="cave-directory-button">Caves and lands</button>
         <button type="button" data-preset="core">Core</button>
         <button type="button" data-preset="dsb">DSB</button>
         <button type="button" data-preset="poker">Poker</button>
         <button type="button" data-preset="sky">Sky</button>
+        <button type="button" data-action="bifrost-mute">Sound</button>
         <button type="button" class="leave" data-action="leave">Leave<span> chamber</span></button>
       </nav>
       <nav class="presets" aria-label="Drop" data-scene="drop" hidden>
         <button type="button" data-action="drop-board" id="drop-board-btn">Board</button>
         <button type="button" data-action="mute" id="drop-mute" aria-label="Mute sound" aria-pressed="false">Sound</button>
+        <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
+      </nav>
+      <nav class="presets" aria-label="Block Frenzy" data-scene="block" hidden>
+        <button type="button" data-action="block-board" id="block-board-btn">Main menu</button>
+        <button type="button" data-action="block-help" id="block-help-btn">Help</button>
+        <button type="button" data-action="block-view" id="block-view-btn" aria-pressed="false">View</button>
+        <button type="button" data-action="block-sound" id="block-sound-btn" aria-pressed="true">Sound</button>
+        <button type="button" data-action="block-drop" id="block-drop" disabled>Drop<span> block</span></button>
+        <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
+      </nav>
+      <nav class="presets" aria-label="Ooga Raid" data-scene="raid" hidden>
+        <button type="button" data-action="raid-pause" id="raid-pause-btn" aria-pressed="false" hidden>Pause</button>
+        <button type="button" data-action="mute" id="raid-mute" aria-label="Mute sound" aria-pressed="false">Sound</button>
         <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
       </nav>
       <nav class="presets" aria-label="Mine" data-scene="mine" hidden>
@@ -332,141 +381,215 @@
         <button type="button" data-action="mute" id="orbit-mute" aria-label="Mute sound" aria-pressed="false">Sound</button>
         <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
       </nav>
+      <!-- The character studio's quick pick (scene-studio.js): every Ooga by name, beside the controls button. -->
+      <select class="studio-pick" id="studio-pick" data-scene="studio" aria-label="Show another Ooga" title="Show another Ooga" hidden></select>
     </header>
+
+    <!-- The character studio's buttons (scene-studio.js), down the left side under the banner. -->
+    <nav class="presets studio-side" aria-label="Character Studio" data-scene="studio" hidden>
+      <button type="button" data-action="studio-stand">Stand</button>
+      <button type="button" data-action="studio-chair">Chair</button>
+      <button type="button" data-action="studio-bed">Bed</button>
+      <button type="button" data-action="studio-hammock">Hammock</button>
+      <button type="button" data-action="studio-fire">Fire</button>
+      <button type="button" data-action="studio-physics" title="Loose crates, dice and barrels to knock about">Physics</button>
+      <button type="button" data-action="studio-pond" title="A pond to splash in: waves, floating props">Pond</button>
+      <button type="button" data-action="studio-props" title="Every loose prop back where it stood">Reset props</button>
+      <button type="button" data-action="studio-eyes" aria-pressed="false" title="Through the Ooga's own eyes">1st person</button>
+      <button type="button" data-action="studio-third" aria-pressed="false" title="From behind and a little above; in combat, over its shoulder">3rd person</button>
+      <button type="button" data-action="studio-combat">Carry</button>
+      <button type="button" data-action="studio-free" aria-pressed="false" title="A camera of your own, flown anywhere round the Ooga">Free cam</button>
+      <button type="button" data-action="studio-night">Day</button>
+      <button type="button" data-action="studio-build" aria-pressed="false" title="A new Ooga's female build (reloads)">Female</button>
+      <button type="button" data-action="studio-speak" title="Say its voice lines in turn">Speak</button>
+    </nav>
+    <!-- The studio's This Ooga panel (scene-studio.js), down the right side: what the character's file gives its Ooga,
+         and how much of the intake's 32,768 bytes it takes. It stands against the right edge, its left edge a grip
+         that drags it wider or narrower, and it folds to a tab on the edge. -->
+    <section class="studio-features fold-panel fold-right" id="studio-features" aria-label="This Ooga" data-scene="studio" hidden>
+      <button type="button" class="studio-resize" id="studio-resize" aria-label="Resize this panel: drag it, or press to widen it" title="Drag to resize"></button>
+      <div class="panel-head">
+        <h3>This Ooga</h3>
+        <button type="button" class="panel-fold" data-fold="studio-features" aria-label="Fold this panel away">&rsaquo;</button>
+      </div>
+      <div class="studio-scroll" id="studio-scroll">
+        <p class="studio-who" id="studio-who"></p>
+        <div class="studio-wardrobe">
+          <fieldset class="studio-hats" id="studio-hat" aria-describedby="studio-hat-status">
+            <legend class="roster-sort-label">Try a hat</legend>
+            <div id="studio-hat-choices"></div>
+          </fieldset>
+          <label class="roster-sort-label studio-hat-size-label" for="studio-hat-size">Hat size <output id="studio-hat-size-value" for="studio-hat-size">100%</output></label>
+          <input type="range" id="studio-hat-size" min="80" max="120" step="1" value="100" aria-valuetext="100%" aria-describedby="studio-hat-status" disabled>
+          <button type="button" class="foot-button" id="studio-hat-size-reset" disabled>Reset fitted size</button>
+          <button type="button" class="foot-button foot-primary" id="studio-hat-save" aria-describedby="studio-hat-status">Save hat for my Ooga</button>
+          <button type="button" class="foot-button" id="studio-hat-own" hidden>Show my Ooga</button>
+          <p class="studio-note" id="studio-hat-status" role="status"></p>
+          <a class="link" href="/auth/login?next=%2F%3Fscene%3Dstudio" id="studio-hat-signin" hidden>Sign in with GitHub to save</a>
+          <a class="link" href="/?scene=studio" id="studio-hat-link" hidden>Open the hosted studio to save</a>
+        </div>
+        <h3 class="section-head">File</h3>
+        <div class="studio-file">
+          <div class="studio-bar" id="studio-size-bar"><span id="studio-size-fill"></span></div>
+          <p class="studio-size" id="studio-size"></p>
+          <p class="studio-note" id="studio-size-note"></p>
+          <ul class="studio-list" id="studio-size-parts"></ul>
+        </div>
+        <div id="studio-groups"></div>
+      </div>
+    </section>
+    <button type="button" class="panel-edge panel-edge-right studio-features-edge" data-fold="studio-features" data-scene="studio" hidden>This Ooga</button>
+
+    <section id="equipment-update" class="equipment-update" aria-label="Hat update" hidden>
+      <p id="equipment-update-text"></p>
+      <div><button type="button" class="foot-button foot-primary" id="equipment-accept">Accept update</button>
+      <button type="button" class="foot-button" id="equipment-decline">Keep my version</button></div>
+      <p id="equipment-update-status" role="status"></p>
+    </section>
 
     <aside class="sheet" id="sheet" data-open="false" data-dock="side" data-paired="false">
       <nav class="sheet-panels" role="tablist" aria-label="Island panels">
         <button type="button" class="sheet-toggle sheet-toggle-bananas" id="sheet-bananas" role="tab"
           data-tab="bananas" aria-selected="false" aria-controls="bananas-panel" aria-label="Bananas and top donors">
-          <span class="sheet-tab-face">
-          <svg class="banana-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
-            <path fill="#211b14" d="M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z" />
-            <path fill="#ffd84a" d="M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z" />
-            <path fill="#789a3b" d="M1 0h1v2H1z" />
-          </svg>
+          <span class="sheet-tab-face" data-native-icon="bananas">
           </span>
         </button>
         <button type="button" class="sheet-toggle" id="sheet-toggle" role="tab" data-tab="roster"
-          aria-selected="true" aria-controls="roster-panel" aria-label="Ooga Boogas">
-          <span class="sheet-tab-face">
-          <svg class="caveman-icon" viewBox="0 0 7 9" shape-rendering="crispEdges" aria-hidden="true">
-            <path fill="#2b1b10" d="M1 0h5v1H1zM0 1h7v2H0zM0 3h1v2H0zM6 3h1v2H6z" />
-            <path fill="#c98a5b" d="M1 3h5v3H1zM2 6h3v1H2z" />
-            <path fill="#141414" d="M2 3h1v1H2zM4 3h1v1H4z" />
-            <path fill="#4a2c14" d="M1 6h1v1H1zM5 6h1v1H5zM1 7h5v1H1zM2 8h3v1H2z" />
-            <path fill="#f2efe4" d="M1 8h1v1H1zM5 8h1v1H5z" />
-          </svg>
+          aria-selected="true" aria-controls="roster-panel" aria-label="Contributing Oogas">
+          <span class="sheet-tab-face" data-native-icon="roster">
           </span>
         </button>
-        <button type="button" class="sheet-toggle sheet-toggle-loot" role="tab" data-tab="loot"
-          aria-selected="false" id="loot-tab" aria-controls="loot-panel" aria-label="Swag locker" hidden>
-          <span class="sheet-tab-face">
-          <svg viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
-            <path fill="#2b1b10" d="M0 2h9v7H0zM1 0h7v2H1z" />
-            <path fill="#d6a45f" d="M1 3h7v5H1zM2 1h5v1H2z" />
-            <path fill="#5c4425" d="M1 4h7v1H1zM4 3h1v5H4z" />
-            <path fill="#f3efe4" d="M4 4h1v2H4z" />
-          </svg><span class="tab-count" id="loot-count" hidden></span>
+        <button type="button" class="sheet-toggle sheet-toggle-players" role="tab" data-tab="players"
+          aria-selected="false" id="players-tab" aria-controls="players-panel" aria-label="Online Oogas" hidden>
+          <span class="sheet-tab-face" data-native-icon="players"><span class="tab-count" hidden></span>
           </span>
         </button>
         <button type="button" class="sheet-toggle sheet-toggle-chat" role="tab" data-tab="chat"
-          aria-selected="false" id="chat-tab" aria-controls="chat-panel" aria-label="Ooga Chat" hidden>
-          <span class="sheet-tab-face">
-          <svg viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
-            <path fill="#2b1b10" d="M0 0h9v7H5v1H4v1H1V7H0z" />
-            <path fill="#f3efe4" d="M1 1h7v5H4v1H3v1H2V6H1z" />
-            <path fill="#5c4425" d="M2 3h1v1H2zM4 3h1v1H4zM6 3h1v1H6z" />
-          </svg>
+          aria-selected="false" id="chat-tab" aria-controls="chat-panel" aria-label="The Commons" hidden>
+          <span class="sheet-tab-face" data-native-icon="chat"><span class="tab-count" hidden></span>
+          </span>
+        </button>
+        <button type="button" class="sheet-toggle sheet-toggle-cloud" role="tab" data-tab="cloud"
+          aria-selected="false" id="cloud-tab" aria-controls="cloud-panel" aria-label="Ooga Chat" hidden>
+          <span class="sheet-tab-face" data-native-icon="cloud">
           </span>
         </button>
       </nav>
+      <button type="button" class="sheet-expand" id="sheet-expand" data-dir="up" aria-label="Open panel" title="Open panel"><svg viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M2 6l4-4 4 4M2 10.5l4-4 4 4" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
       <div class="sheet-body">
       <div class="sheet-content">
       <section class="panel" data-panel="roster" id="roster-panel" role="tabpanel" aria-labelledby="sheet-toggle">
-        <header class="panel-title">
-          <h2><span data-sign>Ooga Boogas</span></h2>
-          <span class="panel-chip" id="roster-count" data-tone="idle"></span>
-        </header>
-        <ul id="roster" class="roster slab" aria-label="Ooga Boogas"></ul>
-        <p class="help roster-hint" data-scene="hub"><span id="world-loot-hint" hidden>Something is hidden out there.</span></p>
-      </section>
-      <section class="panel" data-panel="bananas" id="bananas-panel" role="tabpanel" aria-labelledby="sheet-bananas" hidden>
-        <header class="panel-title">
-          <h2><span data-sign>Bananas donated</span></h2>
-          <span class="panel-chip" id="banana-source" data-tone="idle">Demo</span>
-        </header>
-        <div class="slab banana-slab">
-          <section class="banana-total" aria-label="Current banana value of all sats donated">
-            <div class="banana-hero">
-              <svg class="banana-hero-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
-                <g id="banana-panel-glyph">
-                  <path fill="#211b14" d="M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z" />
-                  <path fill="#ffd84a" d="M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z" />
-                  <path fill="#789a3b" d="M1 0h1v2H1z" />
-                </g>
-              </svg>
-              <strong id="banana-total" title="All donated sats valued at the current BTCUSD price; 1 banana = $1">—</strong>
-              <span class="banana-hero-label">bananas · current value</span>
-            </div>
-            <dl class="banana-totals">
-              <div><dt>Donations</dt><dd id="stat-donations">0</dd></div>
-              <div><dt>Sats donated</dt><dd id="stat-sats">0</dd></div>
-            </dl>
-            <dl class="banana-rates" aria-label="Current Bitcoin and banana exchange rates">
-              <dt class="banana-rate-label" id="banana-rate-label" data-tone="wait">BTCUSD</dt>
-              <dd id="banana-btc-price">—</dd>
-              <dt class="banana-rate-label">1 banana = $1</dt>
-              <dd class="banana-exchange">
-                <svg class="banana-exchange-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" role="img" aria-label="Banana"><use href="#banana-panel-glyph" /></svg>
-                <span>1</span><span id="banana-exchange">— sats</span>
-              </dd>
-            </dl>
-          </section>
-          <section class="banana-board" aria-labelledby="banana-board-title">
-            <div class="banana-board-head">
-              <h3 class="slab-head" id="banana-board-title"><span data-sign>Top donors</span></h3>
-              <div class="banana-units" role="group" aria-label="Rank donors by">
-                <button type="button" data-donor-unit="bananas" aria-pressed="true">Bananas</button>
-                <button type="button" data-donor-unit="sats" aria-pressed="false">Sats</button>
-              </div>
-            </div>
-            <div class="banana-board-labels" aria-hidden="true"><span>#</span><span>Donor</span><span id="banana-board-unit">Bananas</span></div>
-            <ol class="banana-leaders" id="banana-leaders" aria-label="Top donors by bananas"></ol>
-            <p class="banana-empty" id="banana-empty">No donations yet. Feed the first Ooga!</p>
-          </section>
-          <section class="banana-recent" aria-labelledby="banana-recent-title">
-            <h3 class="slab-head" id="banana-recent-title"><span data-sign>Most recent donations</span></h3>
-            <label class="banana-recent-filter"><input type="checkbox" id="banana-recent-bar"> <span id="banana-recent-bar-label">1,000 sats and up only</span></label>
-            <ol class="banana-recent-list" id="banana-recent-list" aria-label="Most recent donations"></ol>
-            <p class="banana-empty" id="banana-recent-empty">New donations will appear here.</p>
-          </section>
-          <p class="banana-board-note" id="banana-board-note">Demo donations saved in this browser.</p>
+        <!-- The title, Sorted by and the list (#roster) are built here by roster-panel.js, shared with Ooga Chat. -->
+        <div class="panel-foot">
+          <div class="reactions" id="roster-reactions" hidden></div>
+          <div class="account" id="account" hidden>
+            <button type="button" class="panel-primary" data-action="account-login" id="account-login" aria-label="Contributor sign-in with GitHub" title="Contributors can sign in with GitHub to control their own Ooga and gorilla."><span data-sign>Contributor sign-in</span></button>
+            <span class="account-who">
+              <span class="account-name" id="account-name" hidden></span>
+              <span class="account-room" id="account-room" hidden></span>
+            </span>
+            <span class="account-actions">
+              <button type="button" class="foot-button foot-primary" data-action="account-rejoin" id="account-rejoin" hidden>Play here</button>
+              <button type="button" class="foot-button account-mute" data-action="account-mute" id="account-mute" aria-pressed="false" data-mic="" disabled hidden>Unmute</button>
+              <button type="button" class="foot-button account-voice" data-action="account-voice" id="account-voice" hidden>Join voice</button>
+              <button type="button" class="foot-button account-leave" data-action="account-voice-leave" id="account-voice-leave" hidden>Leave voice</button>
+              <button type="button" class="link" data-action="account-logout" id="account-logout" hidden>Sign out</button>
+            </span>
+          </div>
         </div>
       </section>
-      <section class="panel" data-panel="loot" id="loot-panel" role="tabpanel" aria-labelledby="loot-tab" hidden>
+      <section class="panel" data-panel="players" id="players-panel" role="tabpanel" aria-labelledby="players-tab" hidden>
         <header class="panel-title">
-          <h2><span data-sign>Swag locker</span></h2>
-          <button type="button" class="link" data-action="clear-loot">Clear</button>
+          <h2><span data-sign>Online Oogas</span></h2>
+          <span class="panel-chip" id="players-count" data-tone="idle">Offline</span>
         </header>
-        <p class="help empty" id="inventory-empty">Open a loot crate to earn swag, then assign it to a caveman.</p>
-        <ul id="inventory" class="loot"></ul>
+        <details class="players-settings" id="players-settings">
+          <summary>Advanced settings</summary>
+          <div class="players-settings-content">
+            <div class="players-hearing" id="players-hearing">
+              <label class="players-hearing-label" for="players-hearing-range">Hearing range</label>
+              <input type="range" id="players-hearing-range" min="1" max="61" step="1" value="61" aria-describedby="players-hearing-help" aria-valuetext="No limit">
+              <output class="players-hearing-value" id="players-hearing-value" for="players-hearing-range">No limit</output>
+              <span class="players-hearing-help" id="players-hearing-help">Voices at or beyond this range are automatically muted</span>
+            </div>
+            <div id="players-diagnostics" hidden>
+              <div class="diagnostics-label">
+                <label class="players-speak"><input type="checkbox" id="players-diagnostics-input" aria-describedby="players-diagnostics-help"> Report dropout diagnostics</label>
+                <button type="button" id="players-diagnostics-info" aria-label="About dropout diagnostics" aria-expanded="false" aria-controls="players-diagnostics-help" aria-describedby="players-diagnostics-help">?</button>
+              </div>
+              <p class="help" id="players-diagnostics-help" role="tooltip" hidden>Optional: send notable connection dropouts to our Cloudflare service, linked to your signed-in account, for later analysis. No voice, chat, names or positions. Kept for up to 8 days; account deletion removes reports. Your choice is remembered for this account in this browser. Turning this off stops new reports.</p>
+              <p class="help" id="players-diagnostics-status">Off</p>
+            </div>
+            <label class="players-speak" id="players-speak" hidden><input type="checkbox" id="players-speak-input"> Read joins aloud</label>
+            <label class="players-speak" id="players-keys" title="Keeps your microphone shut on key and mouse clicks between your words. Adds a short delay to your voice." hidden><input type="checkbox" id="players-keys-input"> Keyboard noise filter</label>
+            <label class="players-speak"><input type="checkbox" id="players-mute-duels" aria-describedby="players-mute-duels-help"> Automatically mute duelists</label>
+            <p class="help" id="players-mute-duels-help">Until their duel ends. Your own duel pair is exempt.<br>Manual mute and volume choices stay unchanged.</p>
+          </div>
+        </details>
+        <div class="players slab" id="players-list"></div>
+        <p class="help players-status" id="players-status" hidden></p>
+        <div class="panel-foot">
+          <div class="reactions" id="players-reactions" hidden></div>
+          <div data-account-copy="players"></div>
+        </div>
       </section>
+      <section class="panel" data-panel="bananas" id="bananas-panel" role="tabpanel" aria-labelledby="sheet-bananas" hidden></section>
       <section class="panel" data-panel="chat" id="chat-panel" role="tabpanel" aria-labelledby="chat-tab" hidden>
         <header class="panel-title">
-          <h2><span data-sign>Ooga Chat</span></h2>
+          <h2><span data-sign>The Commons</span></h2>
+          <details class="chat-about">
+            <summary aria-label="About The Commons" title="About The Commons">?</summary>
+            <p class="chat-retention">Shared while the room is awake. Your page keeps up to 100 lines until reload or sign-out. No chat database.</p>
+          </details>
           <span class="panel-chip" id="chat-room" data-tone="idle">Offline</span>
         </header>
-        <details class="chat-about">
-          <summary aria-label="About Ooga Chat" title="About Ooga Chat">?</summary>
-          <p class="chat-retention">Shared while the room is awake. Your page keeps up to 100 lines until reload or sign-out. No chat database.</p>
-        </details>
+        <div class="pm-switch" id="pm-switch" role="group" aria-label="Which conversation" hidden>
+          <button type="button" class="pm-switch-button" data-pm-view="island" aria-pressed="true">Island</button>
+          <button type="button" class="pm-switch-button" data-pm-view="private" aria-pressed="false"><svg class="pm-lock" viewBox="0 0 7 9" shape-rendering="crispEdges" aria-hidden="true"><path class="pm-shackle" fill="currentColor" d="M2 0h3v1H2zM1 1h1v1H1zM5 1h1v3H5z" /><path fill="currentColor" d="M0 4h7v5H0z" /><path fill="#2b1b10" d="M3 5h1v2H3z" /></svg><span id="pm-switch-name">Private</span><span class="tab-count pm-count" id="pm-count" hidden></span></button>
+        </div>
+        <section class="pm" id="pm" aria-labelledby="pm-title">
+          <div class="pm-head">
+            <p class="pm-title"><svg class="pm-lock" viewBox="0 0 7 9" shape-rendering="crispEdges" aria-hidden="true"><path class="pm-shackle" fill="currentColor" d="M2 0h3v1H2zM1 1h1v1H1zM5 1h1v3H5z" /><path fill="currentColor" d="M0 4h7v5H0z" /><path fill="#2b1b10" d="M3 5h1v2H3z" /></svg><span id="pm-title">Private</span></p>
+            <button type="button" class="pm-button pm-quiet pm-end" id="pm-end" hidden>End</button>
+          </div>
+          <p class="help pm-note" id="pm-note" role="status" aria-live="polite"></p>
+          <div class="pm-actions" id="pm-answer" hidden>
+            <button type="button" class="pm-button" id="pm-accept">Accept</button>
+            <button type="button" class="pm-button" id="pm-decline">Decline</button>
+            <button type="button" class="pm-button pm-quiet" id="pm-block">Block</button>
+          </div>
+          <div class="pm-actions" id="pm-pad" hidden>
+            <label class="pm-button pm-file">Load pad file<input type="file" id="pm-file" accept=".oogapad,application/octet-stream"></label>
+            <span class="pm-make">
+              <select id="pm-size" aria-label="Pad size">
+                <option value="262144">256 KB</option>
+                <option value="1048576" selected>1 MB</option>
+                <option value="16777216">16 MB</option>
+              </select>
+              <button type="button" class="pm-button" id="pm-make">Make a pad</button>
+            </span>
+          </div>
+          <div class="pm-actions" id="pm-confirm" hidden>
+            <button type="button" class="pm-button" id="pm-fresh">It's new: use it</button>
+            <button type="button" class="pm-button pm-quiet" id="pm-other">Choose another file</button>
+          </div>
+          <p class="pm-print" id="pm-print-line" title="A digest of the whole pad file: the same digits on both sides mean the same file. Compare them outside Ooga." hidden>Check with <span id="pm-print-peer"></span>: <code id="pm-print"></code></p>
+          <ol class="chat-log slab pm-log" id="pm-log" role="log" aria-live="polite" aria-label="Private conversation" tabindex="0"></ol>
+          <p class="help pm-budget" id="pm-budget"></p>
+          <form class="chat-form pm-form" id="pm-form" autocomplete="off">
+            <span class="chat-field">
+              <input type="text" id="pm-input" aria-label="Say something privately" aria-describedby="pm-left pm-budget" maxlength="320" enterkeyhint="send" spellcheck="false" autocorrect="off" autocapitalize="sentences" disabled>
+              <span class="chat-left" id="pm-left" title="Characters left">160</span>
+            </span>
+            <button type="submit" class="chat-send" id="pm-send" disabled>Send</button>
+          </form>
+        </section>
         <div class="chat-identity" id="chat-identity" hidden>
           <form class="chat-display-form" id="chat-display-form" autocomplete="off">
             <label for="chat-display">Name</label>
-            <input id="chat-display" type="text" minlength="3" maxlength="24" aria-describedby="chat-display-status chat-account-login">
+            <input id="chat-display" type="text" minlength="3" maxlength="24" aria-describedby="chat-display-status">
             <button type="submit" class="chat-display-save" id="chat-display-save">Save</button>
           </form>
-          <span class="chat-account" title="Your GitHub account">signed in as <strong id="chat-account-login"></strong></span>
           <p class="chat-display-status" id="chat-display-status" role="status" aria-live="polite"></p>
         </div>
         <ol class="chat-log slab" id="chat-log" role="log" aria-live="off" aria-label="Island chat" tabindex="0"></ol>
@@ -479,30 +602,43 @@
           </span>
           <button type="submit" class="chat-send" id="chat-send" disabled>Send</button>
         </form>
+        <div class="panel-foot">
+          <div class="reactions" id="chat-reactions" hidden></div>
+          <div data-account-copy="chat"></div>
+        </div>
+      </section>
+      <section class="panel" data-panel="cloud" id="cloud-panel" role="tabpanel" aria-labelledby="cloud-tab" hidden>
+        <header class="panel-title">
+          <h2><span data-sign>Ooga Chat</span></h2>
+          <span class="panel-chip" id="cloud-zone">Main Island</span>
+        </header>
+        <p class="help cloud-status" id="cloud-status" role="status" aria-live="polite" hidden><span id="cloud-status-text"></span> <button type="button" class="link" id="cloud-retry" hidden>Retry</button></p>
+        <ul class="cloud-roster slab" id="cloud-roster" aria-label="Speakers and listeners"></ul>
+        <div class="panel-foot">
+          <div class="reactions" id="cloud-reactions" hidden></div>
+          <div class="cloud-foot" id="cloud-foot">
+            <span class="cloud-foot-name" id="cloud-foot-name"></span>
+            <span class="cloud-foot-actions">
+              <button type="button" class="foot-button cloud-mute" id="cloud-mute" aria-pressed="false" data-mic="" disabled>Unmute</button>
+              <button type="button" class="foot-button cloud-voice" id="cloud-voice" disabled>Join Voice</button>
+              <button type="button" class="link" id="cloud-logout">Sign out</button>
+            </span>
+          </div>
+        </div>
       </section>
       </div>
-      <footer class="sheet-foot">
-        <button type="button" class="feed-open" data-action="feed"><span data-sign>Feed the Ooga Boogas</span></button>
-        <span class="account" id="account" hidden>
-          <span class="account-who">
-            <span class="account-name" id="account-name" hidden></span>
-          </span>
-          <span class="account-actions">
-            <button type="button" class="foot-button foot-primary" data-action="account-login" id="account-login" aria-label="Contributor sign-in with GitHub" title="Contributors can sign in with GitHub to control their own Ooga and gorilla.">Contributor sign-in</button>
-            <button type="button" class="foot-button foot-primary" data-action="account-rejoin" id="account-rejoin" hidden>Play here</button>
-            <button type="button" class="foot-button" data-action="account-voice" id="account-voice" aria-pressed="false" hidden>Join voice</button>
-            <button type="button" class="foot-button" data-action="account-voice-leave" id="account-voice-leave" hidden>Leave voice</button>
-            <button type="button" class="link" data-action="account-logout" id="account-logout" hidden>Sign out</button>
-          </span>
-        </span>
-        <span class="sheet-foot-meta">
-          <span class="account-room" id="account-room" hidden></span>
-          <span class="quality" id="quality" aria-live="polite"></span>
-          <button type="button" class="link" data-action="reset">Reset demo</button>
-        </span>
-      </footer>
       </div>
     </aside>
+
+    <template id="sheet-notifications">
+      <div class="sheet-notifications" hidden>
+        <button type="button" class="sheet-bell" aria-label="Notifications" title="Notifications" aria-expanded="false">
+          <svg viewBox="0 0.25 16 16" aria-hidden="true" focusable="false"><path d="M3 11h10l-1.5-2V6a3.5 3.5 0 0 0-7 0v3L3 11Zm3.5 2a1.6 1.6 0 0 0 3 0" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>
+          <span class="tab-count" aria-hidden="true" hidden></span>
+        </button>
+        <ul class="sheet-unread" hidden></ul>
+      </div>
+    </template>
 
     <template id="sheet-chrome">
       <button type="button" class="sheet-drag" aria-label="Move panel" title="Drag top edge to move · arrow keys move · double-click to reset"></button>
@@ -525,8 +661,14 @@
 
     <div class="equipment-hud" id="equipment-hud">
       <div class="weapon-equipment-row">
+      <button type="button" class="leave-hud" id="leave-hud" data-action="leave" aria-label="Leave" title="Leave" hidden>
+        <svg class="leave-icon" viewBox="0 0 34 21" shape-rendering="crispEdges" aria-hidden="true">
+          <path fill="#e8891a" d="M17 3h1v1H17zM17 4h2v1H17zM13 5h7v1H13zM13 6h8v1H13zM13 7h7v1H13zM17 8h2v1H17zM17 9h1v1H17z" />
+          <path fill="#f2efe4" d="M8 12h4v1H8zM13 12h1v1H13zM16 12h1v1H16zM18 12h3v1H18zM22 12h5v1H22zM8 13h1v1H8zM13 13h1v1H13zM16 13h1v1H16zM19 13h1v1H19zM24 13h1v1H24zM8 14h3v1H8zM14 14h2v1H14zM19 14h1v1H19zM24 14h1v1H24zM8 15h1v1H8zM14 15h2v1H14zM19 15h1v1H19zM24 15h1v1H24zM8 16h1v1H8zM13 16h1v1H13zM16 16h1v1H16zM19 16h1v1H19zM24 16h1v1H24zM8 17h4v1H8zM13 17h1v1H13zM16 17h1v1H16zM18 17h3v1H18zM24 17h1v1H24z" />
+        </svg>
+      </button>
       <button type="button" class="mode-hud" id="destination-hud" data-action="mode-preset" data-selected="false"
-        aria-labelledby="detached-destination-name destination-hud-label" title="Map · cycle destinations" hidden>
+        aria-labelledby="detached-destination-name destination-hud-label" title="Map · choose a destination" aria-haspopup="dialog" aria-controls="destination-map" aria-expanded="false" hidden>
         <img class="freeroam-icon" id="freeroam-icon" alt="" aria-hidden="true">
         <svg class="dsb-island-icon" viewBox="0 0 64 48" aria-hidden="true">
           <path fill="#195c78" d="m3 30 9-8 30-6 18 12-5 11-23 7-24-6z"/>
@@ -553,12 +695,7 @@
           </g>
         </svg>
         <span class="detached-destination-name" id="detached-destination-name" aria-live="polite"></span>
-        <span id="destination-hud-label" hidden>Map. Cycle destinations</span>
-      </button>
-      <button type="button" class="mode-hud" id="own-ooga-hud" data-action="mode-retake" data-selected="true"
-        aria-label="Return to your last character" title="Return to your last character" hidden>
-        <canvas class="mode-face-icon" id="own-ooga-face-icon" width="48" height="48" aria-hidden="true"></canvas>
-        <span class="mode-health" id="own-ooga-health" role="progressbar" aria-label="Last character's health" aria-valuemin="0" aria-valuemax="25" aria-valuenow="25" hidden><span id="own-ooga-health-fill"></span></span>
+        <span id="destination-hud-label" hidden>Map. Choose a destination</span>
       </button>
       <button type="button" class="mode-hud" id="mode-hud" data-action="mode-toggle" data-selected="false" data-shooter="false"
         aria-label="Character controls" title="Character controls" hidden>
@@ -589,6 +726,16 @@
           </span>
         </span>
       </button>
+      <div class="dance-hud" id="dance-hud" role="group" aria-label="Dance level" data-level="1" hidden>
+        <button type="button" class="dance-step" data-action="dance-down" aria-label="Dance calmer" title="Dance calmer (-)">&minus;</button>
+        <span class="dance-read" aria-live="polite">
+          <svg class="dance-icon" viewBox="0 0 9 11" shape-rendering="crispEdges" aria-hidden="true">
+            <path fill="#ffcf5a" d="M3 0h2v2H3zM2 2h4v1H2zM6 1h1v1H6zM7 0h1v1H7zM1 3h1v1H1zM0 4h1v1H0zM3 3h3v3H3zM3 6h1v2H3zM5 6h1v1H5zM6 7h1v2H6zM2 8h1v2H2zM7 9h1v1H7zM1 10h2v1H1z"/>
+          </svg>
+          <span class="dance-num" id="dance-level">1</span>
+        </span>
+        <button type="button" class="dance-step" data-action="dance-up" aria-label="Dance harder" title="Dance harder (=)">+</button>
+      </div>
       <button type="button" class="gorilla-hud" id="gorilla-smash-hud" data-action="gorilla-smash"
         aria-label="Ground smash; hold for double damage" title="Ground smash · hold for double damage (1)" hidden>
         <span class="weapon-toggle">
@@ -637,7 +784,7 @@
                 <path fill="#789a3b" d="M1 0h1v2H1z" />
               </g>
             </defs>
-            <g transform="translate(16 16) scale(-1 1) rotate(-48) translate(-15.5 -12)">
+            <g class="weapon-art-ak" transform="translate(16 16) scale(-1 1) rotate(-48) translate(-15.5 -12)">
               <path fill="#a76f3b" d="M1 8h4V7h3v3H5v1H1zM18 6h6v4h-6zM10 11h3v5h-3z" />
               <path fill="#ca9657" d="M2 8h3v1H2zM5 7h3v1H5zM18 6h6v1h-6z" />
               <path fill="#81898b" d="M8 6h10v5H8z" />
@@ -646,6 +793,8 @@
               <path fill="#81898b" d="M24 8h7v2h-7zM29 7h1v1h-1z" />
               <path fill="#748080" d="M18 12h1v2h1v2h1v1h-1v-1h-1v-2h-1zM20 12h1v2h1v2h-1v-2h-1z" />
             </g>
+            <!-- HALLOWEEN: the ghost hunt gun (ghost-gear.js), shown by the weapon button data-skin. -->
+            <g class="weapon-art-ghost" transform="translate(16 16) scale(-1 1) rotate(-48) translate(-15.5 -12)"><path fill="#aeb4bb" d="M3 5h16v1H3zM2 6h1v1H2zM19 6h6v1H19zM29 6h2v1H29zM2 7h1v1H2zM25 7h4v1H25zM31 7h1v1H31zM2 8h1v1H2zM31 8h1v1H31zM2 9h1v1H2zM31 9h1v1H31zM2 10h1v1H2zM25 10h4v1H25zM31 10h1v1H31zM2 11h1v1H2zM19 11h1v1H19zM23 11h2v1H23zM29 11h2v1H29zM3 12h3v1H3zM10 12h10v1H10zM23 12h1v1H23zM5 13h1v1H5zM10 13h1v1H10zM19 13h1v1H19zM23 13h1v1H23zM5 14h1v1H5zM10 14h1v1H10zM19 14h1v1H19zM23 14h1v1H23zM4 15h1v1H4zM9 15h1v1H9zM20 15h3v1H20zM4 16h1v1H4zM9 16h1v1H9zM4 17h1v1H4zM9 17h1v1H9zM5 18h4v1H5z" /><path fill="#0b0c0e" d="M3 6h1v1H3zM11 6h2v1H11zM14 6h1v1H14zM16 6h1v1H16zM18 6h1v1H18zM3 7h10v1H3zM14 7h1v1H14zM16 7h1v1H16zM18 7h7v1H18zM29 7h2v1H29zM3 8h10v1H3zM14 8h1v1H14zM16 8h1v1H16zM18 8h13v1H18zM3 9h10v1H3zM14 9h1v1H14zM16 9h1v1H16zM18 9h13v1H18zM3 10h10v1H3zM14 10h1v1H14zM16 10h1v1H16zM18 10h7v1H18zM29 10h2v1H29zM3 11h10v1H3zM14 11h1v1H14zM16 11h1v1H16zM18 11h1v1H18zM20 11h3v1H20zM6 12h4v1H6zM20 12h3v1H20zM6 13h4v1H6zM20 13h3v1H20zM6 14h4v1H6zM20 14h3v1H20zM5 15h4v1H5zM5 16h4v1H5zM5 17h4v1H5z" /><path fill="#4b4f56" d="M4 6h7v1H4zM13 6h1v1H13zM15 6h1v1H15zM17 6h1v1H17zM13 7h1v1H13zM15 7h1v1H15zM17 7h1v1H17zM13 8h1v1H13zM15 8h1v1H15zM17 8h1v1H17zM13 9h1v1H13zM15 9h1v1H15zM17 9h1v1H17zM13 10h1v1H13zM15 10h1v1H15zM17 10h1v1H17zM13 11h1v1H13zM15 11h1v1H15zM17 11h1v1H17z" /><path fill="#050506" d="M1 9h1v1H1zM0 10h2v1H0zM1 11h1v1H1zM0 12h2v1H0zM0 13h2v1H0zM1 14h1v1H1zM0 15h2v1H0z" /><path fill="#3f4349" d="M0 11h1v1H0zM0 14h1v1H0z" /></g>
           </svg>
         </span>
         <span class="equipment-compact weapon-compact" id="weapon-ammo-compact" aria-hidden="true">0</span>
@@ -896,6 +1045,350 @@
         </div>
       </section>
     </div>
+    <div class="race" id="block" data-scene="block" hidden>
+      <section class="garage" id="block-board" aria-label="Block Frenzy sides">
+        <div class="garage-head">
+          <h2><span data-sign>Block Frenzy</span></h2>
+          <p class="help block-tip" id="block-tip"></p>
+          <section id="block-live" class="block-live" hidden aria-label="Multiplayer">
+            <h3 class="section-head" id="block-live-title">Multiplayer</h3>
+            <p class="help" id="block-live-status"></p>
+            <div class="block-live-sizes" id="block-live-sizes" hidden>
+              <button type="button" class="block-side block-target" data-action="block-live-size-2" data-live-size="2" aria-pressed="false">2v2</button>
+              <button type="button" class="block-side block-target" data-action="block-live-size-3" data-live-size="3" aria-pressed="false">3v3</button>
+              <button type="button" class="block-side block-target" data-action="block-live-size-4" data-live-size="4" aria-pressed="false">4v4</button>
+            </div>
+            <ul class="block-live-list" id="block-live-list"></ul>
+            <div class="block-live-buttons">
+              <button type="button" data-action="block-live-reg" id="block-live-reg">Join match</button>
+              <button type="button" data-action="block-live-ready" id="block-live-ready" hidden>Ready!</button>
+              <button type="button" data-action="block-live-alone" id="block-live-alone" hidden>Start with NPCs</button>
+              <button type="button" data-action="block-live-wait" id="block-live-wait" hidden>Wait for players</button>
+              <button type="button" data-action="block-live-watch" id="block-live-watch" hidden>Watch from the deck</button>
+            </div>
+          </section>
+          <p class="help" id="block-board-help">Pick a side. Steal the rivals' Bitcoin block (their colour), carry it to your own stand or throw it into your zone while your block is home. First to 3 captures wins.</p>
+        </div>
+        <div class="garage-columns">
+          <div class="garage-col">
+            <h3 class="section-head">Side</h3>
+            <div class="block-sides">
+              <button type="button" class="block-side" data-team="blue" aria-pressed="true">Blue fort</button>
+              <button type="button" class="block-side" data-team="red" aria-pressed="false">Red fort</button>
+            </div>
+            <h3 class="section-head">Captures to win</h3>
+            <div class="block-sides block-targets">
+              <button type="button" class="block-side block-target" data-target="1" aria-pressed="false">1</button>
+              <button type="button" class="block-side block-target" data-target="3" aria-pressed="true">3</button>
+              <button type="button" class="block-side block-target" data-target="5" aria-pressed="false">5</button>
+              <button type="button" class="block-side block-target" data-target="7" aria-pressed="false">7</button>
+            </div>
+            <h3 class="section-head">Scoring</h3>
+            <div class="block-sides block-targets">
+              <button type="button" class="block-side block-target" data-rule="home" aria-pressed="true" aria-label="Block must be home (classic)" title="Block must be home (classic)">Classic</button>
+              <button type="button" class="block-side block-target" data-rule="any" aria-pressed="false" aria-label="Block doesn't need to be home" title="Block doesn't need to be home">Any time</button>
+            </div>
+            <h3 class="section-head">Map</h3>
+            <div class="block-sides block-targets">
+              <button type="button" class="block-side block-target" data-map="town" aria-pressed="true">Ooga Town</button>
+              <button type="button" class="block-side block-target" data-map="jungle" aria-pressed="false">Gorilla Jungle</button>
+              <button type="button" class="block-side block-target" data-map="haunted" aria-pressed="false">Haunted Hollow</button>
+              <button type="button" class="block-side block-target" data-map="clank" aria-pressed="false">Clanktown</button>
+            </div>
+            <h3 class="section-head">Oogas a side</h3>
+            <div class="block-sides block-targets">
+              <button type="button" class="block-side block-target" data-size="2" aria-pressed="false">2</button>
+              <button type="button" class="block-side block-target" data-size="3" aria-pressed="true">3</button>
+              <button type="button" class="block-side block-target" data-size="4" aria-pressed="false">4</button>
+              <button type="button" class="block-side block-target" data-size="5" aria-pressed="false">5</button>
+            </div>
+            <h3 class="section-head">Detail</h3>
+            <div class="block-sides block-targets">
+              <button type="button" class="block-side block-target" data-detail="full" aria-pressed="true">Full</button>
+              <button type="button" class="block-side block-target" data-detail="low" aria-pressed="false">Low</button>
+            </div>
+            <h3 class="section-head">Bots</h3>
+            <div class="block-sides block-targets">
+              <button type="button" class="block-side block-target" data-skill="easy" aria-pressed="false">Easy</button>
+              <button type="button" class="block-side block-target" data-skill="normal" aria-pressed="true">Normal</button>
+              <button type="button" class="block-side block-target" data-skill="hard" aria-pressed="false">Hard</button>
+              <button type="button" class="block-side block-target" data-skill="expert" aria-pressed="false" title="Bots ride the catapult and ziplines, climb, jetpack over walls, stack and throw crates">Expert</button>
+            </div>
+            <div id="block-ooga-slot">
+              <h3 class="section-head">Your Ooga</h3>
+              <p class="block-ooga" id="block-ooga"></p>
+            </div>
+          </div>
+          <div class="garage-col">
+            <h3 class="section-head">Record</h3>
+            <ul class="garage-list drop-rows">
+              <li><span>Fastest win</span> <b id="block-best">none yet</b></li>
+              <li><span>Rounds</span> <b id="block-record">0 won of 0</b></li>
+            </ul>
+            <h3 class="section-head">Your record</h3>
+            <ul class="garage-list drop-rows" aria-label="Your record, kept in this browser">
+              <li><span>Blocks mined</span> <b id="block-rec-mined">0</b></li>
+              <li><span>Brought home</span> <b id="block-rec-home">0</b></li>
+              <li><span>Splats landed</span> <b id="block-rec-splats">0</b></li>
+              <li><span>Times splatted</span> <b id="block-rec-splatted">0</b></li>
+              <li><span>Rounds as MVP</span> <b id="block-rec-mvps">0</b></li>
+            </ul>
+          </div>
+        </div>
+        <div class="garage-foot">
+          <div class="block-help-wrap">
+            <p class="help" id="block-help">W A S D move · Q E turn · click fires · Space jumps · Tab throws · P pauses · Escape steps back</p>
+            <details class="block-controls"><summary>All controls</summary><div class="block-keys" id="block-controls-list"></div></details>
+          </div>
+          <button type="button" class="feed-open race-go" data-action="block-start"><span data-sign>Play!</span></button>
+        </div>
+      </section>
+      <div class="block-preview-name" id="block-preview-name" hidden><b></b><span>drag to turn</span></div>
+      <div class="block-weapon-card" id="block-weapon-card" hidden role="group" aria-label="Weapons">
+        <small>Weapons</small>
+        <b id="block-weapon-name"></b>
+        <p id="block-weapon-blurb"></p>
+        <div class="block-weapon-nav">
+          <button type="button" data-weapon-step="-1" aria-label="Previous weapon" title="Previous weapon">‹</button>
+          <span id="block-weapon-count" aria-hidden="true"></span>
+          <button type="button" data-weapon-step="1" aria-label="Next weapon" title="Next weapon">›</button>
+        </div>
+      </div>
+      <div class="race-strip" id="block-strip" hidden>
+        <div class="race-hud race-hud-left">
+          <div class="race-lap block-score" data-team="blue"><span>Blue</span><b id="block-score-blue">0</b></div>
+          <div class="race-lap block-score" data-team="red"><span>Red</span><b id="block-score-red">0</b></div>
+          <div class="race-lap block-sprint"><span>Sprint</span><div class="block-sprint-bar" aria-hidden="true"><i id="block-stamina"></i></div></div>
+          <div class="race-lap block-sprint block-jet"><span>Jet</span><div class="block-sprint-bar" aria-hidden="true"><i id="block-fuel"></i></div></div>
+          <div class="race-lap block-power" id="block-power" hidden><span>Power</span><b id="block-power-word"></b></div>
+        </div>
+        <div class="race-hud race-hud-right">
+          <div class="race-time" id="block-time">0:00</div>
+          <div class="race-lap block-state"><span>Your block</span><b id="block-own" data-state="home">home</b></div>
+          <div class="race-lap block-state"><span>Theirs</span><b id="block-theirs" data-state="home">home</b></div>
+        </div>
+        <div class="block-tally" id="block-tally" role="group" aria-label="Your round so far" title="Hold Z for everyone's counts"><span>Grabbed</span><b>0</b><span>Mined</span><b>0</b><span>Home</span><b>0</b><span>Splats</span><b>0</b><span>Splatted</span><b>0</b></div>
+        <section class="block-tally-board" id="block-tally-board" hidden aria-label="Everyone's counts this round">
+          <div class="block-side-panel" data-team="blue">
+            <h3><span>Blue</span><small title="Rival blocks picked up">Grabbed</small><small>Mined</small><small title="Your own block sent home">Home</small><small>Splats</small><small title="Times splatted">Splatted</small></h3>
+            <ol class="ghost-scores" id="block-tally-blue"></ol>
+          </div>
+          <div class="block-side-panel" data-team="red">
+            <h3><span>Red</span><small title="Rival blocks picked up">Grabbed</small><small>Mined</small><small title="Your own block sent home">Home</small><small>Splats</small><small title="Times splatted">Splatted</small></h3>
+            <ol class="ghost-scores" id="block-tally-red"></ol>
+          </div>
+        </section>
+      </div>
+      <section class="block-watch" id="block-watch" hidden aria-label="Watch deck" aria-live="polite">
+        <span id="block-watch-line"></span>
+        <button type="button" data-action="block-live-reg" id="block-watch-reg">Join next round</button>
+        <button type="button" data-action="block-board">Main menu</button>
+      </section>
+      <div class="block-viewer-board" id="block-viewer-board" hidden aria-live="off"><div class="block-board-side" data-side="blue"><span>Blue</span><b id="block-viewer-blue">0</b></div><div class="block-board-mid"><small id="block-viewer-goal"></small><small id="block-viewer-clock"></small></div><div class="block-board-side" data-side="red"><span>Red</span><b id="block-viewer-red">0</b></div><table class="block-board-stats" id="block-viewer-captures" hidden></table></div>
+      <div class="race-center" id="block-center" hidden>GO!</div>
+      <div class="block-struggle" id="block-struggle" hidden>
+        <span id="block-struggle-word">Mash SPACE!</span> <b id="block-struggle-left">6</b>
+        <div class="block-struggle-bar" id="block-struggle-meter" role="meter" aria-label="Struggle meter" aria-valuemin="0" aria-valuemax="60" aria-valuenow="0"><i id="block-struggle-fill"></i></div>
+      </div>
+ <section class="block-help" id="block-help-box" hidden aria-label="How to play">
+        <h3>How to play</h3>
+        <p>Steal the rivals' Bitcoin block and carry it to your stand, or throw it into your zone. Scoring is the round's pick on the board: block must be home (classic), where yours has to be on its stand to score, or block doesn't need to be home. Every block you mine wins a pair of Golden AKs, for you or a teammate. Only the two special weapons take each other: hook a rival holding the Golden AKs out to take them, or splat a rival holding the hook out with Golden AK fire to take it. Gorillas drag you to the edge: mash Space to fill the meter and break free. The rivals' zipline only carries you while your own block is home: grab it with yours gone and a trap door throws you off the island (the lamp on its handle shows red). Fall off and you fly back, or respawn at home.</p>
+        <div class="block-keys" id="block-help-keys"></div>
+        <button type="button" data-action="block-help">Close</button>
+      </section>
+      <canvas class="block-map" id="block-map" width="88" height="148" hidden aria-label="Map: both blocks and every Ooga"></canvas>
+      <ol class="block-feed" id="block-feed" hidden aria-live="off"><li></li><li></li><li></li><li></li></ol>
+      <button type="button" class="act block-paint" id="block-paint" hidden>Throw!</button>
+      <div class="block-tools" id="block-tools" hidden role="toolbar" aria-label="Weapons">
+        <div class="block-tool-name" id="block-tool-name" aria-hidden="true"></div>
+        <div class="block-bar-tabs">
+          <button type="button" class="block-bar-grip" id="block-bar-grip" aria-label="Drag the weapons bar" title="Drag to move">⠿</button>
+          <button type="button" class="block-bar-min" id="block-bar-min" aria-pressed="false" aria-label="Hide or show the weapons bar" title="Hide or show (U)">–</button>
+        </div>
+        <div class="block-slots">
+          <button type="button" data-tool="paint" aria-pressed="true" aria-label="Paint marker" title="Paint marker (1)"><kbd>1</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#7b808c" d="M4 5h6v2h-6zM13 4h2v3h-2z" /><path fill="#4a4c58" d="M7 4h2v1h-2zM10 5h3v1h-3zM5 7h2v3h-2zM9 7h1v2h-1z" /><path class="block-icon-td" d="M6 0h3v1h-3zM1 8h4v2h-4z" /><path class="block-icon-tp" d="M5 1h6v3h-6zM5 5h4v1h-4zM15 4h1v3h-1z" /><path class="block-icon-tl" d="M6 2h3v1h-3zM0 8h1v2h-1z" /><path fill="#c9ced8" d="M7 7h1v1h-1zM10 6h3v1h-3z" /></svg><b></b></button>
+          <button type="button" data-tool="grenade" aria-pressed="false" aria-label="Grenade launcher" title="Grenade launcher (2)"><kbd>2</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#7b808c" d="M0 4h4v1h-4zM0 7h4v1h-4z" /><path fill="#4a4c58" d="M0 3h1v6h-1zM5 9h2v3h-2zM10 8h2v3h-2z" /><path class="block-icon-td" d="M4 3h4v6h-4z" /><path class="block-icon-tp" d="M4 5h4v2h-4zM14 3h1v6h-1z" /><path fill="#6a6d4a" d="M8 4h6v4h-6z" /><path fill="#4a4c58" d="M4 3h1v6h-1zM7 3h1v6h-1zM8 4h1v4h-1zM15 4h1v4h-1z" /><path fill="#fff3d6" d="M10 1h1v3h-1zM9 1h3v1h-3z" /></svg><b></b></button>
+          <button type="button" data-tool="rocket" aria-pressed="false" aria-label="Rocket launcher" title="Rocket launcher (3)"><kbd>3</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#4a4c58" d="M0 2h1v7h-1z" /><path fill="#7b808c" d="M1 3h1v5h-1zM4 7h7v1h-7z" /><path class="block-icon-td" d="M2 4h10v3h-10z" /><path fill="#fff3d6" d="M3 4h1v3h-1zM5 4h1v3h-1zM15 5h1v1h-1z" /><path class="block-icon-tp" d="M10 4h1v3h-1zM12 3h1v5h-1z" /><path fill="#f7931a" d="M13 4h2v3h-2z" /><path fill="#4a4c58" d="M6 2h3v2h-3zM5 8h1v3h-1zM9 8h1v3h-1zM2 7h2v1h-2z" /><path fill="#bfe8ff" d="M9 2h1v1h-1z" /></svg><b></b></button>
+          <button type="button" data-tool="net" aria-pressed="false" aria-label="Net launcher" title="Net launcher (4)"><kbd>4</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path class="block-icon-td" d="M0 7h3v2h-3z" /><path class="block-icon-tl" d="M0 7h1v2h-1z" /><path fill="#7b808c" d="M3 4h3v4h-3z" /><path fill="#4b6a40" d="M6 2h4v8h-4z" /><path fill="#38502f" d="M10 1h1v10h-1zM6 5h4v1h-4z" /><path class="block-icon-tp" d="M11 0h1v12h-1z" /><path fill="#7fe08a" d="M12 1h4v1h-4zM12 4h4v1h-4zM12 7h4v1h-4zM12 10h4v1h-4zM13 1h1v10h-1zM15 1h1v10h-1z" /><path fill="#4a4c58" d="M7 0h3v1h-3zM7 1h1v1h-1zM9 1h1v1h-1zM4 8h1v3h-1z" /></svg><b></b></button>
+          <button type="button" data-tool="sniper" aria-pressed="false" aria-label="Sniper rifle" title="Sniper rifle (5)"><kbd>5</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#8a5a34" d="M0 5h4v2h-4zM8 6h4v1h-4z" /><path fill="#4a4c58" d="M0 5h1v3h-1zM8 5h7v1h-7zM4 2h1v3h-1zM9 2h2v3h-2zM5 7h1v3h-1zM7 7h1v1h-1z" /><path class="block-icon-td" d="M1 4h3v1h-3z" /><path fill="#7b808c" d="M4 5h4v2h-4zM15 4h1v3h-1zM6 4h1v1h-1zM8 4h1v1h-1z" /><path class="block-icon-tp" d="M5 3h4v1h-4z" /><path fill="#bfe8ff" d="M11 2h1v3h-1z" /><path fill="#c9ced8" d="M7 2h1v1h-1zM11 7h1v2h-1zM10 9h1v2h-1zM12 9h1v2h-1z" /></svg><b></b></button>
+          <button type="button" data-tool="gold" aria-pressed="false" aria-label="Golden Dual AKs" title="Golden Dual AKs (6)" disabled><kbd>6</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#4a2e18" d="M0 2h4v1h-4zM0 3h3v1h-3zM8 1h3v2h-3zM5 3h1v3h-1z" /><path fill="#8a6410" d="M0 2h1v2h-1z" /><path fill="#8a6410" d="M4 1h4v2h-4z" /><path fill="#8a6410" d="M4 1h4v1h-4z" /><path fill="#4a2e18" d="M9 2h1v1h-1zM6 2h1v1h-1z" /><path fill="#8a6410" d="M11 1h1v2h-1z" /><path fill="#8a6410" d="M12 2h4v1h-4zM12 1h2v1h-2zM15 1h1v1h-1z" /><path fill="#8a5226" d="M0 6h4v1h-4zM0 7h3v1h-3zM8 5h3v2h-3zM5 7h1v3h-1z" /><path fill="#a87c14" d="M0 6h1v2h-1z" /><path fill="#edbd32" d="M4 5h4v2h-4z" /><path fill="#f8d458" d="M4 5h4v1h-4z" /><path fill="#3a2414" d="M9 6h1v1h-1zM6 6h1v1h-1z" /><path fill="#ffe27a" d="M11 5h1v2h-1z" /><path fill="#f0c95a" d="M12 6h4v1h-4zM12 5h2v1h-2zM15 5h1v1h-1z" /><path fill="#edbd32" d="M7 7h2v1h-2zM8 8h2v1h-2zM9 9h2v1h-2z" /><path fill="#a87c14" d="M8 7h1v1h-1zM9 8h1v1h-1zM10 9h1v1h-1z" /><path fill="#ffe27a" d="M5 6h1v1h-1zM7 6h1v1h-1zM13 5h1v1h-1z" /><path fill="#ffffff" d="M2 3h1v1h-1zM13 9h1v1h-1z" /></svg><b></b></button>
+          <button type="button" data-tool="ak" aria-pressed="false" aria-label="Ooga AK" title="Ooga AK (7)"><kbd>7</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#8a5a34" d="M0 4h4v1h-4zM0 5h3v1h-3zM8 3h3v2h-3zM5 5h1v3h-1z" /><path fill="#4a4c58" d="M0 4h1v2h-1z" /><path fill="#7b808c" d="M4 3h4v2h-4z" /><path fill="#a3a8b4" d="M4 3h4v1h-4z" /><path fill="#5a3a20" d="M9 4h1v1h-1zM6 4h1v1h-1z" /><path class="block-icon-tp" d="M11 3h1v2h-1z" /><path fill="#4a4c58" d="M12 4h4v1h-4zM12 3h2v1h-2zM15 3h1v1h-1z" /><path fill="#c8602c" d="M7 5h2v1h-2zM8 6h2v1h-2zM9 7h2v1h-2z" /><path fill="#8a3d1c" d="M8 5h1v1h-1zM9 6h1v1h-1zM10 7h1v1h-1z" /></svg><b></b></button>
+          <button type="button" data-tool="hook" aria-pressed="false" aria-label="Grappling hook" title="Grappling hook (8)" disabled><kbd>8</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#7b808c" d="M2 5h5v2h-5z" /><path fill="#4a4c58" d="M2 4h4v1h-4zM3 7h1v3h-1zM7 5h3v2h-3zM5 7h1v3h-1zM8 7h1v3h-1z" /><path fill="#c9ced8" d="M1 5h1v2h-1z" /><path fill="#b8935a" d="M6 7h2v3h-2z" /><path fill="#8a6c3e" d="M6 8h2v1h-2z" /><path class="block-icon-tp" d="M10 5h1v2h-1zM3 3h1v1h-1z" /><path fill="#8a92a0" d="M11 5h3v2h-3zM12 2h1v3h-1zM13 2h2v1h-2zM12 7h1v3h-1zM13 9h2v1h-2z" /><path fill="#e3e8f0" d="M14 5h2v1h-2zM15 2h1v2h-1zM15 8h1v2h-1z" /></svg><b></b></button>
+        </div>
+        <div class="block-actions">
+          <button type="button" data-tool="crate" class="block-tool-crate"><kbd>B</kbd>Crate <b>3</b></button>
+          <button type="button" data-tool="grab" class="block-tool-crate" aria-pressed="false"><kbd>F</kbd>Lift</button>
+          <button type="button" data-tool="pass" class="block-tool-pass" disabled><kbd>Tab</kbd>Throw</button>
+          <button type="button" data-tool="zip" class="block-tool-pass" disabled><kbd>Space</kbd>Ride</button>
+        </div>
+      </div>
+      <div class="block-cross" id="block-cross" hidden aria-hidden="true"></div>
+      <div class="race-notice" id="block-notice" hidden>&nbsp;</div>
+      <div class="block-mirage" id="block-mirage" hidden aria-hidden="true"></div>
+      <section class="race-results block-quiz" id="block-quiz" hidden aria-label="Quiz trap" aria-live="polite">
+        <p class="game-intro-kicker">Quiz trap · answer to break out</p>
+        <h2 class="block-quiz-q" id="block-quiz-q">&nbsp;</h2>
+        <div class="block-answers">
+          <button type="button" class="block-answer" data-answer="0">1.</button>
+          <button type="button" class="block-answer" data-answer="1">2.</button>
+          <button type="button" class="block-answer" data-answer="2">3.</button>
+          <button type="button" class="block-answer" data-answer="3">4.</button>
+        </div>
+        <p class="help" id="block-quiz-note">&nbsp;</p>
+        <div class="block-quiz-time" aria-hidden="true"><span id="block-quiz-fill"></span></div>
+      </section>
+      <section class="race-results game-intro" id="block-intro" data-intro="block" hidden aria-label="Block Frenzy">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Capture the block</p>
+        <h2 class="game-intro-title"><span data-sign>Block Frenzy</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#b8650a" d="M2 2h12v12H2z" /><path fill="#f7931a" d="M3 3h10v10H3z" /><path fill="#fff3d6" d="M6 4h1v1H6zM8 4h1v1H8zM5 5h5v1H5zM6 6h1v1H6zM10 6h1v1H10zM6 7h4v1H6zM6 8h1v1H6zM10 8h1v1H10zM5 9h5v1H5zM6 10h1v1H6zM8 10h1v1H8z" /></svg>
+        <p class="game-intro-goal">Carry or throw the rivals' <b>Bitcoin block</b> home three times. Nobody gets hurt: paint wears off.</p>
+        <p class="help block-tip" id="block-intro-tip"></p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#b8650a" d="M1 1h7v7H1z" /><path fill="#f7931a" d="M2 2h5v5H2z" /><path fill="#fff3d6" d="M4 3h1v3H4z" /></svg><b>Grab their block</b><small>Touch the block in their colour in their fort. Tab throws it to a friend, or into your zone to score.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3dff7a" d="M0 0h9v1H0zM0 8h9v1H0zM0 1h1v7H0zM8 1h1v7H8z" /><path fill="#b8ffcf" d="M3 2h3v1H3zM6 3h1v1H6zM5 4h1v1H5zM4 5h1v1H4zM4 7h1v1H4z" /></svg><b>Quiz traps</b><small>Green pads trap you. Answer a Bitcoin question to break out.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3a8dff" d="M4 0h1v1H4zM3 1h3v1H3zM2 2h5v1H2zM1 3h7v1H1z" /><path fill="#8a8178" d="M2 4h5v5H2z" /><path fill="#f7931a" d="M4 6h1v3H4z" /></svg><b>Yours must be home</b><small>You only score while your own block sits on its stand.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff4a3a" d="M3 1h3v1H3zM2 2h5v4H2zM3 6h3v1H3zM1 4h1v1H1zM7 3h1v1H7zM4 7h1v2H4z" /></svg><b>Paint stops a runner</b><small data-coarse="Paint! throws. A splatted carrier drops the block.">Click or Enter throws. A splatted carrier drops the block.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f7931a" d="M3 0h3v3H3z" /><path fill="#f3efe4" d="M4 4h1v1H4zM4 6h1v1H4z" /><path fill="#9aa3ad" d="M2 8h5v1H2z" /></svg><b>Double jump</b><small data-coarse="Jump twice to reach rooftops, huts and the fort walls.">Space twice reaches rooftops, huts and the fort walls.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#22c55e" d="M1 4h1v1H1zM2 5h1v1H2zM3 6h1v1H3zM4 5h1v1H4zM5 4h1v1H5zM6 3h1v1H6zM7 2h1v1H7z" /></svg><b>Tools and crates</b><small data-coarse="Grenades, rockets and nets refill on your stand. Crates wall your fort.">Grenades, rockets and nets refill on your stand. B drops crates to wall your fort.</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Play!</button>
+          <button type="button" data-action="leave">Back to the island</button>
+        </div>
+      </section>
+      <section class="race-results block-trophy" id="block-results" hidden aria-label="Block Frenzy results" data-team="blue">
+        <header class="block-trophy-head">
+          <p class="game-intro-kicker">Ooga Arcade</p>
+          <h2 class="game-intro-title"><span data-sign>Block Frenzy</span></h2>
+        </header>
+        <div class="block-trophy-stage" id="block-trophy-stage">
+          <i class="block-trophy-sparkles" aria-hidden="true"></i>
+          <p class="block-trophy-banner" id="block-result-title" role="status">Blue wins!</p>
+        </div>
+        <div class="block-trophy-board">
+          <div class="block-trophy-tally">
+            <p class="block-trophy-score" aria-label="Final score"><b class="block-final" data-team="blue" id="block-final-blue">0</b><i aria-hidden="true">–</i><b class="block-final" data-team="red" id="block-final-red">0</b></p>
+            <p class="block-trophy-time" id="block-trophy-time" aria-label="Round time">0:00</p>
+          </div>
+          <p class="help" id="block-summary"></p>
+          <div class="block-trophy-sides">
+            <section class="block-side-panel" data-team="blue" aria-label="Blue side">
+              <h3><span>Blue</span><small title="Rival blocks picked up">Grabbed</small><small>Mined</small><small title="Blocks brought home">Home</small><small>Splats</small></h3>
+              <ol id="block-side-blue"></ol>
+            </section>
+            <section class="block-side-panel" data-team="red" aria-label="Red side">
+              <h3><span>Red</span><small title="Rival blocks picked up">Grabbed</small><small>Mined</small><small title="Blocks brought home">Home</small><small>Splats</small></h3>
+              <ol id="block-side-red"></ol>
+            </section>
+          </div>
+          <ul class="block-badges" id="block-stats" aria-label="Highlights"></ul>
+          <div class="actions">
+            <button type="button" data-action="block-again" data-role="go">Again</button>
+            <button type="button" data-action="block-board" data-role="choose">Main menu</button>
+            <button type="button" data-action="leave" data-role="leave">Back to the island</button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="race raid" id="raid" data-scene="raid" hidden>
+      <div class="race-strip raid-strip" id="raid-strip" hidden>
+        <div class="race-hud race-hud-left raid-hud">
+          <div class="raid-stat"><span id="raid-lives-label">Lives</span><b id="raid-lives">3</b></div>
+          <div class="raid-stat"><span>Continues</span><b id="raid-continues">3</b><small class="raid-cheat-mark" id="raid-cheat-mark" hidden>Secrets on</small></div>
+          <div class="raid-stat raid-p2" hidden><span>P2 lives</span><b id="raid-lives2">3</b></div>
+        </div>
+        <div class="race-hud race-hud-right raid-hud">
+          <div class="raid-stat"><span id="raid-score-label">Score</span><b id="raid-score">0</b><small id="raid-best">Best 0</small></div>
+          <div class="raid-stat raid-weapon"><span>Shot</span><b id="raid-weapon">Rifle</b><small id="raid-rapid" data-on="false">&nbsp;</small></div>
+          <div class="raid-stat raid-p2" hidden><span>P2 score</span><b id="raid-score2">0</b><small id="raid-weapon2">Rifle</small></div>
+        </div>
+      </div>
+      <div class="raid-boss" id="raid-boss" role="meter" aria-label="Boss" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" hidden>
+        <span class="raid-boss-name">Boss</span>
+        <span class="raid-boss-track"><i class="raid-boss-fill" id="raid-boss-fill"></i></span>
+      </div>
+      <div class="race-center raid-center" id="raid-center" hidden>&nbsp;</div>
+      <div class="race-notice raid-notice" id="raid-notice" hidden>&nbsp;</div>
+      <button type="button" class="act raid-fire" id="raid-fire" data-action="raid-fire" hidden>Fire</button>
+      <section class="raid-card" id="raid-card" hidden aria-live="polite">
+        <p class="raid-card-kicker" id="raid-card-kicker">Stage 2</p>
+        <h2><span data-sign id="raid-card-sign">Next stage</span></h2>
+      </section>
+      <section class="raid-card raid-bosscard" id="raid-bosscard" hidden aria-live="assertive">
+        <p class="raid-card-kicker">Boss</p>
+        <h2><span data-sign id="raid-bosscard-sign">Boss</span></h2>
+      </section>
+      <div class="raid-call" id="raid-call" hidden aria-live="polite">&nbsp;</div>
+      <section class="race-pause raid-pause" id="raid-pause" hidden aria-label="Paused">
+        <h2><span data-sign>Paused</span></h2>
+        <p class="help raid-pause-help" data-coarse="Resume plays on. Exit Game ends the run." data-pad="A or Start resumes. Exit Game ends the run.">P or Escape resumes. Exit Game ends the run.</p>
+        <div class="actions">
+          <button type="button" data-action="raid-resume">Resume</button>
+          <button type="button" data-action="leave">Exit Game</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="raid-intro" data-intro="raid" hidden aria-label="Ooga Raid">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">A run and gun in eight stages</p>
+        <h2 class="game-intro-title"><span data-sign>Ooga Raid</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3a2410" d="M10 0h4v1H10zM9 1h1v1H9zM14 1h1v1H14zM8 2h1v1H8zM15 2h1v1H15zM8 3h1v1H8zM15 3h1v1H15zM8 4h1v1H8zM15 4h1v1H15zM8 5h1v1H8zM14 5h1v1H14zM8 6h2v1H8zM13 6h1v1H13zM8 7h1v1H8zM11 7h2v1H11zM10 8h1v1H10zM6 9h1v1H6zM5 10h1v1H5zM7 10h1v1H7zM4 11h1v1H4zM7 11h1v1H7zM3 12h1v1H3zM6 12h1v1H6zM2 13h1v1H2zM5 13h1v1H5zM1 14h1v1H1zM4 14h1v1H4zM1 15h3v1H1z" /><path fill="#d29a5c" d="M10 1h2v1H10zM9 2h2v1H9zM9 3h1v1H9z" /><path fill="#a06a34" d="M12 1h2v1H12zM12 2h3v1H12zM10 3h3v1H10zM9 4h1v1H9zM11 4h2v1H11zM9 5h3v1H9zM9 7h1v1H9zM6 10h1v1H6zM5 11h1v1H5zM4 12h1v1H4zM3 13h1v1H3z" /><path fill="#6e4420" d="M14 3h1v1H14zM13 4h2v1H13zM12 5h2v1H12zM10 6h3v1H10zM10 7h1v1H10zM9 8h1v1H9zM6 11h1v1H6zM5 12h1v1H5zM4 13h1v1H4z" /><path fill="#c9c2b0" d="M11 2h1v1H11zM13 3h1v1H13zM10 4h1v1H10z" /><path fill="#2a1a0c" d="M2 14h2v1H2z" /><path fill="#ffd84a" d="M4 2h1v1H4zM3 3h2v1H3zM3 4h2v1H3zM4 5h2v1H4zM4 6h2v1H4zM5 7h2v1H5zM5 8h3v1H5zM7 9h3v1H7zM8 10h3v1H8zM9 11h3v1H9zM10 12h4v1H10z" /><path fill="#e0a228" d="M5 3h1v1H5zM5 4h1v1H5zM6 5h1v1H6zM6 6h1v1H6zM7 7h1v1H7zM8 8h1v1H8zM10 9h1v1H10zM11 10h1v1H11zM12 11h2v1H12zM11 13h2v1H11z" /><path fill="#5a3a12" d="M3 1h1v1H3zM3 2h1v1H3zM14 12h1v1H14zM13 13h1v1H13z" /></svg>
+        <p class="game-intro-goal">Drive the <b>Fiat Legion</b> out of the island, stage by stage.</p>
+        <p class="game-intro-who" id="raid-intro-best">No best score yet</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#e0a878" d="M5 0h2v1H5zM5 1h2v1H5z" /><path fill="#8a5a2c" d="M3 2h5v1H3zM5 3h2v1H5zM5 4h2v1H5zM4 5h1v1H4zM7 5h1v1H7zM3 6h1v1H3zM8 6h1v1H8z" /><path fill="#f3efe4" d="M0 3h1v1H0zM0 5h1v1H0zM0 7h1v1H0z" /><path fill="#789a3b" d="M0 8h9v1H0z" /></svg><b>Run and jump</b><small data-coarse="The stick runs, Jump! jumps. Down with Jump! drops off a ledge.">A and D run, Space jumps. S with Space drops off a ledge.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff8a73" d="M4 0h1v1H4zM4 1h1v1H4zM4 2h1v1H4zM3 3h3v1H3zM0 4h4v1H0zM5 4h4v1H5zM3 5h3v1H3zM4 6h1v1H4zM4 7h1v1H4zM4 8h1v1H4z" /><path fill="#ffd84a" d="M0 0h1v1H0zM8 0h1v1H8zM1 1h1v1H1zM7 1h1v1H7zM2 2h1v1H2zM6 2h1v1H6zM2 6h1v1H2zM6 6h1v1H6zM1 7h1v1H1zM7 7h1v1H7zM0 8h1v1H0zM8 8h1v1H8z" /><path fill="#f3efe4" d="M4 4h1v1H4z" /></svg><b>Aim eight ways</b><small data-coarse="Tilt the stick to aim; down on the ground lies prone. Hold Fire.">W and S tilt your aim; S on the ground lies prone. J or a click fires.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M1 0h2v1H1zM0 1h4v1H0zM1 2h4v1H1zM2 3h4v1H2zM3 4h4v1H3zM4 5h4v1H4zM5 6h4v1H5zM6 7h2v1H6z" /></svg><b>One hit and you are down</b><small>Three lives and three continues. More lives from 20,000 points.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3a2410" d="M0 0h9v1H0zM0 1h1v1H0zM8 1h1v1H8zM0 2h1v1H0zM8 2h1v1H8zM0 3h1v1H0zM8 3h1v1H8zM0 4h1v1H0zM8 4h1v1H8zM0 5h1v1H0zM8 5h1v1H8zM0 6h1v1H0zM8 6h1v1H8zM0 7h1v1H0zM8 7h1v1H8zM0 8h9v1H0z" /><path fill="#a06a34" d="M1 1h7v1H1zM1 2h1v1H1zM3 2h3v1H3zM7 2h1v1H7zM1 6h1v1H1zM3 6h3v1H3zM7 6h1v1H7zM1 7h7v1H1z" /><path fill="#6e4420" d="M2 2h1v1H2zM6 2h1v1H6zM2 6h1v1H2zM6 6h1v1H6z" /><path fill="#d8a330" d="M1 3h7v1H1zM1 4h2v1H1zM4 4h1v1H4zM6 4h2v1H6zM1 5h7v1H1z" /><path fill="#fff3a0" d="M3 4h1v1H3zM5 4h1v1H5z" /></svg><b>Pickups change your shot</b><small>Shoot the carriers and grab what falls. Going down loses it.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c08a50" d="M3 0h3v1H3zM2 1h5v1H2zM2 2h1v1H2zM4 2h1v1H4zM6 2h1v1H6z" /><path fill="#1b1410" d="M3 2h1v1H3zM5 2h1v1H5z" /><path fill="#7fe0ff" d="M0 3h1v1H0zM2 3h1v1H2zM4 3h1v1H4zM6 3h1v1H6zM8 3h1v1H8zM1 4h1v1H1zM3 4h1v1H3zM5 4h1v1H5zM7 4h1v1H7zM0 6h1v1H0zM3 6h1v1H3zM6 6h1v1H6zM0 8h2v1H0zM5 8h2v1H5z" /><path fill="#2f7fb8" d="M0 5h9v1H0zM1 6h2v1H1zM4 6h2v1H4zM7 6h2v1H7zM0 7h9v1H0zM2 8h3v1H2zM7 8h2v1H7z" /></svg><b>Duck under water</b><small data-coarse="Wading, pull the stick down to duck. Nothing hits you under.">Wading, S ducks under. Nothing hits you there.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c9c2b0" d="M2 0h5v1H2zM1 1h1v1H1zM7 1h1v1H7zM0 2h1v1H0zM8 2h1v1H8zM0 3h1v1H0zM8 3h1v1H8zM0 4h1v1H0zM8 4h1v1H8zM0 5h1v1H0zM8 5h1v1H8zM0 6h1v1H0zM8 6h1v1H8zM1 7h1v1H1zM7 7h1v1H7zM2 8h5v1H2z" /><path fill="#6f7480" d="M2 1h5v1H2zM1 2h2v1H1zM4 2h1v1H4zM6 2h2v1H6zM1 3h3v1H1zM5 3h3v1H5zM1 4h1v1H1zM7 4h1v1H7zM1 5h3v1H1zM5 5h3v1H5zM1 6h2v1H1zM4 6h1v1H4zM6 6h2v1H6zM2 7h5v1H2z" /><path fill="#d8a330" d="M3 2h1v1H3zM5 2h1v1H5zM4 3h1v1H4zM2 4h2v1H2zM5 4h2v1H5zM4 5h1v1H4zM3 6h1v1H3zM5 6h1v1H5z" /><path fill="#fff3a0" d="M4 4h1v1H4z" /></svg><b>Beat each boss</b><small>Every stage ends on one. Break what guards it, then shoot it down.</small></li>
+        </ul>
+        <div class="raid-start" id="raid-start" hidden>
+          <button type="button" class="raid-start-step" data-action="raid-start-prev" aria-label="Earlier stage">&lsaquo;</button>
+          <p class="raid-start-pick"><span>Start at</span><b id="raid-start-name">Stage 1</b></p>
+          <button type="button" class="raid-start-step" data-action="raid-start-next" aria-label="Later stage">&rsaquo;</button>
+          <p class="help raid-start-help" data-coarse="Tap an arrow for another stage." data-pad="D-pad up and down change the stage.">Up and down change the stage.</p>
+        </div>
+        <div class="actions raid-players" role="group" aria-label="Players">
+          <button type="button" id="raid-1p" data-action="raid-1p" aria-pressed="true">1 Player</button>
+          <button type="button" id="raid-2p" data-action="raid-2p" aria-pressed="false">2 Players</button>
+        </div>
+        <p class="help raid-players-help" data-coarse="Player 2 plays on a keyboard or gamepad." data-pad="Pads: d-pad marks 1 or 2 players, A or Start plays.&#10;X or B fires.">1 or 2 picks the players.&#10;Player 2: arrows run and aim, comma jumps, full stop fires.</p>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Raid!</button>
+          <button type="button" data-action="leave">Exit Game</button>
+        </div>
+      </section>
+      <section class="race-results raid-secrets" id="raid-secrets" hidden aria-label="Shaman's Secrets">
+        <p class="game-intro-kicker">Carved under the island</p>
+        <h2><span data-sign>Shaman's Secrets</span></h2>
+        <ul class="raid-secret-list" role="group" aria-label="Secrets">
+          <li><button type="button" class="raid-secret" data-action="raid-secret:lives" data-secret="lives" aria-pressed="false" data-name="30 lives" data-note="Every Ooga starts with thirty."><b>30 lives</b><small>Every Ooga starts with thirty.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:continues" data-secret="continues" aria-pressed="false" data-name="Endless continues" data-note="Game over never runs out."><b>Endless continues</b><small>Game over never runs out.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:spread" data-secret="spread" aria-pressed="false" data-name="Start with spread" data-note="The fan shot from every drop-in."><b>Start with spread</b><small>The fan shot from every drop-in.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:rapid" data-secret="rapid" aria-pressed="false" data-name="Always rapid" data-note="Rapid fire that never goes."><b>Always rapid</b><small>Rapid fire that never goes.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:slow" data-secret="slow" aria-pressed="false" data-name="Slow bullets" data-note="The Legion's shots at half speed."><b>Slow bullets</b><small>The Legion's shots at half speed.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:barrier" data-secret="barrier" aria-pressed="false" data-name="Everlasting barrier" data-note="The barrier never wears off."><b>Everlasting barrier</b><small>The barrier never wears off.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:heads" data-secret="heads" aria-pressed="false" data-name="Big heads" data-note="Oogas with heads twice the size."><b>Big heads</b><small>Oogas with heads twice the size.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:peels" data-secret="peels" aria-pressed="false" data-name="Banana peels" data-note="Your shots fly as banana peels."><b>Banana peels</b><small>Your shots fly as banana peels.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:stages" data-secret="stages" aria-pressed="false" data-name="Stage select" data-note="Pick the stage on the title card." data-locked-note="Clear stage 4 to learn it."><b>Stage select</b><small>Pick the stage on the title card.</small><i>Off</i></button></li>
+          <li><button type="button" class="raid-secret" data-action="raid-secret:mirror" data-secret="mirror" aria-pressed="false" data-name="Mirror mode" data-note="The raid flipped left to right." data-locked-note="Finish the loop to learn it."><b>Mirror mode</b><small>The raid flipped left to right.</small><i>Off</i></button></li>
+        </ul>
+        <p class="help raid-secrets-help" data-coarse="Tap a secret to turn it on or off.&#10;Secrets that ease the raid cost the best and tickets." data-pad="D-pad picks, A turns on or off, B closes.&#10;Secrets that ease the raid cost the best and tickets.">Up and down pick, Enter turns on or off, Escape closes.&#10;Secrets that ease the raid cost the best and tickets.</p>
+        <div class="actions">
+          <button type="button" data-action="raid-secrets-close">Done</button>
+        </div>
+      </section>
+      <section class="race-results raid-results" id="raid-results" hidden aria-label="Raid results">
+        <h2><span data-sign id="raid-results-sign">Raid over</span></h2>
+        <ol class="race-podium drop-rows" id="raid-rows"></ol>
+        <p class="help" id="raid-summary"></p>
+        <div class="actions">
+          <button type="button" data-action="raid-again">Again</button>
+          <button type="button" data-action="leave">Exit Game</button>
+        </div>
+      </section>
+    </div>
     <div class="race arcade-ui" id="arcade-ui" data-scene="arcade" hidden>
       <section class="race-results prize-panel" id="prize-panel" hidden aria-label="Prize counter">
         <h2><span data-sign>Prize counter</span></h2>
@@ -1017,12 +1510,12 @@
       </section>
       <section class="race-results game-intro" id="hockey-intro" data-intro="hockey" hidden aria-label="Air Hockey">
         <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
-        <p class="game-intro-kicker">Whack it past other Ooga!</p>
+        <p class="game-intro-kicker">A live table in Ooga Arcade</p>
         <h2 class="game-intro-title"><span data-sign>Air Hockey</span></h2>
         <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#efe6d2" d="M5 1h6v1H5zM3 2h2v1H3zM11 2h2v1H11zM2 3h1v2H2zM13 3h1v2H13zM1 5h1v6H1zM14 5h1v6H14zM2 11h1v2H2zM13 11h1v2H13zM3 13h2v1H3zM11 13h2v1H11zM5 14h6v1H5z" /><path fill="#c8583a" d="M6 4h4v1H6zM4 5h2v1H4zM10 5h2v1H10zM4 6h1v4H4zM11 6h1v4H11zM4 10h2v1H4zM10 10h2v1H10zM6 11h4v1H6z" /><path fill="#d9a53a" d="M7 6h2v1H7zM6 7h4v2H6zM7 9h2v1H7z" /></svg>
-        <p class="game-intro-goal">First to <b>7</b> goals, or ahead when the sand runs out.</p>
+        <p class="game-intro-goal">First to <b>7</b> goals. One goal, one point.</p>
         <ul class="game-rules">
-          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M0 4h9v1H0zM1 3h1v3H1zM7 3h1v3H7z" /></svg><b>Slide your mallet</b><small>Drag, or arrows and A D</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff5a1f" d="M4 0h1v1H4zM3 1h2v2H3zM2 3h5v5H2zM6 2h1v1H6z" /><path fill="#ffd23a" d="M3 5h3v3H3zM4 4h1v1H4z" /></svg><b>Smash in the green</b><small>A power smash sets it on fire</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M0 0h9v1H0z" /><path fill="#d9a53a" d="M1 6h1v2H1zM2 4h1v2H2zM3 2h1v2H3zM4 1h1v1H4zM5 2h1v2H5zM6 4h1v2H6z" /><path fill="#f3efe4" d="M7 6h2v2H7z" /></svg><b>Bank it off a rail</b><small>+5 a goal, on fire +5 more</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3a3530" d="M2 2h5v5H2zM1 1h2v2H1zM6 1h2v2H6z" /><path fill="#8a7a6a" d="M3 4h3v2H3z" /></svg><b>Three Oogas</b><small>Wall, then Basher, then Wild</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M4 0h1v2H4zM3 2h3v1H3zM0 3h9v1H0zM1 4h7v1H1zM2 5h5v1H2zM1 6h3v2H1zM5 6h3v2H5z" /></svg><b>Win big</b><small>A shutout scores most</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M0 2h9v5H0z" /><path fill="#efe6d2" d="M1 3h1v1H1zM1 5h1v1H1zM3 3h5v3H3z" /><path fill="#c8583a" d="M4 4h3v1H4z" /></svg><b>Win tickets</b><small>Trade them for prizes. Ooga rich!</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M0 4h9v1H0zM1 3h1v3H1zM7 3h1v3H7z" /></svg><b>Slide your mallet</b><small>Mouse or drag in two-player games</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff5a1f" d="M4 0h1v1H4zM3 1h2v2H3zM2 3h5v5H2zM6 2h1v1H6z" /><path fill="#ffd23a" d="M3 5h3v3H3zM4 4h1v1H4z" /></svg><b>Hit with your mallet</b><small>Two players: faster strikes, faster puck</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M0 0h9v1H0z" /><path fill="#d9a53a" d="M1 6h1v2H1zM2 4h1v2H2zM3 2h1v2H3zM4 1h1v1H4zM5 2h1v2H5zM6 4h1v2H6z" /><path fill="#f3efe4" d="M7 6h2v2H7z" /></svg><b>Bank it off a rail</b><small>Every goal is worth one point</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3a3530" d="M2 2h5v5H2zM1 1h2v2H1zM6 1h2v2H6z" /><path fill="#8a7a6a" d="M3 4h3v2H3z" /></svg><b>Solo or two players</b><small>Signed-in solo: face a Clanker</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M4 0h1v2H4zM3 2h3v1H3zM0 3h9v1H0zM1 4h7v1H1zM2 5h5v1H2zM1 6h3v2H1zM5 6h3v2H5z" /></svg><b>Shared table</b><small>No time limit. Leaving ends the match.</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M0 2h9v5H0z" /><path fill="#efe6d2" d="M1 3h1v1H1zM1 5h1v1H1zM3 3h5v3H3z" /><path fill="#c8583a" d="M4 4h3v1H4z" /></svg><b>Win tickets</b><small>Trade them for prizes. Ooga rich!</small></li>
         </ul>
         <div class="actions">
           <button type="button" class="game-intro-go" data-action="intro-go">Face off!</button>
@@ -1512,16 +2005,17 @@
       <section class="poker-focus" data-poker="focus" hidden aria-label="Poker table">
         <header class="poker-table-head">
           <div><p class="poker-kicker">THE EMBER DEN <span aria-hidden="true">/</span> <span data-poker="theme-name">THE BANANA CLUB</span></p><div class="poker-table-title"><h3 data-poker="title" tabindex="-1">Table 01</h3><span class="poker-mode-badge" data-poker="mode-badge">PRACTICE</span></div><p data-poker="status">No-limit Hold’em · blinds 5 / 10</p></div>
-          <div class="poker-table-tools"><span class="poker-free">FREE PLAY</span><label class="poker-table-switch">Table <select data-poker="table-select" aria-label="Watch another table"></select></label><button type="button" data-poker-action="walk">Walk the floor</button></div>
+          <div class="poker-table-tools"><span class="poker-free">FREE PLAY</span><label class="poker-table-switch">Table <select data-poker="table-select" aria-label="Watch another table"></select></label><button class="poker-emote-button" type="button" data-poker="emote" aria-expanded="false" hidden>Emote</button><button type="button" data-poker-action="walk">Walk the floor</button><div class="poker-emote-menu" data-poker="emote-menu" role="group" aria-label="Emotes" hidden></div></div>
         </header>
-        <div class="poker-status-strip"><span class="poker-connection" data-poker="connection">Practice · on your device</span><span data-poker="voice-label">Table voice</span><span class="poker-timer" data-poker="countdown" aria-label="Hand timing"></span><button type="button" data-poker="reconnect" data-poker-action="reconnect" hidden>Reconnect</button></div>
+        <div class="poker-status-strip"><span class="poker-connection" data-poker="connection">Practice · on your device</span><span data-poker="voice-label">Table voice</span><span class="poker-timer" data-poker="countdown" aria-label="Hand timing"></span><button type="button" data-poker="reconnect" data-poker-action="reconnect" hidden>Reconnect</button><button class="poker-emote-button" type="button" data-poker="emote" aria-expanded="false" hidden>Emote</button></div>
         <div class="poker-table-layout">
           <div class="poker-play">
             <div class="poker-arena" aria-label="Nine-seat poker table">
               <div class="poker-felt" aria-hidden="true"></div>
               <div class="poker-center">
-                <div class="poker-dealer" aria-label="Suited gorilla dealer"><svg viewBox="0 0 80 80" aria-hidden="true"><path fill="#161f20" d="M6 78V62Q9 49 29 49H51Q71 49 74 62V78Z"/><path fill="#faf0d1" d="M28 49H52L44 78H36Z"/><path fill="#cda75d" d="M35 53L40 57L45 53L43 50H37ZM38 58H42L45 70L40 75L35 70Z"/><path fill="#394542" d="M27 49L15 60L26 62L23 67L36 78ZM53 49L65 60L54 62L57 67L44 78Z"/><path fill="#27332e" d="M17 20L22 10L32 4H48L58 10L63 20V41L53 51H27L17 41Z"/><path fill="#898b73" d="M23 20L32 17L40 21L48 17L57 20V32L60 38L52 46H28L20 38L23 32Z"/><path fill="#18251e" d="M25 23H36V28H25ZM44 23H55V28H44ZM34 31H46L48 36H32ZM30 40H50V42H30Z"/><path fill="#d9bc7b" d="M27 24H30V26H27ZM47 24H50V26H47Z"/></svg><span>THE HOUSE GORILLA</span></div>
+                <div class="poker-dealer" aria-label="Suited gorilla dealer"><canvas class="poker-dealer-face" data-poker="dealer-face" width="144" height="144" aria-hidden="true"></canvas><svg viewBox="0 0 80 80" aria-hidden="true"><path fill="#161f20" d="M6 78V62Q9 49 29 49H51Q71 49 74 62V78Z"/><path fill="#faf0d1" d="M28 49H52L44 78H36Z"/><path fill="#cda75d" d="M35 53L40 57L45 53L43 50H37ZM38 58H42L45 70L40 75L35 70Z"/><path fill="#394542" d="M27 49L15 60L26 62L23 67L36 78ZM53 49L65 60L54 62L57 67L44 78Z"/></svg><span>THE HOUSE GORILLA</span></div>
                 <p class="poker-pot"><span data-poker="pot-label">TOTAL POT</span><strong data-poker="pot">0</strong><small>banana chips</small></p>
+                <div class="poker-pot-chips" data-poker="pot-chips" aria-hidden="true"></div>
                 <div class="poker-board" data-poker="board" aria-label="Community cards"></div>
                 <p class="poker-street" data-poker="street"></p>
               </div>
@@ -1575,41 +2069,133 @@
           <li><b>Walk and watch</b><small data-coarse="Move with the sticks; tap a table to watch.">WASD and drag to explore; click a table to watch.</small></li>
           <li><b>Local or live</b><small>Local practice with computer opponents. Live poker when connected to the poker service.</small></li>
         </ul>
-        <button type="button" class="game-intro-go" data-action="intro-go">Enter The Ember Den</button>
-        <button type="button" data-action="leave">Exit Game</button>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Enter The Ember Den</button>
+          <button type="button" data-action="leave">Exit Game</button>
+        </div>
       </section>
     </div>
-    <dialog class="modal donation-popup" id="donation-popup" aria-labelledby="donation-title">
+    <!-- The donation dialog (#donation-popup) is built here by donation-popup.js, shared with Ooga Chat. -->
+    <div id="factory-donation-fields" hidden></div>
+    <!-- Continues Holo-Elfstone's native controls dialog from PR #57. -->
+    <dialog class="modal controls-help" id="controls-help" tabindex="-1" aria-labelledby="controls-help-title" aria-describedby="controls-help-note">
       <div class="panel-head">
-        <h2 id="donation-title"><span data-sign>Feed the Ooga Boogas</span></h2>
-        <button type="button" class="modal-close" id="donation-close" aria-label="Close donation">&times;</button>
+        <h2 id="controls-help-title">Controls</h2>
+        <button type="button" class="modal-close" id="controls-help-close" aria-label="Close controls">&times;</button>
       </div>
-      <canvas id="donation-screen" width="400" height="400" tabindex="0" aria-label="Donation screen. Type an amount, press Enter to continue, A for your name and message. In the name field, the arrow shows previous names; Down Arrow previews a suggestion, Tab or Enter accepts it, and Escape cancels it. O for on-chain, C to copy, and Escape to go back."></canvas>
-      <div id="donation-fields">
-        <label class="field"><span>Donation handle</span><input id="donation-handle" type="text" maxlength="39" tabindex="-1" autocomplete="off" spellcheck="false" placeholder="anon"></label>
-        <label class="field"><span id="donation-message-label">Banana message (up to 280 characters)</span><input id="donation-message" type="text" maxlength="280" tabindex="-1" autocomplete="off" placeholder="Optional message"></label>
-        <div class="donation-details-actions">
-          <span id="donation-details-status" role="status"></span>
+      <div class="slab controls-help-about">
+        <p id="controls-help-context"></p>
+        <p id="controls-help-note">Try the keys here. Your character stays still while this panel is open.</p>
+      </div>
+      <button type="button" class="controls-help-pad" id="controls-help-pad">Controller settings</button>
+      <div class="controls-list" id="controls-help-list"></div>
+    </dialog>
+    <dialog class="modal destination-map" id="destination-map" aria-labelledby="destination-map-title">
+      <div class="panel-head"><h2 id="destination-map-title">Explore the island</h2><button type="button" class="modal-close" id="destination-map-close" aria-label="Close map">&times;</button></div>
+      <p class="destination-map-mode" id="destination-map-mode"></p>
+      <div class="destination-map-tools">
+        <div class="destination-map-tabs" role="group" aria-label="Map display"><button type="button" id="destination-show-map" aria-pressed="true">Map</button><button type="button" id="destination-show-list" aria-pressed="false">List</button></div>
+        <div id="destination-map-layers" role="group" aria-label="Destination floor"><button type="button" data-map-layer="all" aria-pressed="true">All</button><button type="button" data-map-layer="surface" aria-pressed="false">Surface</button><button type="button" data-map-layer="hq" aria-pressed="false">HQ</button><button type="button" data-map-layer="basement" aria-pressed="false">Basement</button></div>
+      </div>
+      <div class="destination-map-layout">
+        <section class="destination-map-survey" aria-label="World map">
+          <div class="destination-atlas" id="destination-atlas">
+            <canvas id="destination-atlas-ground" width="720" height="600" aria-hidden="true"></canvas>
+            <svg id="destination-atlas-overlay" viewBox="0 0 720 600" aria-hidden="true"></svg>
+            <div id="destination-atlas-pins" role="group" aria-label="Preview a zone on the map"></div>
+          </div>
+          <div class="slab destination-map-legend">
+            <p class="destination-map-key"><span id="destination-map-origin">◉ Your position</span><span>◎ Selected zone</span><span>North up · Landmark numbers match the list</span></p>
+            <p class="destination-map-mapnote" id="destination-map-mapnote"></p>
+          </div>
+        </section>
+        <div id="destination-map-list" aria-label="All destinations"></div>
+      </div>
+      <div class="destination-map-preview">
+        <div><p class="destination-map-eyebrow" id="destination-map-phase">SELECT A ZONE</p><h3 id="destination-map-selection">Where next?</h3><p id="destination-map-detail">Choose a numbered place on the map or in the list.</p></div>
+        <div class="destination-map-actions"><button type="button" id="destination-map-guide" disabled>Guide me there</button><button type="button" id="destination-map-go" disabled>Choose a zone</button></div>
+      </div>
+      <p class="help" id="destination-map-status" role="status" aria-live="polite" aria-atomic="true"></p>
+    </dialog>
+    <div id="destination-map-effect" aria-hidden="true" hidden></div>
+    <aside id="destination-map-receipt" class="destination-map-receipt" role="status" aria-live="polite" aria-atomic="true" hidden></aside>
+    <button type="button" id="destination-return" hidden>Return to my Ooga</button>
+    <aside id="destination-waypoint" aria-label="Walking directions" hidden><span id="destination-waypoint-arrow" aria-hidden="true">↑</span><span id="destination-waypoint-text"></span><button type="button" id="destination-waypoint-stop" aria-label="Stop walking directions">×</button></aside>
+    <dialog class="modal pad-settings" id="pad-settings" aria-labelledby="pad-settings-title">
+      <div class="panel-head">
+        <h2 id="pad-settings-title">Controller</h2>
+        <div class="pad-device"><span class="pad-dot" id="pad-device-dot"></span><span><b id="pad-device-name">No controller yet</b> <small id="pad-device-sub">Press any button on your controller</small></span></div>
+        <button type="button" class="modal-close" id="pad-close" aria-label="Close controller settings">&times;</button>
+      </div>
+      <div class="pad-family" role="group" aria-label="Show buttons as">
+        <span class="pad-label">Buttons</span>
+        <button type="button" data-family="">Auto</button>
+        <button type="button" data-family="xbox">Xbox</button>
+        <button type="button" data-family="playstation">PlayStation</button>
+        <button type="button" data-family="nintendo">Switch</button>
+        <button type="button" data-family="stadia">Stadia</button>
+        <button type="button" data-family="generic">Other</button>
+      </div>
+      <div class="pad-setup" id="pad-setup" hidden>
+        <h3 class="section-head">Set up this controller</h3>
+        <div class="pad-setup-step" id="pad-setup-step"></div>
+        <div class="pad-setup-bar"><i id="pad-setup-bar"></i></div>
+        <p class="pad-note">Press the highlighted input. Hold nothing else. Skip anything your controller doesn't have.</p>
+        <div class="pad-buttons"><button type="button" id="pad-setup-skip">Skip this one</button><button type="button" id="pad-setup-cancel">Cancel setup</button></div>
+      </div>
+      <div class="pad-main">
+        <div class="pad-picture">
+          <svg id="pad-diagram" viewBox="0 0 400 270" role="img" aria-label="Controller diagram"></svg>
+          <p class="pad-hint" id="pad-hint" aria-live="polite"></p>
+        </div>
+        <div>
+          <div class="pad-tabs" role="tablist" id="pad-tabs" aria-label="Where the buttons apply"></div>
+          <div class="pad-list" id="pad-list"></div>
         </div>
       </div>
-      <p class="help">Pay with Lightning or on-chain. Your bananas arrive from the Factory when the payment confirms.</p>
+      <div class="pad-tune">
+        <h3 class="section-head">Feel</h3>
+        <div class="pad-field"><label for="pad-dead">Stick dead zone <output id="pad-dead-out"></output></label><input type="range" id="pad-dead" min="5" max="35" step="1"><span class="pad-note">Raise it if your Ooga creeps while you aren't touching the stick. The dotted ring on the picture shows it.</span></div>
+        <div class="pad-field"><label for="pad-look">Look speed <output id="pad-look-out"></output></label><input type="range" id="pad-look" min="25" max="250" step="5"></div>
+        <div class="pad-field"><span class="pad-label">Run</span><div class="pad-seg" role="group" aria-label="Run"><button type="button" data-feel="runHold" data-value="true">Hold</button><button type="button" data-feel="runHold" data-value="false">Click until you stop</button></div></div>
+        <div class="pad-field"><span class="pad-label">Aim down sights</span><div class="pad-seg" role="group" aria-label="Aim down sights"><button type="button" data-feel="aimToggle" data-value="false">Hold</button><button type="button" data-feel="aimToggle" data-value="true">Toggle</button></div></div>
+        <div class="pad-field">
+          <label class="pad-check"><input type="checkbox" id="pad-invertY"> Invert look up and down (Y)</label>
+          <label class="pad-check"><input type="checkbox" id="pad-invertX"> Invert look left and right (X)</label>
+          <label class="pad-check"><input type="checkbox" id="pad-swap"> Swap sticks (left-handed)</label>
+        </div>
+        <div class="pad-field"><label for="pad-rumble">Vibration <output id="pad-rumble-out"></output></label><input type="range" id="pad-rumble" min="0" max="100" step="5"><button type="button" class="pad-small" id="pad-rumble-test">Feel it</button></div>
+      </div>
+      <div class="pad-foot">
+        <p class="pad-note">View and Menu together open this screen from anywhere. Your choices stay on this browser.</p>
+        <div class="pad-buttons">
+          <button type="button" id="pad-setup-open" hidden>Set up this controller</button>
+          <button type="button" id="pad-reset">Reset this tab</button>
+          <button type="button" class="primary" id="pad-done">Done</button>
+        </div>
+      </div>
+      <div class="pad-toast" id="pad-toast" role="status" hidden><span id="pad-toast-text"></span><button type="button" id="pad-toast-undo">Undo</button></div>
     </dialog>
-    <div id="factory-donation-fields" hidden></div>
     <dialog class="modal" id="recipe" aria-label="Add an Ooga">
       <div class="panel-head">
         <h2><span data-sign>Add an Ooga</span></h2>
         <button type="button" class="modal-close" data-action="recipe-close" aria-label="Close">&times;</button>
       </div>
-      <p class="help">2140data hands you the prompt. Paste it to your coding agent.</p>
-      <pre class="recipe" id="recipe-text">Add an Ooga to Ooga Booga Land. Create one new file, src/characters/&lt;handle&gt;.js, and change nothing else.
+      <p class="help" id="recipe-note" hidden>Signing in needs an Ooga of your own, and the island has none for this GitHub account yet. A new Ooga arrives once it is merged and the island next deploys. Here is how to make one.</p>
+      <p class="help">2140data hands you the prompt. Paste it to an AI coding agent on your computer: it signs you in with GitHub, asks what you want, and shows you your Ooga as it builds it. Once your Ooga is on the island, the sign-in button at the top right hands it to you.</p>
+      <pre class="recipe" id="recipe-text">Make me a character in Ooga Booga Land. Read docs/make-your-ooga.md in https://github.com/OogaBoogaX/oogaboogaland first, and follow it in order.
 
-It is a plain IIFE (const BL = window.BL;) calling BL.characters.add({ handle, joined, lastCommit, github, display, look, voice, dress }). joined and lastCommit are Unix seconds; joined orders the roster.
+Get me set up first: check I have a GitHub account, sign me in on this computer with gh (I will approve it in my browser), fork the repository, and make the clone's commits mine with my GitHub no-reply address. Ask me before installing anything or opening my browser.
 
-look overrides the hashed skin, hair, fur and height and carries the flags build:"slim", bald, hairless, cleanShaven, noBrow, wideEyes, noPupils, face:"nose"|"smirk"|"beard"|"none", eyeColor with eyeGlow, and hatY in sixteenths of height. voice is { poke, idle: [...] }.
+Open the character studio (npm run character:studio -- &lt;my GitHub login&gt;) and keep it open, so I can watch my Ooga while you work: it shows it standing, sitting, in bed and in a hammock, and reloads as you save.
 
-dress hooks build the voxels, each called with the kit k (h, u, rand, P, color(hex), jit, vg, root, parts, eyeCells): torso(k, v), club(k), gear(k), skull(k, v), crown(k, v), eyes(k, v), mark(k, v), hatY(k), headgear(k), extras(k). The head is a 7x6x6 block with the eyes at z=5 and the brow at y=4. Keep accessory builders and their caches in the file, and draw from k.rand in build order.
+Do not write the file yet. Ask me for a picture or two to work from, then interview me, a few questions at a time: a male or a female Ooga; my skin, hair and fur colours; my face and eyes; what I wear; what I hold; whether I have a pet; what I say. Then sort my wishes into three lists and tell me before you build: plain data (it merges on its own the next day), custom code (a maintainer reviews it, which can take days), and what a character file cannot do (it needs a change to the game). Offer the nearest plain-data choice for anything that does not fit, and wait for my yes.
 
-Then run npm run build and ONLY=characters node test/run.mjs.</pre>
+Build it in one file, src/characters/&lt;my GitHub login&gt;.js, and change nothing else. After each round take my notes one at a time. Before the pull request, run npm run character:check, npm run build and npm run test:unit, and ask me before pushing.
+
+Open the pull request from my fork as a draft and keep it draft while building or debugging. Mark it ready for review only when the work and authorized checks are complete and its description records validation and any remaining acceptance work. Return it to draft for substantial new work. While it is draft, push each round I approve; once it is ready, batch related fixes before pushing.
+
+When it is sent, tell me what happens next and when I can sign in at oogabooga.land.</pre>
       <div class="actions recipe-actions">
         <button type="button" data-action="recipe-copy">Copy prompt</button>
       </div>
@@ -1620,8 +2206,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <button type="button" class="chalk-close" id="chalk-close" aria-label="Leave chalkboard">&times;</button>
       </div>
       <div class="chalk-frame" id="chalk-frame">
-        <canvas id="chalk-canvas" width="800" height="500" aria-label="Chalkboard drawing surface"></canvas>
-        <div class="chalk-pointer" id="chalk-pointer" aria-hidden="true"><span class="chalk-held"></span></div>
+        <canvas id="chalk-canvas" width="1200" height="750" aria-label="Chalkboard drawing surface"></canvas>
+        <div class="chalk-pointer" id="chalk-pointer" aria-hidden="true"><span class="chalk-held" id="chalk-held"></span></div>
         <div class="chalk-caret" id="chalk-caret" aria-hidden="true" hidden></div>
         <textarea class="chalk-type-input" id="chalk-type-input" aria-label="Type on chalkboard" autocomplete="off" autocapitalize="off" spellcheck="false" tabindex="-1"></textarea>
       </div>
@@ -1667,6 +2253,52 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
       <p class="help" id="board-help"></p>
       <button type="button" class="board-resize" id="board-resize" aria-label="Resize Oogatron window; arrow keys adjust size" hidden></button>
     </dialog>
+    <dialog class="modal model-modal" id="model-modal" aria-labelledby="model-title">
+      <div class="panel-head">
+        <h2><span data-sign id="model-title">Up close</span></h2>
+        <button type="button" class="modal-close" id="model-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="model-body">
+        <div class="model-view">
+          <canvas class="model-canvas" id="model-canvas" tabindex="0" aria-label="The model, in 3D"></canvas>
+          <div class="board-nav">
+            <button type="button" class="board-page" id="model-prev" aria-label="Previous"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3"><path d="M15 6L9 12L15 18"/></svg></button>
+            <b class="board-caption" id="model-count">1 / 1</b>
+            <button type="button" class="board-page" id="model-next" aria-label="Next"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 6L15 12L9 18"/></svg></button>
+          </div>
+          <p class="help" id="model-help"></p>
+        </div>
+        <div class="model-info">
+          <p class="model-kicker" id="model-kicker"></p>
+          <h3 class="model-name" id="model-name"></h3>
+          <p class="model-text" id="model-text"></p>
+          <dl class="model-stats" id="model-stats"></dl>
+          <p class="board-note" id="model-note" hidden></p>
+          <div class="board-links" id="model-links" hidden></div>
+        </div>
+      </div>
+    </dialog>
+    <aside class="genesis-portal" id="genesis-portal" aria-label="Proof of Knowledge" hidden>
+      <div class="gp-head"><span class="gp-kicker">MINING MUSEUM · PROOF OF KNOWLEDGE</span><button type="button" class="gp-x" data-action="genesis-portal-close" aria-label="Hide">&times;</button></div>
+      <div class="gp-body" id="genesis-portal-body"></div>
+    </aside>
+    <dialog class="wp-reader" id="wp-reader" aria-label="The Bitcoin whitepaper">
+      <div class="wpr-panel">
+        <div class="wpr-view" id="wp-reader-view" tabindex="0" aria-label="The pages: drag, swipe or scroll to read"><img class="wpr-strip" id="wp-reader-strip" alt="The whitepaper's nine pages, one below the other" draggable="false"><i class="wpr-thumb" id="wp-reader-thumb"></i></div>
+        <button type="button" class="wpr-close" data-action="reader-close" aria-label="Close the reader">&times;</button>
+      </div>
+      <div class="wpr-foot"><button type="button" class="wpr-about" id="wp-reader-about">ABOUT THIS PAPER</button><b class="wpr-page" id="wp-reader-page">PAGE 1 / 9</b><span class="wpr-credit">Source: bitcoin.org · MIT licence · <a class="wpr-site" href="https://bitcoin.org/en/bitcoin-paper" target="_blank" rel="noopener noreferrer">Read it on bitcoin.org</a></span></div>
+    </dialog>
+    <dialog class="modal" id="sphere-exit" aria-labelledby="sphere-exit-title" aria-describedby="sphere-exit-note">
+      <div class="panel-head">
+        <h2 id="sphere-exit-title">Leave this room?</h2>
+      </div>
+      <p class="help" id="sphere-exit-note">Your Ooga walks back out through the doors to the Timechain Sphere's bridge.</p>
+      <div class="actions">
+        <button type="button" data-sphere-exit="stay">Stay</button>
+        <button type="button" data-sphere-exit="leave" autofocus>Leave</button>
+      </div>
+    </dialog>
     <dialog class="modal" id="ooga-portal-menu" aria-labelledby="ooga-portal-title" aria-describedby="ooga-portal-status">
       <div class="panel-head">
         <h2 id="ooga-portal-title">OOGA PORTAL DIALER</h2>
@@ -1679,18 +2311,38 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
       <button type="button" class="act" id="act" data-action="act" hidden>JUMP!</button>
       <div class="message-stack" id="message-stack">
         <output class="toast" id="reload-notice" data-reload="true" hidden></output>
+        <output class="toast show" id="diagnostics-notice" data-diagnostics="true" role="status" aria-live="polite" hidden></output>
         <output class="toast" id="toast" hidden></output>
         <div class="hint" id="hint" hidden></div>
       </div>
-      <!-- Reading the whitepaper's poster (scene-hub.js shows it): the help line, or, on a touch screen, its buttons. -->
-      <div class="wp-nav" id="wp-nav" hidden>
-        <span class="wp-nav-help" id="wp-nav-help"></span>
-        <button type="button" class="wp-nav-step" data-action="wp-next" aria-label="Next page">&#9660;</button>
-        <button type="button" class="wp-nav-step" data-action="wp-prev" aria-label="Previous page">&#9650;</button>
-        <button type="button" class="wp-nav-step" data-action="wp-close" aria-label="Close the whitepaper">&#10005;</button>
-      </div>
     </div>
     <output class="mic-note" id="mic-note" data-muted="false" hidden></output>
+    <!-- Duels on the island (duel.js shows and hides these; the hub alone creates it). -->
+    <div class="duel-target" id="duel-target" role="group" aria-label="Target" hidden>
+      <span class="duel-target-name"></span>
+      <button type="button" class="duel-button" data-duel="challenge">Duel</button>
+      <button type="button" class="duel-close" data-duel="clear" aria-label="Clear target" title="Clear target">×</button>
+    </div>
+    <div class="duel-invite" id="duel-invite" role="alertdialog" aria-label="Duel challenge" hidden>
+      <p class="duel-invite-text"></p>
+      <button type="button" class="duel-button" data-duel="accept">Accept</button>
+      <button type="button" class="duel-button duel-decline" data-duel="decline">Decline</button>
+    </div>
+    <div class="duel-hud" id="duel-hud" role="group" aria-label="Duel" hidden>
+      <div class="duel-head"><span class="duel-title">Duel</span><span class="duel-clock"></span></div>
+      <div class="duel-rows">
+        <div class="duel-side"><span class="duel-name"></span><span class="duel-bar"><span class="duel-chip"></span><span class="duel-fill"></span></span><span class="duel-hp"></span><span class="duel-far"></span></div>
+        <div class="duel-side duel-them"><span class="duel-name"></span><span class="duel-bar"><span class="duel-chip"></span><span class="duel-fill"></span></span><span class="duel-hp"></span><span class="duel-far"></span></div>
+      </div>
+      <p class="duel-note" role="alert" hidden></p>
+      <button type="button" class="duel-yield" data-duel="yield">Yield</button>
+    </div>
+    <div class="duel-flash" id="duel-flash" aria-hidden="true" hidden></div>
+    <p class="duel-count" id="duel-count" role="status" hidden></p>
+    <div class="duel-result" id="duel-result" role="status" hidden>
+      <strong class="duel-result-title"></strong>
+      <span class="duel-result-line"></span>
+    </div>
     <!-- HALLOWEEN: the ghost hunt's HUD (ghost-hud.js shows and hides it; no data-scene, or every arrival would show it). -->
     <ol class="ghost-scores" id="ghost-scores" aria-label="Hunters' points" hidden></ol>
     <p class="ghost-halving" id="ghost-halving" role="status" hidden>Halving · rifles at half power</p>
@@ -1729,26 +2381,50 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
     </section>
     <canvas class="ghost-minimap" id="ghost-minimap" aria-hidden="true" hidden></canvas>
     <div class="ghost-spectate" id="ghost-spectate" role="group" aria-label="Watch while you're down" hidden>
-      <span class="ghost-spectate-head">You're down · watch from</span>
-      <div class="ghost-spectate-modes">
-        <button type="button" data-spec="grave" aria-pressed="true">My view</button>
-        <button type="button" data-spec="free" aria-pressed="false">Free camera</button>
-        <button type="button" data-spec="players" aria-pressed="false">Players</button>
-      </div>
-      <div class="ghost-spectate-watch" id="ghost-spectate-watch" hidden>
+      <span class="ghost-spectate-head">You're down · watching</span>
+      <div class="ghost-spectate-watch" id="ghost-spectate-watch">
         <span class="ghost-spectate-name" id="ghost-spectate-name"></span>
         <button type="button" class="ghost-spectate-next" id="ghost-spectate-next" aria-label="Next player">Next ▶</button>
       </div>
     </div>
+    <!-- The speaker button's panel (sound-panel.js): a level for all game sounds, all players' voices and each sound this place holds. -->
+    <section class="sound-mixer" id="sound-mixer" role="dialog" aria-labelledby="sound-mixer-title" tabindex="-1" hidden>
+      <div class="sound-mixer-head">
+        <h2 id="sound-mixer-title">Sound</h2>
+        <button type="button" class="sound-mixer-toggle" id="sound-mixer-toggle" aria-pressed="true">Sound on</button>
+        <button type="button" class="sound-mixer-close" id="sound-mixer-close" aria-label="Close sound levels">&times;</button>
+      </div>
+      <div class="slab sound-mixer-slab">
+        <div id="sound-mixer-all"></div>
+        <h3 class="sound-mixer-here">Around you</h3>
+        <div id="sound-mixer-list"></div>
+        <p class="sound-mixer-empty" id="sound-mixer-empty" hidden>Nothing here has a level of its own.</p>
+      </div>
+      <div class="sound-mixer-foot">
+        <p>Saved in this browser</p>
+        <button type="button" class="sound-mixer-reset" id="sound-mixer-reset">Reset all</button>
+      </div>
+    </section>
     <section class="hangar-sound" id="hangar-sound" aria-label="Hangar sound" hidden>
       <div class="hangar-sound-head">
         <h3>Sound</h3>
         <button type="button" class="hangar-sound-toggle" id="hangar-sound-toggle" aria-pressed="true">Sound on</button>
       </div>
-      <label class="hangar-sound-row" for="hangar-volume"><span>Volume</span><input type="range" id="hangar-volume" min="0" max="100" step="5" value="100"></label>
-      <label class="hangar-sound-row" for="hangar-vibration"><span>Vibration</span><input type="range" id="hangar-vibration" min="0" max="100" step="5" value="100"></label>
+      <div class="slab hangar-sound-slab">
+        <label class="hangar-sound-row" for="hangar-volume"><span>Volume</span><input type="range" id="hangar-volume" min="0" max="100" step="5" value="100"></label>
+        <label class="hangar-sound-row" for="hangar-vibration"><span>Vibration</span><input type="range" id="hangar-vibration" min="0" max="100" step="5" value="100"></label>
+      </div>
       <p class="hangar-sound-note">Pad vibration: Chrome and Edge</p>
     </section>
+    <dialog class="hangar-keypad" id="hangar-keypad" aria-label="Door keypad" data-state="idle" tabindex="-1">
+      <div class="hangar-keypad-head">
+        <h3 id="hangar-keypad-name">Control room</h3>
+        <button type="button" class="hangar-keypad-close" id="hangar-keypad-close" aria-label="Close keypad">✕</button>
+      </div>
+      <p class="hangar-keypad-screen" id="hangar-keypad-screen" aria-live="polite">ENTER CODE</p>
+      <div class="hangar-keypad-keys"><button type="button" data-key="1">1</button><button type="button" data-key="2">2</button><button type="button" data-key="3">3</button><button type="button" data-key="4">4</button><button type="button" data-key="5">5</button><button type="button" data-key="6">6</button><button type="button" data-key="7">7</button><button type="button" data-key="8">8</button><button type="button" data-key="9">9</button><button type="button" class="hangar-keypad-go" data-key="clear" aria-label="Clear">CLR</button><button type="button" data-key="0">0</button><button type="button" class="hangar-keypad-go" data-key="enter" aria-label="Enter">ENT</button></div>
+      <p class="hangar-keypad-note" data-coarse="Tap a code, then ENT">Type a code, then Enter</p>
+    </dialog>
     <div class="ghost-player" id="ghost-player" hidden>
       <span class="ghost-player-note" aria-hidden="true">♪</span>
       <span class="ghost-player-title" id="ghost-player-title"></span>
@@ -1797,6 +2473,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
     <footer>Curated from the official homepage · checked 4 October 2026. The headquarters is in-world satire; market screens are decorative.</footer>
   </section>
   <script src="js/sound.js"></script>
+  <script src="js/room-acoustics.js"></script>
   <script src="js/math.js"></script>
   <script src="js/daylight.js"></script>
   <script src="js/scene.js"></script>
@@ -1809,6 +2486,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/icon-renderer.js"></script>
   <script src="js/canvas-renderer.js" data-defer="canvas"></script>
   <script src="js/models.js"></script>
+  <script src="js/hero-body.js"></script>
   <script src="js/blaze.js"></script>
   <script src="js/banana-icon.js"></script>
   <script src="js/convex.js"></script>
@@ -1816,14 +2494,21 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/terrain-cutaway.js"></script>
   <script src="js/lab-wallpaper.js"></script>
   <script src="js/lab-wallpaper-data.js" data-defer="lab-wallpaper"></script>
+  <script src="js/sign-glyphs.js"></script>
+  <script src="js/native-icons.js"></script>
   <script src="js/hub-models.js"></script>
+  <script src="js/sleep-beam.js"></script>
+  <script src="js/npc-status-beams.js"></script>
   <script src="js/dressing.js"></script>
+  <script src="js/hub-hammock.js"></script>
   <script src="js/dressing-mediterranean.js"></script>
+  <script src="js/chalk-board.js"></script>
   <script src="js/chalkboard.js"></script>
   <script src="js/lifehash.js"></script>
   <script src="js/contributor-identities.js"></script>
   <script src="js/activity-repos.js"></script>
   <script src="js/jumbotron-data.js"></script>
+  <script src="js/jumbotron-font.js"></script>
   <script src="js/jumbotron.js"></script>
   <script src="js/headquarters-models.js"></script>
   <script src="js/headquarters-sleep.js"></script>
@@ -1835,14 +2520,23 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/object-guides.js"></script>
   <script src="js/sight-guides.js"></script>
   <script src="js/caves.js"></script>
+  <script src="js/character-catalog-schema.js"></script>
   <script src="js/characters.js"></script>
   <script src="js/characters.gen.js"></script>
+  <script src="js/character-catalog.js"></script>
+  <script src="js/roster-panel.js"></script>
   <script src="js/contributors.js"></script>
+  <script src="js/equipment-hats.js"></script>
+  <script src="js/equipment-hats.gen.js"></script>
+  <script src="js/character-equipment.js"></script>
+  <script src="js/equipment-hat-data.gen.js"></script>
   <script src="js/donations.js"></script>
   <script src="js/donation-rate.js"></script>
   <script src="js/mempool.js"></script>
   <script src="js/oogatron-live.js"></script>
   <script src="js/totem-feed.js"></script>
+  <script src="js/repo-island-data.js"></script>
+  <script src="js/repo-feed.js"></script>
     <script src="js/chain.js"></script>
   <script src="js/weapon-targets.js"></script>
   <script src="js/interact.js"></script>
@@ -1850,27 +2544,62 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/controls.js"></script>
   <script src="js/cursor.js"></script>
   <script src="js/pilot.js"></script>
+  <script src="js/visit-spot.js"></script>
   <script src="js/rocket-parts.js"></script>
   <script src="js/mine-rigs.js"></script>
   <script src="js/highscore-rules.js"></script>
+  <script src="js/cloud-hopper-replay-codec.js"></script>
+  <script src="js/format-large.js"></script>
   <script src="js/game.js"></script>
   <script src="js/sheet.js"></script>
+  <script src="js/zone-map.js"></script>
+  <script src="js/banana-panel.js"></script>
   <script src="js/hud.js"></script>
+  <script src="js/chat-policy.js"></script>
+  <script src="js/emoji-data.js"></script>
+  <script src="js/reaction-policy.js"></script>
+  <script src="js/audience.js"></script>
+  <script src="js/voice-blend.js"></script>
+  <script src="js/outdoor-scope.js"></script>
+  <script src="js/hockey-wire.js"></script>
+  <script src="js/block-wire.js"></script>
+  <script src="js/game-wire.js"></script>
+  <script src="js/game-timeline.js"></script>
+  <script src="js/arcade-cabinets.js"></script>
+  <script src="js/arcade-popular.js"></script>
+  <script src="js/duel-rules.js"></script>
+  <script src="js/duel-listening.js"></script>
   <script src="js/net.js"></script>
+  <script src="js/equipment.js"></script>
+  <script src="js/game-net.js"></script>
   <script src="js/highscores.js"></script>
+  <script src="js/cloud-hopper-replays.js"></script>
   <script src="js/voice.js"></script>
+  <script src="js/outdoor-voice.js"></script>
+  <script src="js/voice-handoff.js"></script>
+  <script src="js/voice-switch.js"></script>
   <script src="js/studio-catalogue.js"></script>
   <script src="js/studio-session.js"></script>
+  <script src="js/commons-log.js"></script>
   <script src="js/chat.js"></script>
+  <script src="js/one-time-pad.js"></script>
+  <script src="js/private-chat.js"></script>
+  <script src="js/connection-reports.js"></script>
+  <script src="js/players.js"></script>
+  <script src="js/reaction-bar.js"></script>
+  <script src="js/reactions.js"></script>
+  <script src="js/audience-tiles.js"></script>
+  <script src="js/cloud-panel.js"></script>
   <script src="js/fx.js"></script>
   <script src="js/camera-cover.js"></script>
   <script src="js/crew.js"></script>
   <script src="js/npc-paths.js"></script>
+  <script src="js/island-layout.js"></script>
+  <script src="js/island-sim.js"></script>
   <script src="js/pile.js"></script>
   <script src="js/pile-guides.js"></script>
   <script src="js/banana-cover.js"></script>
   <script src="js/mirror-guides.js"></script>
-  <script src="js/crates.js"></script>
   <script src="js/critters.js"></script>
   <script src="js/weather.js"></script>
   <script src="js/race-models.js"></script>
@@ -1887,14 +2616,20 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/terrain-snapshot.js" data-defer="terrain-cache"></script>
   <script src="js/terrain-cache.js" data-defer="terrain-cache"></script>
   <script src="js/build-tasks.js"></script>
+  <script src="js/door-ready.js"></script>
   <script src="js/timechain-models.js"></script>
   <script src="js/timechain-gate.js"></script>
   <script src="js/solid-props.js"></script>
+  <script src="js/physics.js"></script>
   <script src="js/breakables.js"></script>
   <script src="js/agent.js"></script>
   <script src="js/remote-players.js"></script>
+  <script src="js/duel.js"></script>
   <script src="js/npc-sync.js"></script>
+  <script src="js/island-world.js"></script>
+  <script src="js/prop-sync.js"></script>
   <script src="js/footsteps.js"></script>
+  <script src="js/pet-reactions.js"></script>
   <script src="js/ooga-portal-models.js"></script>
   <script src="js/ooga-portal.js"></script>
   <script src="js/lab-phase.js"></script>
@@ -1903,18 +2638,35 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/clankers.js"></script>
   <script src="js/clanker-play.js"></script>
   <script src="js/bca-models.js"></script>
-  <script src="js/whitepaper-poster-data.js" data-defer="whitepaper"></script>
-  <script src="js/whitepaper-pages-data.js" data-defer="whitepaper"></script>
   <script src="js/arcade-models.js"></script>
-  <script src="js/cloud-hopper-course.js"></script>
-  <script src="js/cloud-hopper-models.js"></script>
-  <script src="js/cloud-hopper-art.js"></script>
-  <script src="js/cloud-hopper-hud.js"></script>
-  <script src="js/cloud-hopper-island.js"></script>
-  <script src="js/cloud-hopper-ghost.js"></script>
-  <script src="js/cloud-hopper-music.js"></script>
-  <script src="js/cloud-hopper-audio.js"></script>
-  <script src="js/cloud-hopper.js"></script>
+  <script src="js/haunt-models.js"></script>
+  <script src="js/arcade-ambience.js"></script>
+  <script src="js/hockey-session.js"></script>
+  <script src="js/hockey-players.js"></script>
+  <script src="js/grapple.js"></script>
+  <script src="js/ghost-style.js"></script>
+  <script src="js/cloud-hopper-course.js" data-defer="cloud-hopper"></script>
+  <script src="js/cloud-hopper-levels.js"></script>
+  <script src="js/cloud-hopper-models.js" data-defer="cloud-hopper"></script>
+  <script src="js/cloud-hopper-art.js" data-defer="cloud-hopper"></script>
+  <script src="js/cloud-hopper-hud.js" data-defer="cloud-hopper"></script>
+  <script src="js/cloud-hopper-island.js" data-defer="cloud-hopper"></script>
+  <script src="js/cloud-hopper-ghost.js" data-defer="cloud-hopper"></script>
+  <script src="js/cloud-hopper-music.js" data-defer="cloud-hopper"></script>
+  <script src="js/cloud-hopper-audio.js" data-defer="cloud-hopper"></script>
+  <script src="js/cloud-hopper-sky.js" data-defer="cloud-hopper"></script>
+  <script src="js/cloud-hopper-tornado.js" data-defer="cloud-hopper"></script>
+  <script src="js/cloud-hopper-gust.js" data-defer="cloud-hopper"></script>
+  <script src="js/cloud-hopper.js" data-defer="cloud-hopper"></script>
+  <script src="js/npc-ghosts.js"></script>
+  <script src="js/architect-audio.js"></script>
+  <script src="js/observatory-visitors.js"></script>
+  <script src="js/observatory-bifrost.js"></script>
+  <script src="js/observatory-timechain.js"></script>
+  <script src="js/observatory-workshops.js"></script>
+  <script src="js/observatory-detail.js"></script>
+  <script src="js/observatory-cameras.js"></script>
+  <script src="js/architect-cave.js"></script>
   <script src="js/scene-hub.js"></script>
   <script src="js/scene-lab.js"></script>
   <script src="js/factory-feed.js"></script>
@@ -1925,6 +2677,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/factory-models.js"></script>
   <script src="js/factory-scene-models.js" data-defer="factory-scene"></script>
   <script src="js/factory-window.js"></script>
+  <script src="js/arcade-doors.js"></script>
+  <script src="js/arcade-entrance.js"></script>
   <script src="js/tess.js"></script>
   <script src="js/hub-guide.js"></script>
   <script src="js/scene-deferred.js"></script>
@@ -1940,18 +2694,29 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/hangar-models.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-fire.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-terminals.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-keypad.js" data-defer="hangar-scene"></script>
   <script src="js/sis-models.js" data-defer="hangar-scene"></script>
   <script src="js/sis.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-anomaly.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-crane.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-room-fire.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-meltdown.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-shimmer.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-network.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-window.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-guide.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-audio.js" data-defer="hangar-scene"></script>
   <script src="js/scene-hangar.js" data-defer="hangar-scene"></script>
+  <script src="js/ghost-gear.js" data-defer="arcade"></script>
+  <script src="js/zipline-models.js" data-defer="arcade"></script>
+  <script src="js/zipline.js" data-defer="arcade"></script>
+  <script src="js/arcade-block-watch.js" data-defer="arcade"></script>
   <script src="js/arcade-scene-models.js" data-defer="arcade"></script>
   <script src="js/arcade-games.js" data-defer="arcade"></script>
   <script src="js/retro-games.js" data-defer="arcade"></script>
   <script src="js/scene-arcade.js" data-defer="arcade-scene"></script>
   <script src="js/carnival-audio.js" data-defer="arcade"></script>
-  <script src="js/scene-carnival.js"></script>
+  <script src="js/scene-carnival.js" data-defer="carnival-scene"></script>
   <script src="js/race-track.js" data-defer="race"></script>
   <script src="js/racers.js" data-defer="race"></script>
   <script src="js/race-items.js" data-defer="race"></script>
@@ -1962,22 +2727,58 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/drop-hud.js"></script>
   <script src="js/drop-audio.js" data-defer="drop"></script>
   <script src="js/scene-drop.js" data-defer="drop-scene"></script>
+  <!-- DSB Land's menu shell and the wallet store's picker art load with the page. -->
+  <script src="js/dsb-menu-shell.js"></script>
+  <script src="js/wallets-menu.js"></script>
+  <script src="js/block-sim.js"></script>
+  <script src="js/block-live.js"></script>
+  <script src="js/block-viewer.js" data-defer="block-viewer"></script>
+  <script src="js/block-trivia.js" data-defer="block-scene"></script>
+  <script src="js/block-models.js"></script>
+  <script src="js/block-audio.js" data-defer="block-scene"></script>
+  <script src="js/scene-block.js" data-defer="block-scene"></script>
   <script src="js/mine-models.js"></script>
   <script src="js/mine-sim.js"></script>
   <script src="js/mine-hud.js" data-defer="mine"></script>
   <script src="js/mine-audio.js" data-defer="mine"></script>
   <script src="js/mine-crew.js" data-defer="mine"></script>
   <script src="js/scene-mine.js" data-defer="mine-scene"></script>
+  <script src="js/raid-stages.js" data-defer="raid-scene"></script>
+  <script src="js/raid-enemies.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-counting.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-tower.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-treasury.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-field.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-factory.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-lake.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-pass.js" data-defer="raid-scene"></script>
+  <script src="js/raid-legion-reserve.js" data-defer="raid-scene"></script>
+  <script src="js/raid-terrain.js" data-defer="raid-scene"></script>
+  <script src="js/raid-sim.js" data-defer="raid-scene"></script>
+  <script src="js/raid-autopilot.js" data-defer="raid-scene"></script>
+  <script src="js/raid-campaign.js" data-defer="raid-scene"></script>
+  <script src="js/raid-models.js" data-defer="raid-scene"></script>
+  <script src="js/raid-art-bank.js" data-defer="raid-scene"></script>
+  <script src="js/raid-art-tower.js" data-defer="raid-scene"></script>
+  <script src="js/raid-art-field.js" data-defer="raid-scene"></script>
+  <script src="js/raid-art-factory.js" data-defer="raid-scene"></script>
+  <script src="js/raid-art-lake.js" data-defer="raid-scene"></script>
+  <script src="js/raid-art-pass.js" data-defer="raid-scene"></script>
+  <script src="js/raid-art-reserve.js" data-defer="raid-scene"></script>
+  <script src="js/raid-crew.js" data-defer="raid-scene"></script>
+  <script src="js/raid-hud.js" data-defer="raid-scene"></script>
+  <script src="js/raid-audio.js" data-defer="raid-scene"></script>
+  <script src="js/scene-raid.js" data-defer="raid-scene"></script>
   <script src="js/rocket-hud.js" data-defer="orbit"></script>
   <script src="js/rocket-audio.js" data-defer="orbit"></script>
   <script src="js/scene-orbit.js" data-defer="orbit-scene"></script>
+  <script src="js/scene-studio.js" data-defer="studio-scene"></script>
   <script src="js/dsb-coast.js" data-defer="dsb"></script>
   <script src="js/dsb-geography.js" data-defer="dsb"></script>
   <script src="js/dsb-models.js" data-defer="dsb"></script>
   <script src="js/dsb-data.js" data-defer="dsb"></script>
   <script src="js/dsb-audio-data.js"></script>
   <script src="js/dsb-audio.js" data-defer="dsb"></script>
-  <script src="js/dsb-menu-shell.js" data-defer="dsb"></script>
   <script src="js/dsb-menu-zones.js" data-defer="dsb"></script>
   <script src="js/dsb-tv.js" data-defer="dsb"></script>
   <script src="js/dsb-agent-remote.js" data-defer="dsb"></script>
@@ -2035,7 +2836,6 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/wallet-bombs.js" data-defer="dsb"></script>
   <script src="js/wallets-models.js" data-defer="dsb"></script>
   <script src="js/wallets-room.js" data-defer="dsb"></script>
-  <script src="js/wallets-menu.js" data-defer="dsb"></script>
   <script src="js/dsb-interiors.js" data-defer="dsb"></script>
   <script src="js/dsb-radio.js" data-defer="dsb"></script>
   <script src="js/dsb-noderunner.js" data-defer="dsb"></script>
@@ -2045,29 +2845,78 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/bifrost-gate.js"></script>
   <script src="js/totem-models.js"></script>
   <script src="js/totem-glow.js"></script>
+  <script src="js/repo-island-models.js"></script>
+  <script src="js/repo-island.js"></script>
   <script src="js/bifrost-isle.js"></script>
   <script src="js/bifrost-heimdall.js"></script>
   <script src="js/bifrost-window.js"></script>
+  <script src="js/cave-directory.js"></script>
+  <script src="js/bifrost-audio.js"></script>
+  <script src="js/bifrost-echo.js"></script>
   <script src="js/scene-bifrost.js"></script>
   <script src="js/scene-timechain.js"></script>
-  <script src="js/timechain-beer.js" data-defer="timechain"></script>
   <script src="js/timechain-data.js" data-defer="timechain"></script>
   <script src="js/timechain-blocks.js" data-defer="timechain"></script>
   <script src="js/timechain-charts.js" data-defer="timechain"></script>
   <script src="js/timechain-room-models.js" data-defer="timechain"></script>
+  <script src="js/model-viewer.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-planetarium.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-conference.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-temple.js" data-defer="timechain"></script>
+  <script src="js/timechain-party-radio.js" data-defer="party-radio"></script>
+  <script src="js/timechain-party-dance.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-party.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-workout.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-mining.js" data-defer="timechain"></script>
+  <script src="js/lecture-kit.js" data-defer="timechain"></script>
+  <script src="js/lecture-btc.js" data-defer="timechain"></script>
+  <script src="js/lecture-slides.js" data-defer="timechain"></script>
+  <script src="js/lecture-player.js" data-defer="timechain"></script>
+  <script src="js/lecturer.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-lecture.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-theater.js" data-defer="timechain"></script>
   <script src="js/timechain-interior.js" data-defer="timechain"></script>
+  <script src="js/whitepaper-pages.js" data-defer="timechain-genesis"></script>
+  <script src="js/timechain-genesis-first.js" data-defer="timechain-genesis"></script>
+  <script src="js/timechain-genesis-map.js" data-defer="timechain-genesis"></script>
+  <script src="js/timechain-genesis-models.js" data-defer="timechain-genesis"></script>
+  <script src="js/timechain-room-genesis.js" data-defer="timechain-genesis"></script>
+  <script src="js/lecture-btc-01.js" data-defer="lecture-btc-a"></script>
+  <script src="js/lecture-btc-01.timing.js" data-defer="lecture-btc-a"></script>
+  <script src="js/lecture-btc-02.js" data-defer="lecture-btc-b"></script>
+  <script src="js/lecture-btc-03.js" data-defer="lecture-btc-c"></script>
+  <script src="js/lecture-btc-04.js" data-defer="lecture-btc-d"></script>
+  <script src="js/lecture-btc-05.js" data-defer="lecture-btc-e"></script>
+  <script src="js/lecture-btc-06.js" data-defer="lecture-btc-f"></script>
+  <script src="js/lecture-btc-07.js" data-defer="lecture-btc-g"></script>
+  <script src="js/lecture-btc-08.js" data-defer="lecture-btc-h"></script>
+  <script src="js/lecture-btc-09.js" data-defer="lecture-btc-i"></script>
+  <script src="js/lecture-btc-10.js" data-defer="lecture-btc-j"></script>
+  <script src="js/lecture-btc-11.js" data-defer="lecture-btc-k"></script>
+  <script src="js/lecture-btc-12.js" data-defer="lecture-btc-l"></script>
+  <script src="js/lecture-btc-13.js" data-defer="lecture-btc-m"></script>
+  <script src="js/lecture-btc-14.js" data-defer="lecture-btc-n"></script>
   <script src="js/routes.js"></script>
   <script src="js/router.js"></script>
   <script src="js/poker-rules.js" data-defer="poker"></script>
   <script src="js/poker-live.js" data-defer="poker"></script>
   <script src="js/poker-cards.js" data-defer="poker"></script>
   <script src="js/poker-themes.js"></script>
+  <script src="js/poker-marble.js" data-defer="poker"></script>
+  <script src="js/poker-fountain.js" data-defer="poker"></script>
+  <script src="js/poker-statues.js" data-defer="poker"></script>
   <script src="js/poker-models.js" data-defer="poker"></script>
+  <script src="js/poker-presence.js" data-defer="poker"></script>
+  <script src="js/poker-emotes.js" data-defer="poker"></script>
+  <script src="js/poker-tells.js" data-defer="poker"></script>
+  <script src="js/poker-crowd-models.js" data-defer="poker"></script>
+  <script src="js/poker-crowd.js" data-defer="poker"></script>
+  <script src="js/poker-audio.js" data-defer="poker"></script>
   <script src="js/poker-hud.js" data-defer="poker"></script>
   <script src="js/scene-poker.js"></script>
   <!-- HALLOWEEN: only the herald is present at entry; the hunt loads when a player starts or joins. -->
-  <script src="js/ghost-herald-data.js"></script>
-  <script src="js/ghost-entry.js"></script>
+  <script src="js/ghost-herald-data.js" data-defer="arcade-scene"></script>
+  <script src="js/ghost-entry.js" data-defer="arcade-scene"></script>
   <script src="js/ghost-sim.js" data-defer="halloween"></script>
   <script src="js/ghost-art-data.js" data-defer="halloween"></script>
   <script src="js/ghost-models.js" data-defer="halloween"></script>
@@ -2083,6 +2932,13 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/ghost-track-nightmare.js" data-defer="halloween-track-nightmare"></script>
   <script src="js/ghost-track-synthed.js" data-defer="halloween-track-synthed"></script>
   <script src="js/ghost-track-nr.js" data-defer="halloween-track-nr"></script>
+  <script src="js/controls-help.js"></script>
+  <script src="js/destination-atlas.js"></script>
+  <script src="js/destination-map.js"></script>
+  <script src="js/sound-panel.js"></script>
+  <script src="js/pad-focus.js"></script>
+  <script src="js/pad-settings.js"></script>
+  <script src="js/arcade-view.js"></script>
   <script src="js/director.js"></script>
 </body>
 

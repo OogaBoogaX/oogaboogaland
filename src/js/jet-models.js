@@ -3,7 +3,8 @@
 // pinstripe between them and the bolt's roundel on each side, a dark glass canopy in its frame, swept wings edged in
 // blue, blue tailplanes and a blue fin carrying a big gold bolt, twin engine pods with gold intakes, and its gear. Each
 // part is shaped as its own set of cells (`PARTS`); a construction stage (`STAGES`) is the parts fitted by then, merged
-// into one mesh (`jet(stage)`, cached), so nothing fitted shows a face inside another. The engines' nozzles are turned,
+// into one mesh (`jet(stage)`, cached), so nothing fitted shows a face inside another; `jet(stage, true)` is the same
+// mesh with its gold trim and canopy glass lit, as bright as the node's `glow` (0.22 matches the plain mesh's glass). The engines' nozzles are turned,
 // smooth, not voxels (`nozzles`): a round jet nozzle on each pod, which `pieces(stage)` fits with the engines.
 // `STAGE` is the stage the hangar shows, which the maintainer bumps by hand; `?debug=1&jetstage=N` previews another.
 //
@@ -24,7 +25,7 @@
   // gold, the canopy's glass and frame, the nacelles in two tones, the intakes, the tyres and the struts.
   const PALETTE = [null, LIVERY.body, "#e2e6ee", "#d3d8e2", LIVERY.blue, "#2b4dbb", "#1a2f7a", LIVERY.gold, LIVERY.glass, "#9aa3b0", "#c9ced6", "#b6bcc6", "#2a2d33", "#1d1f24", "#5a6068"];
   const WHITE = 1, WHITE_B = 2, PANEL = 3, BLUE = 4, BLUE_B = 5, NOSE = 6, GOLD = 7, GLASS = 8, FRAME = 9, NACELLE = 10, NACELLE_B = 11, INTAKE = 12, TYRE = 13, STRUT = 14;
-  const EMISSIVE = { [GLASS]: 0.22 };
+  const EMISSIVE = { [GLASS]: 0.22 }, LIT = { [GLASS]: 1, [GOLD]: 1 };
   const SIZE = { length: 18.5 * SCALE, span: 12.4 * SCALE, height: 8 * SCALE };
 
   const smooth = (t) => t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
@@ -153,16 +154,17 @@
   };
   // The jet at a stage, its fitted parts' cells merged into one grid, the fuselage's last, so a cell two parts share
   // takes the body's colour. Each stage's mesh is a cached build, released with the hangar's others.
-  const builds = {};
-  for (const [stage, parts] of Object.entries(STAGES)) builds[stage] = cached(() => {
+  // The same with its gold trim and glass lit (`LIT`), for the hangar's anomalies.
+  const builds = {}, litBuilds = {};
+  for (const [stage, parts] of Object.entries(STAGES)) for (const [out, emissive] of [[builds, EMISSIVE], [litBuilds, LIT]]) out[stage] = cached(() => {
     const v = makeVox();
     for (const name of [...parts.filter((p) => p !== "body"), "body"]) {
       const c = partCells(name);
       for (let n = 0; n < c.length; n += 4) v.set(c[n], c[n + 1], c[n + 2], c[n + 3]);
     }
-    return voxelGeometry(v, { unit: U, palette: PALETTE, emissive: EMISSIVE });
+    return voxelGeometry(v, { unit: U, palette: PALETTE, emissive });
   });
-  const jet = (stage = STAGE) => (builds[stage] || builds[STAGE])();
+  const jet = (stage = STAGE, lit = false) => { const b = lit ? litBuilds : builds; return (b[stage] || b[STAGE])(); };
   // The jet at a stage seen from above, for walkers: a grid of columns `U` metres square in the jet's frame, from cell
   // `i0` across and `k0` along, `ni` by `nk` of them, and where each column's lowest cell starts and its highest ends,
   // in metres up from the floor (`bottom`, `top`; -1 for a column that holds none), from the same cells as its mesh.

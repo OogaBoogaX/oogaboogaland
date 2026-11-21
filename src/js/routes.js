@@ -15,10 +15,10 @@
       return entry.path ? `${entry.title} · ${this.name}` : `${this.name} · ${entry.title}`;
     },
     list: [
-      { path: "", scene: "hub", image: "home", title: "an island of caves where bananas feed EntropyLab contributors",
-        description: "A floating island of caves where donated bananas feed the voxel cavemen of OogaBoogaX. Race, skydive, mine and fly, under weather from the live Bitcoin mempool." },
-      { path: "donate", scene: "hub", place: "donate", title: "Feed the Ooga Boogas",
-        description: "Feed the Ooga Boogas with a donation of bananas on Ooga Booga Land." },
+      { path: "", scene: "hub", image: "home", title: "a virtual world for open-source contributors",
+        description: "Ooga Booga Land is a virtual world where open-source contributors collaborate and track contributions across Team Ooga Booga’s repositories." },
+      { path: "donate", scene: "hub", place: "donate", title: "Feed the Oogas",
+        description: "Feed the Oogas with a donation of bananas on Ooga Booga Land." },
       { path: "oogarally", scene: "race", image: "oogarally", title: "Ooga Rally",
         description: "Kart racing round a floating island. Three tracks, three laps: podium on all of them and take the Cup." },
       { path: "oogadrop", scene: "drop", image: "oogadrop", title: "Ooga Drop",
@@ -27,8 +27,14 @@
         description: "Lash a rocket together, reach the Sky Top, touch the space rock and fall home shield first." },
       { path: "oogamine", scene: "mine", image: "oogamine", title: "Ooga Mine",
         description: "A mining tycoon about margin: power, heat and the halving. Mine 21 coin in an hour without going broke." },
+      { path: "blockfrenzy", scene: "block", title: "Block Frenzy",
+        description: "Capture the block: steal the rivals' glowing Bitcoin block, carry it home and splat their runners with paint. Nobody gets hurt." },
       { path: "mempool", scene: "hub", place: "mempool", image: "mempool", title: "Mempool chamber",
         description: "The live Bitcoin mempool as a rainforest lake: the backlog fills it, new blocks fall from it, and the chamber under it reads the chain out in paint." },
+      { path: "bifrost", scene: "bifrost", title: "₿IFRÖST · Caves and lands",
+        description: "Explore Ooga Booga Land's project caves, connected worlds and independent project sites from the Bifrost directory." },
+      { path: "repos", scene: "hub", place: "repos", title: "Merge Rock",
+        description: "An island of carved totems off Ooga Booga Land's south rim, one for each of 171 open-source Bitcoin projects, sized by how much Bitcoin leans on it and lit for a day after it merges a pull request." },
       { path: "dsb", scene: "dsb", title: "DSB Land",
         description: "Walk through ₿IFRÖST to DSB Land: a river boat, the Bitcoin coaster riding the live price, the Meme Shop and NodeRunner TV." },
       { path: "entropylab", scene: "hub", place: "lab", image: "entropylab", title: "EntropyLab",
@@ -40,14 +46,24 @@
       { path: "jet", scene: "hangar", title: "Lightning Jet Hangar",
         description: "Behind the Lightning Factory, the hangar where Lightning Jet v2 is being built: the Jet in its dock, its crew at work and the project's progress on the wall." },
       { path: "oogaarcade", scene: "arcade", title: "Ooga Arcade",
-        description: "A torchlit cave of arcade cabinets, one for every Ooga game: walk up to Ooga Rally, Drop, Orbit or Mine and play." },
+        description: "A torchlit cave of arcade cabinets, one for every Ooga game: walk up to Ooga Rally, Drop, Orbit or Mine and play, or take the upper hall's zipline to Block Frenzy." },
+      { path: "oogaraid", scene: "raid", image: "oogaraid", title: "Ooga Raid",
+        description: "Play your own Ooga side-on through eight stages, from the jungle shore to the Chairman's Engine, and drive out the Fiat Legion." },
       { path: "sphere", scene: "hub", place: "timechain", image: "sphere", title: "Timechain Sphere",
-        description: "The Timechain Sphere's doors: choose one of nine rooms at the keypad. Inside, live block and mining charts, Timechain Index holdings and Sani in his recliner." },
-      // The nine rooms, each its own address: 1–3 at 1×, 4–6 at 1.5×, 7–9 at 2× (timechain-rooms.js).
-      ...Array.from({ length: 9 }, (_, i) => ({
-        path: `sphere-${i + 1}`, scene: "timechain", place: String(i + 1), title: `Timechain Sphere Room ${i + 1}`,
-        description: `Room ${i + 1} of the Timechain Sphere, ${["normal sized", "half as big again", "twice the size"][Math.floor(i / 3)]}: live block and mining charts from mempool.space on a curved wall of screens, Timechain Index holdings at the desk, Sani in his recliner.`
-      }))
+        description: "The Timechain Sphere's doors: choose one of nine rooms at the keypad, from a planetarium and a conference room to a meditation temple, a block party, a mining museum and a movie theater." },
+      // The rooms, each its own kind of place and its own address (timechain-rooms.js), at their keypad numbers; 9 is
+      // empty and has none.
+      ...[
+        ["Conference Room", "A round table for eight under a dome of live block and mining charts from mempool.space, the latest blocks round its base and the next block at the crown. The one room that locks."],
+        ["Lecture Hall", "Lounge chairs on broad terraces facing a stage, with lectures on Bitcoin given on the dome: slides, a hand-drawn board and captions."],
+        ["The Mining Museum", "From Satoshi's CPU to today's ASICs: miners from every era round the room, under seventeen years of hashrate on the dome."],
+        ["Satoshi's Temple", "A meditation temple under a dusk sky: a lantern path, a pagoda, a koi pond and a replica of Valentina Picozzi's Satoshi statue in the main hall."],
+        ["Proof of Work-out", "Exercise bikes facing a mountain sunrise: pedal to find a fake block and climb the gym's leaderboard."],
+        ["Movie Theater", "Recliners on a steep rake facing a dome that is all picture, the biggest room in the Sphere."],
+        ["Block Party", "Live dance radio in a club of light: an LED floor and wall that move to the music, lasers on the walls, and EDM Sessions live from the DJ booth. The latest block lights the scoreboard as it lands."],
+        ["Planetarium", "Tonight's sky over London on the whole dome, from reclining seats round the star projector."],
+        ["Genesis Museum", "The road to Bitcoin, 1974 to 2009: the technologies and events before the genesis block on a ring of plinths, a hologram of Satoshi's statue in the middle that opens the whitepaper, Block 0 at the end of the walk, a glass floor over a living map of the network, and the timeline round the dome."]
+      ].map(([name, what], i) => ({ path: `sphere-${i}`, scene: "timechain", place: String(i), title: `Timechain Sphere · ${name}`, description: `${name}, room ${i} of the Timechain Sphere. ${what}` }))
     ]
   };
 })();

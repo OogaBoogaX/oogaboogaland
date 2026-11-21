@@ -4,11 +4,17 @@ import { fileURLToPath } from "node:url";
 import { basename, join } from "node:path";
 import { createHash } from "node:crypto";
 import { launch, dispose } from "../test/browser.mjs";
-const root = fileURLToPath(new URL("../", import.meta.url)), cpu = process.argv.includes("--cpu");
+const root = fileURLToPath(new URL("../", import.meta.url)), cpu = process.argv.includes("--cpu"), sourcePage = process.argv.includes("--source");
+const page = new URL(sourcePage ? "../src/index.html" : "../oogaboogaland.html", import.meta.url);
 const source = readFileSync(new URL("../test/run.mjs", import.meta.url), "utf8");
 const first = source.indexOf("const wallPerformance ="), last = source.indexOf("const adaptiveQualityChecks =", first);
 if (first < 0 || last < 0) throw new Error("The suite's wallPerformance workload was not found");
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
+const pageHash = () => {
+  const html = readFileSync(page, "utf8"), digest = createHash("sha256").update(html);
+  if (sourcePage) for (const [, src] of html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)) digest.update(src).update(readFileSync(new URL(src, page)));
+  return digest.digest("hex");
+};
 // The same field #194's captures record: a changed workload shows up as a changed hash.
 const workloadSha256 = hash(source.slice(first, last));
 const rows = [], run = new Function("record", source.slice(first, last) + ";return wallPerformance;")((name, pass, detail) => rows.push({ name, pass, details: JSON.parse(detail) }));
@@ -17,7 +23,8 @@ mkdirSync(output, { recursive: true });
 let b;
 try {
   b = await launch({ w: 1920, h: 1080, perf: true, motion: true });
-  await b.open(new URL("../oogaboogaland.html?debug=1&nosim=1&hour=12&day=80&bananas=1000", import.meta.url).href);
+  await b.open(page.href + "?debug=1&nosim=1&hour=12&day=80&bananas=1000");
+  await b.focus(true);
   const begun = Date.now();
   while (!await b.evaluate('!!window.__ooga && __ooga.renderedFrames >= 2 && !document.getElementById("curtain")')) {
     if (Date.now() - begun > 20000) throw new Error("The hub did not draw");
@@ -41,7 +48,7 @@ try {
     hot.push(...[...functions.values()].sort((a, b) => b.samples - a.samples).slice(0, 30));
     writeFileSync(join(output, "covered-movement.cpuprofile"), JSON.stringify(profile));
   }
-  const evidence = { capturedAt: new Date().toISOString(), workloadSha256, suiteSha256: hash(source), pageSha256: hash(readFileSync(new URL("../oogaboogaland.html", import.meta.url))), browser: (await b.send("Browser.getVersion")).result.product, cpuProfilerEnabled: cpu, rows, hot, stats: await b.evaluate("__ooga.headquarters.objectGuides.stats"), logs: b.logs };
+  const evidence = { capturedAt: new Date().toISOString(), workloadSha256, suiteSha256: hash(source), pageKind: sourcePage ? "source" : "portable", pageSha256: pageHash(), browser: (await b.send("Browser.getVersion")).result.product, cpuProfilerEnabled: cpu, rows, hot, stats: await b.evaluate("__ooga.headquarters.objectGuides.stats"), logs: b.logs };
   writeFileSync(join(output, "covered-movement-profile.json"), JSON.stringify(evidence, null, 2) + "\n");
   console.log(JSON.stringify(evidence, null, 2));
   if (rows.some(row => !row.pass) || b.logs.length) process.exitCode = 1;

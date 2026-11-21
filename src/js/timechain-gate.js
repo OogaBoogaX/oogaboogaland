@@ -1,12 +1,15 @@
 // The Timechain Sphere's doorway on the island: the keypad, the doors and the crossing into a room and back, all of it
 // seen from the Ooga's own eyes. The hub creates it with the sphere (`create`) and drives it every frame.
 //
-// Space beside the keypad (or a click on one of its buttons) engages it: the view glides into the Ooga's first person
-// as the Ooga turns to face the keypad, and the physical buttons take the clicks and keys. 1–9 choose exactly one room
-// (choosing another replaces it), Enter is off until one is chosen, Back or Escape lets go and glides the view back to
-// the camera the player had. Enter commits: the visitor's account must already be resolved (signed in: a shared room;
-// signed out: a solo copy); after an unanswered account look, the selected number retries and Enter explicitly
-// continues solo.
+// Space beside the keypad engages it: the view glides into the Ooga's first person as the Ooga turns to face the keypad,
+// and the physical buttons take the clicks and keys. Its buttons also take clicks from anywhere on the bridge's half
+// nearer the sphere (`fromBridge`) without engaging it: the Ooga stays the player's and the view theirs until Enter,
+// which glides the view into the Ooga's eyes where it stands; walking off that half lets the choice go. A number with
+// a room behind it chooses exactly that room (choosing another replaces it, choosing it again clears it, and an empty
+// number does nothing; the directory's rows choose the same way), Enter is off until one is chosen, Back or Escape
+// lets go and glides the view back to the camera the player had. Enter
+// commits: the visitor's account must already be resolved (signed in: a shared room; signed out: a solo copy); after
+// an unanswered account look, the selected number retries and Enter explicitly continues solo.
 //
 // Committed, the keys lock and the Ooga turns, eyes and all, from the keypad to the seam of the doors while its room
 // readies behind them, a slice a frame (timechain-interior.js `prepare`: the room's code, built and painted, then seen
@@ -20,24 +23,40 @@
 //
 // Coming back, the room hands over in its vestibule where the island's view out of the passage (taken here before the
 // crossing, doors shut) fills its eye; the Ooga appears there, in front of the curtain behind the shut doors, and walks
-// on out as they part, asking for the doorway first when shared. Only after the doors close does the normal island
-// view return, and its jetpack comes back as it was. The plug across the doorway (timechain-models.js) is lifted only
+// on out as they part, asking for the doorway first when shared, to a spot on the bridge clear of the other players
+// there (`EXITS`), so players coming out one after another never walk into each other. Only after the doors close does
+// the normal island view return (in first person straight from the eyes it walked out with), and its jetpack comes
+// back as it was. The plug across the doorway (timechain-models.js) is lifted only
 // for this page's own traveler, while it crosses.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
+  const { clamp } = BL.math;
   const ROOMS = BL.timechainRooms, TM = BL.timechainModels, S = TM.SPOTS, P = TM.PASSAGE;
   const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)");
   // Seconds: the doors' slide, a preparation's limit, the room socket's grace before a shared crossing goes ahead
   // without a reservation, the longest any one walk may take, the glide into the eyes and back out, and how long a
   // settled Ooga waits on its room before the heartbeat shows it is working.
   const DOOR_TIME = 0.75, PREPARE_LIMIT = 15, CONNECT_GRACE = 6, WALK_LIMIT = 8, GLIDE = 0.45, SLOW = 1.2;
-  const WALK_SPEED = 0.6, TURN_RATE = 6, HINT_GAP = 4, SETTLED = 0.05;
+  const WALK_SPEED = 0.6, TURN_RATE = 6, LOOK_SPEED = Math.PI / 3, HINT_GAP = 4, SETTLED = 0.05;
   // Where the room's picture hangs (just in front of the curtain), how far into the passage the crossing may hand
   // over (a step past the doors, out of sight of the bridge), and where the eye stands coming back out, in front of
   // the curtain behind the shut doors.
   const PICTURE_Z = P.curtain + 0.03, HAND_REACH = P.mouth - 1 - PICTURE_Z, OUT_Z = P.curtain + 0.55;
   const CURVE = 24;
+  // What the keypad's small window says while it is in use: the prompt until a number is pressed, then the room's
+  // name, running across it.
+  const SELECT_WORDS = "SELECT ROOM NUMBER", ROOM_WORDS = ROOMS.ROOMS.map((room) => room.name.replace(/^The /, "").toUpperCase());
+  // No room chosen; the hint while choosing; a room as the hint names it.
+  const NONE = -1, CHOOSE = `Choose a room on the keypad · 0–${ROOMS.OPEN[ROOMS.OPEN.length - 1]}${window.matchMedia("(pointer: coarse)").matches ? "" : " · D for the directory"}`, roomWords = (id) => `Room ${id}, the ${ROOMS.ROOMS[id].name.replace(/^The /, "")}`;
+  const ENTER_PIN_WORDS = "ENTER 4-DIGIT PIN", PIN_DOTS = ["", "*", "**", "***", "****"], WRONG_PIN_WORDS = "WRONG PIN", PIN_WAIT_WORDS = "TRY LATER";
+  // Seconds a note stands in the window, and the longest a PIN waits on the room's answer.
+  const NOTE_TIME = 1.8, PIN_ANSWER = 4;
+  // Where a walk back out may end, in the doorway's frame: the middle of the bridge first, then either side and further
+  // along, each a body's width and more from the next. A walker takes the first, from its own turn round them (hashed
+  // from its name, so two coming out together lean apart), that no other player stands near (`EXIT_CLEAR` metres).
+  const EXITS = [{ x: 0, z: 18.2 }, { x: -1.6, z: 17.6 }, { x: 1.6, z: 17.6 }, { x: -0.8, z: 19.9 }, { x: 0.8, z: 19.9 }, { x: -1.8, z: 20.6 }, { x: 1.8, z: 20.6 }];
+  const EXIT_CLEAR = 1.3;
   // The page's first sound wakes the browser's audio, tens of milliseconds on the main thread. Engaging the keypad is
   // a gesture and the view is still at that moment, so the pause is paid there rather than at the walk's first
   // footstep in the doorway.
@@ -51,30 +70,49 @@
 
   const create = (h) => {
     const { site, place, pilot, crew, hud, camera, renderer, canvas, world, go } = h;
+    // The other players' bodies on the island (x, z), for a free spot to walk out to.
+    const others = h.others || (() => []);
     const cos = Math.cos(place.ry), sin = Math.sin(place.ry);
     const worldX = (x, z) => place.x + x * cos + z * sin, worldZ = (x, z) => place.z - x * sin + z * cos;
     const localZ = (x, z) => (x - place.x) * sin + (z - place.z) * cos, localX = (x, z) => (x - place.x) * cos - (z - place.z) * sin;
     // idle, keypad, account, preparing, waiting, opening, crossing, gone, arriving, leaving.
     const g = {
-      state: "idle", selection: 0, room: null, mode: null, prep: 0, stage: null, prepared: null, picture: null, t: 0, ask: 0,
+      // `radio`: the Block Party's number is chosen, so its radio is wanted early (`radioFor`).
+      radio: false,
+      state: "idle", selection: NONE, room: null, mode: null, prep: 0, stage: null, prepared: null, picture: null, t: 0, ask: 0,
       cycle: null, exp: 0, starting: false, dir: null, open: 0, want: 0, remoteUntil: 0, hintAt: -Infinity, jetpack: null, exit: null, failures: 0, login: null,
+      // The keypad used by clicks from the bridge (`fromBridge`), the Ooga and the view still the player's; and whether a
+      // crossing under way began that way, so a cancel gives both back rather than walking up to the keypad.
+      remote: false, bridged: false,
+      // Where the walk back out ends: an entry of `EXITS` in the island's frame.
+      outX: 0, outZ: 0,
+      // The view and mode (`pilot.viewState`) the visitor walked up to the keypad in, which the room gives back once its
+      // guided arrival is done, and the room's own on the way out, which the island gives back on the bridge.
+      view: null,
       // The view: null (the pilot's own), "eyes" (gliding into and held at the Ooga's eyes from engagement until the
       // crossing hands over, and coming back out) or "back" (gliding back to the pilot's, once free). `glide` runs 0
       // to 1 from the pose held in `from`; `pitch` is the eye's, easing toward `pitchTo`.
       lens: null, glide: 1, from: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, to: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, fromFov: 0,
-      pitch: 0, pitchTo: 0, hidden: null, settledAt: 0, cued: 0, handZ: 0, outZ: OUT_Z, path: new Float64Array(CURVE * 2), along: 0, still: 0
+      pitch: 0, pitchTo: 0, eyeYaw: 0, hidden: null, settledAt: 0, cued: 0, handZ: 0, outZ: OUT_Z, path: new Float64Array(CURVE * 2), along: 0, still: 0,
+      // A locked room: the one being asked for, the digits so far, the one a right PIN opened, and a note in the window.
+      pinRoom: NONE, pin: "", pinSent: 0, pass: NONE, note: "", noteLeft: 0
     };
     const action = { kind: "sphere-keypad" };
     // A room chosen in advance (a signed-in arrival at its address, sent out here), lit when the keypad is next used.
-    let preselect = ROOMS.parse(world.sphereKeypad) || 0;
+    let preselect = ROOMS.parse(world.sphereKeypad) ?? NONE;
     world.sphereKeypad = null;
     const at = (spot) => ({ x: worldX(spot.x, spot.z), z: worldZ(spot.x, spot.z) });
     // The walk back out ends far enough along the bridge that a camera behind the Ooga stands outside the doors.
     const WAIT = at(S.WAIT), PARK = at(S.PARK), SEAM = at({ x: 0, z: S.THRESHOLD }), OUTSIDE = at({ x: 0, z: S.WAIT.z + 3.8 });
+    const OUTS = EXITS.map(at);
+    // The bridge's half nearer the sphere, from the doors out, where the keypad's buttons take clicks from afar.
+    const NEAR_HALF = place.bridgeZ + TM.SITE.span / 2;
     // A clear spot on the bridge directly in front of the keypad. The Ooga sidesteps here while keeping its eyes on
     // the panel, so every valid approach settles at the same readable distance and face-on angle.
     const KEYPAD_STAND = at({ x: S.KEYPAD.x, z: S.KEYPAD.z + 1.45 });
     const KEYPAD = { x: worldX(S.KEYPAD.x, S.KEYPAD.z), y: place.y + S.KEYPAD.y, z: worldZ(S.KEYPAD.x, S.KEYPAD.z) };
+    // The eye looks at the middle of the keypad and the directory button under it together.
+    const KEYPAD_AIM = (TM.DIRECTORY_PLATE.gap + TM.DIRECTORY_PLATE.h) / 2;
     // Facing the doors from the bridge, and out of them.
     const IN_HEADING = place.ry + Math.PI, OUT_HEADING = place.ry;
     const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -110,23 +148,28 @@
     };
 
     // Walks the Ooga as a held stick would, at a stroll.
-    const steerTo = (x, z) => {
+    const steerTo = (x, z, dt) => {
       const cave = crew.player, p = cave.root.position, dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz);
       if (d < 0.12) { crew.steer(0, 0, 0, 0, 0); return true; }
-      crew.steer(dx / d, dz / d, 0, 1, 0, WALK_SPEED);
+      // A slow frame must stop at the waypoint, not oscillate across its arrival radius.
+      const speed = Math.min(WALK_SPEED, d / (BL.pilot.WALK.speed * Math.max(dt, 1e-6)));
+      crew.steer(dx / d, dz / d, 0, 1, 0, speed);
       return false;
     };
+    // Inside the ball at the passage's height, in the doorway's frame: nearer its middle than the plug, where only a
+    // crossing's Ooga ever stands.
+    const behindDoors = (x, z, feet) => Math.hypot(x, z) < S.THRESHOLD - 0.5 && feet > P.floor - 1 && feet < P.top + 1;
     // Turns the Ooga where it stands, the eyes with it; true once it faces `heading`.
     const turnTo = (heading, dt) => {
       const r = crew.player.root.rotation, off = wrap(heading - r.y);
-      r.y += off * Math.min(1, dt * TURN_RATE);
+      r.y += clamp(off * Math.min(1, dt * TURN_RATE), -LOOK_SPEED * dt, LOOK_SPEED * dt);
       return Math.abs(off) < SETTLED;
     };
     const facing = (x, z) => { const p = crew.player.root.position; return Math.atan2(x - p.x, z - p.z); };
     const settleAtKeypad = (dt) => {
       const p = crew.player.root.position, dx = KEYPAD_STAND.x - p.x, dz = KEYPAD_STAND.z - p.z, d = Math.hypot(dx, dz);
       turnTo(facing(KEYPAD.x, KEYPAD.z), dt);
-      if (d > 0.1) crew.steer(dx / d, dz / d, 1, 0, 1, WALK_SPEED);
+      if (d > 0.1) crew.steer(dx / d, dz / d, 1, 0, 1, Math.min(WALK_SPEED, d / (BL.pilot.WALK.speed * Math.max(dt, 1e-6))));
       else crew.steer(0, 0, 0, 0, 0);
     };
     const hold = (on) => {
@@ -137,23 +180,101 @@
     // Into the eyes from wherever the view is now, or back out to the pilot's.
     const lens = (name) => {
       readPose(g.from);
+      g.eyeYaw = g.from.yaw;
       g.fromFov = camera.fov;
       g.lens = name;
       g.glide = REDUCED.matches ? 1 : 0;
     };
 
     // ---------- the keypad ----------
-    const nearKeypad = (x, y, z) => g.state === "idle" && !!crew.player && Math.hypot(x - KEYPAD.x, z - KEYPAD.z) < S.KEYPAD_REACH && Math.abs(y - KEYPAD.y) < 2;
+    const padWords = () => {
+      if (g.state === "pin") return g.pin ? PIN_DOTS[g.pin.length] : ENTER_PIN_WORDS;
+      if (g.state !== "keypad" && g.state !== "account" && g.state !== "preparing" && g.state !== "waiting" && g.state !== "opening") return "";
+      if (g.noteLeft > 0) return g.note;
+      return g.selection >= 0 ? ROOM_WORDS[g.selection] : SELECT_WORDS;
+    };
+    // Padlocks over the numbers of the rooms locked from inside (only the Conference Room has a lock).
+    const lockedRoom = (room) => room >= 0 && ROOMS.ROOMS[room].lockable && !!BL.net.state.lockedRooms[room];
+    const showLocks = () => { for (const room of ROOMS.LOCKABLE) site.lock(room, lockedRoom(room)); };
+    const askPin = (room) => {
+      g.state = "pin";
+      g.pinRoom = room; g.pin = ""; g.pinSent = 0;
+      g.selection = NONE;
+      site.choose(room);
+      radioFor(NONE);
+      show(`Room ${room} is locked from inside · enter its 4-digit PIN`);
+    };
+    // Back to choosing, with no room selected; a wrong PIN says so in the window first.
+    const leavePin = (note = "") => {
+      g.state = "keypad";
+      g.pinRoom = NONE; g.pin = ""; g.pinSent = 0;
+      g.selection = NONE;
+      site.choose(NONE);
+      g.note = note; g.noteLeft = note ? NOTE_TIME : 0;
+    };
+    const pinAnswer = (ok, reason) => {
+      const room = g.pinRoom;
+      if (ok) {
+        g.pass = room;
+        leavePin();
+        g.selection = room;
+        site.choose(room);
+        commit();
+        return;
+      }
+      leavePin(reason === "wait" ? PIN_WAIT_WORDS : WRONG_PIN_WORDS);
+      show(reason === "wait" ? "Too many tries · wait a minute and try again" : `Wrong PIN for Room ${room} · choose a room`);
+    };
+    const pinKey = (key) => {
+      if (g.pinSent) return;
+      if (key === "back") {
+        if (g.pin) g.pin = g.pin.slice(0, -1);
+        else { leavePin(); show(CHOOSE); }
+      } else if (/^[0-9]$/.test(key) && g.pin.length < 4) {
+        g.pin += key;
+        if (g.pin.length === 4) {
+          if (BL.net.tryRoomPin(g.pinRoom, g.pin)) g.pinSent = PIN_ANSWER;
+          else pinAnswer(false, "wrong");
+        }
+      }
+    };
+    const nearKeypad = (x, y, z) => (g.state === "idle" || g.remote) && !!crew.player && Math.hypot(x - KEYPAD.x, z - KEYPAD.z) < S.KEYPAD_REACH && Math.abs(y - KEYPAD.y) < 2;
+    // Standing (x, feet, z) on the bridge's half nearer the sphere, in front of the doors.
+    const onNearHalf = (x, feet, z) => {
+      const lx = localX(x, z), lz = localZ(x, z);
+      return Math.abs(lx) <= TM.SITE.width / 2 && lz > S.THRESHOLD && lz <= NEAR_HALF && Math.abs(feet - place.y) < 1.5;
+    };
+    const driverOnNearHalf = () => {
+      const cave = crew.player, p = cave && cave.root.position;
+      return !!p && onNearHalf(p.x, p.y - cave.baseY, p.z);
+    };
+    // Whether a click on the keypad's buttons from where the driven Ooga stands is taken without engaging it.
+    const fromBridge = () => (g.state === "idle" || g.remote) && driverOnNearHalf();
     const keypadPitch = () => {
       const cave = crew.player, p = cave.root.position;
-      return Math.atan2(KEYPAD.y - (p.y - cave.baseY + eyeRise(cave)), Math.max(0.3, Math.hypot(KEYPAD.x - p.x, KEYPAD.z - p.z) - 0.1));
+      return Math.atan2(KEYPAD.y - KEYPAD_AIM - (p.y - cave.baseY + eyeRise(cave)), Math.max(0.3, Math.hypot(KEYPAD.x - p.x, KEYPAD.z - p.z) - 0.1));
     };
-    const engage = () => {
-      if (g.state !== "idle" || !crew.player) return false;
+    // The Block Party's radio, started as its number is chosen (a gesture) so its music is under way by the time the
+    // visitor walks in (timechain-party-radio.js `warm`): only its own small module loads, never the rooms'. Any other
+    // choice, or none, lets it go; the room takes it on arrival.
+    const radioFor = (room) => {
+      g.radio = room !== NONE && ROOMS.ROOMS[room].kind === "party";
+      if (!g.radio) { if (BL.timechainPartyRadio) BL.timechainPartyRadio.cool(); return; }
+      Promise.resolve(BL.deferred.load("party-radio")).then(() => { if (g.radio) BL.timechainPartyRadio.warm(); }, () => {});
+    };
+    // The keypad in use, its choice starting from a room chosen in advance.
+    const startKeypad = () => {
       g.state = "keypad";
       g.selection = preselect;
-      preselect = 0;
+      preselect = NONE;
+      g.pass = NONE; g.noteLeft = 0;
+      showLocks();
       site.choose(g.selection);
+      radioFor(g.selection);
+    };
+    // The view into the Ooga's eyes from wherever it is now, the Ooga held: at the keypad, or for Enter from the bridge.
+    const zoomIn = () => {
+      g.view = pilot.viewState();
       hold(true);
       if (document.pointerLockElement) document.exitPointerLock();
       const stall = wakeAudio();
@@ -161,31 +282,59 @@
       // The audio's wake stalls the next frame or two; the glide starts after it, not across it.
       g.still = stall ? 2 : 0;
       g.pitch = g.from.pitch;
-      g.pitchTo = keypadPitch();
       hud.tooltip.hide();
-      show(g.selection ? `Room ${g.selection} selected · press Enter` : "Choose a room on the keypad · 1–9");
+    };
+    // Space beside the keypad: engaged there, the Ooga walking up to it. A choice made from the bridge carries on.
+    const engage = () => {
+      const upgrade = g.remote && (g.state === "keypad" || g.state === "account" || g.state === "pin");
+      if (!upgrade && g.state !== "idle" || !crew.player) return false;
+      if (!upgrade) startKeypad();
+      g.remote = false;
+      zoomIn();
+      g.pitchTo = keypadPitch();
+      if (!upgrade) show(g.selection >= 0 ? `${roomWords(g.selection)} selected · press Enter` : CHOOSE);
       return true;
     };
-    // Back to walking, the view gliding back to the pilot's own camera.
+    // A click on the keypad from the bridge: the keypad answers it without taking the Ooga or the view.
+    // A room chosen in advance is lit as the keypad starts, so its own number keeps it rather than clearing it.
+    const pressFromBridge = (key) => {
+      if (!fromBridge()) return false;
+      if (g.state === "idle") {
+        const kept = String(preselect) === key;
+        startKeypad();
+        g.remote = true;
+        if (kept) { show(`${roomWords(g.selection)} selected · press Enter`); return true; }
+      }
+      press(key);
+      return true;
+    };
+    // Back to walking, the view gliding back to the pilot's own camera; from the bridge, only the choice goes.
     const disengage = () => {
-      if (g.state !== "keypad" && g.state !== "account") return;
+      if (g.state !== "keypad" && g.state !== "account" && g.state !== "pin") return;
       g.state = "idle";
-      site.choose(0);
+      site.choose(NONE);
+      radioFor(NONE);
+      if (g.remote) { g.remote = false; g.selection = g.pinRoom = NONE; g.pin = ""; g.pinSent = 0; return; }
       if (crew.player) hideHead(crew.player, false);
       lens("back");
       hold(false);
     };
+    // The room already chosen, chosen again, clears the choice.
     const choose = (digit) => {
-      if (g.state !== "keypad" || !ROOMS.parse(digit)) return;
+      if (g.state !== "keypad" || ROOMS.parse(digit) === null) return;
+      if (digit === g.selection) { g.selection = NONE; site.choose(NONE); radioFor(NONE); show(CHOOSE); return; }
+      if (lockedRoom(digit) && g.pass !== digit) { askPin(digit); return; }
       g.selection = digit;
       site.choose(digit);
-      show(`Room ${digit} selected · press Enter`);
+      radioFor(digit);
+      show(`${roomWords(digit)} selected · press Enter`);
     };
     // Enter: the room, the account's answer, then the turn to the doors while the room readies.
     const commit = (solo = false) => {
       const room = ROOMS.get(g.selection);
       if (!room || g.state !== "keypad" && g.state !== "account") return;
       const net = BL.net.state;
+      if (!solo && lockedRoom(room.id) && g.pass !== room.id) { askPin(room.id); return; }
       if (!solo && !net.resolved) {
         g.state = "account";
         show("Account unavailable · selected number retries · Enter continues solo · Back changes room");
@@ -194,6 +343,9 @@
       g.room = room;
       g.mode = !solo && net.me ? "shared" : "solo";
       g.login = g.mode === "shared" ? net.me.login : null;
+      // From the bridge, the view glides into the Ooga's eyes where it stands, and the walk in starts from there.
+      g.bridged = g.remote;
+      if (g.remote) { g.remote = false; zoomIn(); }
       const cave = crew.player;
       g.jetpack = { equipped: !!cave.jet, fuel: cave.jetFuel };
       g.state = "preparing";
@@ -201,6 +353,8 @@
       g.settledAt = 0;
       g.pitchTo = 0;
       show(`Preparing Room ${room.id}… · Back cancels`);
+      // Its radio again, should one warmed long ago have gone by itself.
+      radioFor(room.id);
       prepare();
     };
     const retryAccount = () => {
@@ -208,7 +362,7 @@
       show("Looking up your account…");
       BL.net.recheck().then(() => {
         if (g.state !== "account") return;
-        if (BL.net.state.resolved) { g.state = "keypad"; show(`Press Enter to go to Room ${g.selection}`); }
+        if (BL.net.state.resolved) { g.state = "keypad"; show(`Press Enter to go to ${roomWords(g.selection)}`); }
         else show("Still unavailable · selected number retries · Enter continues solo · Back changes room");
       });
     };
@@ -217,11 +371,12 @@
     // The room's code (deferred on a hosted page) and the room itself, built and painted over frames by its module;
     // then, a step a frame, its picture from the handover point, a frame for that picture to reach the GPU, and the
     // island's view out of the passage for the way back. A cancel or a newer preparation makes an older one's answer
-    // moot. Nothing of the room loads before Enter.
+    // moot. Nothing of the room loads before Enter (the Block Party's radio, alone, as its number is chosen: `radioFor`).
     const prepare = () => {
       const stamp = ++g.prep;
       g.stage = "load";
-      Promise.resolve(BL.deferred.load("timechain")).then(() => {
+      // The Genesis Museum's code is a group of its own on the rooms' group (deferred.js `SCENE_BASE`).
+      Promise.resolve(BL.deferred.load(g.room.kind === "genesis" ? "timechain-genesis" : "timechain")).then(() => {
         if (stamp !== g.prep) return null;
         g.prepared = BL.models.withScope("timechain", () => BL.timechainInterior.prepare(g.room.id, renderer));
         return g.prepared.ready;
@@ -276,7 +431,8 @@
         g.stage = "ready";
       }
     };
-    // Back to the keypad with the room still chosen: a cancel, a failure, a lost connection, a stale grant.
+    // Back to the keypad with the room still chosen: a cancel, a failure, a lost connection, a stale grant. A crossing
+    // begun from the bridge gives the Ooga and the view back there instead, the choice still on the keypad.
     const fallBack = (words) => {
       dropPrepared();
       if (g.cycle !== null || g.ask) BL.net.cancelDoor();
@@ -284,14 +440,24 @@
       g.want = 0;
       site.plug.visible = true;
       g.state = "keypad";
-      g.pitchTo = keypadPitch();
+      if (g.bridged) {
+        g.bridged = false; g.remote = true;
+        if (crew.player) hideHead(crew.player, false);
+        lens("back");
+        hold(false);
+      } else g.pitchTo = keypadPitch();
       show(words);
     };
 
     // ---------- the doorway ----------
     // The island room's word on the doorway, for this page's own crossing and for anyone else's.
     const onDoor = (event) => {
-      if (event.t === "transit") {
+      if (event.op === "locks") {
+        showLocks();
+        if (g.state === "pin" && !lockedRoom(g.pinRoom)) pinAnswer(true, "");
+      } else if (event.op === "lock-result") {
+        if (event.action === "try" && g.state === "pin" && event.room === g.pinRoom && g.pinSent) pinAnswer(event.ok, event.reason);
+      } else if (event.t === "transit") {
         if (event.door !== ROOMS.EXTERIOR_ZONE || event.cycle === g.cycle) return;
         g.remoteUntil = Math.max(g.remoteUntil, performance.now() + Math.max(0, Math.min(12000, event.exp - BL.net.serverNow())));
       } else if (event.t === "transit-end") {
@@ -314,7 +480,12 @@
         else { BL.net.cancelDoor(); g.cycle = null; }
       } else if (event.op === "denied" && (g.ask || g.cycle !== null)) {
         g.ask = 0; g.cycle = null; g.starting = false;
-        if (g.state === "waiting") fallBack("The doorway was not available · press Enter to try again");
+        if (g.state === "waiting" && event.reason === "locked") {
+          fallBack(`Room ${g.room.id} was locked from inside · choose a room`);
+          g.pass = NONE;
+          g.selection = NONE;
+          site.choose(NONE);
+        } else if (g.state === "waiting") fallBack("The doorway was not available · press Enter to try again");
         else if (g.state === "arriving") g.t = 0;
       } else if (event.op === "lost" && (g.ask || g.starting)) {
         if (g.state === "waiting") fallBack("Connection lost · press Enter to try again");
@@ -322,6 +493,7 @@
       }
     };
     let unsubscribeDoor = BL.net.subscribeDoor(onDoor);
+    showLocks();
     // Whether this crossing should wait its turn: shared, with a room that knows the doorway.
     const reserving = () => g.mode === "shared" && BL.net.state.doorway;
     const askDoor = (dir) => {
@@ -368,10 +540,10 @@
     const handOff = () => {
       const cave = crew.player, p = camera.position, t = camera.target, dx = t.x - p.x, dz = t.z - p.z;
       const entry = { x: localX(p.x, p.z), dz: localZ(p.x, p.z) - g.handZ, heading: wrap(Math.atan2(dx, dz) - IN_HEADING), pitch: Math.atan2(t.y - p.y, Math.hypot(dx, dz)) };
-      world.sphereVisit = { room: g.room.id, mode: g.mode, login: g.login, character: cave.traits.name, guided: true, jetpack: g.jetpack, prepared: g.prepared, entry };
+      world.sphereVisit = { room: g.room.id, mode: g.mode, login: g.login, character: cave.traits.name, guided: true, jetpack: g.jetpack, prepared: g.prepared, entry, view: g.view };
       world.sphereKeep = h.keep();
       world.pilot = cave.traits.name;
-      if (go("timechain", String(g.room.id), true)) { g.prepared = null; g.state = "gone"; g.t = 0; }
+      if (go("timechain", String(g.room.id), true)) { g.prepared = null; g.state = "gone"; g.t = 0; g.radio = false; }
       else { world.sphereVisit = null; world.sphereKeep = null; }
     };
 
@@ -383,10 +555,15 @@
     const arrive = (exit) => {
       const cave = crew.player;
       if (!cave) return false;
+      // Back out, the keypad starts over: the room gone into is no longer chosen.
+      g.selection = preselect = NONE;
+      site.choose(NONE);
+      radioFor(NONE);
       g.exit = exit;
       g.room = ROOMS.get(exit.room);
       g.mode = exit.mode;
       g.jetpack = exit.jetpack || null;
+      g.view = exit.view || null;
       const pose = exit.pose;
       if (pose) {
         const heading = OUT_HEADING + pose.heading, ahead = eyeAhead(cave, pose.pitch), lx = pose.x - Math.sin(pose.heading) * ahead, lz = OUT_Z + pose.dz - Math.cos(pose.heading) * ahead;
@@ -404,28 +581,55 @@
       hold(true);
       g.state = "arriving";
       g.lens = "eyes";
+      g.eyeYaw = cave.root.rotation.y;
       g.glide = 1;
       hideHead(cave, true);
       return true;
     };
+    // The first spot of `EXITS`, from this walker's own turn round them, that no other player stands near; else the one
+    // whose nearest player is furthest.
+    const pickExit = () => {
+      const list = others(), name = crew.player ? crew.player.traits.name : "", turn = BL.math.fnv1a(name) % OUTS.length;
+      let best = 0, room = -1;
+      for (let i = 0; i < OUTS.length; i++) {
+        const k = (turn + i) % OUTS.length, spot = OUTS[k];
+        let near = Infinity;
+        for (const a of list) near = Math.min(near, Math.hypot(a.x - spot.x, a.z - spot.z) - (a.radius || 0.3));
+        if (near >= EXIT_CLEAR) { best = k; break; }
+        if (near > room) { room = near; best = k; }
+      }
+      g.outX = OUTS[best].x; g.outZ = OUTS[best].z;
+    };
     const startLeaving = () => {
+      pickExit();
       g.state = "leaving";
       g.t = 0;
       g.want = 1;
       site.plug.visible = false;
     };
     const finishLeaving = () => {
-      const cave = crew.player;
+      const cave = crew.player, eyes = !!cave && !!g.view && g.view.view === "first-person";
+      if (eyes) readPose(g.to);
       g.state = "idle";
       g.want = 0;
       if (g.cycle !== null) BL.net.doneDoor(g.cycle);
       g.cycle = null; g.starting = false;
+      // Left in first person, the view stays in the eyes it walked out with: no glide out to the pilot's camera and
+      // back in.
+      if (eyes) g.lens = null;
+      else lens("back");
+      // The head is given back before the pilot moves its camera: `navigate` poses that camera at once, and in combat or
+      // first person it hides the head itself, keeping what it found to put back later. Found still hidden here, that
+      // would put it back hidden for good.
       hideHead(cave, false);
-      lens("back");
       hold(false);
       // The pilot's own camera resumes behind the Ooga where it now stands on the bridge, not where it was left inside
-      // the doors when the island opened.
-      if (cave) pilot.navigate({ position: { x: cave.root.position.x, y: cave.root.position.y - cave.baseY, z: cave.root.position.z }, yaw: cave.root.rotation.y + Math.PI, pitch: 0.12, dist: 4.5 });
+      // the doors when the island opened; in first person, looking as the eyes look now.
+      if (cave) pilot.navigate({ position: { x: cave.root.position.x, y: cave.root.position.y - cave.baseY, z: cave.root.position.z }, yaw: eyes ? g.to.yaw + Math.PI : cave.root.rotation.y + Math.PI, pitch: g.view ? g.view.pitch : eyes ? -g.pitch : 0.12, dist: g.view ? g.view.distance : 4.5 });
+      // In the view and mode the room was left in.
+      if (cave && g.view) pilot.adopt(g.view, false);
+      if (cave) pilot.controls.takeMovement();
+      g.view = null;
       if (g.jetpack && g.jetpack.equipped && cave && h.equipJetpack(cave)) cave.jetFuel = g.jetpack.fuel;
       else if (g.jetpack && cave) cave.jetFuel = g.jetpack.fuel;
       g.jetpack = null;
@@ -436,11 +640,17 @@
     const update = (dt) => {
       const cave = crew.player, now = performance.now();
       g.t += dt;
+      if (g.radio && BL.timechainPartyRadio) BL.timechainPartyRadio.tick();
+      g.noteLeft = Math.max(0, g.noteLeft - dt);
+      if (g.pinSent > 0 && (g.pinSent -= dt) <= 0 && g.state === "pin") pinAnswer(false, "wrong");
       if (g.state !== "idle" && g.state !== "gone" && !cave) {
-        if (g.state === "keypad" || g.state === "account") disengage();
+        if (g.state === "keypad" || g.state === "account" || g.state === "pin") disengage();
         else if (g.state === "preparing" || g.state === "waiting") { fallBack("Walk an Ooga up to the keypad"); disengage(); }
       }
-      if (g.state === "keypad" || g.state === "account") {
+      if (g.remote) {
+        // Chosen from the bridge: the Ooga is the player's, and walking off the bridge's near half lets the choice go.
+        if (!driverOnNearHalf()) disengage();
+      } else if (g.state === "keypad" || g.state === "account" || g.state === "pin") {
         if (cave) { settleAtKeypad(dt); g.pitchTo = keypadPitch(); }
       } else if (g.state === "preparing" || g.state === "waiting") {
         if (g.starting && BL.net.serverNow() > g.exp) { fallBack("The doorway grant expired · press Enter to try again"); return; }
@@ -472,10 +682,10 @@
         const p = cave.root.position, x = localX(p.x, p.z), z = localZ(p.x, p.z);
         while (g.along < CURVE - 1 && Math.hypot(g.path[g.along * 2] - x, g.path[g.along * 2 + 1] - z) < 0.5) g.along++;
         const tx = g.path[g.along * 2], tz = g.path[g.along * 2 + 1];
-        steerTo(worldX(tx, tz), worldZ(tx, tz));
+        steerTo(worldX(tx, tz), worldZ(tx, tz), dt);
         if (localZ(camera.position.x, camera.position.z) <= g.handZ || g.t > WALK_LIMIT) handOff();
       } else if (g.state === "gone") {
-        if (cave) steerTo(PARK.x, PARK.z);
+        if (cave) steerTo(PARK.x, PARK.z, dt);
         // The room's scene takes over in the next frame; one that could not leaves the island running.
         if (g.t > 4) {
           world.sphereVisit = null;
@@ -492,7 +702,7 @@
       } else if (g.state === "leaving") {
         // The walk goes on once the doors are open enough and on while they close behind it.
         if (cave && (g.open > 0.55 || g.want === 0)) {
-          const out = steerTo(OUTSIDE.x, OUTSIDE.z), z = localZ(cave.root.position.x, cave.root.position.z);
+          const out = steerTo(g.outX, g.outZ, dt), z = localZ(cave.root.position.x, cave.root.position.z);
           if (z > S.THRESHOLD + 1.2) { g.want = 0; site.plug.visible = true; }
           // Hold the eye through the walk and the doors closing; the ordinary island camera returns afterward.
           if (out && g.open === 0 || g.t > WALK_LIMIT) { site.plug.visible = true; finishLeaving(); }
@@ -500,7 +710,10 @@
       } else if (g.state === "idle" && cave) {
         // Pressing against the doorway: it only opens from the keypad.
         const lx = localX(cave.root.position.x, cave.root.position.z), lz = localZ(cave.root.position.x, cave.root.position.z);
-        if (Math.abs(lx) < P.halfW && lz > S.THRESHOLD && lz < S.THRESHOLD + 1.1 && now - g.hintAt > HINT_GAP * 1000) {
+        // Only a crossing stands behind the doors. An Ooga left in the ball (a walk out that ran past its limit short of
+        // them, held by another player or begun off the passage) is put on the bridge where that walk ends.
+        if (behindDoors(lx, lz, cave.root.position.y - cave.baseY - place.y)) pilot.navigate({ position: { x: OUTSIDE.x, y: place.y, z: OUTSIDE.z }, yaw: OUT_HEADING + Math.PI, pitch: 0.12, dist: 4.5 });
+        else if (Math.abs(lx) < P.halfW && lz > S.THRESHOLD && lz < S.THRESHOLD + 1.1 && now - g.hintAt > HINT_GAP * 1000) {
           g.hintAt = now;
           hud.hint("Use keypad to choose a room", 3000);
         }
@@ -511,6 +724,10 @@
       const want = Math.max(g.want, now < g.remoteUntil ? 1 : 0), step = REDUCED.matches ? 1 : dt / DOOR_TIME;
       g.open = g.open < want ? Math.min(want, g.open + step) : Math.max(want, g.open - step);
       site.setDoors(g.open * g.open * (3 - 2 * g.open));
+      site.say(padWords());
+      // A PIN's digits are any of 0–9, the empty rooms' numbers too.
+      site.pinMode(g.state === "pin");
+      site.tick(dt);
     };
     const view = (dt) => {
       const cave = crew.player;
@@ -520,7 +737,14 @@
         if (g.still > 0) g.still--;
         else g.glide = Math.min(1, g.glide + dt / GLIDE);
         eyePose(cave, g.to);
+        // Follow the passage, not the body's lateral corrections between path points.
+        if (g.state === "crossing" || g.state === "gone") g.to.yaw = IN_HEADING;
+        else if (g.state === "leaving") g.to.yaw = OUT_HEADING;
+        // The walking rig can turn sharply near a path waypoint. Keep that body
+        // correction out of the eye: the view follows at a bounded angular speed.
+        if (g.glide === 1) g.to.yaw = g.eyeYaw + clamp(wrap(g.to.yaw - g.eyeYaw), -LOOK_SPEED * dt, LOOK_SPEED * dt);
         const e = putPose(g.from, g.to, g.glide), fov = pilot.eyeFov();
+        g.eyeYaw = Math.atan2(camera.target.x - camera.position.x, camera.target.z - camera.position.z);
         camera.fov = g.fromFov ? g.fromFov + (fov - g.fromFov) * e : fov;
         if (g.glide > 0.5) hideHead(cave, true);
       } else if (g.lens === "back") {
@@ -534,8 +758,9 @@
     };
     const keyOf = (e) => e.key.length === 1 ? e.key.toLowerCase() : e.key;
     const press = (key) => {
-      const digit = Number(key);
-      if (digit >= 1 && digit <= 9) {
+      if (g.state === "pin") { pinKey(key); return; }
+      const digit = /^[0-9]$/.test(key) ? Number(key) : NONE;
+      if (digit >= 0) {
         if (g.state === "account" && digit === g.selection) retryAccount();
         else if (g.state === "account") { g.state = "keypad"; choose(digit); }
         else choose(digit);
@@ -543,28 +768,46 @@
         if (g.state === "keypad") commit();
         else if (g.state === "account") commit(true);
       } else if (key === "back") {
-        if (g.state === "account") { g.state = "keypad"; show(`Room ${g.selection} selected · press Enter`); }
+        if (g.state === "account") { g.state = "keypad"; show(`${roomWords(g.selection)} selected · press Enter`); }
         else if (g.state === "keypad") disengage();
-        else if (g.state === "preparing" || g.state === "waiting") fallBack(`Cancelled · Room ${g.selection} remains selected`);
+        else if (g.state === "preparing" || g.state === "waiting") fallBack(`Cancelled · ${roomWords(g.selection)} remains selected`);
       }
     };
     // From the keypad until the Ooga is through, the doorway has the keys: nothing reaches the Ooga, the camera or
-    // the hub's shortcuts (a chat line being typed still gets its own). Once committed only Back is heard, until the
-    // doors part.
+    // the hub's shortcuts (a chat line being typed, or the directory open over the keypad, still gets its own). D opens
+    // the directory. Once committed only Back is heard, until the doors part.
     const onKey = (e) => {
-      if (g.state === "idle" || e.metaKey || e.ctrlKey || e.altKey || e.target && e.target.closest && e.target.closest("input, textarea, [contenteditable]")) return false;
+      // From the bridge the keypad takes clicks alone: every key still walks the Ooga and drives the view.
+      if (g.state === "idle" || g.remote || e.metaKey || e.ctrlKey || e.altKey || e.target && e.target.closest && e.target.closest("input, textarea, [contenteditable], dialog")) return false;
       const k = keyOf(e);
       e.preventDefault();
       e.stopImmediatePropagation();
       if (e.repeat) return true;
-      if (g.state === "keypad" || g.state === "account") {
-        if (/^[1-9]$/.test(k)) press(k);
+      if (g.state === "pin") {
+        if (/^[0-9]$/.test(k)) press(k);
+        else if (k === "Backspace") press("back");
+        else if (k === "Escape" && !g.pinSent) { leavePin(); show(CHOOSE); }
+      } else if (g.state === "keypad" || g.state === "account") {
+        if (/^[0-9]$/.test(k)) press(k);
         else if (k === "Enter") press("enter");
         else if (k === "Escape" || k === "Backspace") press("back");
+        else if (k === "d") hud.openBoard(site.directory);
       } else if ((g.state === "preparing" || g.state === "waiting") && (k === "Escape" || k === "Backspace")) press("back");
       return true;
     };
     window.addEventListener("keydown", onKey, true);
+    // The directory's rows and number keys choose as the keypad's numbers do, wherever a click on them would: while the
+    // keypad is in use, or from the bridge's near half. A locked room's PIN closes the directory so the keypad takes it,
+    // and while the keypad asks for one the directory chooses nothing (`asking`, for its caption).
+    const canChoose = () => g.state !== "pin" && (g.state === "keypad" || g.state === "account" || fromBridge());
+    const asking = () => g.state === "pin";
+    const pickRoom = (room) => {
+      if (g.state === "idle") pressFromBridge(String(room));
+      else press(String(room));
+      return g.state === "pin" ? "close" : true;
+    };
+    const hookDirectory = (on) => { site.directory.onChoose = on ? pickRoom : null; site.directory.canChoose = on ? canChoose : null; site.directory.asking = on ? asking : null; };
+    hookDirectory(true);
     // A hidden tab can come back long after a grant ran out; a waiting request is then given up rather than kept.
     const onVisibility = () => {
       if (!document.hidden && g.state === "waiting" && g.ask && performance.now() - g.ask > 60000) fallBack("The wait ran out · press Enter to try again");
@@ -577,6 +820,7 @@
     };
     const dispose = () => {
       window.removeEventListener("keydown", onKey, true);
+      hookDirectory(false);
       document.removeEventListener("visibilitychange", onVisibility);
       if (unsubscribeDoor) unsubscribeDoor();
       unsubscribeDoor = null;
@@ -585,26 +829,39 @@
       else if (g.cycle !== null || g.ask) BL.net.cancelDoor();
       g.starting = false;
       dropPrepared();
+      // Handed over, the room takes the radio as it opens; left any other way, it goes.
+      if (g.state !== "gone") radioFor(NONE);
       if (crew.player) hideHead(crew.player, false);
       g.state = "idle";
+      g.remote = g.bridged = false;
       g.ask = 0; g.cycle = null;
+      // A kept island comes back with the doors shut behind the crossing and the plug down, so the walk back out
+      // finds them shut, as the room's picture of them shows, and they part for it.
+      g.want = g.open = 0;
+      site.setDoors(0);
+      site.plug.visible = true;
     };
     // A kept island's gate takes a room chosen in advance on resuming, as `create` does; true when one was.
     const resume = () => {
-      const asked = ROOMS.parse(world.sphereKeypad) || 0;
+      const asked = ROOMS.parse(world.sphereKeypad);
       world.sphereKeypad = null;
-      if (asked) preselect = asked;
-      if (unsubscribeDoor) return !!asked;
+      if (asked !== null) preselect = asked;
+      if (unsubscribeDoor) return asked !== null;
+      showLocks();
       unsubscribeDoor = BL.net.subscribeDoor(onDoor);
       window.addEventListener("keydown", onKey, true);
+      hookDirectory(true);
       document.addEventListener("visibilitychange", onVisibility);
       show();
-      return !!asked;
+      return asked !== null;
     };
     show();
     return {
-      action, nearKeypad, engage, update, view, arrive, resume, dispose, onKey, liveGeometry, get preselected() { return preselect; },
-      get busy() { return g.state !== "idle"; },
+      action, nearKeypad, fromBridge, pressFromBridge, engage, update, view, arrive, resume, dispose, onKey, liveGeometry, get preselected() { return preselect; },
+      // Chosen from the bridge, the Ooga is the player's and the doorway holds nothing.
+      get busy() { return g.state !== "idle" && !g.remote; },
+      get remote() { return g.remote; },
+      get askingPin() { return g.state === "pin"; },
       get crossing() { return g.state === "opening" || g.state === "crossing" || g.state === "gone" || g.state === "leaving" || g.state === "arriving"; },
       debug: g, choose, commit, disengage, press
     };

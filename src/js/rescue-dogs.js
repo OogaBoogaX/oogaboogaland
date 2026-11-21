@@ -46,7 +46,10 @@
   const EAT_SECONDS = 2.6, FOOD_DROP_SECONDS = 0.4, SQUAT_SECONDS = 1.4, RESTOCK_SECONDS = 4;
   // A dog stopped by a wall further than LEFT_BEHIND from its Ooga, or whose Ooga moved more than MOVED in one frame
   // (a door, the deep-water return), turns up beside it; a hungry one trots after an Ooga further off than TROT.
-  const WALK = 2.2, RUN = 4.6, FED_RUN = 6.9, LEFT_BEHIND = 2.5, MOVED = 3, TROT = 4;
+  // The adopted dog follows by the crew's companion rules (`BL.crew.COMPANION_FOLLOW`), which a character's own pet
+  // shares, so the two follow alike.
+  const FOLLOW_RULES = BL.crew.COMPANION_FOLLOW;
+  const WALK = 2.2, RUN = 4.6, FED_RUN = FOLLOW_RULES.run, LEFT_BEHIND = FOLLOW_RULES.behind, MOVED = FOLLOW_RULES.moved, TROT = 4;
   // Flight: the dog takes off once its Ooga thrusts off the ground or is LIFT above what lies under it and flies next to
   // it, FLY_SIDE out on its own side and FLY_UP over its feet, at up to CATCH_UP times a jetpack's speed (`flyTo` closes
   // FLY_GAIN times the gap a second, so to keep abreast at speed it aims a second's FLY_GAIN-th of its Ooga's way ahead,
@@ -54,7 +57,8 @@
   // Its Ooga down, it lands within LAND_REACH of it on dry open ground; the jetpack sits on its back at JET_SCALE.
   // Held up in the air longer than HELD_UP with no way on (a canopy over it, a wall ahead), it turns up where it is
   // going.
-  const LIFT = 1.2, FLY_SIDE = 1.2, FLY_UP = 0.4, FLY_GAIN = 3, CATCH_UP = 1.35, FLY_FAR = 30, LAND_REACH = 14, JET_SCALE = 0.55, HELD_UP = 1.5, CLIMB_OVER = 8;
+  const GAIT = BL.crew.QUAD_GAIT;
+  const LIFT = 1.2, FLY_SIDE = FOLLOW_RULES.side, FLY_UP = FOLLOW_RULES.up, FLY_GAIN = BL.crew.COMPANION_FLIGHT.gain, FLY_FAR = FOLLOW_RULES.far, LAND_REACH = 14, JET_SCALE = 0.55, HELD_UP = FOLLOW_RULES.held;
   const FREE = 0, KENNEL = 1, FOLLOW = 2, SIT = 3, EAT = 4, SQUAT = 5, NAP = 6, HOME = 7, STRAY = 8, FLY = 9, LAND = 10;
   const STATE_NAMES = ["free", "kennel", "follow", "sit", "eat", "poop", "sleep", "home", "stray", "fly", "land"];
   // Where a dog is: the Chora, the rescue's yard, or with its Ooga. `update` takes the visitor's as CHORA, YARD or ROOM
@@ -589,7 +593,7 @@
         return false;
       }
       if (!pile.eat()) {
-        hud.toast("The banana pile is empty. Feed the Ooga Boogas first!");
+        hud.toast("The banana pile is empty. Feed the Oogas first!");
         return false;
       }
       e.hunger = 0;
@@ -670,7 +674,7 @@
         px[i] += Math.sin(yaw[i]) * go;
         pz[i] += Math.cos(yaw[i]) * go;
         py[i] = floorOf(i);
-        phase[i] += speed[i] * dt * 11;
+        phase[i] += speed[i] * dt * GAIT.stride;
       }
       return d < 0.25;
     };
@@ -679,9 +683,9 @@
     const WALKED = 0, ARRIVED = 1, BLOCKED = 2;
     const walkTo = (i, tx, tz, top, dt) => {
       const dx = tx - px[i], dz = tz - pz[i], d = Math.sqrt(dx * dx + dz * dz);
-      const want = d < 0.12 ? 0 : Math.min(top, (d - 0.08) * 2.6);
-      speed[i] += (want - speed[i]) * Math.min(1, dt * 6);
-      if (d > 0.12) turn(i, Math.atan2(dx, dz), dt * 7);
+      const want = d < 0.12 ? 0 : Math.min(top, (d - 0.08) * FOLLOW_RULES.ease);
+      speed[i] += (want - speed[i]) * Math.min(1, dt * FOLLOW_RULES.accel);
+      if (d > 0.12) turn(i, Math.atan2(dx, dz), dt * FOLLOW_RULES.turn);
       if (speed[i] > 0.01) {
         const go = Math.min(speed[i] * dt, d), nx = px[i] + Math.sin(yaw[i]) * go, nz = pz[i] + Math.cos(yaw[i]) * go;
         if (!strays.clearSegment(px[i], pz[i], nx, nz, py[i])) {
@@ -689,31 +693,25 @@
           return BLOCKED;
         }
         px[i] = nx; pz[i] = nz; py[i] = floorOf(i);
-        phase[i] += speed[i] * dt * 11;
+        phase[i] += speed[i] * dt * GAIT.stride;
       }
       return d < 0.25 ? ARRIVED : WALKED;
     };
     // Flies slot i toward (tx, ty, tz), as fast and as steep as a jetpack goes: a wall or roof in its way it climbs
     // over, up to CLIMB_OVER above where it is going, never through; it keeps clear of the floor under it. True once
     // it is there.
+    const flight = { x: 0, y: 0, z: 0, heading: 0, speed: 0, phase: 0 };
+    const flightFloor = (x, z, feet) => {
+      const y = ground(x, z, feet);
+      return y > -100 ? y : feet;
+    };
     const flyTo = (i, tx, ty, tz, dt) => {
-      const dx = tx - px[i], dz = tz - pz[i], d = Math.sqrt(dx * dx + dz * dz);
-      const want = Math.min(JET_SPEED * CATCH_UP, d * FLY_GAIN);
-      speed[i] += (want - speed[i]) * Math.min(1, dt * 4);
-      if (d > 0.1) turn(i, Math.atan2(dx, dz), dt * 6);
-      let rise = Math.max(-JET_RISE, Math.min(JET_RISE, (ty - py[i]) * FLY_GAIN));
-      if (d > 0.02 && speed[i] > 0.01) {
-        const go = Math.min(speed[i] * dt, d), nx = px[i] + dx / d * go, nz = pz[i] + dz / d * go;
-        if (flyClear(px[i], pz[i], nx, nz, py[i])) { px[i] = nx; pz[i] = nz; }
-        else { speed[i] = 0; rise = py[i] < ty + CLIMB_OVER ? JET_RISE : Math.min(rise, 0); }
-      }
-      // The floor under it, not one within a step over its feet: in the air it climbs no mast or crane a step at a time.
-      let floor = floorOf(i);
-      if (floor > py[i] + 0.05) floor = floorOf(i, py[i] - 0.65);
-      const y = Math.max(py[i] + rise * dt, floor + 0.15);
-      if (flyClear(px[i], pz[i], px[i], pz[i], y)) py[i] = y;
-      phase[i] += dt * 4;
-      return d < 0.15 && Math.abs(ty - py[i]) < 0.15;
+      flight.x = px[i]; flight.y = py[i]; flight.z = pz[i];
+      flight.heading = yaw[i]; flight.speed = speed[i]; flight.phase = phase[i];
+      const arrived = BL.crew.flyCompanion(flight, tx, ty, tz, dt, flightFloor, flyClear);
+      px[i] = flight.x; py[i] = flight.y; pz[i] = flight.z;
+      yaw[i] = flight.heading; speed[i] = flight.speed; phase[i] = flight.phase;
+      return arrived;
     };
     // Horizontal steering burns fuel too; Space is only the upward part of a powered flight.
     const jetting = (cave) => !!cave.jet && !cave.jetRecovering && cave.jetFuel > 0 && (cave.jet.power > 0 || cave.jet.thrust);
@@ -852,12 +850,12 @@
         return;
       }
       state[i] = FOLLOW;
-      const step = walkTo(i, p.x - sh * 0.95 + ch * side[i], p.z - ch * 0.95 - sh * side[i], hungry ? WALK : FED_RUN, dt);
+      const step = walkTo(i, p.x - sh * FOLLOW_RULES.back + ch * side[i], p.z - ch * FOLLOW_RULES.back - sh * side[i], hungry ? WALK : FED_RUN, dt);
       // Stopped by a wall with its Ooga out of reach on its own level, it turns up beside it; an Ooga up on a roof
       // it waits under, looking up.
       if (step === BLOCKED) {
         if (feet - py[i] > LIFT) lookUp = d < LAND_REACH;
-        else if ((stuck[i] += dt) > 0.4 && d > LEFT_BEHIND) beside(i, p, feet, h);
+        else if ((stuck[i] += dt) > FOLLOW_RULES.stuck && d > LEFT_BEHIND) beside(i, p, feet, h);
       } else stuck[i] = 0;
       if (step === ARRIVED && speed[i] < 0.2) turn(i, h, dt * 3);
       if (!hungry && here === CHORA && (poopTimer[i] -= dt) <= 0 && speed[i] < 0.6) {
@@ -972,20 +970,21 @@
     // Whether dog i is in the visitor's space and drawn this frame.
     const shown = (i) => state[i] !== FREE && state[i] !== NAP && (space[i] === WITH || space[i] === here);
     // Legs swing in diagonal pairs while walking; sitting folds the hind legs, napping lays all four flat, flying
-    // stretches them fore and aft under the jetpack. `near` is whether its shadow is worth drawing.
+    // stretches them fore and aft under the jetpack (the gait is `BL.crew.QUAD_GAIT`, shared with legged companions).
+    // `near` is whether its shadow is worth drawing.
     const draw = (i, elapsed, near, dt) => {
       const b = breedOf[i], L = layouts[b], s = (spotOf[i] >= 0 || state[i] === HOME ? 0.88 : state[i] === STRAY ? 0.94 : 1) * (0.2 + 0.8 * grow[i]);
       const st = state[i] === STRAY ? MOOD_POSE[mood[i]] : state[i], hunger = entries[i] ? entries[i].hunger : 0, aloft = st === FLY || st === LAND, powered = st === FLY || st === LAND && landingHover;
       let pitch = 0, lift = 0, front = 0, hind = 0;
-      const walk = aloft ? 0 : Math.min(1, speed[i] / 1.4), swing = Math.sin(phase[i]) * 0.65 * walk;
-      let y = py[i] + Math.abs(Math.cos(phase[i])) * 0.018 * walk;
+      const walk = aloft ? 0 : Math.min(1, speed[i] / GAIT.pace), swing = Math.sin(phase[i]) * GAIT.swing * walk;
+      let y = py[i] + Math.abs(Math.cos(phase[i])) * GAIT.bob * walk;
       if (st === SIT) { pitch = -0.42; front = 0.42; hind = -1.25; y += L.leg * U * 0.1; }
       else if (st === NAP && speed[i] < 0.05) { lift = -L.leg * U * 0.92; front = -1.5; hind = 1.5; }
       else if (st === EAT && (i !== own || timer[i] < EAT_SECONDS - FOOD_DROP_SECONDS)) { pitch = 0.32 + Math.sin(elapsed * 14) * 0.05; front = -0.32; hind = -0.32; }
       else if (st === SQUAT) { pitch = -0.22; front = 0.22; hind = -0.75; lift = -0.035; }
       else if (st === KENNEL && speed[i] < 0.05 && (i & 1)) { pitch = -0.42; front = 0.42; hind = -1.25; y += L.leg * U * 0.1; }
-      else if (st === LAND && !landingHover) { front = -0.2; hind = 0.2; }
-      else if (aloft) { pitch = Math.sin(phase[i]) * 0.04; front = -1.05; hind = 1.1; y += Math.sin(elapsed * 3 + i) * 0.03; }
+      else if (st === LAND && !landingHover) { front = GAIT.landFront; hind = GAIT.landHind; }
+      else if (aloft) { pitch = Math.sin(phase[i]) * 0.04; front = GAIT.flyFront; hind = GAIT.flyHind; y += Math.sin(elapsed * 3 + i) * 0.03; }
       else if (i === own && lookUp && speed[i] < 0.05) pitch = -0.3;
       y += lift * s;
       // Nearby strays emit the same rising Z as sleeping Oogas, only once settled at home.
