@@ -22,7 +22,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { appRow, createAudience, DEFAULT_LIMITS, FANOUT_DEFAULT, ID, isZone, ZONES, zoneReactHz } from "./audience-model.js";
 import { decideCapability } from "./chat-capability.js";
-import { contributorFor } from "./contributor-access.js";
+import { contributorForEnv } from "./contributor-access.js";
 import { oogatron, readContributorSnapshot } from "./contributor-policy.js";
 import { bridgeFeatures } from "./chat-bridge-protocol.js";
 import { SEAT_REVISION } from "./cloud-seats.js";
@@ -100,7 +100,7 @@ export class Audience extends DurableObject {
     this.genAt = 0;
     this.contributions = { at: 0, map: null, pending: null };
     // The island's contributor lookup (contributor-access.js), on the instance so a check can stand in its own.
-    this.contributorFor = contributorFor;
+    this.contributorFor = contributorForEnv(env);
     // The owner's private Inspector (#669): aggregate counts and this object's state, nothing per person. Off, every call
     // returns at once, unless INSPECTOR_IDS names an account; it rides the calls the object already makes, no timer.
     this.inspect = inspectReporter(ctx, env, "Audience", () => AUDIENCE_NAME, () => this.inspectState());

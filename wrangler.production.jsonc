@@ -23,6 +23,9 @@
   },
   "vars": {
     "ENVIRONMENT": "production",
+    // Independent character catalogs stay off until the runtime and publisher acceptance checks pass.
+    // Enabling also requires CHARACTER_CATALOGS, CHARACTER_CATALOG_ENGINE and CHARACTER_CATALOG_BASELINE.
+    "CHARACTER_CATALOG_ENABLED": "0",
     // Ooga Chat's private bridge (worker/src/chat-bridge.js), comma-separated: bridge (every operation but hello),
     // outdoor (island voices heard by Ooga Chat's audience), cloud (Ooga Chat speakers on clouds), commons (The Commons
     // from Ooga Chat, read; commons-send lets its members send too). Empty: the bridge answers hello alone. Deploying with

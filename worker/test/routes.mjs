@@ -6,7 +6,7 @@ import * as cookies from "../src/cookies.js";
 import * as crypto from "../src/crypto.js";
 import * as db from "../src/db.js";
 import * as highscoreStore from "../src/highscore-store.js";
-import { createOwnedCharacterLookup, oogatron } from "../src/contributor-policy.js";
+import { createContributorLookup, createOwnedCharacterLookup, LOGIN, oogatron } from "../src/contributor-policy.js";
 import { turnConfigured } from "../src/sfu.js";
 import { RULES } from "../src/tess-rules.js";
 import "../../src/js/highscore-rules.js";
@@ -33,10 +33,11 @@ export const TESS_FACTS = { places: ["pile", "factory", "arcade"],
 
 export const routeFixture = ({ cast = [{ handle: "ooga-dev", github_login: "ooga-dev",
   joined_at: "2026-09-01T00:00:00Z", last_commit_at: "2026-10-01T00:00:00Z" }],
-lookup = async () => null, fetcher = async () => { throw new Error("Unexpected network request"); },
+lookup = async () => null, catalog = null, fetcher = async () => { throw new Error("Unexpected network request"); },
 anthropic = class { constructor() { throw new Error("Unexpected Claude call"); } }, facts = TESS_FACTS } = {}) => {
-  const access = load("contributor-access", { CAST_ROWS: cast,
-    createOwnedCharacterLookup: (rows) => createOwnedCharacterLookup(rows, lookup) }, ["contributorFor"]);
+  const access = load("contributor-access", { CAST_ROWS: cast, LOGIN, createContributorLookup: () => lookup,
+    catalogFor: () => catalog || ({ read: async () => ({ revision: "fixture", generation: 0, rows: cast }), fresh: () => true }),
+    createOwnedCharacterLookup: (rows) => createOwnedCharacterLookup(rows, lookup) }, ["contributorFor", "contributorForEnv", "contributorDecision"]);
   const http = load("http", { ...cookies, ...db, ...access, oogatron }, ["json", "text", "redirect", "fromSite", "safeNext",
     "clientIp", "allowed", "sessionToken", "getSessionFromRequest", "getSessionForRemoval", "readBody"]);
   const auth = load("auth", { ...cookies, ...crypto, ...db, ...http, ...access, oogatron, fetch: fetcher }, ["handleAuth"]);

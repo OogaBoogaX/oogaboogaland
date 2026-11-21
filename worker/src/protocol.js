@@ -13,6 +13,7 @@ import { audienceRoom, overhearing } from "./room-audience.js";
 export { audienceRoom, overhearing };
 import { commonsRoom } from "./room-commons.js";
 export { commonsRoom };
+export { roomCatalog } from "./room-catalog.js";
 // The Durable Object inspector's reporter (inspect-report.js), here so the room and game host take it with the rest.
 export { inspectReporter, INSPECT_FEATURE } from "./inspect-report.js";
 // The World Map's reporter (world-report.js), likewise.

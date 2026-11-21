@@ -3,7 +3,7 @@
 // session; nothing a client sends can change its identity. Ported from the OBL-Audio prototype:
 // hibernatable sockets with attachments, a snapshot at most 15 times a second while anything moves, an
 // alarm sweeping silent sockets once a minute, and one socket per player, where a newer one kicks the older with `replaced`.
-// Every claim on an Ooga or gorilla passes `claimRefusal` against the cast the build writes (characters.gen.json).
+// Every claim on an Ooga or gorilla passes `claimRefusal` against this Room's accepted character catalog.
 // Voice: the room alone talks to the Realtime SFU (the secret stays here), decides who hears whom
 // (`voicePeers`: both driving a body in the same place) and re-checks it on every pull, so a page never
 // learns another player's session and cannot pull a voice it may not hear.
@@ -41,7 +41,7 @@ import {
   PM_FEATURE, PM_HZ, PM_BURST, PM_INVITE_HZ, PM_INVITE_BURST, PM_CONTROL_HZ, PM_CONTROL_BURST, PM_INVITES, PM_BLOCKS, PM_ACCOUNT_KEEP,
   LINK_FEATURE, LINK_HZ, LINK_BURST, LINK_WANTS, LINK_ACCOUNTS, voiceLinked, restoreLinks, storedLinks, linkView, inVoice,
   chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
-  BLEND, BLEND_HZ, seenTogether, inspectReporter, INSPECT_FEATURE, worldReporter, audienceRoom, commonsRoom, sessionGone, cleanupPass,
+  BLEND, BLEND_HZ, seenTogether, inspectReporter, INSPECT_FEATURE, worldReporter, audienceRoom, commonsRoom, roomCatalog, sessionGone, cleanupPass,
 } from "./protocol.js";
 import { sha256Hex } from "./crypto.js";
 import { getPlayer } from "./db.js";
@@ -50,7 +50,6 @@ import { sfuClient, turnCredentials } from "./sfu.js";
 import { STUDIO_TRANSPORT, STUDIO_ZONE, studioState, studioHostAllowed, studioCanSpeak, studioPosition, studioSeatAllowed, studioSource } from "./studio-policy.js";
 import CAST_ROWS from "./characters.gen.json";
 
-const CAST = castIndex(CAST_ROWS);
 // The voice cleanup queue's bound (`shedCleanup`).
 const CLEANUP_JOBS_MAX = 64;
 // A held player's socket while its page is away (`hold`): anything written to it goes nowhere, as to a socket closing,
@@ -73,6 +72,7 @@ const LOAD_MS = 2000, LOAD_CHAT = "ooga-chat";
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.catalog = roomCatalog.create(env, CAST_ROWS, castIndex, () => Date.now());
     this.inspect = inspectReporter(ctx, env, "Room", () => ctx.id.name, (detail) => this.inspectState(detail));
     // The World Map's live layer (world-report.js): who stands where, told to WorldWatch as it changes.
     this.world = worldReporter(ctx, env, () => this.worldView());
@@ -127,6 +127,14 @@ export class Room extends DurableObject {
     // Each stored key is restored on its own (`restoring`): a throw inside this block resets the object, and the same
     // stored value would then fail every wake and every connect after it.
     ctx.blockConcurrencyWhile(async () => {
+      if (this.catalog.enabled) {
+        await this.restoring(roomCatalog.key, (saved) => this.catalog.restore(saved));
+        await this.restoring(null, () => this.catalog.refresh(ctx.storage));
+        // A catalog outage is not a revocation. Never compare restored players
+        // to an embedded cast that predates their accepted characters.
+        const cast = this.catalog.current();
+        if (cast) for (const p of this.players.values()) if (!ownedBody(cast, p.login, p.contributor, p.id)) this.evict(p, "revoked");
+      }
       await this.restoring("hockeyLimitsV1", (saved) => {
         if (saved !== undefined && !hockey.validLimits(saved)) throw new InvalidStoredValue("hockey limits are not their shape");
         return hockey.loadLimits(this, saved);
@@ -198,7 +206,7 @@ export class Room extends DurableObject {
     }
     // Old guest sockets can survive a deployment in hibernated attachments.
     // Use the ordinary departure path so peers drop their presence and voice.
-    for (const p of this.players.values()) if (!ownedBody(CAST, p.login, p.contributor, p.id)) this.evict(p, "revoked");
+    if (!this.catalog.enabled) for (const p of this.players.values()) if (!ownedBody(this.catalog.current(), p.login, p.contributor, p.id)) this.evict(p, "revoked");
     // A conversation stands only while both ends are here and hold each other; an invite only to someone here.
     for (const p of this.players.values()) {
       const pm = p.pm && typeof p.pm === "object" ? p.pm : {};
@@ -332,7 +340,10 @@ export class Room extends DurableObject {
   }
 
   // Whether this Room's own cast and contributor rule give the account an Ooga (an Ooga Chat member is vouched for).
-  memberOwns(login, id) { return !!ownedBody(CAST, login, true, id); }
+  memberOwns(login, id) {
+    const cast = this.catalog.current();
+    return !!cast && !!ownedBody(cast, login, true, id);
+  }
 
   broadcastZone(zone, msg) {
     const text = JSON.stringify(msg);
@@ -592,12 +603,16 @@ export class Room extends DurableObject {
 
   async fetch(request) {
     const path = new URL(request.url).pathname;
+    const cleanup = ["/voice/leave", "/voice/unpublish", "/voice/close"].includes(path);
+    if (this.catalog.enabled && !cleanup) await this.catalog.refresh(this.ctx.storage);
     if (path.startsWith("/voice/")) return this.voiceRequest(path.slice("/voice/".length), request);
+    const cast = this.catalog.current();
+    if (!cast) return new Response("Character catalog unavailable", { status: 503, headers: { "cache-control": "no-store", "retry-after": "60" } });
     // Ooga Chat's contributors, through the private bridge alone: the public `/room` never has this path.
     if (path === "/community") return commonsRoom.connect(this, request, (login, id) => this.memberOwns(login, id), Date.now());
     if (request.headers.get("upgrade") !== "websocket") return new Response("Expected WebSocket", { status: 426 });
     const who = playerFromHeaders(request.headers);
-    if (!who || !ownedBody(CAST, who.login, who.contributor, who.id)) return new Response("Contributors with an Ooga only", { status: 403 });
+    if (!who || !ownedBody(cast, who.login, who.contributor, who.id)) return new Response("Contributors with an Ooga only", { status: 403 });
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
@@ -611,6 +626,11 @@ export class Room extends DurableObject {
     else if (older) this.evict(older, "replaced");
     // The account's last connection's outdoor grants are taken back before this one's welcome (#667).
     await audienceRoom.settled(this, who.id);
+    const admitted = this.catalog.current();
+    if (!admitted || !ownedBody(admitted, who.login, who.contributor, who.id)) {
+      server.close(CLOSE_KICK, admitted ? "revoked" : "catalog-unavailable");
+      return new Response(null, { status: 101, webSocket: client });
+    }
     if (back && this.players.get(who.id) === older) {
       this.resume(older, server, who);
       await this.ensureSweep();
@@ -629,7 +649,7 @@ export class Room extends DurableObject {
     if (kept) p.pm.blocked = kept.blocked.slice();
     server.serializeAttachment(this.attachment(p));
     // An owner arriving takes either body back from whoever holds it.
-    const own = ownedBody(CAST, p.login, p.contributor, p.id);
+    const own = ownedBody(admitted, p.login, p.contributor, p.id);
     if (own) for (const o of this.players.values()) if (o.body && bodyName(o.body).toLowerCase() === own) this.release(o, "owner-here");
     this.players.set(p.id, p);
     this.sockets.set(server, p);
@@ -646,10 +666,11 @@ export class Room extends DurableObject {
   // Everything a page hears as its socket opens, a new record's or a resumed one's (`resumed`, its voice kept).
   welcome(p, resumed) {
     const server = p.ws, others = [];
+    const catalog = this.catalog.metadata();
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
     this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, resume: p.resumeKey, ...(resumed ? { resumed: true } : {}), tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [PROP_FEATURE, tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, DANCE_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, duel.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...audienceRoom.features(this), ...(this.inspect.on ? [INSPECT_FEATURE] : [])],
       // The account speaks from Ooga Chat on another device: this page's own voice waits for the visitor's word.
-      ...(audienceRoom.elsewhere(this, p.id) ? { voiceElsewhere: true } : {}) });
+      ...(audienceRoom.elsewhere(this, p.id) ? { voiceElsewhere: true } : {}), ...(catalog ? { catalog } : {}) });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.sendCabinets(server);
@@ -791,7 +812,8 @@ export class Room extends DurableObject {
     this.countLoad(p.zone, true);
     this.inspect.count("in");
     this.inspect.count("inBytes", typeof message === "string" ? message.length : message.byteLength);
-    if (!ownedBody(CAST, p.login, p.contributor, p.id)) { this.evict(p, "revoked"); return; }
+    const cast = this.catalog.current();
+    if (cast && !ownedBody(cast, p.login, p.contributor, p.id)) { this.evict(p, "revoked"); return; }
     if (typeof message !== "string") {
       if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === BLOCK.MAGIC) block.frame(this, p, message);
       else if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === GHOST_MAGIC) return; // HALLOWEEN: a page from before the hunt ran on the server (game-host.js)
@@ -964,6 +986,7 @@ export class Room extends DurableObject {
       audienceRoom.world(this);
     } else if (msg.t === "outdoor") {
       // Ooga Chat's outdoor handshake (room-audience.js): each frame in order, the grant saved on the attachment there.
+      if (msg.op === "enter" && !cast) { audienceRoom.sendOutdoor(this, p, { op: "refused", epoch: msg.epoch, reason: "unavailable" }); return; }
       return audienceRoom.outdoor(this, p, msg);
     } else if (msg.t === "audience-view" || msg.t === "audience-resync") {
       // Ooga Chat's panel (room-audience.js): its zone rides the attachment, saved there.
@@ -995,10 +1018,11 @@ export class Room extends DurableObject {
       return;
     } else if (msg.t === "body") {
       if (msg.name === p.body) return;
+      if (msg.name !== null && !cast) { this.send(ws, { t: "release", name: msg.name, reason: "catalog-unavailable" }); return; }
       hockey.leave(this, p.id);
       block.leave(this, p.id);
       duel.leave(this, p);
-      const refusal = claimRefusal(CAST, p.login, msg.name, this.players.values(), p.contributor, p.id);
+      const refusal = claimRefusal(cast, p.login, msg.name, this.players.values(), p.contributor, p.id);
       if (refusal) {
         this.send(ws, { t: "release", name: msg.name, reason: refusal });
         if (p.body === null) return;
@@ -1552,7 +1576,9 @@ export class Room extends DurableObject {
     if (!p) return new Response(JSON.stringify({ error: "join the island first" }), { status: 409, headers: { "content-type": "application/json" } });
     if (!p.connectionToken || request.headers.get("x-room-token") !== p.connectionToken) return new Response(JSON.stringify({ error: "connection replaced" }), { status: 409, headers: { "content-type": "application/json" } });
     if (op === "ice") {
-      if (!ownedBody(CAST, p.login, p.contributor, p.id)) {
+      const cast = this.catalog.current();
+      if (!cast) return new Response(JSON.stringify({ error: "character catalog unavailable" }), { status: 503, headers: { "cache-control": "no-store", "content-type": "application/json" } });
+      if (!ownedBody(cast, p.login, p.contributor, p.id)) {
         this.evict(p, "revoked");
         return new Response(JSON.stringify({ error: "contributors with an Ooga only" }), { status: 403, headers: { "cache-control": "no-store", "content-type": "application/json" } });
       }
@@ -1561,6 +1587,9 @@ export class Room extends DurableObject {
       const data = await turnCredentials(this.env).catch(() => null);
       if (this.players.get(p.id) !== p || p.connectionToken !== request.headers.get("x-room-token"))
         return new Response(null, { status: 409, headers: { "cache-control": "no-store" } });
+      const current = this.catalog.current();
+      if (!current || !ownedBody(current, p.login, p.contributor, p.id))
+        return new Response(null, { status: 503, headers: { "cache-control": "no-store" } });
       return new Response(JSON.stringify(data || {}), { headers: {
         "cache-control": "no-store", "content-type": "application/json", "x-content-type-options": "nosniff",
       } });
@@ -1586,7 +1615,10 @@ export class Room extends DurableObject {
     if (!this.sfu) return json({ error: "voice is not configured" }, 503);
     const p = this.players.get(Number(request.headers.get("x-player-id")));
     if (!p || p !== expected) return json({ error: "connection replaced" }, 409);
-    if (!ownedBody(CAST, p.login, p.contributor, p.id)) {
+    const cast = this.catalog.current();
+    const cleanup = ["leave", "unpublish", "close"].includes(op);
+    if (!cast && !cleanup) return json({ error: "character catalog unavailable" }, 503);
+    if (cast && !ownedBody(cast, p.login, p.contributor, p.id)) {
       this.evict(p, "revoked");
       return json({ error: "contributors with an Ooga only" }, 403);
     }
@@ -1601,7 +1633,11 @@ export class Room extends DurableObject {
     const was = inVoice(p);
     const voice = p.voice;
     let generation = voice.version || 0;
-    const current = () => this.players.get(p.id) === p && p.voice === voice && (voice.version || 0) === generation;
+    const current = () => {
+      const authority = this.catalog.current();
+      return this.players.get(p.id) === p && p.voice === voice && (voice.version || 0) === generation
+        && (cleanup || authority && !!ownedBody(authority, p.login, p.contributor, p.id));
+    };
     if (this.studio && this.studio.hostId && !studioHostAllowed(this.env, this.studio.hostId)) this.suspendStudio();
     const mayPublish = () => p.zone !== STUDIO_ZONE || studioCanSpeak(this.studio, p);
     try {
@@ -2236,9 +2272,11 @@ export class Room extends DurableObject {
     // A cancelled lease can leave its earlier alarm in place. Before the recorded sweep deadline that wake only
     // expires door state and reschedules; it must not turn account reads and stale checks into a high-frequency poll.
     if (sweepDue) {
+      if (this.catalog.enabled) await this.restoring(null, () => this.catalog.refresh(this.ctx.storage));
+      const cast = this.catalog.current();
       try { await this.refreshHighscores(); } catch { /* Pending D1 revisions survive until the next sweep. */ }
       for (const p of [...this.players.values()]) {
-        if (!ownedBody(CAST, p.login, p.contributor, p.id)) { this.evict(p, "revoked"); continue; }
+        if (cast && !ownedBody(cast, p.login, p.contributor, p.id)) { this.evict(p, "revoked"); continue; }
         // The existing operator D1 ban also ends active presence at the next successful sweep.
         // Retry on a later alarm if D1 is unavailable; never infer a ban from a failed read.
         if (this.env.DB) {
@@ -2250,7 +2288,7 @@ export class Room extends DurableObject {
         // A held player has no socket to go stale: its hold ends it.
         if (!p.held && now - this.heardAt(p) > STALE_MS) this.evict(p, "stale");
       }
-      await commonsRoom.sweep(this, now, (login, id) => this.memberOwns(login, id), STALE_MS);
+      await commonsRoom.sweep(this, now, (login, id) => !cast || !!ownedBody(cast, login, true, id), STALE_MS);
     }
     // Cleanup retries run on every wake, not only at sweep time, and last: a pass is bounded (`cleanupPass`), and the
     // sweep's account and stale checks never wait behind an SFU slow to answer.

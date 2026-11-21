@@ -5,6 +5,8 @@
 // of exactly what is sent, so a client and a cache can tell when the cast changed. Public data only: nobody's session,
 // account, voice or position.
 
+import { BridgeRefusal } from "./chat-bridge-protocol.js";
+
 const CAST_MAX = 4096;
 
 export const castRows = (cast) => cast.slice(0, CAST_MAX).map((row) => ({
@@ -22,13 +24,24 @@ const hex = async (text) => {
   return out;
 };
 
-export const publicOps = ({ cast }) => {
+export const publicOps = ({ cast, catalogFor }) => {
   let answer = null;
+  const environments = new WeakMap();
   return {
     // Public browsing stays up whatever the bridge's switch says: nothing outward depends on it.
     cast: {
       always: true,
-      run: async () => {
+      run: async (env) => {
+        if (catalogFor) {
+          const snapshot = await catalogFor(env).read();
+          if (!snapshot) throw new BridgeRefusal("unavailable", true);
+          const cached = environments.get(env);
+          if (cached && cached.catalogRevision === snapshot.revision && cached.catalogGeneration === snapshot.generation) return cached;
+          const rows = castRows(snapshot.rows), metadata = { catalogRevision: snapshot.revision, catalogGeneration: snapshot.generation };
+          const result = { rows, revision: (await hex(JSON.stringify({ rows, ...metadata }))).slice(0, 16), count: rows.length, ...metadata };
+          environments.set(env, result);
+          return result;
+        }
         if (!answer) {
           const rows = castRows(cast);
           answer = { rows, revision: (await hex(JSON.stringify(rows))).slice(0, 16), count: rows.length };

@@ -4,8 +4,8 @@ Implementation issue: [#831](https://github.com/OogaBoogaX/oogaboogaland/issues/
 
 The catalog lets approved plain-data characters reach production independently
 of code merged into `rock`. Code releases remain manual. This document describes
-the staged implementation; the foundation does not enable publishing, add a
-public endpoint, or change the running island.
+the staged implementation. Runtime support starts disabled; merging its code
+does not publish a catalog or change the running island.
 
 ## Release boundary
 
@@ -84,13 +84,46 @@ replay events in merge order, validate the runtime's supported engine, upload
 immutable bytes, and conditionally compare-and-swap the stored activation.
 The pure planner's generation check alone provides no distributed write lock.
 
-## Planned runtime
+## Runtime configuration
 
-One environment-scoped Worker loader will validate complete immutable snapshots
-and construct ownership maps and cast indexes. It will deduplicate bounded
-refreshes, avoid storage requests in per-frame/message work, and restore the
-Room's accepted snapshot before checking hibernated connections. ChatBridge's
-public cast and capability consumers will use revision-aware caches.
+The Worker opts in only with `CHARACTER_CATALOG_ENABLED="1"`. Both checked-in
+environment configurations keep it `"0"`. Before enabling, bind that
+environment's private R2 bucket as `CHARACTER_CATALOGS`, set
+`CHARACTER_CATALOG_ENGINE` to the supported engine identifier, and set
+`CHARACTER_CATALOG_BASELINE` to the approved deployed 40-character commit.
+`ENVIRONMENT` must match the catalog. Enabling with missing configuration fails
+closed; it does not silently authorize against the embedded cast.
+
+Each baseline has its own `catalogs/<baseline>/active.json` pointer and immutable
+`catalogs/<baseline>/<sha256>.json` snapshots. A new code release cannot switch
+an old reader to an incompatible baseline by replacing its pointer.
+
+`GET /api/characters/catalog` (also `HEAD`) returns the validated current
+revision, activation generation and catalog. Optional `baseline` and `engine`
+queries refuse incompatible readers with 409; they cannot choose the server's
+ownership revision. Disabled is 404, unavailable is 503 with `Retry-After`, and
+responses are `no-store`. This endpoint publishes character data, never source
+code or account sessions.
+
+## Runtime integration
+
+The environment-scoped Worker loader validates canonical bytes, content hashes,
+schema, environment, baseline and activation history before accepting a complete
+snapshot. It checks at most once a minute, shares in-flight reads, bounds a read
+to four seconds and 2 MiB per object, and retains a last good authority for at
+most fifteen minutes. A failed read cannot replace a newer successful one.
+Compiled owners remain reserved; compiled custom looks cannot become data-only
+entries through a catalog update.
+
+The Room persists its accepted snapshot before using it and restores that
+snapshot before checking hibernated connections. Storage reads happen at
+restore, admission and existing sweep boundaries, never in pose processing.
+Unavailable authority refuses new ownership grants without interpreting the
+outage as a revocation of every existing player. Cleanup, bans, expiry and
+account removal remain active. Sign-in and `/api/me` report unavailable authority
+as a retryable service failure. ChatBridge's cast cache follows catalog revision
+and activation generation; capability decisions and Audience checks use the
+same environment-scoped ownership policy.
 
 The island must finish catalog loading before the contributor roster and models
 are initialized. A page initially pins its appearance catalog for its lifetime;

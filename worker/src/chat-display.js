@@ -11,7 +11,7 @@ import { BridgeRefusal, bridgeFeatures } from "./chat-bridge-protocol.js";
 import { decideCapability, githubAccount } from "./chat-capability.js";
 import { ensureChatPlayer, sanitizeDisplay, updateDisplay } from "./db.js";
 
-export const displayOps = ({ contributorFor, now = Date.now }) => ({
+export const displayOps = ({ contributorFor, contributorForEnv, now = Date.now }) => ({
   display: {
     run: async (env, envelope) => {
       if (!bridgeFeatures(env).commons) throw new BridgeRefusal("disabled");
@@ -19,7 +19,7 @@ export const displayOps = ({ contributorFor, now = Date.now }) => ({
       const display = sanitizeDisplay(envelope.payload && envelope.payload.display);
       if (!display) throw new BridgeRefusal("invalid_display");
       if (!env.DB) throw new BridgeRefusal("unavailable", true);
-      const decision = await decideCapability(env, envelope.principal, contributorFor, now);
+      const decision = await decideCapability(env, envelope.principal, contributorForEnv ? contributorForEnv(env) : contributorFor, now);
       if (decision.state === "unknown") throw new BridgeRefusal("unavailable", true);
       if (decision.state !== "eligible") throw new BridgeRefusal("capability_required");
       await ensureChatPlayer(env.DB, { id, login });

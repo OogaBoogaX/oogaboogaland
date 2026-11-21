@@ -2,7 +2,7 @@
 
 import { cookieNames, parseCookies } from "./cookies.js";
 import { getSession } from "./db.js";
-import { contributorFor } from "./contributor-access.js";
+import { contributorDecision, contributorForEnv } from "./contributor-access.js";
 import { oogatron } from "./contributor-policy.js";
 
 const BASE_HEADERS = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
@@ -70,10 +70,11 @@ const findSession = async (request, env, removal, strict = false) => {
     const found = await getSession(env.DB, token);
     if (!found) return null;
     if (removal) return { ...found, token };
-    const character = await contributorFor(found.player.login, found.player.id, oogatron(env));
+    const { character, fresh } = await contributorDecision(contributorForEnv(env), found.player.login, found.player.id, oogatron(env));
+    if (!character && !fresh) throw Object.assign(new Error("Character catalog is unavailable"), { code: "character_unavailable" });
     return character ? { ...found, token, character } : null;
   } catch (err) {
-    console.error("session lookup failed", err);
+    if (err.code !== "character_unavailable") console.error("session lookup failed", err);
     // `/api/me` says it could not tell rather than "signed out", which a page believes for its whole life.
     if (strict) throw err;
     return null;
