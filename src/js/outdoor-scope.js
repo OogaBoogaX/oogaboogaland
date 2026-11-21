@@ -31,6 +31,12 @@
   // DSB Land's: outdoors only with no room active, no entry or exit fading (an entry is excluded from its request on,
   // before the fade), and the arrival done. An unknown room is a room.
   const dsbReason = (travelling, transitioning, room) => travelling ? "transit" : transitioning ? "entering" : room ? "interior" : "outdoor";
+  // A cave cabinet's seat (`<id>@out`, arcade-cabinets.js) holds the body at its slot on the island's surface for the
+  // whole game, whatever scene draws it, so the player stays public there; any other scene or game keeps its reason.
+  const seatReason = (otherwise) => {
+    const seat = BL.net && BL.net.cabinet;
+    return seat && seat.id.endsWith("@out") ? "outdoor" : otherwise;
+  };
   const create = () => {
     const state = { version: VERSION, scope: null, reason: "scene", epoch: 0, acknowledged: -1, public: false, supported: false };
     const listeners = new Set();
@@ -84,6 +90,6 @@
     return { state, report, hold, acknowledge, reset, setSupported, subscribe };
   };
   const page = create();
-  BL.outdoorScope = { VERSION, REASONS, HUB_OUTDOOR, hubReason, dsbReason, create, state: page.state, report: page.report,
+  BL.outdoorScope = { VERSION, REASONS, HUB_OUTDOOR, hubReason, dsbReason, seatReason, create, state: page.state, report: page.report,
     hold: page.hold, acknowledge: page.acknowledge, reset: page.reset, setSupported: page.setSupported, subscribe: page.subscribe };
 })();
