@@ -653,7 +653,7 @@
     const ear = built.ear = { x: 0, y: 0, z: 0 };
     // A glossy reflector (a kind's polished or glass floor) is WebGL's alone: Canvas 2D would draw it as a solid face.
     if (renderer.kind !== "webgl2") for (const name in built.nodes) { const n = built.nodes[name]; if (n.geometry && n.geometry.reflector) n.visible = false; }
-    const motion = kind.animate ? kind.animate(built.nodes, built, feeds, pilot.setMenuOpen) : null;
+    const motion = kind.animate ? kind.animate(built.nodes, built, feeds, pilot.setMenuOpen, hud, renderer.kind) : null;
 
     const NO_ACTORS = [], actors = [];
 
@@ -945,13 +945,32 @@
       leaving = go("hub", "timechain", !!pose && ctx.hubPolicy === "keep");
       if (!leaving) world.sphereExit = null;
     };
+    // A room's own way into another room (the Genesis room's portal into the Mining Museum): the same hand-over the
+    // island's keypad makes, less the island. The next visit is this one's mode and account, guided, so the room
+    // entered plays its ordinary arrival (doors open in the vestibule, the walk in, the doors closing behind) from the
+    // same view; the Worker hears it as the ordinary zone change into that room, as it does from the keypad.
+    const handOffTo = (roomId) => {
+      if (leaving) return;
+      const target = ROOMS.get(roomId);
+      if (!target || target.id === room.id) return;
+      world.sphereVisit = { room: target.id, mode: visit.mode, login: visit.login, character: avatar ? avatar.traits.name : null, guided: true, jetpack: visit.jetpack || null, prepared: null, entry: null, view: pilot.viewState() };
+      world.pilot = avatar ? avatar.traits.name : null;
+      BL.net.setBody(null);
+      BL.net.setZone("none");
+      leaving = go("timechain", String(target.id));
+      if (!leaving) { world.sphereVisit = null; stay(); }
+    };
     // A way out the island could not be built for (the director's `stay`): back in the room with the walk-out undone, so
     // Space at the button can try again.
     const stay = () => {
       leaving = false;
       world.sphereExit = null;
       if (shared) BL.net.setZone(room.zone);
-      if (guide.stage) {
+      if (guide.stage === "out" && guide.portal) {
+        // A kind's own way on that could not go: the visitor is still in the room, where they stood.
+        guide.portal = null;
+        finishGuide();
+      } else if (guide.stage) {
         // The vestibule is walkable only while guided: return inside before closing the doors and giving control back.
         arrive(L.doorStep);
         doors.want = 0;
@@ -1257,6 +1276,9 @@
           // so the island never takes a pose from inside the room.
           if ((guide.hold += dt) > EXIT_HOLD) { guide.stage = "out"; if (camera.position.z < exitEye) handOff(); else handOff(false, exitPose()); }
         }
+      } else if (guide.stage === "portal") {
+        // Through a room's own portal: walk to its foot, then the hand-over to the room beyond.
+        if (steerTo(guide.portal.x, guide.portal.z, dt) || guide.t > GUIDE_LIMIT) { people.steer(0, 0, 0, 0, 0); guide.stage = "out"; handOffTo(guide.portal.room); }
       } else if (guide.stage === "out") people.steer(0, 0, 0, 0, 0);
     };
     // The view turned `a` (rad) about the visitor's Ooga's hips, as a dance spin turns the body (node rotation.y).
@@ -1317,6 +1339,19 @@
       const heard = avatar ? avatar.root.position : camera.target;
       ear.x = heard.x; ear.y = heard.y; ear.z = heard.z;
       if (motion) motion.update(dt, elapsed);
+      // A kind's portal (`motion.portalGo`: where to walk and which room is beyond) starts the guided walk out through it.
+      if (motion && motion.portalGo && !guide.stage && !leaving && avatar) {
+        const q = motion.portalGo; motion.portalGo = null;
+        if (pilot.player === avatar || pilot.possess(avatar)) { pilot.enterClose(); guide.stage = "portal"; guide.t = 0; guide.portal = q; guided = true; pilot.setActive(false); hud.tooltip.hide(); }
+      }
+      // A kind's moving floor (`motion.carry(x, z, dt)`: how far it carries a body standing at (x, z) this frame, or
+      // null): the played Ooga rides it hands-free and steps off by walking; others' positions come over the net as
+      // their own pages move them, so a rider looks right everywhere with no new message. The carry is a move like a
+      // step, so it goes only where a step could: up against a solid it holds the rider where it stands.
+      if (motion && motion.carry && avatar && !avatar.camp.seat && avatar.hop <= 0) {
+        const p = avatar.root.position, v = motion.carry(p.x, p.z, dt);
+        if (v && walkable(p.x, p.z, p.x + v.x, p.z + v.z, p.y - avatar.baseY, avatar.bodyHeight, avatar)) { p.x += v.x; p.z += v.z; }
+      }
       if (musicOut && !leaving && !guide.stage) { musicOut = false; motion.fadeBack(); }
       // A kind that moves the Oogas to its music (the Block Party's groove) poses each one, after the crew and the other
       // players are posed: the visitor's own (standing still, from its own eyes too, held under them) and every other shown.
