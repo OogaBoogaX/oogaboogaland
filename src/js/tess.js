@@ -519,6 +519,8 @@
       root: body, figure, position, vel,
       mode: 0, aim: { x: 0, y: 0, z: 0 }, aims: null, calm: false, steady: false, watching: false, watch: { x: 0, y: 0, z: 0 }, uneasy: 0, whirl: 0, tilt: 0,
       clearPath(speed, corner) { pathCount = pathAt = 0; pathSpeed = speed; pathCorner = corner; tracking = false; },
+      // Stops her where she is: what she was flying at goes, so she no longer faces or trails it.
+      stop() { vel.x = vel.y = vel.z = 0; },
       push(x, y, z) { const o = pathCount++ * 3; path[o] = x; path[o + 1] = y; path[o + 2] = z; },
       // The last point follows someone: she never settles on it, and `steer` never reports arriving.
       track() { tracking = true; },
