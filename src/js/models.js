@@ -1340,6 +1340,8 @@
     const parts = {};
     // The hip's height over the soles: the refined body's longer legs (see FINE). Authored legs stay five units.
     const legH = LEG_UNITS * u;
+    // How much longer a male build's shins are drawn (see SHIN), which stands it taller.
+    let longer = 0;
     const root = createNode({ position: { x: 0, y: legH, z: 0 } });
     const eyeCells = [];
     // nose: the beard's nose jitter pair; lid: closed-eye colour; headEmissive: lit head indices
@@ -1994,8 +1996,29 @@
       // character's own (`dress.model`), or the regular or slim build wearing what its authored blocks wore. Its head
       // stays its authored blocks unless it models its own.
       if (STYLE === "R" && !dress.model) rewear = (colours) => BL.heroBody.wear(k, { ...authored, palette: colours, P, loin: k.loin, strap: !traits.slim });
-      if (STYLE === "R" && dress.model) wearing = () => BL.heroBody.wear(k, { ...authored, palette, P, loin: k.loin, strap: !traits.slim });
-      const model = STYLE !== "R" ? null : dress.model ? dress.model(k, wearing) : worn = rewear(palette);
+      // The build a character's file draws for (its own), which a worn body (the wardrobe's Body slot) may have changed.
+      const ownSlim = traits.wardrobeKey ? BL.characters?.get(traits.name)?.look?.build === "slim" : !!traits.slim, rebuilt = ownSlim !== !!traits.slim || !!traits.bodyShape;
+      let wore = null;
+      // A copy of what it was handed: a model may merge its own parts into that very object.
+      if (STYLE === "R" && dress.model) wearing = () => { const body = BL.heroBody.wear(k, { ...authored, palette, P, loin: k.loin, strap: !traits.slim }); wore = { ...body }; return body; };
+      const model = STYLE !== "R" ? null : dress.model ? BL.heroBody.dressed(traits, () => dress.model(k, wearing)) : worn = rewear(palette);
+      // What its model added to the limbs it was handed (midy-machete's boots and shorts' legs) was drawn for its own
+      // build's limbs: it is fitted to the worn build's (`heroBody.refit`).
+      // What a male model merged onto the legs it was handed below the knee (Heimdall's toe caps) goes down the longer
+      // shin with the boot (hero-body.js `SHIN`); a rebuilt body's `refit` does the same as it fits them.
+      if (model && wore && !rebuilt && !traits.slim) {
+        const done = new Set();
+        for (const key of ["leg", "legL"]) {
+          const g = model[key], h = wore[key];
+          if (!g || !h || g === h || done.has(g) || g.verts.length <= h.verts.length) continue;
+          done.add(g);
+          for (let i = h.verts.length + 1; i < g.verts.length; i += 3) if (g.verts[i] / u < BL.heroBody.SHIN_BELOW) g.verts[i] -= BL.heroBody.SHIN * u;
+        }
+      }
+      if (model && wore && rebuilt) {
+        const mine = { ...traits, slim: ownSlim, bodyShape: undefined };
+        BL.heroBody.refit(model, wore, BL.heroBody.dressed(mine, () => BL.heroBody.wear({ ...k, traits: mine }, { ...authored, palette, P, loin: k.loin, strap: !ownSlim })), u, traits.slim ? 0 : BL.heroBody.SHIN);
+      }
       // One that draws no head of its own gets the modelled body's head too.
       if (model && !model.headOpen && !(dress.skull || dress.hat || dress.crown || dress.eyes || dress.mark || dress.refine)) Object.assign(model, BL.heroBody.head(k, { palette, P }));
       if (model) {
@@ -2035,12 +2058,33 @@
           }
         }
         // What a character stood on the front or the back of the authored trunk (three units out from its middle)
-        // stands on the modelled trunk's own front or back at that height, so it lies on the surface.
+        // stands on the modelled trunk's own front or back at that height, so it lies on the surface. Worn on another
+        // build (the wardrobe's Body slot), what it hung on the trunk goes to the same place on that build: its height
+        // lined up by the hips, belt and shoulders (`trunk`'s `from`), and a piece at the side (midy-machete's bag) as
+        // far out from that build's side as it stood from its own.
         {
-          const surface = BL.heroBody.trunk(!!traits.slim, traits.bodyShape);
+          const surface = BL.heroBody.dressed(traits, () => BL.heroBody.trunk(ownSlim)), moved = rebuilt, mine = surface.own;
           for (const laid of parts.torso.children) {
-            const y = laid.position.y / u, z = laid.position.z / u;
-            if (Math.abs(z) >= 2.5 && !laid.surface) laid.position.z = (z > 0 ? surface.front(y) + z - 3 : surface.back(y) + z + 3) * u;
+            // Where a piece is: its node, or the middle of its mesh where the mesh was drawn away from the node (SatsMason's
+            // pockets), so it is moved by where it shows.
+            const box = laid.geometry && laid.geometry.verts.length ? BL.scene.boundsOf(laid.geometry) : null, mid = (i) => box ? (box.min[i] + box.max[i]) / 2 * [laid.scale.x, laid.scale.y, laid.scale.z][i] : 0;
+            const at = laid.position.y / u, y = moved ? surface.from(at) : at, x = laid.position.x / u, z = laid.position.z / u;
+            if (moved) {
+              const cA = at + mid(1) / u, cy = surface.from(cA), cx = x + mid(0) / u, cz = z + mid(2) / u;
+              laid.position.y += (cy - cA) * u;
+              // On the front or the back: within a little of its own build's front or back there.
+              const way = cz >= 0 ? 1 : -1, face = (S, h) => way > 0 ? S.front(h) : -S.back(h), onFace = way * cz >= face(mine, cA) - 0.6;
+              const out = Math.abs(cx) - mine.side(cA, cz);
+              if (!onFace && out > -0.5) laid.position.x += (Math.sign(cx) * (surface.side(cy, cz) + out) - cx) * u;
+              // One drawn out on the trunk's front or back in its mesh (the node left at the middle) stands as far past the
+              // worn build's front or back, belt and all, as it did past its own.
+              if (Math.abs(z) < 2.5 && onFace) laid.position.z += way * (face(surface, cy) + surface.beltOut(cy, way) - face(mine, cA) - mine.beltOut(cA, way)) * u;
+            }
+            if (Math.abs(z) >= 2.5 && !laid.surface) {
+              // On the belt, a piece stands as far out past the worn build's belt as it did past its own.
+              const way = Math.sign(z), belt = moved ? surface.beltOut(y, way) - mine.beltOut(at, way) : 0;
+              laid.position.z = (z > 0 ? surface.front(y) + z - 3 + belt : surface.back(y) + z + 3 - belt) * u;
+            }
           }
         }
         // At rest the right forearm comes up square to the club in its hand, which is gripped at the hand point. A
@@ -2063,6 +2107,12 @@
         fist = model.fist;
         parts.club.scale.x = parts.club.scale.y = parts.club.scale.z = 1 / armScale;
         modelled = true;
+        // A male build's shins are drawn longer (hero-body.js `SHIN`), and the Ooga stands that much taller on them.
+        if (!traits.slim) {
+          longer = BL.heroBody.SHIN * u;
+          root.position.y += longer;
+          if (parts.dog && parts.dog.parent === root) parts.dog.position.y -= longer;
+        }
         for (const key of ["legR", "legL"]) {
           parts[key].geometry = key === "legL" && model.legL || model.leg;
           // What a character hung on a leg goes down the longer leg with it.
@@ -2193,7 +2243,7 @@
       }
       return face;
     };
-    return { root, parts, traits, modelled, elbow, back, armScale, fist, headOffset: 1.1 * h + legH + TORSO_RISE * u - 5 * u, headOpen, headClosed, get portraitHead() { return faceHead(); }, skins, clubRest, clubCarry, tint, gunHeadBounds: BL.scene.boundsOf(headOpen) };
+    return { root, parts, traits, modelled, elbow, back, armScale, fist, hip: legH + longer, headOffset: 1.1 * h + legH + longer + TORSO_RISE * u - 5 * u, headOpen, headClosed, get portraitHead() { return faceHead(); }, skins, clubRest, clubCarry, tint, gunHeadBounds: BL.scene.boundsOf(headOpen) };
   };
   // Traits hash from the handle, so one handle always builds the same voxels.
   // Callers get fresh nodes over shared geometry: one build per contributor, GPU records survive a scene swap.
@@ -2222,7 +2272,7 @@
       wardrobeRecent.delete(key); wardrobeRecent.add(key);
       for (const old of wardrobeRecent) {
         if (wardrobeRecent.size <= WARDROBE_TEMPLATES) break;
-        wardrobeRecent.delete(old); cavemen.delete(old);
+        wardrobeRecent.delete(old); cavemen.delete(old); bareHeads.delete(old.replace("\0bare-head", ""));
       }
     }
     return found;
@@ -2242,17 +2292,20 @@
     const skins = { club: { ...template.skins.club }, gun: { ...template.skins.gun } };
     // The face button's head is the template's, built when first read; a clone swapping colourways may set its own.
     let face;
-    return { root, parts, traits, modelled: template.modelled, elbow: template.elbow, back: template.back, armScale: template.armScale, fist: template.fist, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed,
+    return { root, parts, traits, modelled: template.modelled, elbow: template.elbow, back: template.back, armScale: template.armScale, fist: template.fist, hip: template.hip, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed,
       // `template` is the build this clone shows: its own, or the build a worn wardrobe swapped in (character-wardrobe.js).
       template, get portraitHead() { return face === undefined ? this.template.portraitHead : face; }, set portraitHead(geometry) { face = geometry; },
       skins, clubRest: template.clubRest, clubCarry: template.clubCarry, tint: template.tint, gunHeadBounds: template.gunHeadBounds,
       // Only the same character's approved builder runs here; borrowed hats are archived geometry, never hooks.
-      bareHead: () => {
-        let bare = bareHeads.get(traits.name);
+      // The bare head of the build this clone shows, a worn wardrobe's (its height, its hair) included.
+      bareHead() {
+        const worn = this.template.traits, key = traits.name + (worn.wardrobeKey ? "\0" + worn.wardrobeKey : "");
+        let bare = bareHeads.get(key);
         if (!bare) {
-          const body = buildCaveman({ ...BL.contributors.traitsFor(traits.name), equipmentBare: true });
+          // A fresh draw of the character's own hashes: the worn template's build has already spent its `rand`.
+          const fresh = BL.contributors.traitsFor(traits.name), body = buildCaveman({ ...(worn.wardrobeKey ? worn : fresh), rand: fresh.rand, equipmentBare: true });
           bare = { headOpen: body.headOpen, headClosed: body.headClosed, portraitHead: body.portraitHead };
-          bareHeads.set(traits.name, bare);
+          bareHeads.set(key, bare);
         }
         return bare;
       } };

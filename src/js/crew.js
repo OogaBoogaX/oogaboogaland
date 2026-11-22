@@ -340,6 +340,23 @@
     if (cave.bodyRadius !== undefined) { BL.scene.updateWorld(cave.root); cave.bodyRadius = bodyRadiusOf(cave); }
     if (cave.slingRoll !== undefined) cave.slingRoll = undefined;
     if (cave.pet?.ride) { cave.pet.ride.seat = hatSeatOf(cave); cave.pet.ride.stomach = stomachSeatOf(cave); }
+    // At a new height what the crew hung on the body at its old one stands where it would at this one.
+    const h = cave.traits.height;
+    // Measured on the build at rest, feet at 0, so neither the ground under the body nor its pose counts.
+    if (cave.bodyHeight !== undefined) cave.bodyHeight = bodyHeightOf(cave.template);
+    const flash = cave.parts.gunFlash;
+    if (flash) { flash.position.y = GUN_MUZZLE_Y * h; flash.position.z = 0.695 * h; flash.scale.x = flash.scale.y = flash.scale.z = h; }
+    const birds = cave.stunBirds;
+    if (birds) {
+      birds.position.y = cave.headOffset + 0.42 * h;
+      birds.children.forEach((bird, i) => { const angle = i / 3 * Math.PI * 2; bird.position.x = Math.sin(angle) * 0.34 * h; bird.position.z = Math.cos(angle) * 0.34 * h; bird.scale.x = bird.scale.y = bird.scale.z = h; });
+    }
+    // A worn jetpack, the crew's or another player's copy (remote-players.js `presentationJet`), at its new height.
+    for (const jet of [cave.jet, cave.presentationJet]) {
+      if (!jet || jet.node === cave.parts.jetpack) continue;
+      jet.node.position.y = 0.06 * h + (jet === cave.jet ? cave.viewLift || 0 : 0); jet.node.position.z = -0.18 * h; jet.node.scale.x = jet.node.scale.y = jet.node.scale.z = h;
+      seatJetpack(cave, jet.node, jet.node.geometry, jet);
+    }
   };
   // Trots the pet `dt` along its loop (not under Calm) and stands `node` there: `m` is the head's matrix in the node's
   // parent frame, so the pet keeps to the hat through every turn and tilt of the head. Writes in place; allocates nothing.
@@ -1665,7 +1682,7 @@
       // haft to where it rests on it. A remote copy has no `stick` and goes by its idle time.
       const move = w.stick === undefined ? clamp((w.axeIdle - AXE_STICK_DELAY) / AXE_STICK_BLEND, 0, 1) : w.stick, stick = ease.inOutQuad(move);
       // The shoulder's height over the ground, less what a body sitting on the ground is lowered by.
-      const elbow = cave.elbow, arm = parts.armR.rotation, shoulder = HIP * h - (cave.restLower || 0) + parts.armR.position.y;
+      const elbow = cave.elbow, arm = parts.armR.rotation, shoulder = (cave.hip || HIP * h) - (cave.restLower || 0) + parts.armR.position.y;
       // The elbow's distance from the shoulder, and how far behind straight down it hangs.
       const armK = cave.armScale, reach = Math.hypot(elbow.y, elbow.z) * armK, fore = elbow.length * armK, lean = Math.atan2(-elbow.z, -elbow.y);
       const pitch = lerp(STICK_HANG, Math.PI / 2, stick);

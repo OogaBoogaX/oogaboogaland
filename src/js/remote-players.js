@@ -213,7 +213,7 @@
       addChild(root, cave.root);
       const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0 } : null;
       if (!gorilla) {
-        cave.baseY = cave.root.position.y; cave.jetFuel = 1; cave.hopV = 0;
+        cave.baseY = cave.root.position.y; cave.bodyHeight = height; cave.jetFuel = 1; cave.hopV = 0;
         if (cave.parts.dog) {
           // The shared terrain queries read the owner's standing envelope and passenger origin.
           cave.bodyHeight = height; cave.bodyRadius = BL.crew.bodyRadiusOf(cave); cave.hop = 0;
@@ -224,7 +224,8 @@
           cave.pet.node.sightHidden = true;
         }
       }
-      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0,
+      // Its hip over its feet is the body's own (`cave.baseY`), which a worn height moves (character-wardrobe.js).
+      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, get baseY() { return gorilla ? 0 : cave.baseY; }, get height() { return gorilla ? 0 : cave.bodyHeight; }, top: NaN, dTop: 0,
         // The walk's step from the last sample, when it came and how fast it turned since the one before.
         gaitAt: NaN, gaitPhase: 0, gaitRate: 0, puff: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, ghosted: null, label: "", labelW: 0,
         react: "", reactT: 0, screenX: NaN, plateLeft: NaN, plateTop: NaN, plateW: 0, plateH: 0, plateTextX: NaN, plateBaseline: NaN, plateBarLeft: NaN, plateBarTop: NaN, pickOwner: { kind: "player", id: rec.id, cave, weaponType: "none" } };
