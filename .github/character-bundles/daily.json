@@ -1,16 +1,16 @@
 {
   "version": 1,
   "lane": "daily",
-  "openedOn": "2026-11-20",
-  "round": "491ecb11873be8c01c5860fb6753499ae72a8184",
+  "openedOn": "2026-11-21",
+  "round": "a2f922b4a88411122aabdfbb2d434702903d1ce6",
   "entries": [
     {
-      "pr": 843,
-      "head": "c094f93aaff3c71b007b42f5d814916ec3b34858",
-      "author": "SVRNSociety",
-      "path": "src/characters/SVRNSociety.js",
+      "pr": 859,
+      "head": "19240f706ce0f3ae950af96aca23bbb235028e19",
+      "author": "kitsboy",
+      "path": "src/characters/kitsboy.js",
       "base": null,
-      "hash": "a5f0a8755360fbb77681763378d2fc8b50f32a2a608765e2db930ae4274d5987",
+      "hash": "9de5e36ac6f62ee595ca3703be647d34d93b174cb0627ac6ba142823fafd17b0",
       "lane": "daily"
     }
   ]
