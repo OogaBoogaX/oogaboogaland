@@ -373,6 +373,105 @@
       chest: [5.45, 6.65, 2.56, 2.62], belt: [1.4, 2.7, 3.08, 2.14]
     }
   };
+  // Body shapes, either build drawn leaner or bigger (`traits.bodyShape`, which the wardrobe's Body slot sets). The
+  // trunk widens by `w` and deepens by `d` all over, and on top of that by its belly's factors round the middle and its
+  // chest's under the shoulders, eased between so no ledge shows; the neck takes `neck`. The upper arms and forearms
+  // thicken by `arm` and `fore` (`arm` for both when left out), the thighs and shins by `thigh` and `shin` (`leg` for
+  // both), and the arms stand `armOut` units further from the middle. The legs keep the build's own gap between them, however thick
+  // they are, so they never splay apart or crowd together. `soft` (0 to 1) takes the
+  // cut out of a body: the chest's step forward eased away, each limb's swells evened toward its middle, no kneecap and
+  // no line down a bare chest's breastbone (its nipples stay). `slope` narrows the trunk from the top of the chest to the shoulders (to that
+  // share at the shoulders), so they fall to the arms rather than standing square, and `round` cuts the corners of the
+  // trunk and of the shoulder's cap deeper; `cap` is the share of the arm's thickening its top two rings take, so the
+  // shoulder rounds over rather than standing as a block, and the arms hang `drop` units lower. `dome` draws the top of
+  // the trunk (from the chest up to the shoulders) and the top of each arm as domes, with rings of their own that
+  // curve over rather than one flat step, and cuts every limb's corners as deep as the trunk's. Height, hands, feet and the head never change, so nothing that stands, seats or
+  // aims an Ooga by its height has anything to follow, and everything drawn on the body (clothes, belt, skirt, strap,
+  // cuffs, boots) is drawn on these rings, so it fits them.
+  const SHAPES = {
+    lean: { w: 0.82, d: 0.84, bellyW: 0.95, bellyD: 0.95, chestW: 0.97, chestD: 0.97, arm: 0.76, leg: 0.72, armOut: -0.75 },
+    // Big-boned: a bigger frame all over and softer, not fat.
+    big: { w: 1.22, d: 1.2, bellyW: 1.1, bellyD: 1.14, chestW: 1, chestD: 1, neck: 1.15, arm: 1.27, fore: 1.23, thigh: 1.27, shin: 1.22, armOut: 0.62,
+      soft: 1, slope: 0.8, round: 2.1, cap: 0.35, drop: 0.35, dome: true }
+  };
+  const shapedBuilds = new Map();
+  // A factor along the trunk's height: half the belly's at the hips, the belly's round the middle, the chest's under the
+  // shoulders, eased linearly between, and the neck's over the shoulders.
+  const along = (y, belly, chest, top, neck) => {
+    const pts = [[-0.4, 1 + (belly - 1) * 0.45], [3, belly], [5.2, (belly + chest) / 2], [Math.min(6.6, top - 0.6), chest], [top, chest], [top + 0.01, neck]];
+    if (y <= pts[0][0]) return pts[0][1];
+    for (let i = 1; i < pts.length; i++) if (y <= pts[i][0]) { const [y0, a] = pts[i - 1], [y1, b] = pts[i]; return a + (b - a) * (y - y0) / (y1 - y0); }
+    return neck;
+  };
+  const buildOf = (slim, shape) => {
+    const base = slim ? BUILD.slim : BUILD.regular, s = shape && SHAPES[shape];
+    if (!s) return base;
+    const key = (slim ? "slim:" : "regular:") + shape;
+    let B = shapedBuilds.get(key);
+    if (B) return B;
+    const top = base.shoulder, neck = s.neck ?? 1, soft = s.soft || 0;
+    const wAt = (y) => y > top ? neck : s.w * along(y, s.bellyW, s.chestW, top, neck);
+    const dAt = (y) => y > top ? neck : s.d * along(y, s.bellyD, s.chestD, top, neck);
+    // A ring is [height, half width, half depth, corner cut, ...] with its middle's depth at [5]: each scales by the
+    // shape's factors at its height, its middle's step forward (the chest's) eased by `soft`.
+    const chestTop = base.chest[1], fall = (y) => !s.slope || y <= chestTop || y > top ? 1 : 1 + (s.slope - 1) * (y - chestTop) / (top - chestTop);
+    // A ring's corner cut, deeper by `round` but never past a regular octagon's (0.6 of its narrower half).
+    const cutOf = (r) => Math.min(r[3] * (s.round || 1), Math.max(r[3], 0.6 * Math.min(r[1], r[2])));
+    // Rings curving over between ring `a` (wide) and ring `b` (narrow) as a dome: at each share `t` of the way, the
+    // width and depth fall from a's to b's along a quarter circle, so the outline rounds over instead of stepping.
+    const DOME = [0.35, 0.62, 0.82, 0.94];
+    const domed = (a, b) => DOME.map((t) => {
+      const out = a.map((v, i) => typeof v === "number" && typeof b[i] === "number" ? v + (b[i] - v) * t : v), k = Math.sqrt(1 - t * t);
+      out[1] = b[1] + (a[1] - b[1]) * k; out[2] = b[2] + (a[2] - b[2]) * k; out[3] = cutOf(out);
+      return out;
+    });
+    const ring = (r) => {
+      const wx = wAt(r[0]) * fall(r[0]), dz = dAt(r[0]), out = r.slice();
+      out[1] *= wx; out[2] *= dz; out[3] *= Math.min(wx, dz);
+      out[3] = cutOf(out);
+      if (out[5]) out[5] *= dz * (1 - 0.6 * soft);
+      return out;
+    };
+    // A limb's rings evened toward its middle by `soft`, so its swells (a deltoid, a calf) ease out.
+    const even = (rings) => {
+      if (!soft) return rings;
+      const mx = rings.reduce((t, r) => t + r[1], 0) / rings.length, mz = rings.reduce((t, r) => t + r[2], 0) / rings.length, k = 1 - 0.5 * soft;
+      return rings.map((r) => { const out = r.slice(); out[1] = mx + (r[1] - mx) * k; out[2] = mz + (r[2] - mz) * k; return out; });
+    };
+    const limb = (r, k) => { const out = r.slice(); out[1] *= k; out[2] *= k; out[3] *= k; return out; };
+    const upper = s.arm, fore = s.fore ?? s.arm, thigh = s.thigh ?? s.leg, shin = s.shin ?? s.leg;
+    // Down the leg from the thigh's factor to the shin's, so the knee eases between them.
+    const legAt = (y) => y >= -2 ? thigh : y <= -4 ? shin : thigh + (shin - thigh) * (-2 - y) / 2;
+    const waist = wAt(base.belt[0]), depth = dAt(base.belt[0]);
+    let torso = base.torso.map(ring), arm = even(base.arm).map((r, i) => { const out = limb(r, i < 2 && s.cap !== undefined ? 1 + (upper - 1) * s.cap : upper); if (i < 3 || s.dome) out[3] = cutOf(out); return out; });
+    let sleeve = base.sleeve;
+    if (s.dome) {
+      // The trunk's top: from the last ring under the shoulders to the shoulders' own.
+      const at = torso.findIndex((r) => r[0] >= top);
+      if (at > 0) torso = [...torso.slice(0, at), ...domed(torso[at - 1], torso[at]), ...torso.slice(at)];
+      // The arm's top: from its first full ring up to its cap (rings run from the shoulder down).
+      arm = [arm[0], ...domed(arm[1], arm[0]).reverse(), ...arm.slice(1)];
+      sleeve += DOME.length;
+    }
+    // A regular build's legs stand where the rig puts them, two units out (2.5 less `LEGS_IN` in models.js). A shape's
+    // stand as far apart at the inside of their thighs as the build's own (`gap`), and the skirt's shards lean out to
+    // `thigh`, the outside of the thighs' top two rings.
+    const leg = even(base.leg).map((r) => { const out = limb(r, legAt(r[0])); if (s.dome) out[3] = cutOf(out); return out; });
+    const thighTop = (rings) => Math.max(rings[0][1], rings[1][1]), gap = (base.legX || 2) - thighTop(base.leg), legX = gap + thighTop(leg);
+    // The chest's front where the trunk's rings put it (`soft` eases its step forward) and the nipples on its flat face.
+    const torsoAt = (y, f) => { const i = torso.findIndex((r) => r[0] >= y), a = torso[Math.max(0, i - 1)], b = torso[i]; const t = b[0] === a[0] ? 0 : (y - a[0]) / (b[0] - a[0]); return f(a) + (f(b) - f(a)) * t; };
+    const front = (y) => torsoAt(y, (r) => r[2] + (r[5] || 0)), flat = base.nipple ? torsoAt(base.nipple[1], (r) => r[1] - r[3]) : 0;
+    B = { ...base, depthAt: dAt, torso, sleeve, armX: base.armX + s.armOut, legX, thigh: legX + Math.max(leg[0][1], leg[1][1]),
+      arm, armDrop: (base.armDrop || 0) + (s.drop || 0), forearm: even(base.forearm).map((r) => { const out = limb(r, fore); if (s.dome) out[3] = cutOf(out); return out; }),
+      leg, sternum: !soft,
+      knee: base.knee && !soft ? [base.knee[0], base.knee[1], base.knee[2] * legAt(-3.4), base.knee[3] * legAt(-3.4)] : null,
+      ankle: [base.ankle[0], base.ankle[1] * shin, base.ankle[2] * shin], wrist: [base.wrist[0], base.wrist[1] * fore, base.wrist[2] * fore],
+      skirt: [base.skirt[0] * waist, base.skirt[1] * depth], belt: [base.belt[0], base.belt[1], base.belt[2] * waist, base.belt[3] * depth],
+      chest: [base.chest[0], base.chest[1], front(base.chest[0]), front(base.chest[1])],
+      nipple: base.nipple ? [Math.min(base.nipple[0] * wAt(base.nipple[1]), flat - 0.35), base.nipple[1]] : null };
+    shapedBuilds.set(key, B);
+    return B;
+  };
   // Where the rig holds what a hand carries: in units under the shoulder, and ahead of it. A fist closes about
   // that point, so everything the game puts in a hand lands in it.
   const HAND_Y = 10, HAND_Z = 2.4;
@@ -454,7 +553,8 @@
   //   cuffs / anklets: { wrap, wrapDark, trim }; boot: { color, sole, detail }; pecs: the line between a bare chest's two
   //   halves and its nipples' colour; emblem(geo, z, y0, y1): what the chest's front carries
   const build = (k, o) => {
-    const u = k.u, B = o.slim ? BUILD.slim : BUILD.regular, skin = rgb(o.skin);
+    // A body that names no build is drawn in the Ooga's own (a worn body's, `traits.slim`).
+    const slim = o.slim === undefined ? !!k.traits.slim : !!o.slim, u = k.u, B = buildOf(slim, k.traits.bodyShape), skin = rgb(o.skin);
     const torso = geometry(), spans = B.torso.length - 1, [cy0, cy1, cz0, cz1] = B.chest, chestZ = (y) => cz0 + (cz1 - cz0) * (y - cy0) / (cy1 - cy0);
     // `paint` has the body wear what a block map wore (see `wear`): { tone, torso, arm, forearm, leg }, each part a
     // { breaks, pick } for `paintedLoft`, and the limbs one for each side (right, then left).
@@ -467,17 +567,25 @@
     }
     if (o.pecs && B.nipple) {
       // A faint line down the breastbone, and a nipple well out on each half.
-      if (o.sternum !== false) poly(torso, [[-0.07, cy0 + 0.15, chestZ(cy0 + 0.15) + 0.012], [0.07, cy0 + 0.15, chestZ(cy0 + 0.15) + 0.012], [0.07, cy1 - 0.3, chestZ(cy1 - 0.3) + 0.012], [-0.07, cy1 - 0.3, chestZ(cy1 - 0.3) + 0.012]], shade(skin, 0.82), FRONT);
+      if (o.sternum !== false && B.sternum !== false) poly(torso, [[-0.07, cy0 + 0.15, chestZ(cy0 + 0.15) + 0.012], [0.07, cy0 + 0.15, chestZ(cy0 + 0.15) + 0.012], [0.07, cy1 - 0.3, chestZ(cy1 - 0.3) + 0.012], [-0.07, cy1 - 0.3, chestZ(cy1 - 0.3) + 0.012]], shade(skin, 0.82), FRONT);
       const [nx, ny] = B.nipple;
       for (const side of [-1, 1]) slab(torso, rect(nx * side - 0.22, nx * side + 0.22, ny - 0.2, ny + 0.2, chestZ(ny) - 0.02), FRONT, 0.07, 0.85, o.pecs);
     }
-    if (o.strap) strap(torso, o.strap);
+    if (o.strap) strap(torso, o.strap, B.depthAt);
+    // The crotch: a wedge under the trunk between the tops of the thighs, in what the thighs wear, so trousers read as one
+    // garment and no slot of sky shows between the legs. It stands well inside each thigh and behind their faces, so
+    // only the part between them shows, and narrows as it drops so a striding leg never uncovers its side.
+    {
+      const lx = B.legX || 2, deep = Math.min(B.leg[0][2], B.leg[1][2]) * 0.8;
+      const [worn] = paint ? paint.tone(paint.leg[0].pick(0, -0.6, 1)) : [o.legs || skin];
+      loft(torso, [[B.torso[0][0] + 0.3, lx * 0.75, deep, 0.4], [-1, lx * 0.68, deep * 0.94, 0.4], [-1.9, lx * 0.4, deep * 0.62, 0.3]], worn);
+    }
     // The skirt hangs from the hips under the belt (`B.skirt`: how wide and deep it is there). With `hem`, for a body
     // that wears no belt, it is the hem of what the trunk wears instead: it starts in the trunk's own bottom edge, so
     // it is one piece with the trunk and not a thing laid over it. Its side shards lean out as far as the thighs do.
     if (o.skirt) {
       const low = B.torso[0], ring = o.hem ? [low[0], low[1] + 0.01, low[2] + 0.01, low[3]] : [B.belt[0] + 0.15, B.skirt[0], B.skirt[1], 0.62];
-      fur(torso, ring, o.skirt, o.slim ? 1.05 : 1.25, 3, [Math.max(0, B.thigh + 0.05 - ring[1]), 0]);
+      fur(torso, ring, o.skirt, slim ? 1.05 : 1.25, 3, [Math.max(0, B.thigh + 0.05 - ring[1]), 0]);
     }
     if (o.emblem) o.emblem(torso, chestZ, cy0, cy1);
     // An arm drawn at a scale is drawn that much thicker, so only its length changes.
@@ -560,11 +668,12 @@
   const STRAP = { from: [2.4, 2.3], to: [-2.9, 8.35], half: 0.7, thick: 0.22, edge: 0.18,
     path: [[-0.45, 2.2, 0, 1], [0.35, 2.25, 0, 1], [4.9, 2.83, 0, 1], [6.6, 2.74, 0, 1], [7.6, 2.42, 0.45, 0.89], [8.12, 1.5, 0.85, 0.53], [8.2, 0, 1, 0],
       [8.12, -1.5, 0.85, -0.53], [7.6, -2.34, 0.45, -0.89], [6.6, -2.42, 0, -1], [0.35, -2.25, 0, -1], [-0.45, -2.2, 0, -1]] };
-  const strap = (geo, { color, edge, print }) => {
+  // `deep(y)` (a shaped build's, see SHAPES) moves each station out with the trunk's front or back at its height.
+  const strap = (geo, { color, edge, print }, deep = null) => {
     const [ax, ay] = STRAP.from, [bx, by] = STRAP.to, len = Math.hypot(bx - ax, by - ay), dx = (bx - ax) / len, dy = (by - ay) / len, nx = dy, ny = -dx;
     const across = [-STRAP.half, STRAP.edge - STRAP.half, STRAP.half - STRAP.edge, STRAP.half];
-    const rows = STRAP.path.map(([along, depth, oa, od]) => {
-      const ol = Math.hypot(oa, od), out = [dx * oa / ol, dy * oa / ol, od / ol], px = ax + dx * along, py = ay + dy * along;
+    const rows = STRAP.path.map(([along, z, oa, od]) => {
+      const ol = Math.hypot(oa, od), out = [dx * oa / ol, dy * oa / ol, od / ol], px = ax + dx * along, py = ay + dy * along, depth = deep ? z * deep(py) : z;
       return { out, inner: across.map((w) => [px + nx * w, py + ny * w, depth]), outer: across.map((w) => [px + nx * w + out[0] * STRAP.thick, py + ny * w + out[1] * STRAP.thick, depth + out[2] * STRAP.thick]) };
     });
     for (let i = 0; i + 1 < rows.length; i++) {
@@ -630,11 +739,23 @@
   // same blocks of hair, worn long. It returns the head with its eyes open and shut.
   // An eye's colour unless a character names its own (`eyeColor`).
   const BROWN = "#5a3a1e";
+  // What a worn wardrobe changes on this head (`traits.wardrobe.head`, equipment-wardrobe.js): `hair` and `glasses` blocks
+  // of their own (or "none" for no hair), `beard` a colour (or "none"), and `eyes` and `mouth` the face's own traits.
   const head = (k, { palette, P }) => {
-    const t = k.traits, u = k.u, slim = !!t.slim, hairy = !t.bald && !t.hairless, kind = t.face || (slim || t.cleanShaven ? "nose" : "beard");
-    const skin = palette[P.skin], hair = palette[P.hair], hairDk = palette[P.hairDk], F = FRONT, v = makeVox();
+    const W = k.traits.wardrobe?.head || null, t = W ? { ...k.traits, ...(W.eyes || null), ...(W.mouth || null) } : k.traits;
+    const u = k.u, slim = !!t.slim, own = k.traits, ownKind = own.face || (slim || own.cleanShaven ? "nose" : "beard");
+    // A worn beard makes a beard of the face and taking one off leaves its mouth: the worn one, or a plain one. A worn
+    // mouth under the character's own beard waits there unseen.
+    const bearded = W?.beard ? W.beard !== "none" : ownKind === "beard";
+    const kind = !W ? ownKind : bearded ? "beard" : W.mouth ? W.mouth.face : ownKind === "beard" ? "nose" : ownKind;
+    const hairy = W?.hair ? false : !t.bald && !t.hairless;
+    const skin = palette[P.skin], F = FRONT, v = makeVox();
+    const hair = W?.hair && W.hair !== "none" ? W.hair.color : palette[P.hair], hairDk = W?.hair && W.hair !== "none" ? shade(W.hair.color, 0.85) : palette[P.hairDk];
     const grain = (x, y, z) => ((Math.imul(x + 3, 73856093) ^ Math.imul(y + 5, 19349663) ^ Math.imul(z + 7, 83492791)) >>> 0) % 100;
     const lock = (x, y, z) => v.set(x, y, z, grain(x, y, z) < 16 ? 3 : 2);
+    // The beard keeps the head's own hair colour when only the hair is worn, or takes a worn beard's.
+    const beardColor = W?.beard && W.beard !== "none" ? W.beard.color : W?.hair && W.hair !== "none" ? palette[P.hair] : null;
+    const beardLock = beardColor ? (x, y, z) => v.set(x, y, z, grain(x, y, z) < 16 ? 5 : 4) : lock;
     if (!slim) {
       v.fill(0, 6, 0, 5, 0, 5, 0);
       // The jaw stands a block proud of the face, unless the character's mouth lies flat on it (`look.flatMouth`).
@@ -664,11 +785,34 @@
       for (const x of [-1, 7]) for (let z = -1; z <= 4; z++) for (let y = 2; y <= 5; y++) lock(x, y, z);
     } else if (!slim) for (const x of [-1, 7]) v.fill(x, x, 2, 3, 2, 3, 1);
     if (!slim && kind === "beard") {
-      for (let x = 0; x <= 6; x++) for (let y = 0; y <= 1; y++) for (let z = 5; z <= 7; z++) lock(x, y, z);
-      for (let x = 1; x <= 5; x++) for (let y = -2; y <= -1; y++) for (let z = 5; z <= 7; z++) lock(x, y, z);
+      for (let x = 0; x <= 6; x++) for (let y = 0; y <= 1; y++) for (let z = 5; z <= 7; z++) beardLock(x, y, z);
+      for (let x = 1; x <= 5; x++) for (let y = -2; y <= -1; y++) for (let z = 5; z <= 7; z++) beardLock(x, y, z);
     }
-    const blocks = voxelGeometry(v, { unit: u, palette: [skin, shade(skin, 0.9), hair, hairDk], origin: { x: -3.5 * u, y: 0, z: -3 * u } });
-    const white = t.eyeColor || "#f4f0e6", glow = t.eyeGlow || 0, nose = palette[P.nose], dark = "#2a1a14";
+    const colours = [skin, shade(skin, 0.9), hair, hairDk];
+    // The authoring script reads the stock head's own blocks (scripts/equipment-wardrobe.mjs).
+    if (k.traits.capture) k.traits.capture.stockHeadBlocks = { v, palette: colours.slice() };
+    let worn;
+    if (W) {
+      if (beardColor) colours.push(beardColor, shade(beardColor, 0.85));
+      else colours.push(hair, hairDk);
+      // Worn blocks: hair over the skull (where no beard is), glasses before the eyes. Each one's colour is the head's
+      // own (`skin`, `hair` and their darker shades, by name) or its own.
+      const lay = (piece) => {
+        const at = piece.palette.map((c) => c === "skin" ? 0 : c === "skinDk" ? 1 : c === "hair" ? 2 : c === "hairDk" ? 3 : colours.push(P[c] !== undefined ? palette[P[c]] : rgb(c)) - 1);
+        if (piece.glow) for (const [i, level] of Object.entries(piece.glow)) (worn ||= {})[at[i]] = level;
+        for (let n = 0; n < piece.cells.length; n += 4) {
+          const x = piece.cells[n], y = piece.cells[n + 1], z = piece.cells[n + 2];
+          if (piece === W.hair && !slim && kind === "beard" && z >= 5 && y <= 1) continue;
+          v.set(x, y, z, at[piece.cells[n + 3]]);
+        }
+      };
+      if (W.hair && W.hair !== "none") lay(W.hair);
+      if (W.glasses && W.glasses !== "none") lay(W.glasses);
+    }
+    const blocks = voxelGeometry(v, { unit: u, palette: colours, origin: { x: -3.5 * u, y: 0, z: -3 * u }, emissive: worn });
+    // A worn eye colour (`W.iris`) is an iris on the white of a plain eye, under its pupil; a character's own eyeColor
+    // colours the whole eye.
+    const iris = W?.iris || null, white = iris ? "#f4f0e6" : t.eyeColor || "#f4f0e6", glow = iris ? 0 : t.eyeGlow || 0, nose = palette[P.nose], dark = "#2a1a14";
     const blockFace = (shut) => {
       const g = geometry(), z = 3.001;
       for (const side of [-1, 1]) {
@@ -686,7 +830,8 @@
           continue;
         }
         slab(g, rect(ex0, ex1, ey0, ey1, z, 0.12 * es), F, 0.06, 1, white, shade(white, 0.88), glow);
-        if (t.noPupils) continue;
+        if (iris) { const [ix0, ix1] = X(1.3, 2.8); slab(g, rect(ax(ix0), ax(ix1), ay(2), ay(3.35), z + 0.03, 0.1 * es), F, 0.04, 1, iris, shade(iris, 0.8)); }
+        if (t.noPupils && !iris) continue;
         const [px0, px1] = X(1.55, 2.55), gx = (px0 + px1) / 2 + 0.2;
         slab(g, rect(ax(px0), ax(px1), ay(2.05), ay(3.05), z + 0.06, 0.1 * es), F, 0.05, 1, "#17110d");
         slab(g, rect(ax(gx), ax(gx + 0.28), ay(2.62), ay(2.9), z + 0.11), F, 0.03, 1, "#ffffff");
@@ -710,14 +855,14 @@
     // line over each, a broad nose and a mouth in her own skin's darker tones. Nothing on it is painted.
     const softFace = (shut) => {
       const g = loft(geometry(), [[0, 2.45, 2.4, 0.85, 0, 0.25], [1.2, 3.1, 3, 0.9], [4.6, 3.25, 3, 0.9], [6.3, 3, 2.8, 1], [7, 2, 1.9, 0.8]], skin), z = 3.005;
-      const iris = t.eyeColor || BROWN, lip = shade(skin, 0.74), lipDk = shade(skin, 0.6);
+      const irisColor = iris || t.eyeColor || BROWN, lip = shade(skin, 0.74), lipDk = shade(skin, 0.6);
       for (const side of [-1, 1]) {
         const X = (a, b) => [Math.min(a * side, b * side), Math.max(a * side, b * side)], cx = 1.6 * side;
         if (shut) slab(g, rect(cx - 0.72, cx + 0.72, 3.02, 3.18, z, 0.06), F, 0.04, 1, dark);
         else {
           slab(g, rect(cx - 0.72, cx + 0.72, 2.72, 3.56, z, 0.22), F, 0.04, 1, "#f4f0e6", "#d9d2c2", glow);
-          if (!t.noPupils) {
-            slab(g, rect(cx - 0.4, cx + 0.4, 2.74, 3.54, z + 0.04, 0.2), F, 0.03, 1, iris);
+          if (!t.noPupils || iris) {
+            slab(g, rect(cx - 0.4, cx + 0.4, 2.74, 3.54, z + 0.04, 0.2), F, 0.03, 1, irisColor);
             slab(g, rect(cx - 0.2, cx + 0.2, 2.94, 3.36, z + 0.07, 0.07), F, 0.02, 1, "#15100d");
             slab(g, rect(cx - 0.3, cx - 0.12, 3.3, 3.46, z + 0.09), F, 0.02, 1, "#ffffff");
           }
@@ -748,8 +893,8 @@
   // outside it from a point p on it, straight out from the surface whatever way that faces (`rough` only has to
   // point roughly outward). Cloth whose every corner is lifted stands that far off the body all over, corners
   // and ledges included.
-  const trunk = (slim) => {
-    const B = slim ? BUILD.slim : BUILD.regular, rings = B.torso, low = rings[0][0], belt = B.belt[0], top = B.shoulder;
+  const trunk = (slim, shape) => {
+    const B = buildOf(slim, shape), rings = B.torso, low = rings[0][0], belt = B.belt[0], top = B.shoulder;
     const at = (y, i) => {
       let n = 1;
       while (n < rings.length - 1 && rings[n][0] < y) n++;
@@ -799,7 +944,7 @@
   // hip and the chest becomes the belt, with a buckle where its front block differs; a bare chest gets its line and
   // nipples; and the loincloth's flaps become the skirt of shards.
   const wear = (k, { torso, armR, armL, legR, legL, palette, P, lit, loin, strap }) => {
-    const slim = !!k.traits.slim, B = slim ? BUILD.slim : BUILD.regular, skinKey = P.skin, skin = palette[skinKey];
+    const slim = !!k.traits.slim, B = buildOf(slim, k.traits.bodyShape), skinKey = P.skin, skin = palette[skinKey];
     const plain = (c) => c === undefined || c === P.skinDk ? skinKey : c;
     const tone = (c) => [palette[c === undefined ? skinKey : c], lit && lit[c] || 0];
     // Fur's authored spots are blocks of the spot colour among the fur: the fur is read as one flat colour, and the
@@ -910,5 +1055,5 @@
     if (built) body.torso = merge(body.torso, built);
     return body;
   };
-  BL.heroBody = { wear, trunk, head, club, nunchaku, poly, both, loft, slab, noseBlock, rect, fur, cuff, buckle, hand, build, shade, scaled, FRONT, BUILD, HAND: [HAND_Y, HAND_Z] };
+  BL.heroBody = { wear, trunk, SHAPES, buildOf, head, club, nunchaku, poly, both, loft, slab, noseBlock, rect, fur, cuff, buckle, hand, build, shade, scaled, FRONT, BUILD, HAND: [HAND_Y, HAND_Z] };
 })();

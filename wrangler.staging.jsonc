@@ -20,7 +20,7 @@
   },
   "vars": {
     "ENVIRONMENT": "staging",
-    // Account hats are enabled explicitly for staging acceptance; production remains off.
+    // Account equipment: a hat and the wardrobe beside it, saved per account in the hosted studio and worn in the world.
     "EQUIPMENT_ENABLED": "1",
     // Independent character catalogs stay off until the runtime and publisher acceptance checks pass.
     // Enabling also requires CHARACTER_CATALOGS, CHARACTER_CATALOG_ENGINE and CHARACTER_CATALOG_BASELINE.

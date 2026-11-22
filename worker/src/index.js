@@ -11,7 +11,7 @@ import { handleCharacterCatalog } from "./character-catalog-http.js";
 import { handleCharacterPortrait } from "./character-portraits.js";
 import { handleConnectionReports, pruneConnectionReports } from "./connection-reports.js";
 import { handleApi } from "./api.js";
-import { handleEquipment, handleEquipmentCatalog, handleEquipmentHat } from "./equipment.js";
+import { handleEquipment, handleEquipmentCatalog, handleEquipmentHat, handleWardrobeCatalog } from "./equipment.js";
 import { handleAuth } from "./auth.js";
 import { purgeExpiredSessions } from "./db.js";
 import { handleDonations } from "./donations.js";
@@ -139,6 +139,7 @@ export default {
     if (url.pathname.startsWith("/api/avatar/")) return handleAvatar(request, env, url, ctx);
     if (url.pathname === "/api/equipment") return handleEquipment(request, env);
     if (url.pathname === "/api/equipment/catalog") return handleEquipmentCatalog(request);
+    if (url.pathname === "/api/equipment/wardrobe/catalog") return handleWardrobeCatalog(request);
     if (url.pathname.startsWith("/api/equipment/hats/")) return handleEquipmentHat(request, env, url);
     if (url.pathname === "/api/characters/catalog") return handleCharacterCatalog(request, env);
     if (url.pathname.startsWith("/api/characters/portraits/")) return handleCharacterPortrait(request, env);

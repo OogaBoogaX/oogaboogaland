@@ -1,27 +1,48 @@
 // Saved account equipment, independent of the page's pinned character catalog. Geometry is immutable; a creator's
 // new version is an offer, never a silent change to a wearer. Room messages carry appearance, never ownership.
+// Beside the hat, a record carries its wardrobe (equipment-wardrobe.js): a choice for each other slot, whose pieces
+// arrive in their own same-origin chunk (`wardrobe`, deferred.js) the first time a body on this page wears one.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const HASH = /^[a-f0-9]{64}$/, ITEM = /^[a-z0-9][a-z0-9-]{0,79}$/;
-  const EMPTY = Object.freeze({ selection: null, size: 100, revision: 0, declined: null, update: null });
+  const EMPTY = Object.freeze({ selection: null, size: 100, revision: 0, declined: null, update: null, wardrobe: null });
   const state = { supported: false, record: EMPTY, busy: false, error: "" };
   const subscribers = new Set(), remotes = new Map(), applied = new WeakMap(), loading = new Map();
   const READY = Promise.resolve(true), FAILED = Promise.resolve(false), RETRY_MS = [1000, 4000, 15000, 30000];
-  let account = 0, epoch = 0, reading = null, geometryEpoch = 0, intent = 0, retryTimer = 0;
+  let account = 0, epoch = 0, reading = null, geometryEpoch = 0, intent = 0, retryTimer = 0, wardrobeLoad = null, wardrobeRetryAt = 0;
+  const WARDROBE = BL.equipmentWardrobe;
+  // The wardrobe as this page knows it: a choice whose item this page has never heard of (a newer deploy's) is the
+  // character's own look here, never a reason to refuse the rest.
+  const wardrobeOf = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const out = {};
+    for (const id of WARDROBE.WORN) if (Object.hasOwn(value, id)) { try { out[id] = WARDROBE.choice(id, value[id]); } catch { /* not this page's */ } }
+    return Object.keys(out).length ? Object.freeze(out) : null;
+  };
+  const wardrobeReady = (w) => !w || WARDROBE.WORN.every((id) => !w[id] || w[id].item === "none" || w[id].item === "custom" || !!WARDROBE.content(w[id].version));
+  // The pieces' chunk, fetched once something worn needs it; a failure waits out the shared retry timer's steps.
+  const loadWardrobe = () => {
+    if (WARDROBE.seeded || wardrobeLoad || Date.now() < wardrobeRetryAt) return;
+    const task = BL.deferred?.load("wardrobe");
+    if (!task) return;
+    wardrobeLoad = task.then(() => { wardrobeLoad = null; geometryEpoch++; emit(); }, () => { wardrobeLoad = null; wardrobeRetryAt = Date.now() + RETRY_MS[2]; });
+  };
   const selection = (s) => s === null || !!s && typeof s === "object" && Object.keys(s).length === 2
     && Object.hasOwn(s, "item") && Object.hasOwn(s, "version") && (s.item === "none" ? s.version === null : ITEM.test(s.item) && HASH.test(s.version));
   const validSize = (value) => Number.isInteger(value) && value >= 80 && value <= 120;
   const sizeOf = (value) => Object.hasOwn(value, "size") ? validSize(value.size) ? value.size : null : 100;
   const record = (r) => !!r && selection(r.selection) && Number.isSafeInteger(r.revision) && r.revision >= 0
+    && (r.wardrobe === undefined || r.wardrobe === null || typeof r.wardrobe === "object" && !Array.isArray(r.wardrobe))
     && sizeOf(r) !== null
     && (r.declined === null || HASH.test(r.declined)) && (r.update === null || selection(r.update) && r.update.item !== "none"
       && r.selection && r.update.item === r.selection.item && r.update.version !== r.selection.version);
   const emit = () => { notice(); for (const fn of subscribers) fn(state); };
   const adopt = (r) => {
     if (!record(r) || r.revision < state.record.revision) return false;
-    state.record = { ...r, size: sizeOf(r) };
+    state.record = { ...r, size: sizeOf(r), wardrobe: wardrobeOf(r.wardrobe) };
     ensure(r.selection);
+    if (!wardrobeReady(state.record.wardrobe)) loadWardrobe();
     scheduleRetry();
     return true;
   };
@@ -118,14 +139,17 @@
     } catch { if (own === epoch) state.error = "Equipment could not be saved. Try again."; return false; }
     finally { if (own === epoch) { state.busy = false; emit(); } }
   };
-  const save = async (s, size) => {
+  // `wardrobe` (optional) is the whole wardrobe to save beside the hat: a choice for each slot it changes.
+  const save = async (s, size, wardrobe) => {
     if (!account || !state.supported || state.busy || !selection(s) || size !== undefined && !validSize(size)) return false;
     // Keep the user's original CAS revision: a late archive must never save over a newer choice.
     const own = epoch, revision = state.record.revision, ticket = ++intent;
     const loaded = await ensure(s, true);
     if (own !== epoch || ticket !== intent || revision !== state.record.revision) return false;
     if (!loaded) { state.error = "This hat could not be loaded. Try again."; emit(); return false; }
-    return write(size === undefined ? { selection: s } : { selection: s, size }, revision);
+    const change = size === undefined ? { selection: s } : { selection: s, size };
+    if (wardrobe !== undefined) change.wardrobe = wardrobe;
+    return write(change, revision);
   };
   const accept = () => state.record.update ? save(state.record.update) : Promise.resolve(false);
   const decline = () => state.record.update ? write({ decline: state.record.update.version }) : Promise.resolve(false);
@@ -137,19 +161,23 @@
       for (const row of msg.rows) {
         if (!row || !Number.isSafeInteger(row.id) || row.id <= 0 || !Number.isSafeInteger(row.revision) || row.revision < 0 || !selection(row.selection) || sizeOf(row) === null) return;
         const old = remotes.get(row.id);
-        next.set(row.id, old && old.revision > row.revision ? old : { ...row, size: sizeOf(row) });
+        next.set(row.id, old && old.revision > row.revision ? old : { ...row, size: sizeOf(row), wardrobe: wardrobeOf(row.wardrobe) });
       }
       remotes.clear();
-      for (const [id, row] of next) { remotes.set(id, row); ensure(row.selection); }
+      for (const [id, row] of next) { remotes.set(id, row); ensure(row.selection); if (!wardrobeReady(row.wardrobe)) loadWardrobe(); }
     } else if (msg.kind === "remove") {
       if (Array.isArray(msg.ids) && msg.ids.length <= 32) for (const id of msg.ids) remotes.delete(id);
     } else if (Number.isSafeInteger(msg.id) && msg.id > 0 && Number.isSafeInteger(msg.revision) && msg.revision >= 0 && selection(msg.selection) && sizeOf(msg) !== null) {
       if (msg.id === account) {
         if (msg.equipment) adopt(msg.equipment);
-        else if (msg.revision > state.record.revision) adopt({ selection: msg.selection, size: sizeOf(msg), revision: msg.revision, declined: null, update: null });
+        else if (msg.revision > state.record.revision) adopt({ selection: msg.selection, size: sizeOf(msg), revision: msg.revision, declined: null, update: null, wardrobe: msg.wardrobe });
       } else {
         const old = remotes.get(msg.id);
-        if ((!old || msg.revision > old.revision) && (remotes.has(msg.id) || remotes.size < 32)) { remotes.set(msg.id, { ...msg, size: sizeOf(msg) }); ensure(msg.selection); }
+        if ((!old || msg.revision > old.revision) && (remotes.has(msg.id) || remotes.size < 32)) {
+          const row = { ...msg, size: sizeOf(msg), wardrobe: wardrobeOf(msg.wardrobe) };
+          remotes.set(msg.id, row); ensure(msg.selection);
+          if (!wardrobeReady(row.wardrobe)) loadWardrobe();
+        }
       }
     }
     scheduleRetry();
@@ -158,20 +186,26 @@
   const apply = (cave, value) => {
     if (!cave || !BL.characterEquipment) return;
     const old = applied.get(cave);
-    if (old && old.value === value && old.geometryEpoch === geometryEpoch) return;
-    const s = value ? value.selection : null;
+    // A body still waiting on the wardrobe's chunk asks again once its retry step has passed (`loadWardrobe` keeps it).
+    if (old && old.value === value && old.geometryEpoch === geometryEpoch) { if (old.wardrobe) loadWardrobe(); return; }
+    const s = value ? value.selection : null, wardrobe = value ? value.wardrobe || null : null;
+    if (!wardrobeReady(wardrobe)) {
+      applied.set(cave, { value, geometryEpoch, pending: true, wardrobe: true });
+      loadWardrobe(); return;
+    }
     if (s && s.item !== "none" && !BL.equipmentHats.loaded(s.item, s.version)) {
       // A pending choice waits on the shared retry timer. Only installed geometry advances
       // the epoch and lets this same wearer try again; failed reads never wake the frame loop.
       applied.set(cave, { value, geometryEpoch, pending: true });
       ensure(s); return;
     }
+    BL.characterWardrobe?.apply(cave, wardrobe);
     BL.characterEquipment.apply(cave, s, value ? value.size : 100);
     applied.set(cave, { value, geometryEpoch, pending: false });
   };
   const applyLocal = (cave) => apply(cave, account && state.supported ? state.record : EMPTY);
   const applyRemote = (cave, id) => apply(cave, remotes.get(id) || EMPTY);
-  const clear = (cave) => { applied.delete(cave); BL.characterEquipment?.apply(cave, null); };
+  const clear = (cave) => { applied.delete(cave); BL.characterWardrobe?.clear(cave); BL.characterEquipment?.apply(cave, null); };
   const notice = () => {
     const box = document.getElementById("equipment-update");
     if (!box) return;
@@ -198,6 +232,6 @@
       if (account && supported) refresh();
     }
   });
-  BL.equipment = { state, refresh, save, accept, decline, receive, applyLocal, applyRemote, clear,
+  BL.equipment = { state, refresh, save, accept, decline, receive, applyLocal, applyRemote, clear, wardrobeReady, loadWardrobe: () => { wardrobeRetryAt = 0; loadWardrobe(); return wardrobeLoad; },
     subscribe: (fn) => { subscribers.add(fn); return () => subscribers.delete(fn); } };
 })();

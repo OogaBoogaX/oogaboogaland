@@ -12536,19 +12536,85 @@ body[data-active-scene] #environment-sound { display: flex; align-items: center;
 }
 .studio-side button { flex: 0 0 auto; padding: 0 10px; }
 .studio-wardrobe { display: grid; gap: 7px; margin: 12px 0; }
-.studio-hats { width: 100%; min-width: 0; margin: 0; padding: 0; border: 0; }
-.studio-hats legend { padding: 0; margin-bottom: 6px; }
-#studio-hat-choices { display: grid; gap: 5px; max-height: min(32vh, 240px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--wood-edge) rgba(0, 0, 0, 0.25); }
-.studio-hat-family { min-width: 0; padding: 3px; }
-.studio-hat-choice { display: flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 6px; border-radius: 4px; cursor: pointer; }
-.studio-hat-choice:has(input:checked) { background: rgba(216, 137, 43, 0.16); }
-.studio-hat-choice input { flex: 0 0 16px; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
-.studio-hat-choice span { min-width: 0; overflow-wrap: anywhere; }
-.studio-hat-name { display: block; color: var(--paper); font-size: 12px; line-height: 1.4; }
-.studio-hat-credit { display: block; color: rgba(243, 239, 228, 0.65); font-size: 10px; line-height: 1.4; }
-.studio-hat-variants { margin-left: 8px; padding-left: 6px; border-left: 1px solid var(--stone-dk); }
-.studio-hat-variants > summary { min-height: 44px; align-content: center; padding: 0 6px; color: var(--accent-text); font-size: 11px; cursor: pointer; overflow-wrap: anywhere; }
-.studio-wardrobe :is(input[type="radio"], input[type="range"], summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The wardrobe follows the pop-ups' text standard (AGENTS.md, A pop-up or menu): its words stand on stone, never on the
+   planks. The tiles and the open editor share one slab; a tile reads as its slot's name alone (12px, paper at 0.88), in
+   the light accent when something other than the Ooga's own is worn there, and what is worn shows in its editor. The
+   chosen tile is ringed in amber and a tile changed since the last save carries a dot. */
+.studio-slots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 5px; background: var(--slab-dark);
+  border: 2px solid var(--stone-dk); border-radius: 9px 7px 10px 8px; box-shadow: var(--tablet-shadow); }
+.studio-wardrobe .studio-tile { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 44px; box-sizing: border-box; padding: 6px 7px; border: 1px solid rgba(243, 239, 228, 0.07);
+  border-radius: 5px; background: rgba(0, 0, 0, 0.16); color: var(--paper); font: inherit; text-align: left; cursor: pointer; }
+.studio-tile:hover { background: rgba(243, 239, 228, 0.06); }
+.studio-tile[aria-pressed="true"] { border-color: var(--accent); background: rgba(216, 137, 43, 0.14); box-shadow: inset 0 0 0 1px var(--accent); }
+.studio-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.studio-tile-icon { flex: 0 0 18px; width: 18px; height: 18px; color: rgba(243, 239, 228, 0.62); shape-rendering: crispEdges; }
+.studio-tile[data-worn] .studio-tile-icon { color: var(--accent-text); }
+.studio-tile-name { min-width: 0; color: rgba(243, 239, 228, 0.88); font-size: 12px; line-height: 1.2; white-space: nowrap; }
+.studio-tile[data-worn] .studio-tile-name { color: var(--accent-text); }
+.studio-tile { position: relative; }
+.studio-tile[data-changed]::after { content: ""; position: absolute; top: 5px; left: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.studio-tile[data-unsupported] { opacity: 0.55; }
+/* The chosen tile's editor, across the slab under that tile's row: its name, its list, who made the piece and, for the
+   hat and the mask, a size whose value reads as the pop-ups' values do. */
+.studio-editors { grid-column: 1 / -1; padding: 8px; border: 1px solid rgba(216, 137, 43, 0.6); border-radius: 5px; background: rgba(0, 0, 0, 0.22); }
+.studio-editor { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.studio-editor[hidden] { display: none; }
+.studio-editor-name { margin: 0; color: rgba(243, 239, 228, 0.88); font-size: 12px; font-weight: 700; }
+.studio-editor .studio-slot-credit { color: rgba(243, 239, 228, 0.78); font-size: 11px; }
+.studio-editor .studio-note { color: rgba(243, 239, 228, 0.62); font-size: 11px; }
+.studio-editor .studio-hat-size-label { color: rgba(243, 239, 228, 0.88); font-size: 12px; letter-spacing: 0; text-transform: none; }
+.studio-editor .studio-hat-size-label output { font-family: var(--mono); font-size: 11px; color: var(--accent-text); }
+.studio-editor select { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; padding: 0 8px; border: 1px solid rgba(0, 0, 0, 0.5); border-radius: 5px;
+  background: rgba(0, 0, 0, 0.28); color: var(--paper); font: inherit; font-size: 12px; cursor: pointer; }
+.studio-editor select:disabled { opacity: 0.55; cursor: default; }
+.studio-editor select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.studio-save-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 10px; }
+.studio-save-row .studio-changes { flex: 1 0 auto; margin: 0; }
+.studio-save-row .foot-button { flex: 0 0 auto; }
+.studio-size-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.studio-size-line .studio-hat-size-label { flex: 1 1 auto; }
+.studio-size-line .link { padding: 0; min-height: 0; font-size: 11px; }
+.studio-size-line .link:disabled { opacity: 0.4; cursor: default; }
+.studio-changes { color: var(--accent-text); font-size: 11px; white-space: nowrap; }
+.studio-changes .link { padding: 0; min-height: 0; font-size: 11px; }
+.studio-slot-credit { color: rgba(243, 239, 228, 0.65); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+.studio-slot-credit:empty { display: none; }
+/* An Ooga's own colours, each under the editor of what it colours (the skin's under the body's): a rule over it, its
+   name and what is worn, then square swatches with its own first (a dashed ring), the chosen one ringed in amber, and
+   last a colour wheel for any colour, which takes the colour worn once one is mixed. The hex field says and takes it. */
+.studio-colour { padding-top: 8px; border-top: 1px solid rgba(243, 239, 228, 0.12); }
+.studio-colour .studio-editor-name { display: flex; gap: 8px; align-items: baseline; }
+.studio-colour-name { color: var(--accent-text); font-size: 11px; font-weight: 400; }
+.studio-wardrobe .studio-swatch.studio-wheel { -webkit-appearance: none; appearance: none; display: block;
+  background: conic-gradient(#e2453c, #e8c13b, #5fbf4b, #3bb7d2, #4062d8, #b04bd0, #e2453c); }
+.studio-wheel::-webkit-color-swatch-wrapper { padding: 0; }
+.studio-wheel::-webkit-color-swatch { border: 0; opacity: 0; }
+.studio-wheel::-moz-color-swatch { border: 0; opacity: 0; }
+.studio-hex { display: flex; align-items: center; gap: 8px; color: rgba(243, 239, 228, 0.88); font-size: 12px; }
+.studio-hex input { flex: 1 1 0; width: 0; min-width: 0; min-height: 36px; box-sizing: border-box; padding: 0 8px; border: 1px solid rgba(0, 0, 0, 0.5); border-radius: 5px;
+  background: rgba(0, 0, 0, 0.28); color: var(--paper); font-family: var(--mono); font-size: 12px; text-transform: uppercase; }
+.studio-hex input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.studio-hex input[aria-invalid] { border-color: #e2453c; }
+.studio-hex input:disabled { opacity: 0.55; }
+.studio-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(30px, 1fr)); gap: 5px; }
+.studio-wardrobe .studio-swatch { width: 100%; min-width: 0; min-height: 0; height: auto; aspect-ratio: 1; padding: 0; border: 2px solid rgba(0, 0, 0, 0.55); border-radius: 5px; background: #555; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(243, 239, 228, 0.2); }
+.studio-swatch[data-own] { border-style: dashed; border-color: rgba(243, 239, 228, 0.6); }
+.studio-swatch[aria-pressed="true"] { border: 2px solid var(--accent); box-shadow: inset 0 0 0 2px var(--slab-dark); }
+.studio-swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.studio-swatch:disabled { opacity: 0.4; cursor: default; }
+@media (pointer: coarse) {
+  .studio-swatches { grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); }
+  /* A tile's words keep its whole width a phone gives it: a smaller mark, closer in. */
+  .studio-wardrobe .studio-tile { gap: 5px; padding: 6px 5px; }
+  .studio-tile-icon { flex-basis: 14px; width: 14px; height: 14px; }
+}
+/* The foot pinned under the slots is a stone slab of its own: a copy of the planks could never line its seams up with
+   the panel's behind it as the slots scroll, so it would read as a broken board. Its text stands on the stone. */
+.studio-wardrobe-foot { position: sticky; bottom: 0; z-index: 1; display: grid; gap: 6px; margin-top: 2px; padding: 8px; background: var(--slab-dark);
+  border: 2px solid var(--stone-dk); border-radius: 9px 7px 10px 8px; box-shadow: var(--tablet-shadow); }
+.studio-wardrobe .studio-wardrobe-foot .studio-note { padding: 0; background: none; color: rgba(243, 239, 228, 0.62); font-size: 11px; }
+.studio-wardrobe .studio-wardrobe-foot .studio-note:empty { display: none; }
+.studio-wardrobe :is(input[type="range"], summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .studio-hat-size-label { display: flex; justify-content: space-between; gap: 8px; }
 .studio-hat-size-label output { color: var(--accent-text); font-variant-numeric: tabular-nums; }
 .studio-wardrobe input[type="range"] { width: 100%; min-width: 0; height: 44px; margin: 0; accent-color: var(--accent); cursor: pointer; }

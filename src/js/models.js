@@ -1430,8 +1430,11 @@
     // club(k) returns { voxels, palette } for a voxel item, or { default }
     // geometry, plus optional rest and carry angles ({ x, y, z } in the rotation's YXZ order, y 0
     // when left out: a quarter turn in y with the tilt in z turns a blade about its haft).
-    const club = dress.club ? dress.club(k) : {};
-    const clubV = club.voxels || clubVoxels(rand);
+    // A worn weapon (`traits.wardrobe.weapon`, character-wardrobe.js: already this Ooga's size) takes the club's place.
+    // The character's own club hook and the stock club's draws still run, so nothing drawn after them moves.
+    const authoredClub = dress.club ? dress.club(k) : {};
+    const clubV = authoredClub.voxels || clubVoxels(rand);
+    const club = traits.wardrobe?.weapon || authoredClub;
     const clubOrigin = { x: -1 * u, y: -1 * u, z: -1 * u };
     const clubRest = club.rest || CLUB_REST, clubCarry = club.carry || clubRest;
     const skins = {
@@ -1568,9 +1571,14 @@
     const beforeHat = parts.head.children.length;
     if (dress.hatNodes && !traits.equipmentBare) dress.hatNodes(k);
     parts.nativeHat = parts.head.children.slice(beforeHat);
+    const beforeGear = parts.head.children.length;
     if (dress.headgear) dress.headgear(k);
+    // What the character wears on its face beside its hat (a gas mask, a cowling), which a worn mask stands in for.
+    parts.nativeHeadgear = parts.head.children.slice(beforeGear);
     addChild(root, parts.legR, parts.legL, parts.torso, parts.armR, parts.armL, parts.head);
     if (dress.extras) dress.extras(k);
+    // What a character's own hooks hung on its club (itsLiran's plate) stays with its own club, off a worn weapon.
+    if (traits.wardrobe?.weapon) for (const child of parts.club.children) child.visible = false;
     // The refined body (see FINE): every authored part drawn again on the fine grid, after every hook. A character's
     // `refine(k, part, v, side)` hook may paint the fine maps before they bake: "head", "closed" and "portrait" (the
     // head's three faces), "torso", "arm", "fingers" and "leg" (with its side), in fine cells of the part's own frame,
@@ -1591,6 +1599,12 @@
       const blocksOf = (node) => bakeOf.get(node.geometry)?.v || null;
       const authored = { torso: blocksOf(parts.torso), armR: blocksOf(parts.armR), armL: blocksOf(parts.armL), legR: blocksOf(parts.legR), legL: blocksOf(parts.legL),
         lit: bakeOf.get(parts.torso.geometry)?.emissive };
+      // Worn clothes (`traits.wardrobe.paint`, equipment-wardrobe.js) are laid over the authored blocks before anything
+      // wears them: each clears its own rows and lays its own blocks, its colours joining the palette after the
+      // character's own (never its recorded order, so a later build of the character keeps its indices).
+      if (traits.wardrobe?.paint) BL.equipmentWardrobe.paint(authored, traits.wardrobe.paint, P, (rgb) => palette.push(rgb) - 1);
+      // The authoring script reads what a character's blocks wore (scripts/equipment-wardrobe.mjs), never a page.
+      if (traits.capture) Object.assign(traits.capture, { authored, palette, P, head: headVox, stockHead: !(dress.model || dress.skull || dress.hat || dress.crown || dress.eyes || dress.mark || dress.refine) });
       const fineBake = (v, origin, emissive) => {
         v.trim();
         const geo = voxelGeometry(v, { unit: fineU, palette, origin, emissive, rects: true });
@@ -2023,7 +2037,7 @@
         // What a character stood on the front or the back of the authored trunk (three units out from its middle)
         // stands on the modelled trunk's own front or back at that height, so it lies on the surface.
         {
-          const surface = BL.heroBody.trunk(!!traits.slim);
+          const surface = BL.heroBody.trunk(!!traits.slim, traits.bodyShape);
           for (const laid of parts.torso.children) {
             const y = laid.position.y / u, z = laid.position.z / u;
             if (Math.abs(z) >= 2.5 && !laid.surface) laid.position.z = (z > 0 ? surface.front(y) + z - 3 : surface.back(y) + z + 3) * u;
@@ -2189,13 +2203,32 @@
     const copy = createNode({ ...node, position: { ...node.position }, rotation: { ...node.rotation }, scale: { ...node.scale }, parent: null, children: [], world: new Float32Array(node.world), local: new Float32Array(node.local) });
     if (node.quaternion) copy.quaternion = new Float32Array(node.quaternion);
     copies.set(node, copy);
+    TEMPLATE_NODE.set(copy, node);
     for (const child of node.children) addChild(copy, cloneNode(child, copies));
     return copy;
   };
+  // Each clone's node is known by the template node it was copied from, so a worn wardrobe (character-wardrobe.js) can
+  // find the same node in another build of the same character.
+  const TEMPLATE_NODE = new WeakMap();
+  // Builds in a worn wardrobe are kept for the `WARDROBE_TEMPLATES` most recently asked for, the oldest let go first: a
+  // body still showing one keeps its own meshes, and once nothing does the renderer frees them at housekeeping. Asking
+  // again for one let go builds it again.
+  const WARDROBE_TEMPLATES = 32, wardrobeRecent = new Set();
+  const templateFor = (traits) => {
+    const key = traits.name + (traits.equipmentBare ? "\0bare-head" : "") + (traits.wardrobeKey ? "\0" + traits.wardrobeKey : "");
+    let found = cavemen.get(key);
+    if (!found) cavemen.set(key, found = buildCaveman(traits));
+    if (traits.wardrobeKey) {
+      wardrobeRecent.delete(key); wardrobeRecent.add(key);
+      for (const old of wardrobeRecent) {
+        if (wardrobeRecent.size <= WARDROBE_TEMPLATES) break;
+        wardrobeRecent.delete(old); cavemen.delete(old);
+      }
+    }
+    return found;
+  };
   const caveman = (traits) => {
-    const key = traits.name + (traits.equipmentBare ? "\0bare-head" : "");
-    let template = cavemen.get(key);
-    if (!template) cavemen.set(key, template = buildCaveman(traits));
+    const template = templateFor(traits);
     const copies = new Map(), root = cloneNode(template.root, copies), parts = {};
     // A legged companion names its own limbs (`legs`, `tail`); the clone's must be its own nodes, not the template's.
     for (const [node, copy] of copies) {
@@ -2210,7 +2243,8 @@
     // The face button's head is the template's, built when first read; a clone swapping colourways may set its own.
     let face;
     return { root, parts, traits, modelled: template.modelled, elbow: template.elbow, back: template.back, armScale: template.armScale, fist: template.fist, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed,
-      get portraitHead() { return face === undefined ? template.portraitHead : face; }, set portraitHead(geometry) { face = geometry; },
+      // `template` is the build this clone shows: its own, or the build a worn wardrobe swapped in (character-wardrobe.js).
+      template, get portraitHead() { return face === undefined ? this.template.portraitHead : face; }, set portraitHead(geometry) { face = geometry; },
       skins, clubRest: template.clubRest, clubCarry: template.clubCarry, tint: template.tint, gunHeadBounds: template.gunHeadBounds,
       // Only the same character's approved builder runs here; borrowed hats are archived geometry, never hooks.
       bareHead: () => {
@@ -2876,5 +2910,5 @@
     for (const geo of set) if (geo.foliageLods?.owner === geo) { set.add(geo.foliageLods.medium); set.add(geo.foliageLods.far); }
     return set;
   };
-  BL.models = { STYLE, GUN_BANANA_SCALE, BODY, characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, die, dieRotationFor };
+  BL.models = { STYLE, GUN_BANANA_SCALE, BODY, characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, templateFor, templateNode: (node) => TEMPLATE_NODE.get(node) || null, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, die, dieRotationFor };
 })();

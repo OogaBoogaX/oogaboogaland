@@ -2068,6 +2068,11 @@
     writeAccount("account-name", "hidden", !me);
     writeAccount("account-login", "hidden", !!me);
     writeAccount("account-logout", "hidden", !me);
+    // The studio, where a signed-in player chooses what their own Ooga wears (scene-studio.js), where the Worker keeps it.
+    const own = me && state.equipment ? BL.net.ownCharacter?.() : null;
+    writeAccount("account-look", "hidden", !own);
+    // From the site's root: a routed address (/lightning) outranks `?scene=`.
+    if (own) writeAccount("account-look", "href", new URL(`/?scene=studio&character=${encodeURIComponent(own.handle)}`, location.href).href);
     writeAccount("account-room", "textContent", words);
     writeAccount("account-room", "hidden", !me || !words);
     writeAccount("account-rejoin", "hidden", !me || !ROOM_WORDS[room]);

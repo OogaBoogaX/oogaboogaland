@@ -692,8 +692,10 @@ export class Room extends DurableObject {
     this.players.set(p.id, p);
     this.sockets.set(server, p);
     if (this.env.EQUIPMENT_ENABLED === "1") {
+      // A read that fails admits the player in their own look: a fresh record has no saved choice to protect, and the
+      // sweep reads it again. A cosmetic read never keeps anyone off the island.
       try { if (!await equipmentRoom.refresh(this, p, false)) return new Response(null, { status: 101, webSocket: client }); }
-      catch { this.evict(p, "equipment-unavailable"); return new Response(null, { status: 101, webSocket: client }); }
+      catch { /* retried at the next sweep */ }
       if (this.players.get(p.id) !== p) { server.close(CLOSE_KICK, "replaced"); return new Response(null, { status: 101, webSocket: client }); }
     }
     this.world.changed();

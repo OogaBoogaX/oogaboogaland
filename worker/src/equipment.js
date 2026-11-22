@@ -3,6 +3,7 @@
 import { allowed, fromSite, getSessionFromRequest, json, readBody } from "./http.js";
 import { equipmentCommand, equipmentEnabled } from "./equipment-model.js";
 import { equipmentHatArchive, equipmentHats } from "./equipment-hats.js";
+import { equipmentWardrobe } from "./equipment-wardrobe.js";
 import { sha256Hex } from "./crypto.js";
 
 export const createEquipmentHandler = (session = getSessionFromRequest) => async (request, env) => {
@@ -16,7 +17,7 @@ export const createEquipmentHandler = (session = getSessionFromRequest) => async
   if (!(await allowed(env.EQUIPMENT_LIMITER, `${found.player.id}:${request.method}`))) return json({ error: "limited" }, 429, { "retry-after": "60" });
   let command = null;
   if (request.method === "PUT") {
-    const raw = await readBody(request, 512);
+    const raw = await readBody(request, 4096);
     if (raw === null) return json({ error: "too large" }, 413);
     try { command = equipmentCommand(JSON.parse(raw)); } catch { return json({ error: "invalid equipment" }, 400); }
   }
@@ -33,6 +34,14 @@ export const handleEquipment = createEquipmentHandler();
 export const handleEquipmentCatalog = request => {
   if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "method not allowed" }, 405, { allow: "GET, HEAD" });
   const response = json({ format: 1, items: equipmentHats.items.map(({ id, versions }) => ({ id, versions })) });
+  return request.method === "HEAD" ? new Response(null, { headers: response.headers }) : response;
+};
+
+// The wardrobe's history beside it: every piece ever published, retired ones too, so a release can refuse to drop one
+// someone may be wearing (scripts/equipment-retention.mjs). Its own address keeps the hat catalog's shape as it was.
+export const handleWardrobeCatalog = request => {
+  if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "method not allowed" }, 405, { allow: "GET, HEAD" });
+  const response = json({ format: 1, items: equipmentWardrobe.items.map(({ id, version }) => ({ id, version })) });
   return request.method === "HEAD" ? new Response(null, { headers: response.headers }) : response;
 };
 

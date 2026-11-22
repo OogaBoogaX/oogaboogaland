@@ -10,7 +10,7 @@ const queue = (room, step) => {
   room.equipmentQueue = operation.catch(() => {});
   return operation.finally(() => { room.equipmentPending--; });
 };
-const row = p => ({ id: p.id, revision: p.equipment.revision, selection: p.equipment.selection, size: p.equipment.size });
+const row = p => ({ id: p.id, revision: p.equipment.revision, selection: p.equipment.selection, size: p.equipment.size, wardrobe: p.equipment.wardrobe || null });
 const own = (room, p) => { if (p.equipment) room.send(p.ws, { t: "equipment", ...row(p), equipment: p.equipment }); };
 const publish = (room, p) => {
   if (!p.equipment || !p.equipmentReady) return;
@@ -34,9 +34,9 @@ export const equipmentRoom = {
   saved(room, value, login, id) {
     if (!equipmentEnabled(room.env) || !value) return null;
     try {
-      if (value.revision === 0 && value.selection === null && value.declined === null && (value.size === undefined || value.size === 100)) return equipmentRecord(null);
+      if (value.revision === 0 && value.selection === null && value.declined === null && (value.size === undefined || value.size === 100) && !value.wardrobe) return equipmentRecord(null);
       const record = equipmentRecord({ item: value.selection?.item ?? null, version: value.selection?.version ?? null,
-        size: value.size, revision: value.revision, declined: value.declined });
+        size: value.size, revision: value.revision, declined: value.declined, wardrobe: value.wardrobe ? JSON.stringify(value.wardrobe) : null });
       // The apple helmet is the only restricted fit. Pins safe even for that wearer do not
       // need catalog authority while a hibernated Room is still restoring its index.
       if (equipmentFitSize("w-s-bitcoin", record.selection, record.size) === record.size) return record;

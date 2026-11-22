@@ -88,6 +88,46 @@ const retain = (root, { context, archives }, rows) => {
   return seen.size;
 };
 
+// The wardrobe's pieces are immutable and every one ever published stays in its catalog, retired or not
+// (src/equipment/wardrobe). A release keeps every piece the live site lists, each whole and matching its hash.
+const WARDROBE_MAX = 1024, wardrobeSchema = readFileSync(new URL("../src/js/equipment-wardrobe.js", import.meta.url), "utf8");
+const retainWardrobe = (root, rows) => {
+  let catalog;
+  try { catalog = parse(read(root, "src/equipment/wardrobe/catalog.json", 1024 * 1024), "invalid target wardrobe catalog"); }
+  catch { if (rows.length) fail("target has no wardrobe for a published piece"); return 0; }
+  if (catalog.format !== 1 || !Array.isArray(catalog.items) || catalog.items.length > WARDROBE_MAX) fail("invalid target wardrobe catalog");
+  const target = new Map(catalog.items.map((row) => [row?.id, row?.version])), context = vm.createContext({});
+  vm.runInContext(wardrobeSchema, context, { timeout: 1000 });
+  const seen = new Set();
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Object.keys(row).sort().join(",") !== "id,version" || typeof row.id !== "string"
+      || !ITEM.test(row.id) || row.id.length > 64 || !HASH.test(row.version || "") || seen.has(row.id)) fail("expected only wardrobe id/version pairs");
+    seen.add(row.id);
+    if (target.get(row.id) !== row.version) fail("target omits a published wardrobe piece");
+    const text = read(root, `src/equipment/wardrobe/${row.version}.json`, context.BL.equipmentWardrobe.MAX_BYTES);
+    if (createHash("sha256").update(text).digest("hex") !== row.version) fail("wardrobe piece digest differs");
+    context.content = text;
+    try {
+      if (vm.runInContext("BL.equipmentWardrobe.encode(BL.equipmentWardrobe.validateContent(JSON.parse(content)))", context, { timeout: 1000 }) !== text)
+        fail("wardrobe piece is not canonical");
+    } catch { fail("wardrobe piece is invalid or noncanonical"); }
+  }
+  return seen.size;
+};
+const publishedWardrobe = async (fetcher, origin, signal, deadline) => {
+  const response = await Promise.race([fetcher(`${origin}/api/equipment/wardrobe/catalog`, {
+    credentials: "omit", cache: "no-store", redirect: "error", headers: { accept: "application/json" }, signal }), deadline]);
+  // A Worker from before the wardrobe has nothing published to keep.
+  if (response.status === 404) { await response.body?.cancel(); return []; }
+  if (!response.ok || !(response.headers.get("content-type") || "").startsWith("application/json")) fail("published wardrobe unavailable");
+  const text = await Promise.race([response.text(), deadline]);
+  if (Buffer.byteLength(text) > MAX_RESULT_BYTES) fail("published wardrobe exceeds its bound");
+  const value = parse(text, "invalid published wardrobe");
+  if (!value || Object.keys(value).sort().join(",") !== "format,items" || value.format !== 1 || !Array.isArray(value.items) || value.items.length > WARDROBE_MAX)
+    fail("invalid published wardrobe");
+  return value.items;
+};
+
 export const validateEquipmentRetention = (releaseDir, resultJSON) => {
   const root = realpathSync(releaseDir), config = parse(read(root, ".catalog-wrangler.json", MAX_RESULT_BYTES), "invalid release config");
   if (!enabledFor(config)) return { enabled: false, retained: 0 };
@@ -138,7 +178,8 @@ export const preflightEquipmentRetention = async ({ releaseDir, environment, fet
     }
     // Disabling wearers does not retire immutable archives. The public registry stays available while off,
     // so losing its history here would make a subsequent re-enable unable to recover unpublished selections.
-    return { enabled, retained: retain(root, context || targetRegistry(root), rows) };
+    const retained = retain(root, context || targetRegistry(root), rows);
+    return { enabled, retained, wardrobe: retainWardrobe(root, await publishedWardrobe(fetcher, ORIGINS[environment], controller.signal, deadline)) };
   } finally { clearTimeout(timer); if (reader) { await reader.cancel().catch(() => {}); reader.releaseLock(); } }
 };
 

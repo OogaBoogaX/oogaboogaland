@@ -256,8 +256,11 @@
   const RIDE_HEAD = math.quat.create(), RIDE_TURN = math.quat.create(), RIDE_SPIN = math.quat.create(), RIDE_MATRIX = math.mat4.create();
   const hatSeatOf = (cave) => {
     const head = cave.parts.head, dog = cave.parts.dog, equipment = BL.characterEquipment;
-    const selected = equipment?.selection(cave), key = !selected ? "authored" : selected.item === "none" ? "none"
+    const selected = equipment?.selection(cave);
+    let key = !selected ? "authored" : selected.item === "none" ? "none"
       : selected.item + ":" + selected.version + ":" + equipment.size(cave);
+    const wardrobe = BL.characterWardrobe?.wearing(cave);
+    if (wardrobe) key += "|" + wardrobe;
     let seats = HAT_SEATS.get(cave.headOpen);
     if (!seats) HAT_SEATS.set(cave.headOpen, seats = new Map());
     let seat = seats.get(key);
@@ -329,6 +332,15 @@
   // Equipment changes are events, not frame work. Keep the pet's loop phase, quaternion and leap state while
   // measuring the newly visible headwear; clones with the same version and size share the bounded cached seat.
   const refreshHatRide = (cave) => { if (cave.pet?.ride) cave.pet.ride.seat = hatSeatOf(cave); };
+  // A worn wardrobe (character-wardrobe.js) gave this body new geometry: what was measured from the old is measured again.
+  const refreshBody = (cave) => {
+    if (cave.clubSlingProfile) cave.clubSlingProfile = clubSlingProfile(cave.parts.club.geometry);
+    if (cave.meleePoints) cave.meleePoints = meleeExtremes(cave.parts.club.geometry);
+    if (cave.clubTorsoBounds) cave.clubTorsoBounds = BL.scene.boundsOf(cave.parts.torso.geometry);
+    if (cave.bodyRadius !== undefined) { BL.scene.updateWorld(cave.root); cave.bodyRadius = bodyRadiusOf(cave); }
+    if (cave.slingRoll !== undefined) cave.slingRoll = undefined;
+    if (cave.pet?.ride) { cave.pet.ride.seat = hatSeatOf(cave); cave.pet.ride.stomach = stomachSeatOf(cave); }
+  };
   // Trots the pet `dt` along its loop (not under Calm) and stands `node` there: `m` is the head's matrix in the node's
   // parent frame, so the pet keeps to the hat through every turn and tilt of the head. Writes in place; allocates nothing.
   const poseHatRide = (ride, node, m, dt) => {
@@ -8298,5 +8310,5 @@
       }
     };
   };
-  BL.crew = { create, createPets, hatRide, refreshHatRide, poseHatRide, poseStomachRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, VISUAL_BODY, GAIT, poseGait, poseCloseWalk, poseGroundSit, seatJetpack, jetSparks, preparePresentation, poseEquipment, poseReload, reachArm, strikeTime, bodyHeightOf, bodyRadiusOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, COMPANION_FOLLOW, QUAD_GAIT, poseQuadruped, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_PUFF, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
+  BL.crew = { create, createPets, hatRide, refreshHatRide, refreshBody, poseHatRide, poseStomachRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, VISUAL_BODY, GAIT, poseGait, poseCloseWalk, poseGroundSit, seatJetpack, jetSparks, preparePresentation, poseEquipment, poseReload, reachArm, strikeTime, bodyHeightOf, bodyRadiusOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, COMPANION_FOLLOW, QUAD_GAIT, poseQuadruped, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_PUFF, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
 })();

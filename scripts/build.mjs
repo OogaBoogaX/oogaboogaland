@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeCharacters } from "./characters.mjs";
 import { writeEquipmentHats } from "./equipment-hats.mjs";
+import { writeWardrobe } from "./equipment-wardrobe.mjs";
 import { catalogBaseline, catalogContinuation } from "./character-catalog-build.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -20,6 +21,7 @@ runInNewContext(read("js/cave-directory.js"), { window: {}, URL });
 
 writeCharacters();
 writeEquipmentHats();
+writeWardrobe();
 let html = read("index.html");
 
 // The source links its touch icon beside index.html; the single-file page has no file beside it (opened from disk it

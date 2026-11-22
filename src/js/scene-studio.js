@@ -548,134 +548,349 @@
     asked = state.name;
     return false;
   };
+  // The wardrobe: a row for each slot (equipment-wardrobe.js `SLOTS`), folded to its name and what is worn there, which
+  // opens on a list of everything that slot can wear and, for the hat and the mask, a size. Choosing previews it on
+  // the Ooga on the pad; Save keeps the whole look for the visitor's own Ooga (equipment.js), hat and all.
   const startWardrobe = (signal) => {
-    const $ = (id) => document.getElementById(id), equipment = BL.equipment, hats = BL.equipmentHats;
-    const view = wardrobe = { choices: $("studio-hat-choices"), range: $("studio-hat-size"), sizeOutput: $("studio-hat-size-value"), reset: $("studio-hat-size-reset"),
-      save: $("studio-hat-save"), own: $("studio-hat-own"), status: $("studio-hat-status"), link: $("studio-hat-link"), selection: null, size: 100, dirty: false, ticket: 0, stop: null };
-    const key = (s) => s ? s.item === "none" ? "none" : `${s.item}@${s.version}` : "authored";
-    const rows = [], grouped = new Map(), disclosures = [], savedRows = new Map();
-    let selectedKey = null, serial = 0;
-    const add = (parent, selection, label, creators = [], choice = null, parents = []) => {
-      const node = document.createElement("label"), input = document.createElement("input"), words = document.createElement("span"), name = document.createElement("span");
-      node.className = "studio-hat-choice" + (parent === view.choices ? " slab" : "");
-      input.type = "radio"; input.name = "studio-hat-choice"; input.id = `studio-hat-choice-${serial++}`;
-      input.value = key(selection); input.dataset.hatItem = selection?.item || "authored";
-      if (choice) input.dataset.hatKey = choice.key;
-      name.className = "studio-hat-name"; name.textContent = label; words.append(name);
-      if (creators.length) {
-        const credit = document.createElement("span"); credit.className = "studio-hat-credit";
-        credit.textContent = "By " + creators.join(", "); words.append(credit);
-      }
-      node.append(input, words); parent.append(node);
-      const row = { node, input, selection, label, choice, parents };
-      rows.push(row); return row;
+    const $ = (id) => document.getElementById(id), equipment = BL.equipment, hats = BL.equipmentHats, W = BL.equipmentWardrobe;
+    const view = wardrobe = { slots: $("studio-slots"), save: $("studio-hat-save"), own: $("studio-hat-own"), status: $("studio-hat-status"), link: $("studio-hat-link"),
+      editors: $("studio-editors"), changes: $("studio-changes"), discard: $("studio-discard"), selection: null, size: 100, worn: null, dirty: false, ticket: 0, stop: null, open: "hat" };
+    const owns = () => BL.net.ownCharacter()?.handle.toLowerCase() === state.name.toLowerCase();
+    const hatKey = (s) => s ? s.item === "none" ? "none" : `${s.item}@${s.version}` : "authored";
+    const pieceKey = (c) => c ? c.item === "none" ? "none" : c.item === "custom" ? "custom:" + c.color : c.version : "original";
+    const nameOf = (handle) => BL.characters.get(handle)?.display || handle;
+    const credits = (creators) => {
+      if (!creators.length) return "";
+      const names = creators.map((c) => c === "OogaBoogaX" ? "the stock Ooga" : nameOf(c));
+      return "By " + (names.length > 4 ? names.slice(0, 3).join(", ") + ` and ${names.length - 3} more` : names.join(", "));
     };
-    const authored = add(view.choices, null, "Original character look"), none = add(view.choices, { item: "none", version: null }, "No hat");
-    const family = (choice, parent, parents) => {
-      const node = document.createElement("div"); node.className = "studio-hat-family" + (parent === view.choices ? " slab" : "");
-      parent.append(node);
-      const row = add(node, choice.selection, choice.label, choice.creators, choice, parents);
-      grouped.set(choice.key, row);
-      if (choice.children.length) {
-        const details = document.createElement("details"), summary = document.createElement("summary");
-        details.className = "studio-hat-variants";
-        const disclosure = { details, summary, count: choice.children.length };
-        disclosures.push(disclosure); details.append(summary); node.append(details);
-        for (const child of choice.children) family(child, details, [...parents, disclosure]);
+    const element = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text) node.textContent = text; return node; };
+    // Each slot's mark on its tile: a ten-by-ten pixel silhouette in the tile's own ink.
+    const ICONS = {
+      body: ["....##....", "....##....", "..######..", ".#.####.#.", ".#.####.#.", "...####...", "...#..#...", "..##..##.."],
+      hat: ["...####...", "..######..", "..######..", "..######..", "..######..", "##########", "##########"],
+      hair: ["..######..", ".########.", "##########", "###....###", "##......##", "##......##", "##......##", "#........#"],
+      eyes: ["####..####", "#..#..#..#", "#.##..#.##", "####..####"],
+      glasses: ["####..####", "#..####..#", "#..#..#..#", "####..####"],
+      mask: ["..######..", ".#......#.", "#..#..#..#", "#.##..##.#", "#........#", ".#..##..#.", "..#.##.#..", "...####..."],
+      mouth: ["#........#", ".#......#.", "..######.."],
+      beard: ["#........#", "#........#", "##.####.##", "##########", "##########", ".########.", "..######..", "...####..."],
+      shirt: ["..##..##..", "###....###", "##########", "##########", "..######..", "..######..", "..######..", "..######.."],
+      gloves: ["....##....", "...####.#.", "...######.", "...#####..", "...####...", "..######..", "..######.."],
+      belt: ["####..####", "###.##.###", "###.##.###", "####..####"],
+      pants: ["##########", "##########", "####..####", "###....###", "###....###", "###....###", "###....###"],
+      shoes: ["..###.....", "..###.....", "..###.....", "..######..", ".########.", "##########", "##########"],
+      back: ["#........#", "##......##", "###.##.###", "##########", ".########.", ".###..###.", "..#....#.."],
+      weapon: ["......###.", ".....####.", "....####..", "...##.....", "..##......", ".##.......", "##........", "#........."]
+    };
+    const icon = (id) => {
+      const rows = ICONS[id], svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"), path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      let d = "";
+      const top = Math.floor((10 - rows.length) / 2);
+      rows.forEach((row, y) => { for (let x = 0; x < row.length;) { if (row[x] !== "#") { x++; continue; } let w = 0; while (row[x + w] === "#") w++; d += `M${x} ${y + top}h${w}v1h-${w}z`; x += w; } });
+      svg.setAttribute("viewBox", "0 0 10 10"); svg.setAttribute("aria-hidden", "true"); svg.classList.add("studio-tile-icon");
+      path.setAttribute("d", d); path.setAttribute("fill", "currentColor"); svg.append(path);
+      return svg;
+    };
+    // One slot: its tile in the grid (its mark and its name) and its editor under the grid, shown while the tile is
+    // chosen. A colour slot has no tile: its editor is part of another's (`COLOUR_IN`: the skin's under the body, the
+    // hair's and the eyes' under theirs), headed by what it wears. Its options are kept as data beside the list:
+    // `{ label, creators, pick }`, where `pick` gives what choosing it wears (the hat's selection, or a slot's choice).
+    const editors = view.editors, COLOUR_IN = { skin: "body", hairColor: "hair", eyeColor: "eyes" };
+    const makeRow = (slot) => {
+      const colour = !!COLOUR_IN[slot.id];
+      const body = element("div", colour ? "studio-editor studio-colour" : "studio-editor"), heading = element("p", "studio-editor-name", slot.id === "skin" ? "Skin color" : slot.label);
+      const select = element("select"), credit = element("p", "studio-slot-credit"), note = element("p", "studio-note"), value = colour ? element("span", "studio-colour-name") : null;
+      body.id = `studio-editor-${slot.id}`; body.dataset.slot = slot.id; body.hidden = !colour;
+      select.id = slot.id === "hat" ? "studio-hat-choices" : `studio-slot-${slot.id}`;
+      select.setAttribute("aria-label", slot.label);
+      select.hidden = colour;
+      note.hidden = true;
+      if (value) heading.append(value);
+      body.append(heading, select, credit);
+      let tile = null;
+      if (!colour) {
+        tile = element("button", "studio-tile");
+        tile.type = "button"; tile.dataset.slot = slot.id; tile.setAttribute("aria-pressed", "false"); tile.setAttribute("aria-controls", `studio-editor-${slot.id}`);
+        if (slot.id === "hat") tile.id = "studio-hat";
+        tile.append(icon(slot.id), element("span", "studio-tile-name", slot.id === "weapon" ? "Weapon" : slot.label));
+        view.slots.append(tile);
+      }
+      const row = { slot, tile, details: tile || body, body, value, select, credit, note, options: [], range: null, output: null, reset: null };
+      if (slot.sized) {
+        const id = slot.id === "hat" ? "studio-hat-size" : `studio-slot-${slot.id}-size`, line = element("div", "studio-size-line"), label = element("label", "roster-sort-label studio-hat-size-label", "Size ");
+        label.htmlFor = id;
+        row.output = element("output", null, "100%"); row.output.id = id + "-value"; row.output.htmlFor = id;
+        label.append(row.output);
+        row.range = element("input"); Object.assign(row.range, { type: "range", id, min: "80", max: "120", step: "1", value: "100", disabled: true });
+        row.range.setAttribute("aria-valuetext", "100%");
+        row.reset = element("button", "link", "Reset size"); row.reset.type = "button"; row.reset.id = slot.id === "hat" ? "studio-hat-size-reset" : `studio-slot-${slot.id}-reset`; row.reset.disabled = true;
+        row.reset.title = "Back to the reviewed fit, 100%";
+        line.append(label, row.reset);
+        body.append(line, row.range);
+      }
+      body.append(note);
+      editors.append(body);
+      return row;
+    };
+    // The chosen tile and the one editor it opens, across the grid under the chosen tile's row.
+    const choose = (row) => {
+      view.open = row.slot.id;
+      const last = tiled[Math.min(tiled.indexOf(row) | 1, tiled.length - 1)].tile;
+      if (last.nextSibling !== editors) last.after(editors);
+      for (const other of tiled) {
+        const on = other === row;
+        other.tile.setAttribute("aria-pressed", String(on));
+        other.body.hidden = !on;
       }
     };
-    for (const choice of hats.groups()) family(choice, view.choices, []);
-    const showSelection = () => {
-      const saved = owns() && equipment.state.supported ? equipment.state.record.selection : null, retained = new Set();
-      // Keep a distinct old pin available while trying another hat. Only the saved and current preview pins may
-      // add rows beyond the catalog, so successive accepts or other-tab changes cannot grow a version history here.
-      for (const selection of [saved, view.selection]) {
-        if (!selection || selection.item === "none") continue;
-        const choice = hats.choiceFor(selection), value = key(selection);
-        if (choice && grouped.has(choice.key)) continue;
-        retained.add(value);
-        if (!savedRows.has(value)) {
-          const item = hats.get(selection.item, selection.version) || hats.get(selection.item);
-          const row = add(view.choices, selection, `${item?.label || "My hat"} · saved version`, item?.creator ? [item.creator] : []);
-          row.input.dataset.savedVersion = "true"; savedRows.set(value, row);
+    const add = (row, label, creators, pick, depth = 0, extra = null) => {
+      const option = element("option", null, (depth ? " ".repeat(depth) + "↳ " : "") + label);
+      option.value = String(row.options.length);
+      if (creators.length) option.title = credits(creators);
+      row.select.append(option);
+      const entry = { option, label, creators, pick, ...extra };
+      // What choosing it wears, as the page names it: the hat's `item@version`, `none` or `authored`; a slot's piece's
+      // version, `none` or `original`.
+      option.dataset.value = row === hatRow ? hatKey(extra?.choice ? extra.choice.selection : pick()) : pieceKey(pick());
+      if (extra?.choice) option.dataset.hatKey = extra.choice.key;
+      row.options.push(entry);
+      return entry;
+    };
+    const rows = W.SLOTS.map(makeRow), hatRow = rows.find((row) => row.slot.id === "hat"), tiled = rows.filter((row) => row.tile);
+    for (const row of rows) if (COLOUR_IN[row.slot.id]) { const host = rows.find((r) => r.slot.id === COLOUR_IN[row.slot.id]); host.body.insertBefore(row.body, host.note); }
+    for (const row of tiled) row.tile.addEventListener("click", () => choose(row), { signal });
+    choose(tiled.find((row) => row.slot.id === view.open) || hatRow);
+    // The hat's list: the character's own, none, then each shared choice with its variants under it.
+    add(hatRow, "Original character look", [], () => null);
+    add(hatRow, "No hat", [], () => ({ item: "none", version: null }), 0, { selection: { item: "none", version: null } });
+    const grouped = new Map(), saved = new Map();
+    const family = (choice, depth) => {
+      grouped.set(choice.key, add(hatRow, choice.label, choice.creators, () => hats.selectionFor(choice, owns() ? equipment.state.record.selection : null), depth, { choice }));
+      for (const child of choice.children) family(child, depth + 1);
+    };
+    for (const choice of hats.groups()) family(choice, 0);
+    for (const row of rows.filter((row) => row !== hatRow)) {
+      add(row, "Original look", [], () => null);
+      if (row.slot.none) add(row, row.slot.none, [], () => ({ item: "none", version: null }));
+      for (const item of W.slotItems(row.slot.id)) add(row, item.label, item.creators, () => ({ item: item.id, version: item.version }), 0, { item });
+      // A colour the player mixed: the picker's, or one typed as a hex.
+      if (COLOUR_IN[row.slot.id]) row.custom = add(row, "Custom", [], () => ({ item: "custom", version: null, color: row.mixed }));
+    }
+    // The Ooga's own colours choose from swatches over the list: its own colour first, then the palette. Their colours
+    // are the pieces' own, so they are painted once the pieces' chunk is here (equipment.js `loadWardrobe`).
+    const TONES = { skin: "skin", hairColor: "hair", eyeColor: "eyeColor" }, OWN_EYES = "#f4f0e6";
+    const ownTone = (id) => (cave.template?.traits || cave.traits)[TONES[id]] || (id === "eyeColor" ? OWN_EYES : "#888888");
+    const toneOf = (row, entry) => entry === row.options[0] ? ownTone(row.slot.id) : entry === row.custom ? view.worn?.[row.slot.id]?.color || row.mixed || null
+      : W.content(entry.item?.version)?.color || null;
+    const swatched = rows.filter((row) => TONES[row.slot.id]);
+    // Wearing a mixed colour builds the Ooga again, so a drag across the picker is worn once it rests (`MIX_REST`).
+    const MIX_REST = 350, HEX_IN = /^#?([0-9a-f]{6})$/i;
+    const wearMixed = (row, hex) => {
+      row.mixed = hex;
+      if (view.worn?.[row.slot.id]?.color === hex) return;
+      row.select.value = row.custom.option.value; row.select.dispatchEvent(new Event("change"));
+    };
+    for (const row of swatched) {
+      const box = element("div", "studio-swatches");
+      box.setAttribute("role", "group"); box.setAttribute("aria-label", `${row.slot.label} swatches`);
+      row.swatches = row.options.filter((entry) => entry !== row.custom).map((entry) => {
+        const swatch = element("button", "studio-swatch");
+        swatch.type = "button"; swatch.title = entry.label; swatch.setAttribute("aria-label", entry.label); swatch.setAttribute("aria-pressed", "false");
+        if (entry === row.options[0]) swatch.dataset.own = "true";
+        swatch.entry = entry;
+        swatch.addEventListener("click", () => { row.select.value = entry.option.value; row.select.dispatchEvent(new Event("change")); }, { signal });
+        box.append(swatch);
+        return swatch;
+      });
+      // The last cell is the colour wheel; the hex field under the grid says, and takes, the colour worn.
+      const wheel = element("input", "studio-swatch studio-wheel"), mix = element("label", "studio-hex"), hex = element("input");
+      Object.assign(wheel, { type: "color", value: "#888888", title: "Pick any color" });
+      wheel.setAttribute("aria-label", `Pick any ${row.slot.id === "skin" ? "skin color" : row.slot.label.toLowerCase()}`);
+      Object.assign(hex, { type: "text", maxLength: 7, spellcheck: false, autocomplete: "off", placeholder: "#rrggbb", id: `studio-slot-${row.slot.id}-hex` });
+      hex.setAttribute("aria-label", `${row.slot.id === "skin" ? "Skin color" : row.slot.label} hex`);
+      mix.append("Hex", hex);
+      box.append(wheel);
+      row.wheel = wheel; row.hex = hex;
+      let rest = 0;
+      const timers = () => { clearTimeout(rest); rest = 0; };
+      signal.addEventListener("abort", timers);
+      wheel.addEventListener("input", () => {
+        hex.value = wheel.value; wheel.dataset.mixed = "true"; wheel.style.backgroundColor = wheel.value;
+        timers(); rest = setTimeout(() => { rest = 0; wearMixed(row, wheel.value.toLowerCase()); }, MIX_REST);
+      }, { signal });
+      wheel.addEventListener("change", () => { timers(); wearMixed(row, wheel.value.toLowerCase()); }, { signal });
+      const typed = () => {
+        const m = HEX_IN.exec(hex.value.trim());
+        hex.toggleAttribute("aria-invalid", !m);
+        if (m) wearMixed(row, "#" + m[1].toLowerCase());
+      };
+      hex.addEventListener("change", typed, { signal });
+      hex.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); typed(); } }, { signal });
+      row.select.before(box, mix);
+    }
+    // Painted now where the pieces are already here (the portable page, a second visit), else once they arrive.
+    const paintSwatches = () => {
+      for (const row of swatched) for (const swatch of row.swatches) { const tone = toneOf(row, swatch.entry); if (tone) swatch.style.background = tone; }
+    };
+    paintSwatches();
+    const ready = equipment.loadWardrobe();
+    if (ready) ready.then(() => { if (wardrobe === view && !signal.aborted) { paintSwatches(); display(); } }, () => {});
+    // The option showing what a row wears: the hat's grouped choice for its pin, or a slot's item. A pin no longer
+    // listed (an old hat version, a retired piece) gets an option of its own while it is saved or previewed.
+    const optionFor = (row, worn) => {
+      if (row === hatRow) {
+        if (!worn) return hatRow.options[0];
+        if (worn.item === "none") return hatRow.options[1];
+        const choice = hats.choiceFor(worn);
+        if (choice && grouped.has(choice.key)) return grouped.get(choice.key);
+        return saved.get(row.slot.id + hatKey(worn)) || null;
+      }
+      if (!worn) return row.options[0];
+      if (worn.item === "custom") { row.mixed = worn.color; return row.custom; }
+      return row.options.find((o) => worn.item === "none" ? !o.item && o.pick()?.item === "none" : o.item?.version === worn.version)
+        || saved.get(row.slot.id + pieceKey(worn)) || null;
+    };
+    const keep = (row, worn) => {
+      const key = row.slot.id + (row === hatRow ? hatKey(worn) : pieceKey(worn));
+      if (saved.has(key)) return saved.get(key);
+      const item = row === hatRow ? hats.get(worn.item, worn.version) || hats.get(worn.item) : W.get(worn.item);
+      const creators = row === hatRow ? item?.creator ? [item.creator] : [] : item?.creators || [];
+      const entry = add(row, `${item?.label || "My " + row.slot.label.toLowerCase()} · saved version`, creators, () => ({ ...worn }), 0, { item: row === hatRow ? null : item });
+      entry.option.dataset.savedVersion = "true";
+      saved.set(key, entry);
+      return entry;
+    };
+    const wornIn = (row) => row === hatRow ? view.selection : view.worn?.[row.slot.id] || null;
+    const savedIn = (row) => {
+      const s = equipment.state, own = owns() && s.supported;
+      return !own ? null : row === hatRow ? s.record.selection : s.record.wardrobe?.[row.slot.id] || null;
+    };
+    const supported = (row) => row === hatRow ? BL.characterEquipment.supports(cave) : BL.characterWardrobe.supports(cave, row.slot.id);
+    const display = () => {
+      let changes = 0;
+      for (const row of rows) {
+        const worn = wornIn(row), entry = optionFor(row, worn) || keep(row, worn), base = savedIn(row);
+        row.select.value = entry.option.value;
+        // A body or an Ooga's own colour is the game's, credited to nobody.
+        row.credit.textContent = row.slot.id === "body" || row.swatches ? "" : credits(entry.creators);
+        if (row.swatches) {
+          const tone = toneOf(row, entry), mixed = entry === row.custom;
+          row.value.textContent = entry === row.options[0] ? "Original" : mixed ? tone.toUpperCase() : entry.label;
+          for (const swatch of row.swatches) swatch.setAttribute("aria-pressed", String(swatch.entry === entry));
+          row.wheel.setAttribute("aria-pressed", String(mixed));
+          row.wheel.toggleAttribute("data-mixed", mixed);
+          row.wheel.style.backgroundColor = mixed ? tone : "";
+          if (tone) row.wheel.value = tone;
+          if (document.activeElement !== row.hex) { row.hex.value = tone ? tone.toUpperCase() : ""; row.hex.removeAttribute("aria-invalid"); }
+        }
+        const same = row === hatRow ? hatKey(worn) === hatKey(base) && (!worn || worn.item === "none" || view.size === equipment.state.record.size)
+          : pieceKey(worn) === pieceKey(base) && (worn?.size || 100) === (base?.size || 100);
+        row.details.toggleAttribute("data-changed", view.dirty && !same);
+        row.details.toggleAttribute("data-worn", !!worn);
+        if (view.dirty && !same) changes++;
+        const ok = supported(row);
+        row.details.toggleAttribute("data-unsupported", !ok);
+        row.select.disabled = !ok;
+        if (row.swatches) for (const control of [...row.swatches, row.wheel, row.hex]) control.disabled = !ok;
+        row.note.hidden = ok;
+        if (!ok) row.note.textContent = row === hatRow ? "This character needs a hat fitting before it can wear shared hats."
+          : `This Ooga's own design keeps its ${row.slot.label.toLowerCase()}.`;
+        if (row.range) {
+          const size = row === hatRow ? view.size : worn?.size || 100, minimum = row === hatRow ? BL.characterEquipment.minimumSize(cave, view.selection) : 80;
+          row.range.min = String(minimum);
+          row.range.value = String(size);
+          row.range.setAttribute("aria-valuetext", `${size}%`);
+          row.output.value = `${size}%`;
+          row.range.disabled = !ok || !worn || worn.item === "none";
+          row.reset.disabled = row.range.disabled || size === 100;
         }
       }
-      for (const [value, row] of savedRows) if (!retained.has(value)) { row.node.remove(); rows.splice(rows.indexOf(row), 1); savedRows.delete(value); }
-      const value = key(view.selection), choice = view.selection && view.selection.item !== "none" ? hats.choiceFor(view.selection) : null;
-      const selected = !view.selection ? authored : view.selection.item === "none" ? none : (choice && grouped.get(choice.key)) || savedRows.get(value);
-      for (const row of rows) {
-        row.input.checked = row === selected;
-        // The visible duplicate row represents the wearer's exact pin, never a silent transfer to another creator.
-        row.input.value = key(row === selected ? view.selection : row.selection);
+      // A colour's change and wear show on the tile whose editor holds it.
+      for (const row of rows) if (COLOUR_IN[row.slot.id]) {
+        const host = rows.find((r) => r.slot.id === COLOUR_IN[row.slot.id]).tile;
+        for (const flag of ["data-changed", "data-worn"]) if (row.body.hasAttribute(flag)) host.setAttribute(flag, "");
       }
-      if (selectedKey !== value) for (const parent of selected.parents) parent.details.open = true;
-      for (const disclosure of disclosures) disclosure.summary.textContent = `Variants (${disclosure.count})`
-        + (selected.parents.includes(disclosure) ? ` · ${selected.label} selected` : "");
-      if (selectedKey !== value && view.choices.clientHeight) {
-        // Keep the pin in view without moving focus or scrolling the surrounding studio panel.
-        const bounds = view.choices.getBoundingClientRect(), row = selected.node.getBoundingClientRect();
-        const top = bounds.top + view.choices.clientTop, bottom = top + view.choices.clientHeight;
-        if (row.top < top || row.height > view.choices.clientHeight) view.choices.scrollTop += row.top - top;
-        else if (row.bottom > bottom) view.choices.scrollTop += row.bottom - bottom;
-      }
-      selectedKey = value;
+      view.changes.textContent = changes === 1 ? "1 change" : `${changes} changes`;
+      view.changes.parentElement.hidden = !changes;
     };
-    const owns = () => BL.net.ownCharacter()?.handle.toLowerCase() === state.name.toLowerCase();
     const draw = async () => {
-      const ticket = ++view.ticket, chosen = view.selection, size = view.size;
+      const ticket = ++view.ticket, chosen = view.selection, size = view.size, worn = view.worn;
+      const stale = () => signal.aborted || wardrobe !== view || ticket !== view.ticket;
       try {
-        if (chosen && chosen.item !== "none" && !BL.equipmentHats.loaded(chosen.item, chosen.version)) await BL.equipmentHats.load(chosen.item, chosen.version);
-        if (signal.aborted || wardrobe !== view || ticket !== view.ticket) return;
+        if (chosen && chosen.item !== "none" && !hats.loaded(chosen.item, chosen.version)) await hats.load(chosen.item, chosen.version);
+        if (worn && !equipment.wardrobeReady(worn)) await equipment.loadWardrobe();
+        if (stale()) return;
+        const dressed = BL.characterWardrobe.apply(cave, worn);
         if (!BL.characterEquipment.apply(cave, chosen, size)) view.status.textContent = "This character needs a hat fitting before it can wear this selection.";
-      } catch { if (!signal.aborted && wardrobe === view && ticket === view.ticket) view.status.textContent = "This hat could not be loaded. Try again."; }
+        else if (!dressed) view.status.textContent = "These pieces could not be put on this Ooga. Try again.";
+        // What the editors allow follows the build now worn (a female face takes no beard).
+        display();
+      } catch { if (!stale()) view.status.textContent = "This look could not be loaded. Try again."; }
     };
     const changed = () => {
       if (wardrobe !== view) return;
-      const own = owns(), s = equipment.state, supported = BL.characterEquipment.supports(cave);
+      const own = owns(), s = equipment.state;
       if (!view.dirty) {
         view.selection = own && s.supported ? s.record.selection : null;
         view.size = view.selection && view.selection.item !== "none" ? s.record.size : 100;
+        view.worn = own && s.supported ? s.record.wardrobe : null;
       }
-      showSelection();
-      const minimum = BL.characterEquipment.minimumSize(cave, view.selection);
-      view.range.min = String(minimum);
-      view.size = Math.max(minimum, view.size);
+      view.size = Math.max(BL.characterEquipment.minimumSize(cave, view.selection), view.size);
+      display();
       if (!view.dirty) draw();
-      view.range.value = String(view.size);
-      view.range.setAttribute("aria-valuetext", `${view.size}%`);
-      view.sizeOutput.value = `${view.size}%`;
-      view.range.disabled = !supported || !view.selection || view.selection.item === "none";
-      view.reset.disabled = view.range.disabled || view.size === 100;
-      view.save.disabled = !own || !s.supported || s.busy || !supported;
+      view.save.disabled = !own || !s.supported || s.busy;
       view.own.hidden = !BL.net.state.me || own;
       $("studio-hat-signin").hidden = !BL.net.state.backend || !!BL.net.state.me;
-      view.status.textContent = s.error || (s.busy ? "Saving…" : !supported ? "This character needs a hat fitting before it can wear shared hats."
-        : !s.supported ? "Preview only here. Use the staging studio while signed in to save your hat."
-        : !BL.net.state.me ? "Sign in to save a hat for your Ooga." : !own ? "Preview any Ooga. Switch to your own to save a hat." : view.dirty ? "Previewing. Save to wear this in the world." : "Your saved hat follows you into the world.");
-      if (!view.range.disabled && minimum > 80) view.status.textContent += ` Minimum size for this Ooga: ${minimum}%.`;
+      const minimum = BL.characterEquipment.minimumSize(cave, view.selection);
+      view.status.textContent = s.error || (s.busy ? "Saving…"
+        : !s.supported ? "Preview only here. Use the hosted studio while signed in to save your look."
+        : !BL.net.state.me ? "Sign in to save a look for your Ooga." : !own ? "Preview any Ooga. Switch to your own to save a look." : view.dirty ? "Previewing. Save to wear this in the world." : "Your saved look follows you into the world.");
+      if (supported(hatRow) && view.selection && view.selection.item !== "none" && minimum > 80) view.status.textContent += ` Minimum hat size for this Ooga: ${minimum}%.`;
       view.link.hidden = s.supported || document.documentElement.dataset.workerPage === "1";
       view.link.href = `https://oogaboogaland-staging.wickedsmartbitcoin.workers.dev/?scene=studio&character=${encodeURIComponent(state.name)}`;
     };
-    view.choices.addEventListener("change", (event) => {
-      const row = rows.find((row) => row.input === event.target);
-      if (!row || !row.input.checked) return;
-      view.selection = row.choice ? hats.selectionFor(row.choice, owns() ? equipment.state.record.selection : null) : row.selection;
-      view.size = owns() && view.selection && view.selection.item !== "none" && key(view.selection) === key(equipment.state.record.selection) ? equipment.state.record.size : 100;
-      view.dirty = true; changed(); draw();
-    }, { signal });
-    const resize = (size) => {
-      if (view.range.disabled || !Number.isInteger(size) || size < BL.characterEquipment.minimumSize(cave, view.selection) || size > 120 || size === view.size) return;
-      view.size = size; view.dirty = true; changed(); draw();
-    };
-    view.range.addEventListener("input", () => resize(Number(view.range.value)), { signal });
-    view.reset.addEventListener("click", () => resize(100), { signal });
+    for (const row of rows) {
+      row.select.addEventListener("change", () => {
+        const entry = row.options[Number(row.select.value)];
+        if (!entry) return;
+        const picked = entry.pick();
+        if (row === hatRow) {
+          view.selection = picked;
+          view.size = owns() && picked && picked.item !== "none" && hatKey(picked) === hatKey(equipment.state.record.selection) ? equipment.state.record.size : 100;
+        } else {
+          const base = savedIn(row), next = { ...(view.worn || null) };
+          if (picked) next[row.slot.id] = row.slot.sized && picked.item !== "none" && base && pieceKey(base) === pieceKey(picked) && base.size ? { ...picked, size: base.size } : picked;
+          else delete next[row.slot.id];
+          view.worn = Object.keys(next).length ? next : null;
+        }
+        view.dirty = true; changed(); draw();
+      }, { signal });
+      if (!row.range) continue;
+      const resize = (size) => {
+        if (row.range.disabled || !Number.isInteger(size) || size < Number(row.range.min) || size > 120) return;
+        if (row === hatRow) { if (size === view.size) return; view.size = size; }
+        else {
+          const worn = view.worn?.[row.slot.id];
+          if (!worn || (worn.size || 100) === size) return;
+          const next = { ...worn };
+          if (size === 100) delete next.size; else next.size = size;
+          view.worn = { ...view.worn, [row.slot.id]: next };
+        }
+        view.dirty = true; changed(); draw();
+      };
+      row.range.addEventListener("input", () => resize(Number(row.range.value)), { signal });
+      row.reset.addEventListener("click", () => resize(100), { signal });
+    }
     view.save.addEventListener("click", async () => {
       if (!owns()) return;
-      const submitted = key(view.selection), size = view.size;
-      if (await equipment.save(view.selection, view.selection && view.selection.item !== "none" ? size : undefined)
-        && !signal.aborted && wardrobe === view && key(view.selection) === submitted && view.size === size) { view.dirty = false; changed(); }
+      const submitted = hatKey(view.selection) + W.key(view.worn), size = view.size;
+      if (await equipment.save(view.selection, view.selection && view.selection.item !== "none" ? size : undefined, view.worn)
+        && !signal.aborted && wardrobe === view && hatKey(view.selection) + W.key(view.worn) === submitted && view.size === size) { view.dirty = false; changed(); }
     }, { signal });
     view.own.addEventListener("click", () => { const own = BL.net.ownCharacter(); if (own) show(own.handle); }, { signal });
+    // Reset leaves the previews and puts the saved look back on.
+    view.discard.addEventListener("click", () => { if (!view.dirty) return; view.dirty = false; changed(); }, { signal });
     view.stop = equipment.subscribe(changed);
     changed();
   };
@@ -1221,7 +1436,7 @@
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   const leave = () => {
-    if (wardrobe) { wardrobe.stop(); wardrobe.choices.replaceChildren(); wardrobe = null; }
+    if (wardrobe) { wardrobe.stop(); wardrobe.editors.replaceChildren(); wardrobe.slots.after(wardrobe.editors); wardrobe.slots.replaceChildren(); wardrobe = null; }
     window.clearInterval(watchTimer);
     watchTimer = 0;
     homeLink.title = homeTitle;

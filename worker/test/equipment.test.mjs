@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import vm from "node:vm";
 import { deletePlayer } from "../src/db.js";
 import { equipmentHats, equipmentHatArchive } from "../src/equipment-hats.js";
+import { equipmentWardrobe } from "../src/equipment-wardrobe.js";
 import { equipmentCommand, equipmentRecord, nextEquipment } from "../src/equipment-model.js";
 import { equipmentRoom } from "../src/equipment-room.js";
 import { equipmentAccount, equipmentDatabase, readEquipment, writeEquipment } from "./equipment-fixture.mjs";
@@ -33,14 +34,14 @@ const variantModel = () => {
   vm.runInContext(readFileSync(new URL("../../src/js/equipment-hats.js", import.meta.url), "utf8"), context);
   vm.runInContext("BL.equipmentHats.register(JSON.parse(rows),JSON.parse(revisions))", context);
   const source = readFileSync(new URL("../src/equipment-model.js", import.meta.url), "utf8")
-    .replace(/import[^;]+;/, "").replace(/export const /g, "const ");
-  const model = vm.compileFunction(source + "\nreturn { equipmentRecord, equipmentCommand, nextEquipment };", ["equipmentHats"])(context.BL.equipmentHats);
+    .replace(/import[^;]+;/g, "").replace(/export const /g, "const ");
+  const model = vm.compileFunction(source + "\nreturn { equipmentRecord, equipmentCommand, nextEquipment };", ["equipmentHats", "equipmentWardrobe"])(context.BL.equipmentHats, equipmentWardrobe);
   return { ...model, base: parent, next, fork: { item: "another-space-helmet", version: fork }, changed };
 };
 
 test("equipment: SQL CAS admits one concurrent save and deletion cascades", async t => {
   const { db, account } = await setup(t), token = account.session.token_hash;
-  assert.deepEqual(await readEquipment(db, 1, token), { selection: null, size: 100, revision: 0, declined: null, update: null });
+  assert.deepEqual(await readEquipment(db, 1, token), { selection: null, size: 100, revision: 0, declined: null, update: null, wardrobe: null });
   const answers = await Promise.all([writeEquipment(db, 1, token, { revision: 0, selection: hat() }),
     writeEquipment(db, 1, token, { revision: 0, selection: NONE })]);
   assert.deepEqual(answers.map(a => a.status).sort(), [200, 409]);
@@ -183,12 +184,12 @@ test("equipment: shared geometry keeps independent item pins and Accept or Keep 
   assert.deepEqual(fork.selection, f.fork);
   assert.deepEqual(fork.update, { item: f.fork.item, version: f.changed });
   const keep = f.nextEquipment(own, f.equipmentCommand({ revision: 7, decline: f.next }));
-  assert.deepEqual(keep, { selection: f.base, size: 110, declined: f.next });
+  assert.deepEqual(keep, { selection: f.base, size: 110, declined: f.next, wardrobe: null });
   assert.equal(f.equipmentRecord({ ...stored, revision: 8, declined: keep.declined }).update, null);
   assert.throws(() => f.nextEquipment(fork, { revision: 7, decline: f.next }), /no longer offered/,
     "a source item's decision cannot dismiss a variant's update");
   const accept = f.nextEquipment(fork, f.equipmentCommand({ revision: 7, selection: fork.update }));
-  assert.deepEqual(accept, { selection: fork.update, size: 110, declined: null });
+  assert.deepEqual(accept, { selection: fork.update, size: 110, declined: null, wardrobe: null });
   assert.deepEqual(own.selection, f.base, "accepting a variant never rewrites the source item's pin");
   assert.equal(f.nextEquipment(fork, { revision: 6, selection: fork.update }), null);
   assert.throws(() => f.equipmentCommand({ revision: 7, selection: { item: f.base.item, version: f.fork.version } }), /Unknown hat version/);
@@ -235,11 +236,11 @@ test("equipment: HTTP authentication, bounds, flag and server-owned identity", a
   assert.equal((await send({ revision: 0, selection: NONE }, { env: { ...env, EQUIPMENT_ENABLED: "0" } })).status, 404);
   assert.equal((await send({ revision: 0, selection: NONE }, { headers: { origin: "https://evil.test" } })).status, 403);
   assert.equal((await send({ revision: 0, selection: NONE }, { headers: { cookie: "" } })).status, 401);
-  assert.equal((await send(" ".repeat(513))).status, 413);
+  assert.equal((await send(" ".repeat(4097))).status, 413);
   assert.equal((await send({ revision: 0, selection: NONE, id: 2 })).status, 400);
   const response = await send({ revision: 0, selection: NONE });
   assert.equal(response.status, 200); assert.equal(response.headers.get("cache-control"), "no-store");
-  assert.deepEqual(await response.json(), { equipment: { selection: NONE, size: 100, revision: 1, declined: null, update: null } });
+  assert.deepEqual(await response.json(), { equipment: { selection: NONE, size: 100, revision: 1, declined: null, update: null, wardrobe: null } });
   const conflict = await send({ revision: 0, selection: null });
   assert.equal(conflict.status, 409); assert.equal((await conflict.json()).equipment.revision, 1);
   assert.equal((await send(null, { method: "GET" })).status, 200);

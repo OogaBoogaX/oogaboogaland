@@ -49664,6 +49664,7 @@ scene("dsb",{label:"integration checkpoint phone",query:"&weather=clear&time=120
 // staging authentication or a substitute for two different signed-in people observing the actual Room.
 const equipmentAppChecks = async () => {
   const { equipmentHats, equipmentHatArchive } = await import("../worker/src/equipment-hats.js");
+  const { equipmentWardrobe } = await import("../worker/src/equipment-wardrobe.js");
   const temporary = mkdtempSync(join(tmpdir(), "equipment-app-")), staged = join(temporary, "site");
   const build = spawnSync(process.execPath, [join(root, "scripts/site.mjs"), staged, "--audio-assets", "--image-assets", "--worker-page", "--page-assets"], {
     cwd: root, encoding: "utf8", env: { ...process.env, CHARACTER_CATALOG_BASELINE: "", CHARACTER_CATALOG_ENGINE: "", CHARACTER_CATALOG_ENVIRONMENT: "" }
@@ -49727,7 +49728,7 @@ const equipmentAppChecks = async () => {
   const augment = `(() => {const hats=globalThis.BL.equipmentHats,register=hats.register;
     hats.register=(rows,revisions)=>register([...rows,...${JSON.stringify(fixtureItems)}],{...revisions,...${JSON.stringify(Object.fromEntries(fixtureItems.map(row => [row.current, fixtureRevisions[row.current]])))}});})();\n`;
   writeFileSync(mainPath, main.replace(registry, augment + registry));
-  let current = item.current, saved = { selection: null, size: 100, revision: 0, declined: null, update: null };
+  let current = item.current, saved = { selection: null, size: 100, revision: 0, declined: null, update: null, wardrobe: null };
   let heldArchive = null, archiveGate = null, releaseArchive = null;
   const account = { id: 71, login: "equipment-preview", display: "Equipment preview" }, at = Math.floor(Date.now() / 1000) - 3600;
   const answer = () => {
@@ -49748,7 +49749,8 @@ const equipmentAppChecks = async () => {
       const command = JSON.parse(body); writes.push(command);
       if (command.revision !== saved.revision) return json(409, { error: "conflict", equipment: answer() });
       saved = { selection: Object.hasOwn(command, "selection") ? command.selection : saved.selection,
-        size: command.size ?? saved.size, revision: saved.revision + 1, declined: command.decline || null, update: null };
+        size: command.size ?? saved.size, revision: saved.revision + 1, declined: command.decline || null, update: null,
+        wardrobe: Object.hasOwn(command, "wardrobe") ? command.wardrobe : saved.wardrobe ?? null };
       return json(200, { equipment: answer() });
     }
     const version = /^\/api\/equipment\/hats\/([a-f0-9]{64})\.json$/.exec(path)?.[1];
@@ -49802,14 +49804,14 @@ const equipmentAppChecks = async () => {
     await b.open(address); await untilReady(b, 30000);
     await wait("BL.equipment?.state.supported && BL.net.ownCharacter()?.handle==='equipment-preview' && !!document.getElementById('studio-hat')", "Hosted wardrobe did not initialize");
   };
-  const choose = async (value) => b.evaluate(`(() => {
-    const value=${JSON.stringify(value)}, selection=value.includes('@')?{item:value.split('@')[0],version:value.split('@')[1]}:null;
-    const choice=selection?BL.equipmentHats.choiceFor(selection):null;
-    const input=[...document.querySelectorAll('#studio-hat input[type=radio]')].find(input=>choice?input.dataset.hatKey===choice.key:input.value===value);
-    if(!input)throw new Error('Hat choice is missing: '+value);
-    for(let parent=input.closest('details');parent;parent=parent.parentElement.closest('details'))parent.open=true;
-    input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}));
+  const choose = async (value, slot = "hat") => b.evaluate(`(() => {
+    const value=${JSON.stringify(value)}, slot=${JSON.stringify(slot)}, selection=slot==='hat'&&value.includes('@')?{item:value.split('@')[0],version:value.split('@')[1]}:null;
+    const choice=selection?BL.equipmentHats.choiceFor(selection):null, host={skin:'body',hairColor:'hair',eyeColor:'eyes'}[slot]||slot, tile=document.querySelector('.studio-tile[data-slot="'+host+'"]'), select=document.querySelector('.studio-editor[data-slot="'+slot+'"] select');
+    const option=[...select.options].find(o=>choice?o.dataset.hatKey===choice.key:o.dataset.value===value);
+    if(!option)throw new Error('Choice is missing: '+slot+' '+value);
+    tile.click();select.value=option.value;select.dispatchEvent(new Event('change',{bubbles:true}));
   })()`);
+  const chosen = (slot = "hat") => `document.querySelector('.studio-editor[data-slot="${slot}"] select').selectedOptions[0]`;
   const resize = async (size) => {
     await b.evaluate(`(() => { const input=document.getElementById('studio-hat-size');input.value=${size};input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
     await wait(`BL.characterEquipment.size(__ooga.studio.cave)===${size}`, "Hat size preview did not apply");
@@ -49826,24 +49828,24 @@ const equipmentAppChecks = async () => {
     const groups = await b.evaluate(`(() => {
       const hats=BL.equipmentHats,original=hats.choiceFor({item:${JSON.stringify(item.id)},version:${JSON.stringify(item.current)}}),
         copy=hats.choiceFor(${JSON.stringify(duplicate)}),fork=hats.choiceFor(${JSON.stringify(fork)}),child=hats.choiceFor(${JSON.stringify(nested)});
-      const inputs=[...document.querySelectorAll('#studio-hat input[type=radio]')],row=inputs.find(input=>input.dataset.hatKey===original.key),
-        variant=inputs.find(input=>input.dataset.hatKey===fork.key),nested=inputs.find(input=>input.dataset.hatKey===child.key);
-      return {shared:original.key===copy.key,one:inputs.filter(input=>input.dataset.hatKey===original.key).length===1,
-        credits:row.closest('label').textContent.includes('HatCopy')&&row.closest('label').textContent.includes(${JSON.stringify(item.creator)}),
-        collapsed:!variant.closest('details').open,nested:!!nested.closest('details').parentElement.closest('details')};
+      const options=[...document.getElementById('studio-hat-choices').options],row=options.find(o=>o.dataset.hatKey===original.key),
+        variant=options.find(o=>o.dataset.hatKey===fork.key),nested=options.find(o=>o.dataset.hatKey===child.key);
+      const depth=(o)=>o.textContent.indexOf('\u21b3');
+      return {shared:original.key===copy.key,one:options.filter(o=>o.dataset.hatKey===original.key).length===1,
+        credits:row.title.includes('HatCopy')&&row.title.includes(BL.characters.get(${JSON.stringify(item.creator)})?.display||${JSON.stringify(item.creator)}),
+        indented:depth(row)===-1&&depth(variant)>-1,nested:depth(nested)>depth(variant),
+        oneEditor:[...document.querySelectorAll('.studio-editors > .studio-editor')].filter(e=>!e.hidden).length===1&&document.querySelectorAll('.studio-tile[aria-pressed=true]').length===1};
     })()`);
-    record("equipment catalog: identical hats share one credited choice and edited forks form collapsed nested variants", Object.values(groups).every(Boolean), JSON.stringify(groups));
-    await b.evaluate("document.querySelector('.studio-hat-variants > summary').focus()");
+    record("equipment catalog: identical hats share one credited choice, edited forks list indented under it, and one tile's editor shows at a time", Object.values(groups).every(Boolean), JSON.stringify(groups));
+    await b.evaluate("document.querySelector('.studio-tile[data-slot=hair]').click();document.getElementById('studio-hat').focus()");
     await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
     await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
-    await wait("document.querySelector('.studio-hat-variants').open", "Keyboard did not expand variants");
-    await b.evaluate(`document.querySelector('[data-hat-item="${fork.item}"]').focus()`);
-    await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space", text: " ", windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
-    await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space", windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
-    await wait(wearing(fork), "Keyboard did not preview the full immutable fork");
-    record("equipment catalog: keyboard disclosure and selection preview a full immutable variant without saving", writes.length === 0
+    await wait("document.getElementById('studio-hat').getAttribute('aria-pressed')==='true' && !document.getElementById('studio-editor-hat').hidden && document.getElementById('studio-editor-hair').hidden", "Keyboard did not choose the hat's tile");
+    await choose(`${fork.item}@${fork.version}`);
+    await wait(wearing(fork), "The dropdown did not preview the full immutable fork");
+    record("equipment catalog: the hat's tile (its name alone) opens its editor from the keyboard and its dropdown previews a full immutable variant without saving", writes.length === 0
       && archiveReads.includes(fork.version) && archiveReads.includes(blueContent)
-      && await b.evaluate(`document.querySelector('[data-hat-item="${fork.item}"]').checked`));
+      && await b.evaluate(`${chosen()}.dataset.hatKey===BL.equipmentHats.choiceFor(${JSON.stringify(fork)}).key && document.getElementById('studio-hat').textContent.trim()==='Hat' && document.getElementById('studio-hat-choices').selectedOptions[0].textContent.length>0`));
     await b.evaluate("window.__equipmentCave=__ooga.studio.cave;window.__equipmentRoot=__ooga.studio.cave.root");
     let previews = 0;
     for (const entry of equipmentHats.items) {
@@ -49922,6 +49924,101 @@ const equipmentAppChecks = async () => {
     record("equipment live messages: size-only updates reuse the attachment, old messages default to fitted size and stale or invalid updates are ignored", live.resized&&live.legacy&&live.stale, JSON.stringify(live));
     record("equipment live messages: own and remote bodies retain pose and gameplay nodes and share immutable geometry", live.changed&&live.reused&&live.retained, JSON.stringify(live));
     record("equipment live messages: leaving visibility clears borrowed geometry and a fresh arrival snapshot restores the saved version", live.removed&&live.arrived&&live.clean, JSON.stringify(live));
+    // The wardrobe beside the hat: a slot's dropdown previews its piece on the same body, Save sends the whole look with
+    // the hat, a new page brings it back, and another player's message dresses their body and leaving undresses it.
+    const piece = (slot, n = 0) => { const row = equipmentWardrobe.slotItems(slot)[n]; return { item: row.id, version: row.version }; };
+    const look = { shirt: piece("shirt", 2), weapon: piece("weapon", 2), shoes: { item: "none", version: null } };
+    const dressed = (who, value) => `BL.characterWardrobe.wearing(${who}).startsWith(${JSON.stringify(equipmentWardrobe.key(value))}+"|")`;
+    await b.evaluate("window.__wardrobeBody=__ooga.studio.cave.root;window.__wardrobeTorso=__ooga.studio.cave.parts.torso.geometry");
+    const beforeLook = writes.length;
+    await choose(look.shirt.version, "shirt"); await choose(look.weapon.version, "weapon"); await choose("none", "shoes");
+    await wait(dressed("__ooga.studio.cave", look), "Wardrobe preview did not dress the studio's Ooga");
+    record("equipment wardrobe: each slot's dropdown previews its piece on the same body without saving", writes.length === beforeLook
+      && await b.evaluate(`__ooga.studio.cave.root===__wardrobeBody && __ooga.studio.cave.parts.torso.geometry!==__wardrobeTorso
+        && ['shirt','weapon','shoes'].every(s=>document.querySelector('.studio-tile[data-slot="'+s+'"]').hasAttribute('data-changed'))
+        && document.getElementById('studio-slot-shoes').selectedOptions[0].textContent==='Barefoot'
+        && document.getElementById('studio-changes').textContent==='3 changes' && !document.querySelector('.studio-changes').hidden`));
+    await b.evaluate("document.getElementById('studio-discard').click()");
+    await wait("BL.characterWardrobe.wearing(__ooga.studio.cave)===''", "Reset did not put the saved look back on");
+    record("equipment wardrobe: Reset drops every preview and puts the saved look back on without saving", writes.length === beforeLook
+      && await b.evaluate("document.querySelector('.studio-changes').hidden && !document.querySelector('.studio-tile[data-changed]') && __ooga.studio.cave.parts.torso.geometry===__wardrobeTorso"));
+    await choose(look.shirt.version, "shirt"); await choose(look.weapon.version, "weapon"); await choose("none", "shoes");
+    await wait(dressed("__ooga.studio.cave", look), "Wardrobe preview did not come back");
+    // The body: a female build in place, its arms and girth following, and the Ooga's own back with Original.
+    const female = equipmentWardrobe.slotItems("body").find((row) => row.label === "Female");
+    await b.evaluate("window.__ownBody={elbow:__ooga.studio.cave.elbow,arm:__ooga.studio.cave.parts.armR.position.x,root:__ooga.studio.cave.root}");
+    await choose(female.version, "body");
+    await wait("__ooga.studio.cave.armScale===0.86", "The female build did not reach the studio's Ooga");
+    const built = await b.evaluate(`(() => { const cave=__ooga.studio.cave; return cave.root===__ownBody.root && cave.parts.armR.position.x!==__ownBody.arm && !BL.characterWardrobe.supports(cave,'beard')
+      && cave.sleepParts.armRX===cave.parts.armR.position.x && document.getElementById('studio-slot-beard').disabled; })()`);
+    await choose("original", "body");
+    await wait("__ooga.studio.cave.elbow===__ownBody.elbow", "Original did not give the Ooga its own build back");
+    record("equipment wardrobe: the body switches the build in place with its resting arms, a female face takes no beard (its editor says so at once), and Original gives the Ooga's own build back", built
+      && await b.evaluate("__ooga.studio.cave.parts.armR.position.x===__ownBody.arm && __ooga.studio.cave.sleepParts.armRX===__ownBody.arm && __ooga.studio.cave.armScale===1 && !document.getElementById('studio-slot-beard').disabled"));
+    // An Ooga's own colours: a swatch under its part's editor puts the colour on the whole build, a typed hex any colour,
+    // and Original takes it off.
+    const ginger = equipmentWardrobe.slotItems("hairColor").find((row) => row.label === "Ginger");
+    await b.evaluate(`(() => { document.querySelector('.studio-tile[data-slot=hair]').click();
+      const i=[...document.querySelector('.studio-editor[data-slot=hairColor] select').options].findIndex(o=>o.dataset.value===${JSON.stringify(ginger.version)});
+      document.querySelectorAll('.studio-editor[data-slot=hairColor] .studio-swatch')[i].click(); })()`);
+    await wait("__ooga.studio.cave.template.traits.hair==='#c4622a'", "The hair colour swatch did not dress the Ooga");
+    const toned = await b.evaluate("document.querySelector('.studio-editor[data-slot=hairColor] .studio-swatch[aria-pressed=true]')?.title==='Ginger' && document.querySelector('#studio-editor-hair #studio-editor-hairColor .studio-colour-name').textContent==='Ginger' && !document.querySelector('.studio-tile[data-slot=hairColor]') && document.querySelector('.studio-tile[data-slot=hair]').hasAttribute('data-changed')");
+    await b.evaluate("(() => { const hex=document.getElementById('studio-slot-hairColor-hex'); hex.focus(); hex.value='12AB34'; hex.dispatchEvent(new Event('change')); hex.blur(); })()");
+    await wait("__ooga.studio.cave.template.traits.hair==='#12ab34'", "A typed hex did not dress the Ooga");
+    const mixed = await b.evaluate("document.querySelector('#studio-editor-hairColor .studio-colour-name').textContent==='#12AB34' && document.querySelector('#studio-editor-hairColor .studio-wheel').getAttribute('aria-pressed')==='true'");
+    await choose("original", "hairColor");
+    await wait("__ooga.studio.cave.template.traits.hair!=='#c4622a'", "Original did not give the Ooga its own hair colour back");
+    record("equipment wardrobe: the hair's editor holds its colour, whose swatch or typed hex puts it on the whole build, and Original gives its own back", toned && mixed);
+    const lookRevision = saved.revision;
+    await b.evaluate("document.getElementById('studio-hat-save').click()");
+    await wait(`!BL.equipment.state.busy && BL.equipment.state.record.revision===${lookRevision + 1}`, "Wardrobe save did not complete");
+    record("equipment wardrobe: Save sends the whole look beside the unchanged hat", JSON.stringify(writes.at(-1).wardrobe) === JSON.stringify(look)
+      && writes.at(-1).selection?.version === accepted.version && JSON.stringify(saved.wardrobe) === JSON.stringify(look), JSON.stringify(writes.at(-1)));
+    await b.open(address); await untilReady(b, 30000);
+    await wait(dressed("__ooga.studio.cave", look) + " && " + wearing(accepted), "Reload lost the saved look");
+    record("equipment wardrobe: a new page wears the saved look, hat and all, and shows each row's choice", await b.evaluate(
+      `${chosen("shirt")}.dataset.value===${JSON.stringify(look.shirt.version)} && ${chosen("shoes")}.dataset.value==='none' && !document.querySelector('#studio-slots [data-changed]')`));
+    const peerLook = await b.evaluate(`(async () => {
+      const peer=BL.models.caveman(BL.contributors.traitsFor('equipment-peer')),root=peer.root,torso=peer.parts.torso.geometry,club=peer.parts.club.geometry;
+      const look=${JSON.stringify(look)};
+      BL.equipment.receive({t:'equipment',id:76,revision:1,selection:null,wardrobe:look});
+      BL.equipment.applyRemote(peer,76);
+      const worn=${dressed("peer", look)}&&peer.parts.torso.geometry!==torso&&peer.parts.club.geometry!==club&&peer.root===root,weapon=peer.parts.club.geometry;
+      BL.equipment.receive({t:'equipment',id:76,revision:2,selection:null,wardrobe:{shirt:look.shirt,bogus:look.weapon,weapon:{item:'weapon-unknown',version:'${"0".repeat(64)}'}}});
+      BL.equipment.applyRemote(peer,76);
+      const lenient=${dressed("peer", { shirt: look.shirt })}&&peer.parts.club.geometry!==weapon&&peer.parts.club.geometry.faces.length===club.faces.length;
+      BL.equipment.receive({t:'equipment',kind:'remove',ids:[76]});BL.equipment.applyRemote(peer,76);
+      const gone=BL.characterWardrobe.wearing(peer)===''&&peer.parts.torso.geometry===torso&&peer.parts.club.geometry===club;
+      BL.equipment.clear(peer);
+      return {worn,lenient,gone};
+    })()`);
+    record("equipment wardrobe: a peer's message dresses their body in place, an unknown piece is their own look, and leaving undresses it",
+      Object.values(peerLook).every(Boolean), JSON.stringify(peerLook));
+    const bouquet = equipmentWardrobe.slotItems("weapon").find((row) => row.label === "Bouquet");
+    const borrowed = await b.evaluate(`(() => {
+      const cave=BL.models.caveman(BL.contributors.traitsFor('itsLiran')),plate=cave.parts.club.children[0];
+      const own=!!plate&&plate.visible;
+      BL.characterWardrobe.apply(cave,{weapon:{item:${JSON.stringify(bouquet.id)},version:${JSON.stringify(bouquet.version)}}});
+      const hidden=!plate.visible;
+      BL.characterWardrobe.apply(cave,null);
+      const back=plate.visible;
+      // Builds in a worn wardrobe are kept for the 32 most recently asked for.
+      const t=BL.contributors.traitsFor('equipment-peer'),first=BL.models.templateFor({...t,wardrobeKey:'cap-0'});
+      for(let i=1;i<=32;i++)BL.models.templateFor({...t,wardrobeKey:'cap-'+i});
+      const recent=BL.models.templateFor({...t,wardrobeKey:'cap-32'})===BL.models.templateFor({...t,wardrobeKey:'cap-32'});
+      const evicted=BL.models.templateFor({...t,wardrobeKey:'cap-0'})!==first;
+      return {own,hidden,back,recent,evicted};
+    })()`);
+    record("equipment wardrobe: what a character hung on its own club stays off a borrowed weapon, and outfit builds are kept to the most recent 32",
+      Object.values(borrowed).every(Boolean), JSON.stringify(borrowed));
+    await choose("original", "shirt"); await choose("original", "weapon"); await choose("original", "shoes");
+    const clearRevision = saved.revision;
+    await b.evaluate("document.getElementById('studio-hat-save').click()");
+    await wait(`!BL.equipment.state.busy && BL.equipment.state.record.revision===${clearRevision + 1}`, "Clearing the wardrobe did not save");
+    record("equipment wardrobe: a signed-in account row links to the studio on the player's own Ooga from the site's root", await b.evaluate(
+      "(() => { const a=document.getElementById('account-look'), u=new URL(a.href); return !a.hidden && u.pathname==='/' && u.searchParams.get('scene')==='studio' && u.searchParams.get('character')==='equipment-preview'; })()"));
+    record("equipment wardrobe: Original everywhere saves no wardrobe and gives the body its own look back", writes.at(-1).wardrobe === null && saved.wardrobe === null
+      && await b.evaluate("BL.characterWardrobe.wearing(__ooga.studio.cave)===''"));
     record("equipment studio: ordinary save, reload and creator-update flows have a clean console", b.logs.length === 0, b.logs.join("\n"));
     const conflictLog = b.logs.length;
     // Another tab wins the revision before this page saves. The response is authoritative; the fixture never
@@ -49971,7 +50068,7 @@ const equipmentAppChecks = async () => {
     await b.evaluate("(() => { const input=document.getElementById('studio-hat-size');input.value='80';input.dispatchEvent(new Event('input',{bubbles:true})); })()");
     await wait("BL.characterEquipment.size(__ooga.studio.cave)===100", "The apple helmet minimum did not apply");
     record("equipment studio: the apple space helmet has an honest minimum and clamps previews without saving or replacing its attachment", writes.length === beforeMinimum
-      && await b.evaluate("document.getElementById('studio-hat-size').min==='100' && document.getElementById('studio-hat-size').max==='120' && document.getElementById('studio-hat-size').value==='100' && document.getElementById('studio-hat-size-value').textContent.includes('100') && document.getElementById('studio-hat-status').textContent.includes('Minimum size for this Ooga: 100%') && __ooga.studio.cave.equipmentHatNode===__minimumHat"));
+      && await b.evaluate("document.getElementById('studio-hat-size').min==='100' && document.getElementById('studio-hat-size').max==='120' && document.getElementById('studio-hat-size').value==='100' && document.getElementById('studio-hat-size-value').textContent.includes('100') && document.getElementById('studio-hat-status').textContent.includes('Minimum hat size for this Ooga: 100%') && __ooga.studio.cave.equipmentHatNode===__minimumHat"));
     await choose(`${item.id}@${item.current}`); await resize(80);
     const otherHatMinimum = await b.evaluate("document.getElementById('studio-hat-size').min==='80'");
     // Change recipient with a fresh document, preserving the existing Studio teardown failure in its own check.
@@ -49983,7 +50080,7 @@ const equipmentAppChecks = async () => {
     b.close(); b = null;
     await open({ w: 390, h: 844, mobile: true });
     await b.evaluate("if(document.getElementById('studio-features').dataset.folded==='true')document.querySelector('.studio-features-edge').click()");
-    await wait("document.getElementById('studio-features').dataset.folded!=='true' && document.getElementById('studio-hat').getBoundingClientRect().right<=innerWidth", "Phone wardrobe did not unfold into view");
+    await wait("document.getElementById('studio-features').dataset.folded!=='true' && document.getElementById('studio-features').getBoundingClientRect().right<=innerWidth+1", "Phone wardrobe did not unfold into view");
     await choose(`${item.id}@${item.current}`); await wait(wearing(first), "Phone hat did not preview");
     const fit = await b.evaluate("['studio-hat','studio-hat-size','studio-hat-size-reset','studio-hat-save'].map(id=>{const e=document.getElementById(id),r=e.getBoundingClientRect();return {id,visible:r.width>0&&r.height>0,left:r.left,right:r.right,top:r.top,bottom:r.bottom};})");
     record("equipment studio: phone selection and save controls fit the viewport", fit.every(r=>r.visible&&r.left>=0&&r.right<=390&&r.top>=0&&r.bottom<=844), JSON.stringify(fit));
@@ -50101,7 +50198,7 @@ const equipmentAppChecks = async () => {
     record("equipment catalog: an original creator update cannot change or notify another item's wearer", await b.evaluate(wearing(duplicate) + " && document.getElementById('equipment-update').hidden"));
     saved = { selection: fork, size: 90, revision: saved.revision + 1, declined: null, update: null };
     await b.open(address); await untilReady(b, 30000); await wait(wearing(fork), "Saved fork did not reload");
-    record("equipment catalog: a saved variant reopens its family with its own version and size", await b.evaluate(`document.querySelector('[data-hat-item="${fork.item}"]').closest('details').open && BL.characterEquipment.size(__ooga.studio.cave)===90 && document.getElementById('equipment-update').hidden`));
+    record("equipment catalog: a saved variant reopens on its own choice with its own version and size", await b.evaluate(`${chosen()}.dataset.hatKey===BL.equipmentHats.choiceFor(${JSON.stringify(fork)}).key && BL.characterEquipment.size(__ooga.studio.cave)===90 && document.getElementById('equipment-update').hidden`));
     fixtureCurrent.set(fork.item, forkSecond.version);
     await b.evaluate("BL.equipment.refresh()"); await wait("!document.getElementById('equipment-update').hidden", "Fork update was not offered");
     await b.evaluate("document.getElementById('equipment-decline').click()");
@@ -50113,16 +50210,18 @@ const equipmentAppChecks = async () => {
     await b.evaluate("BL.equipment.refresh()"); await wait("!document.getElementById('equipment-update').hidden", "Later fork update was not offered");
     await b.evaluate("document.getElementById('equipment-accept').click()");
     await wait(wearing(forkThird) + " && !BL.equipment.state.busy", "Fork Accept did not install its full version");
-    const pin = await b.evaluate("document.querySelector('#studio-hat input:checked')?.value");
+    const pin = await b.evaluate(`${chosen()}.dataset.value`);
     await choose("none");
-    const retainedPin = await b.evaluate(`[...document.querySelectorAll('#studio-hat input')].some(input=>input.value===${JSON.stringify(`${forkThird.item}@${forkThird.version}`)})`);
+    const retainedPin = await b.evaluate(`[...document.getElementById('studio-hat-choices').options].some(o=>o.dataset.value===${JSON.stringify(`${forkThird.item}@${forkThird.version}`)})`);
     record("equipment catalog: Accept advances only the fork and its historical saved row remains available while previewing", saved.selection.version === forkThird.version
       && saved.selection.item === fork.item && saved.declined === null && saved.size === 90 && pin === `${forkThird.item}@${forkThird.version}` && retainedPin);
     await choose(`${forkThird.item}@${forkThird.version}`); await wait(wearing(forkThird), "Saved historical fork could not be selected again");
-    record("equipment catalog: a restored historical choice stays visible in the bounded phone list with Save reachable", await b.evaluate(`(() => {
-      const box=document.getElementById('studio-hat-choices').getBoundingClientRect(),row=document.querySelector('#studio-hat input:checked').closest('label').getBoundingClientRect(),
-        save=document.getElementById('studio-hat-save').getBoundingClientRect();
-      return row.top>=box.top-1&&row.bottom<=box.bottom+1&&save.top>=0&&save.bottom<=innerHeight;
+    record("equipment catalog: a restored historical choice shows in its folded row on the phone with Save reachable", await b.evaluate(`(() => {
+      const hat=document.getElementById('studio-hat');
+      const row=hat.getBoundingClientRect(),save=document.getElementById('studio-hat-save');
+      save.scrollIntoView({block:'nearest'});const s=save.getBoundingClientRect();
+      return ${chosen()}.dataset.value===${JSON.stringify(`${forkThird.item}@${forkThird.version}`)}&&document.getElementById('studio-hat-choices').selectedOptions[0].textContent.includes('saved version')
+        &&row.left>=0&&row.right<=innerWidth&&s.top>=0&&s.bottom<=innerHeight;
     })()`));
     await b.screenshot(join(shots, "hat-variants-phone.png"));
     record("equipment catalog: duplicate and fork save/update checks keep a clean console", b.logs.length === 0, b.logs.join("\n"));

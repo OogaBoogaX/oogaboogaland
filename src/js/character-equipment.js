@@ -210,6 +210,16 @@
     BL.crew?.refreshHatRide(cave);
     return true;
   };
-  BL.characterEquipment = { apply, clear: (cave) => apply(cave, null), supports: supported, selection, size, minimumSize, seed,
+  // Lifts the hat off while something else changes the head under it (character-wardrobe.js), forgetting the head it
+  // was fitted to; `apply` with what this returns puts it back on the new head.
+  const detach = (cave) => {
+    const old = worn.get(cave);
+    if (!old) return null;
+    const kept = old.selection ? { selection: old.selection, size: old.size } : null;
+    apply(cave, null);
+    worn.delete(cave);
+    return kept;
+  };
+  BL.characterEquipment = { apply, clear: (cave) => apply(cave, null), detach, supports: supported, selection, size, minimumSize, seed,
     get loaded() { return recipes.size; } };
 })();

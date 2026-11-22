@@ -414,17 +414,21 @@
       </div>
       <div class="studio-scroll" id="studio-scroll">
         <p class="studio-who" id="studio-who"></p>
-        <div class="studio-wardrobe">
-          <fieldset class="studio-hats" id="studio-hat" aria-describedby="studio-hat-status">
-            <legend class="roster-sort-label">Try a hat</legend>
-            <div id="studio-hat-choices"></div>
-          </fieldset>
-          <label class="roster-sort-label studio-hat-size-label" for="studio-hat-size">Hat size <output id="studio-hat-size-value" for="studio-hat-size">100%</output></label>
-          <input type="range" id="studio-hat-size" min="80" max="120" step="1" value="100" aria-valuetext="100%" aria-describedby="studio-hat-status" disabled>
-          <button type="button" class="foot-button" id="studio-hat-size-reset" disabled>Reset fitted size</button>
-          <button type="button" class="foot-button foot-primary" id="studio-hat-save" aria-describedby="studio-hat-status">Save hat for my Ooga</button>
-          <button type="button" class="foot-button" id="studio-hat-own" hidden>Show my Ooga</button>
-          <p class="studio-note" id="studio-hat-status" role="status"></p>
+        <!-- The wardrobe (scene-studio.js `startWardrobe`): a tile for each slot (equipment-wardrobe.js `SLOTS`) with its
+             mark and its name, and under the grid the chosen tile's editor: its list, who made the piece, for the hat
+             and the mask a size, and under the body, the hair and the eyes their colours. -->
+        <div class="studio-wardrobe" id="studio-wardrobe" aria-describedby="studio-hat-status">
+          <div class="studio-slots" id="studio-slots" role="group" aria-label="Wardrobe slots"></div>
+          <div class="studio-editors" id="studio-editors"></div>
+          <!-- Save and what it says stay in view at the panel's foot while the slots scroll past. -->
+          <div class="studio-wardrobe-foot">
+            <div class="studio-save-row">
+              <p class="studio-changes" hidden><span id="studio-changes"></span> · <button type="button" class="link" id="studio-discard">Reset</button></p>
+              <button type="button" class="foot-button foot-primary" id="studio-hat-save" aria-describedby="studio-hat-status">Save my look</button>
+            </div>
+            <button type="button" class="foot-button" id="studio-hat-own" hidden>Show my Ooga</button>
+            <p class="studio-note" id="studio-hat-status" role="status"></p>
+          </div>
           <a class="link" href="/auth/login?next=%2F%3Fscene%3Dstudio" id="studio-hat-signin" hidden>Sign in with GitHub to save</a>
           <a class="link" href="/?scene=studio" id="studio-hat-link" hidden>Open the hosted studio to save</a>
         </div>
@@ -493,6 +497,7 @@
               <button type="button" class="foot-button account-mute" data-action="account-mute" id="account-mute" aria-pressed="false" data-mic="" disabled hidden>Unmute</button>
               <button type="button" class="foot-button account-voice" data-action="account-voice" id="account-voice" hidden>Join voice</button>
               <button type="button" class="foot-button account-leave" data-action="account-voice-leave" id="account-voice-leave" hidden>Leave voice</button>
+              <a class="link" id="account-look" href="/?scene=studio" title="Choose what your Ooga wears: a hat, hair, clothes and more" hidden>My look</a>
               <button type="button" class="link" data-action="account-logout" id="account-logout" hidden>Sign out</button>
             </span>
           </div>
@@ -2530,6 +2535,10 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
   <script src="js/equipment-hats.gen.js"></script>
   <script src="js/character-equipment.js"></script>
   <script src="js/equipment-hat-data.gen.js"></script>
+  <script src="js/equipment-wardrobe.js"></script>
+  <script src="js/equipment-wardrobe.gen.js"></script>
+  <script src="js/character-wardrobe.js"></script>
+  <script src="js/equipment-wardrobe-data.gen.js" data-defer="wardrobe"></script>
   <script src="js/donations.js"></script>
   <script src="js/donation-rate.js"></script>
   <script src="js/mempool.js"></script>

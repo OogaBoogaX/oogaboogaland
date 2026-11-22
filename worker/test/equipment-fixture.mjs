@@ -12,7 +12,7 @@ export const writeEquipment = (db, id, tokenHash, command, characterFor = matchi
 export const equipmentDatabase = () => {
   const sql = new DatabaseSync(":memory:");
   sql.exec("PRAGMA foreign_keys = ON");
-  for (const file of ["0001_init.sql", "0012_player_equipment.sql", "0013_player_equipment_size.sql"])
+  for (const file of ["0001_init.sql", "0012_player_equipment.sql", "0013_player_equipment_size.sql", "0014_player_wardrobe.sql"])
     sql.exec(readFileSync(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
   const prepare = (query, args = []) => {
     const execute = method => {

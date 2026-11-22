@@ -14,6 +14,8 @@ const item = { ...equipmentHats.items.find(row => row.id === "bitcoin-bill-straw
 const original = readFileSync(new URL(`src/equipment/hats/${item.current}.json`, root), "utf8");
 const changed = JSON.parse(original); changed.nodes[0].geometry.faces[0].color = [201, 13, 93];
 const next = equipmentHats.encode(changed), version = createHash("sha256").update(next).digest("hex");
+const WARDROBE_URL = "/api/equipment/wardrobe/catalog";
+const hats = fetcher => async (url, options) => url.endsWith(WARDROBE_URL) ? new Response(null, { status: 404 }) : fetcher(url, options);
 const result = rows => JSON.stringify([{ success: true, results: rows, meta: { changed_db: false } }]);
 const fixture = () => {
   const directory = mkdtempSync(join(tmpdir(), "equipment-retention-"));
@@ -72,8 +74,8 @@ test("shared full geometry retains both item-bound revisions and legacy saves", 
     assert.notEqual(f.firstVersion, f.secondVersion, "a shared mesh does not erase item ownership or parent history");
     assert.deepEqual(validateEquipmentRetention(f.directory, result(rows)), { enabled: true, retained: 3 });
     assert.deepEqual(await preflightEquipmentRetention({ releaseDir: f.directory, environment: "staging",
-      fetcher: async () => Response.json({ format: 1, items: f.catalog.items.map(({ id, versions }) => ({ id, versions })) }) }),
-    { enabled: true, retained: 4 });
+      fetcher: hats(async () => Response.json({ format: 1, items: f.catalog.items.map(({ id, versions }) => ({ id, versions })) })) }),
+    { enabled: true, retained: 4, wardrobe: 0 });
     f.catalog.items.pop(); f.write("src/equipment/hats/catalog.json", f.catalog);
     assert.throws(() => validateEquipmentRetention(f.directory, result(rows)), /omits a retained hat version/,
       "retaining the shared blob and another item cannot replace the saved variant identity");
@@ -120,10 +122,10 @@ test("preflight preserves all published versions, including one nobody has selec
     return Response.json(published);
   };
   try {
-    assert.deepEqual(await preflightEquipmentRetention({ releaseDir: f.directory, environment: "staging", fetcher }), { enabled: true, retained: 2 });
+    assert.deepEqual(await preflightEquipmentRetention({ releaseDir: f.directory, environment: "staging", fetcher: hats(fetcher) }), { enabled: true, retained: 2, wardrobe: 0 });
     f.catalog.items[0].versions = [item.current]; f.catalog.items[0].current = item.current; f.write("src/equipment/hats/catalog.json", f.catalog);
     assert.deepEqual(validateEquipmentRetention(f.directory, result([])), { enabled: true, retained: 0 });
-    await assert.rejects(preflightEquipmentRetention({ releaseDir: f.directory, environment: "staging", fetcher }), /omits a retained hat version/);
+    await assert.rejects(preflightEquipmentRetention({ releaseDir: f.directory, environment: "staging", fetcher: hats(fetcher) }), /omits a retained hat version/);
   } finally { f.close(); }
 });
 
@@ -141,11 +143,11 @@ test("preflight permits the first registry but fails closed on an unavailable or
 
 test("feature-off releases preserve public history before any later re-enable", async () => {
   const f = fixture(), published = { format: 1, items: [{ id: item.id, versions: [item.current, version] }] };
-  const check = fetcher => preflightEquipmentRetention({ releaseDir: f.directory, environment: "staging", fetcher });
+  const check = fetcher => preflightEquipmentRetention({ releaseDir: f.directory, environment: "staging", fetcher: hats(fetcher) });
   try {
     f.write("wrangler.staging.jsonc", { name: "oogaboogaland-staging", vars: { EQUIPMENT_ENABLED: "0", ENVIRONMENT: "staging",
       SITE_ORIGIN: "https://oogaboogaland-staging.wickedsmartbitcoin.workers.dev" } });
-    assert.deepEqual(await check(async () => Response.json(published)), { enabled: false, retained: 2 });
+    assert.deepEqual(await check(async () => Response.json(published)), { enabled: false, retained: 2, wardrobe: 0 });
     f.catalog.items[0].versions = [item.current]; f.catalog.items[0].current = item.current;
     f.write("src/equipment/hats/catalog.json", f.catalog);
     await assert.rejects(check(async () => Response.json(published)), /omits a retained hat version/);
@@ -191,5 +193,25 @@ test("an explicit feature-off release skips the D1 census while unsupported enab
     assert.deepEqual(validateEquipmentRetention(f.directory), { enabled: false, retained: 0 });
     f.write(".catalog-wrangler.json", { vars: {} });
     assert.deepEqual(validateEquipmentRetention(f.directory), { enabled: false, retained: 0 });
+  } finally { f.close(); }
+});
+
+test("preflight keeps every wardrobe piece the live site publishes, whole and matching its hash", async () => {
+  const f = fixture(), published = { format: 1, items: [{ id: item.id, versions: [item.current, version] }] };
+  const text = '{"color":"#8b8279","format":1,"slot":"beard"}\n', piece = createHash("sha256").update(text).digest("hex"), id = "beard-" + piece.slice(0, 16);
+  const live = { format: 1, items: [{ id, version: piece }] };
+  const check = () => preflightEquipmentRetention({ releaseDir: f.directory, environment: "staging",
+    fetcher: async (url) => Response.json(url.endsWith("/api/equipment/wardrobe/catalog") ? live : published) });
+  try {
+    await assert.rejects(check(), /no wardrobe for a published piece/);
+    mkdirSync(join(f.directory, "src/equipment/wardrobe"));
+    f.write("src/equipment/wardrobe/catalog.json", { format: 1, items: [{ id, slot: "beard", label: "Grey beard", creators: ["NickDaGreek"], version: piece, retired: true }] });
+    await assert.rejects(check(), /required target file is missing/);
+    f.write(`src/equipment/wardrobe/${piece}.json`, text.replace("8b8279", "8b8270"));
+    await assert.rejects(check(), /digest differs/);
+    f.write(`src/equipment/wardrobe/${piece}.json`, text);
+    assert.deepEqual(await check(), { enabled: true, retained: 2, wardrobe: 1 });
+    f.write("src/equipment/wardrobe/catalog.json", { format: 1, items: [] });
+    await assert.rejects(check(), /omits a published wardrobe piece/);
   } finally { f.close(); }
 });
