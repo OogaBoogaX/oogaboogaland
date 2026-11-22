@@ -49809,7 +49809,7 @@ const equipmentAppChecks = async () => {
     const choice=selection?BL.equipmentHats.choiceFor(selection):null, host={skin:'body',hairColor:'hair',eyeColor:'eyes'}[slot]||slot, tile=document.querySelector('.studio-tile[data-slot="'+host+'"]'), select=document.querySelector('.studio-editor[data-slot="'+slot+'"] select');
     const option=[...select.options].find(o=>choice?o.dataset.hatKey===choice.key:o.dataset.value===value);
     if(!option)throw new Error('Choice is missing: '+slot+' '+value);
-    tile.click();select.value=option.value;select.dispatchEvent(new Event('change',{bubbles:true}));
+    if(tile.getAttribute('aria-pressed')!=='true')tile.click();select.value=option.value;select.dispatchEvent(new Event('change',{bubbles:true}));
   })()`);
   const chosen = (slot = "hat") => `document.querySelector('.studio-editor[data-slot="${slot}"] select').selectedOptions[0]`;
   const resize = async (size) => {
@@ -49837,6 +49837,11 @@ const equipmentAppChecks = async () => {
         oneEditor:[...document.querySelectorAll('.studio-editors > .studio-editor')].filter(e=>!e.hidden).length===1&&document.querySelectorAll('.studio-tile[aria-pressed=true]').length===1};
     })()`);
     record("equipment catalog: identical hats share one credited choice, edited forks list indented under it, and one tile's editor shows at a time", Object.values(groups).every(Boolean), JSON.stringify(groups));
+    const toggles = await b.evaluate(`(() => { const tile=(id)=>document.querySelector('.studio-tile[data-slot='+id+']'), open=()=>[...document.querySelectorAll('.studio-editors > .studio-editor')].filter(e=>!e.hidden).map(e=>e.dataset.slot).join();
+      if(tile('hat').getAttribute('aria-pressed')!=='true')tile('hat').click(); const first=open();
+      tile('shirt').click(); const switched=open(); tile('shirt').click(); const closed=open(), box=document.getElementById('studio-editors').hidden;
+      return first==='hat'&&switched==='shirt'&&closed===''&&box&&!document.querySelector('.studio-tile[aria-pressed=true]'); })()`);
+    record("equipment wardrobe: one section opens at a time, another closes the first, and the open one closes again", toggles);
     await b.evaluate("document.querySelector('.studio-tile[data-slot=hair]').click();document.getElementById('studio-hat').focus()");
     await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
     await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
@@ -49955,10 +49960,21 @@ const equipmentAppChecks = async () => {
     await wait("__ooga.studio.cave.elbow===__ownBody.elbow", "Original did not give the Ooga its own build back");
     record("equipment wardrobe: the body switches the build in place with its resting arms, a female face takes no beard (its editor says so at once), and Original gives the Ooga's own build back", built
       && await b.evaluate("__ooga.studio.cave.parts.armR.position.x===__ownBody.arm && __ooga.studio.cave.sleepParts.armRX===__ownBody.arm && __ooga.studio.cave.armScale===1 && !document.getElementById('studio-slot-beard').disabled"));
+    // The height: the slider builds the body at that height on the same feet, its eyes with it, and Original gives its own back.
+    await b.evaluate("window.__ownHeight={h:__ooga.studio.cave.traits.height,feet:__ooga.studio.cave.root.position.y-__ooga.studio.cave.baseY,eye:__ooga.studio.cave.headOffset}");
+    await b.evaluate("(() => { const t=document.querySelector('.studio-tile[data-slot=body]'); if(t.getAttribute('aria-pressed')!=='true')t.click(); const r=document.getElementById('studio-slot-height-range'); r.value='117'; r.dispatchEvent(new Event('change')); })()");
+    await wait("__ooga.studio.cave.traits.height===1.17", "The height did not reach the studio's Ooga");
+    const grown = await b.evaluate(`(() => { const cave=__ooga.studio.cave; return Math.abs(cave.root.position.y-cave.baseY-__ownHeight.feet)<1e-9 && cave.headOffset>__ownHeight.eye
+      && Math.abs(cave.baseY-cave.template.root.position.y)<1e-9 && /^1\\.\\d\\d m$/.test(document.querySelector('#studio-editor-height .studio-colour-name').textContent)
+      && document.querySelector('.studio-tile[data-slot=body]').hasAttribute('data-changed') && !document.querySelector('.studio-tile[data-slot=height]'); })()`);
+    await b.evaluate("document.getElementById('studio-slot-height-reset').click()");
+    await wait("__ooga.studio.cave.traits.height===__ownHeight.h", "Original did not give the Ooga its own height back");
+    record("equipment wardrobe: the height slider in the body's editor builds the Ooga at that height on the same feet, and Original gives its own back", grown
+      && await b.evaluate("__ooga.studio.cave.headOffset===__ownHeight.eye && !BL.equipment.state.busy"));
     // An Ooga's own colours: a swatch under its part's editor puts the colour on the whole build, a typed hex any colour,
     // and Original takes it off.
     const ginger = equipmentWardrobe.slotItems("hairColor").find((row) => row.label === "Ginger");
-    await b.evaluate(`(() => { document.querySelector('.studio-tile[data-slot=hair]').click();
+    await b.evaluate(`(() => { const t=document.querySelector('.studio-tile[data-slot=hair]'); if(t.getAttribute('aria-pressed')!=='true')t.click();
       const i=[...document.querySelector('.studio-editor[data-slot=hairColor] select').options].findIndex(o=>o.dataset.value===${JSON.stringify(ginger.version)});
       document.querySelectorAll('.studio-editor[data-slot=hairColor] .studio-swatch')[i].click(); })()`);
     await wait("__ooga.studio.cave.template.traits.hair==='#c4622a'", "The hair colour swatch did not dress the Ooga");
@@ -50007,9 +50023,17 @@ const equipmentAppChecks = async () => {
       for(let i=1;i<=32;i++)BL.models.templateFor({...t,wardrobeKey:'cap-'+i});
       const recent=BL.models.templateFor({...t,wardrobeKey:'cap-32'})===BL.models.templateFor({...t,wardrobeKey:'cap-32'});
       const evicted=BL.models.templateFor({...t,wardrobeKey:'cap-0'})!==first;
-      return {own,hidden,back,recent,evicted};
+      // A pet keeps its file's size at any height its Ooga is worn at, and the Pet slot sizes it alone.
+      const bill=BL.models.caveman(BL.contributors.traitsFor('Bitcoin-Bill')),dog=bill.parts.dog,petGeo=dog.geometry,petScale=dog.scale.x;
+      BL.characterWardrobe.apply(bill,{height:{item:'custom',version:null,height:118}});
+      const petKept=dog.geometry===petGeo&&dog.scale.x===petScale&&bill.traits.height===1.18;
+      BL.characterWardrobe.apply(bill,{height:{item:'custom',version:null,height:118},pet:{item:'custom',version:null,size:150}});
+      const petSized=Math.abs(dog.scale.x-petScale*1.5)<1e-9&&dog.geometry===petGeo;
+      BL.characterWardrobe.apply(bill,null);
+      const petBack=dog.scale.x===petScale&&!BL.characterWardrobe.supports(cave,'pet')&&BL.characterWardrobe.supports(bill,'pet');
+      return {own,hidden,back,recent,evicted,petKept,petSized,petBack,noPetTile:!document.querySelector('.studio-tile[data-slot=pet]')};
     })()`);
-    record("equipment wardrobe: what a character hung on its own club stays off a borrowed weapon, and outfit builds are kept to the most recent 32",
+    record("equipment wardrobe: what a character hung on its own club stays off a borrowed weapon, outfit builds are kept to the most recent 32, and a pet keeps its size at any height and takes the Pet slot's alone",
       Object.values(borrowed).every(Boolean), JSON.stringify(borrowed));
     await choose("original", "shirt"); await choose("original", "weapon"); await choose("original", "shoes");
     const clearRevision = saved.revision;

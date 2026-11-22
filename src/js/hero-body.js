@@ -176,6 +176,11 @@
     }
   };
   // The belt's buckle: a gold plate with a raised rim, on the front plane at z; with `coin`, the coin's B on it.
+  // How far a belt stands proud of the trunk it goes round (`build`'s `o.belt`), and a skirt hung under it.
+  // A male build's shin is drawn `SHIN` units longer, stretched between `SHIN_RAMP` (under the calf's thickest point,
+  // so the calf stays high under the knee) and below it moved whole; `shin(y)` is how far a point of the leg at height y moves down.
+  const SHIN = 0.9, SHIN_BELOW = -3, SHIN_RAMP = [-4, -4.8], shin = (y) => y >= SHIN_RAMP[0] ? 0 : SHIN * Math.min(1, (SHIN_RAMP[0] - y) / (SHIN_RAMP[0] - SHIN_RAMP[1]));
+  const BELT_OUT = 0.12, SKIRT_OUT = 0.05, SKIRT_CLEAR = 0.5, SEAT = 0.6, SEAT_BAND = 0.22;
   const buckle = (geo, y, z, { gold, goldDark, goldLight, coin }) => {
     slab(geo, rect(-1.2, 1.2, y - 0.95, y + 0.95, z, 0.35), FRONT, 0.4, 0.92, gold, goldDark);
     slab(geo, rect(-0.85, 0.85, y - 0.62, y + 0.62, z + 0.4, 0.22), FRONT, 0.05, 1, goldDark);
@@ -320,9 +325,9 @@
   const BUILD = {
     regular: {
       // `shoulder` is the height the trunk's clothes reach: over it is the neck.
-      armX: 5.3, handScale: 1, shoulder: 8.45, skirt: [3.55, 2.22], thigh: 3.85,
-      leg: [[0, 1.75, 1.9, 0.5], [-1.6, 1.85, 2, 0.55, 0, 0.05], [-2.8, 1.65, 1.8, 0.5, 0, 0.1], [-3.4, 1.6, 1.8, 0.5, 0, 0.15], [-4, 1.5, 1.6, 0.45, 0, 0.08],
-        [-4.8, 1.55, 1.7, 0.45, 0, -0.05], [-5.6, 1.4, 1.5, 0.4], [-6.1, 1.35, 1.45, 0.4]],
+      armX: 5.3, handScale: 1, shoulder: 8.45, skirt: [3.85, 2.3], thigh: 3.85,
+      leg: [[0, 1.75, 1.9, 0.5], [-1.6, 1.85, 2, 0.55, 0, 0.05], [-2.8, 1.65, 1.8, 0.5, 0, 0.1], [-3.4, 1.6, 1.8, 0.5, 0, 0.15], [-3.8, 1.64, 1.82, 0.45, 0, 0.06],
+        [-4.6, 1.5, 1.64, 0.45, 0, -0.03], [-5.6, 1.4, 1.5, 0.4], [-6.1, 1.35, 1.45, 0.4]],
       // The anklet stands clear of the calf above it and the instep below, so its wraps cover the ankle whole.
       knee: [-3.95, -2.85, 1, 2], ankle: [-5.05, 1.68, 1.84],
       // The foot is a block its whole length: as tall at the toes as a toe, its top rising from them to the instep,
@@ -340,10 +345,11 @@
       elbow: [-4.9, -0.9], sleeve: 4, wrist: [-2.75, 1.45, 1.5],
       // The chest is a raised section of the trunk itself: it steps out over the ribs in two eased facets, with its
       // front corners cut wide, and runs back to the collar.
-      torso: [[-0.4, 3.1, 2, 0.6], [1, 3.3, 2.15, 0.6], [2, 3.2, 2.1, 0.6], [4, 3.4, 2.15, 0.65], [5.15, 3.7, 2.25, 0.7], [5.4, 3.9, 2.38, 0.95, 0, 0.13],
+      // The trunk widens a little toward its foot, so the thighs meet its sides there rather than standing out past it.
+      torso: [[-0.4, 3.8, 2.15, 0.65], [1, 3.6, 2.15, 0.65], [2, 3.45, 2.15, 0.65], [4, 3.4, 2.15, 0.65], [5.15, 3.7, 2.25, 0.7], [5.4, 3.9, 2.38, 0.95, 0, 0.13],
         [5.72, 4.05, 2.47, 1.1, 0, 0.22], [7.05, 4.3, 2.48, 1.15, 0, 0.2], [7.85, 4.05, 2.35, 0.9, 0, 0.05], [8.45, 2.6, 2, 0.7], [9.05, 2, 1.7, 0.6]],
       nipple: [2.65, 6.15],
-      chest: [5.72, 7.05, 2.69, 2.68], belt: [0.72, 2.28, 3.62, 2.55]
+      chest: [5.72, 7.05, 2.69, 2.68], belt: [0.72, 2.28, 3.92, 2.55]
     },
     slim: {
       // Her legs stand close, with a narrow gap between them (`legX`, each leg's middle from the body's), and her
@@ -389,9 +395,9 @@
   // aims an Ooga by its height has anything to follow, and everything drawn on the body (clothes, belt, skirt, strap,
   // cuffs, boots) is drawn on these rings, so it fits them.
   const SHAPES = {
-    lean: { w: 0.82, d: 0.84, bellyW: 0.95, bellyD: 0.95, chestW: 0.97, chestD: 0.97, arm: 0.76, leg: 0.72, armOut: -0.75 },
+    lean: { w: 0.82, d: 0.84, bellyW: 0.95, bellyD: 0.95, chestW: 0.97, chestD: 0.97, arm: 0.76, leg: 0.72, armOut: -0.75, foot: 0.82 },
     // Big-boned: a bigger frame all over and softer, not fat.
-    big: { w: 1.22, d: 1.2, bellyW: 1.1, bellyD: 1.14, chestW: 1, chestD: 1, neck: 1.15, arm: 1.27, fore: 1.23, thigh: 1.27, shin: 1.22, armOut: 0.62,
+    big: { w: 1.22, d: 1.2, bellyW: 1.1, bellyD: 1.14, chestW: 1, chestD: 1, neck: 1.15, arm: 1.08, fore: 1.08, thigh: 1.27, shin: 1.06, slimThigh: 1.6, slimShin: 1.18, legGap: 0.1, armOut: 0.62,
       soft: 1, slope: 0.8, round: 2.1, cap: 0.35, drop: 0.35, dome: true }
   };
   const shapedBuilds = new Map();
@@ -403,7 +409,34 @@
     for (let i = 1; i < pts.length; i++) if (y <= pts[i][0]) { const [y0, a] = pts[i - 1], [y1, b] = pts[i]; return a + (b - a) * (y - y0) / (y1 - y0); }
     return neck;
   };
+  // Every build's legs keep under its trunk: where its thighs would stand out past the trunk's foot (the regular male's
+  // and a thicker shape's), the whole leg is drawn smaller and the legs closer together, keeping the build's own gap
+  // between the thighs, so the outsides of the thighs meet the trunk's sides (`THIGH_IN` inside them) and nothing
+  // overhangs under the waist. The feet keep their length and narrow only as far as they must not to meet
+  // (`FEET_GAP` between them).
+  const THIGH_IN = 0.08, FEET_GAP = 0.1, tuckedBuilds = new Map();
   const buildOf = (slim, shape) => {
+    const key = (slim ? "slim:" : "regular:") + (shape || "");
+    if (tuckedBuilds.has(key)) return tuckedBuilds.get(key);
+    const B = buildOfRaw(slim, shape), base = slim ? BUILD.slim : BUILD.regular;
+    if (!shape) { tuckedBuilds.set(key, B); return B; }
+    const top = Math.max(B.leg[0][1], B.leg[1][1]), lx = B.legX || 2, target = B.torso[0][1] - THIGH_IN;
+    // A male shape with `legGap` fills its trunk's foot instead: its legs drawn larger until their outsides meet the
+    // trunk's sides, that close together (half the space between the thighs), and deeper with them.
+    const fill = !slim && SHAPES[shape].legGap !== undefined;
+    const gap = fill ? SHAPES[shape].legGap : (base.legX || 2) - Math.max(base.leg[0][1], base.leg[1][1]);
+    let T = B;
+    if (fill || lx + top > target) {
+      const k = (target - gap) / 2 / top, L = (target + gap) / 2, ring = (r, f) => { const o = r.slice(); o[1] *= f; if (f > 1) o[2] *= f; o[3] *= f; return o; };
+      const feet = Math.min(1, (L - FEET_GAP / 2) / Math.max(...B.foot.map((r) => r[1])));
+      T = { ...B, legX: L, thigh: target, leg: B.leg.map((r) => ring(r, k)), ankle: [B.ankle[0], B.ankle[1] * k, B.ankle[2]],
+        knee: B.knee && [B.knee[0], B.knee[1], B.knee[2] * k, B.knee[3] * k],
+        foot: B.foot.map((r) => { const o = r.slice(); o[1] *= feet; o[3] *= feet; return o; }) };
+    }
+    tuckedBuilds.set(key, T);
+    return T;
+  };
+  const buildOfRaw = (slim, shape) => {
     const base = slim ? BUILD.slim : BUILD.regular, s = shape && SHAPES[shape];
     if (!s) return base;
     const key = (slim ? "slim:" : "regular:") + shape;
@@ -419,17 +452,23 @@
     const cutOf = (r) => Math.min(r[3] * (s.round || 1), Math.max(r[3], 0.6 * Math.min(r[1], r[2])));
     // Rings curving over between ring `a` (wide) and ring `b` (narrow) as a dome: at each share `t` of the way, the
     // width and depth fall from a's to b's along a quarter circle, so the outline rounds over instead of stepping.
-    const DOME = [0.35, 0.62, 0.82, 0.94];
+    const DOME = [0.35, 0.62, 0.82, 0.94], CAP_TOP = [0.3, 0.45];
     const domed = (a, b) => DOME.map((t) => {
       const out = a.map((v, i) => typeof v === "number" && typeof b[i] === "number" ? v + (b[i] - v) * t : v), k = Math.sqrt(1 - t * t);
       out[1] = b[1] + (a[1] - b[1]) * k; out[2] = b[2] + (a[2] - b[2]) * k; out[3] = cutOf(out);
       return out;
     });
+    // The trunk's back keeps the build's own profile at the shape's overall depth (`d`), and under the belt eases to the
+    // thighs' own share of the build's depth (never deeper than `d`), so the seat meets the legs as the build's does
+    // rather than standing out over thinner ones; what the belly and chest add (`dAt` past `d`) goes on the front alone.
+    const seat = Math.min(s.d, s.thigh ?? s.leg), hips = base.torso[0][0];
+    const backAt = (y) => y > top ? neck : y >= base.belt[0] ? s.d : seat + (s.d - seat) * Math.max(0, (y - hips) / (base.belt[0] - hips));
     const ring = (r) => {
-      const wx = wAt(r[0]) * fall(r[0]), dz = dAt(r[0]), out = r.slice();
-      out[1] *= wx; out[2] *= dz; out[3] *= Math.min(wx, dz);
+      const wx = wAt(r[0]) * fall(r[0]), dz = dAt(r[0]), back = backAt(r[0]), out = r.slice();
+      out[1] *= wx; out[3] *= Math.min(wx, dz);
+      out[2] = r[2] * (back + dz) / 2;
       out[3] = cutOf(out);
-      if (out[5]) out[5] *= dz * (1 - 0.6 * soft);
+      out[5] = (out[5] ? out[5] * dz * (1 - 0.6 * soft) : 0) + r[2] * (dz - back) / 2;
       return out;
     };
     // A limb's rings evened toward its middle by `soft`, so its swells (a deltoid, a calf) ease out.
@@ -439,7 +478,7 @@
       return rings.map((r) => { const out = r.slice(); out[1] = mx + (r[1] - mx) * k; out[2] = mz + (r[2] - mz) * k; return out; });
     };
     const limb = (r, k) => { const out = r.slice(); out[1] *= k; out[2] *= k; out[3] *= k; return out; };
-    const upper = s.arm, fore = s.fore ?? s.arm, thigh = s.thigh ?? s.leg, shin = s.shin ?? s.leg;
+    const upper = s.arm, fore = s.fore ?? s.arm, thigh = (slim && s.slimThigh) || (s.thigh ?? s.leg), shin = (slim && s.slimShin) || (s.shin ?? s.leg);
     // Down the leg from the thigh's factor to the shin's, so the knee eases between them.
     const legAt = (y) => y >= -2 ? thigh : y <= -4 ? shin : thigh + (shin - thigh) * (-2 - y) / 2;
     const waist = wAt(base.belt[0]), depth = dAt(base.belt[0]);
@@ -449,9 +488,12 @@
       // The trunk's top: from the last ring under the shoulders to the shoulders' own.
       const at = torso.findIndex((r) => r[0] >= top);
       if (at > 0) torso = [...torso.slice(0, at), ...domed(torso[at - 1], torso[at]), ...torso.slice(at)];
-      // The arm's top: from its first full ring up to its cap (rings run from the shoulder down).
-      arm = [arm[0], ...domed(arm[1], arm[0]).reverse(), ...arm.slice(1)];
-      sleeve += DOME.length;
+      // The arm's top: a round cap, from the deltoid's widest ring up over a small ring `CAP_TOP` higher than the arm's
+      // own top, as a dome (rings run from the shoulder down), so the top of the shoulder is round rather than flat.
+      const a0 = arm[0], cap = [a0[0] + CAP_TOP[0], a0[1] * CAP_TOP[1], a0[2] * CAP_TOP[1], 0, ...a0.slice(4)];
+      cap[3] = cutOf(cap);
+      arm = [cap, ...domed(arm[2], cap).reverse(), ...arm.slice(2)];
+      sleeve += DOME.length - 1;
     }
     // A regular build's legs stand where the rig puts them, two units out (2.5 less `LEGS_IN` in models.js). A shape's
     // stand as far apart at the inside of their thighs as the build's own (`gap`), and the skirt's shards lean out to
@@ -461,11 +503,20 @@
     // The chest's front where the trunk's rings put it (`soft` eases its step forward) and the nipples on its flat face.
     const torsoAt = (y, f) => { const i = torso.findIndex((r) => r[0] >= y), a = torso[Math.max(0, i - 1)], b = torso[i]; const t = b[0] === a[0] ? 0 : (y - a[0]) / (b[0] - a[0]); return f(a) + (f(b) - f(a)) * t; };
     const front = (y) => torsoAt(y, (r) => r[2] + (r[5] || 0)), flat = base.nipple ? torsoAt(base.nipple[1], (r) => r[1] - r[3]) : 0;
-    B = { ...base, depthAt: dAt, torso, sleeve, armX: base.armX + s.armOut, legX, thigh: legX + Math.max(leg[0][1], leg[1][1]),
+    B = { ...base, depthAt: dAt, backAt, torso, sleeve, armX: base.armX + s.armOut, legX, thigh: legX + Math.max(leg[0][1], leg[1][1]),
       arm, armDrop: (base.armDrop || 0) + (s.drop || 0), forearm: even(base.forearm).map((r) => { const out = limb(r, fore); if (s.dome) out[3] = cutOf(out); return out; }),
       leg, sternum: !soft,
       knee: base.knee && !soft ? [base.knee[0], base.knee[1], base.knee[2] * legAt(-3.4), base.knee[3] * legAt(-3.4)] : null,
-      ankle: [base.ankle[0], base.ankle[1] * shin, base.ankle[2] * shin], wrist: [base.wrist[0], base.wrist[1] * fore, base.wrist[2] * fore],
+      // A shape's `foot` draws the regular build's feet that much smaller, across and along (a female build's are small
+      // already).
+      ...(s.foot && !slim ? { foot: base.foot.map((r) => { const o = r.slice(); o[1] *= s.foot; o[2] *= s.foot; o[3] *= s.foot; o[5] = (o[5] || 0) * s.foot; return o; }) } : null),
+      // An anklet or a boot's top stands as far past the shape's own ankle as the build's stands past its ankle, so it
+      // is snug on a thicker or thinner leg rather than scaled out with it.
+      ankle: (() => {
+        const at = (rings, y) => { let n = 1; while (n < rings.length - 1 && rings[n][0] > y) n++; const a = rings[n - 1], b = rings[n], t = Math.max(0, Math.min(1, (a[0] - y) / (a[0] - b[0]))); return [a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; };
+        const y = base.ankle[0], own = at(base.leg, y), worn = at(leg, y);
+        return [y, worn[0] + base.ankle[1] - own[0], worn[1] + base.ankle[2] - own[1]];
+      })(), wrist: [base.wrist[0], base.wrist[1] * fore, base.wrist[2] * fore],
       skirt: [base.skirt[0] * waist, base.skirt[1] * depth], belt: [base.belt[0], base.belt[1], base.belt[2] * waist, base.belt[3] * depth],
       chest: [base.chest[0], base.chest[1], front(base.chest[0]), front(base.chest[1])],
       nipple: base.nipple ? [Math.min(base.nipple[0] * wAt(base.nipple[1]), flat - 0.35), base.nipple[1]] : null };
@@ -514,9 +565,10 @@
         }
       }
     }
-    const end = rings.length - 1;
-    poly(geo, rings[0], base, [0, sections[0][0] - sections[1][0], 0]);
-    poly(geo, rings[end], base, [0, sections[end][0] - sections[end - 1][0], 0]);
+    // Each end is closed in what the part wears there (a sleeve's top over the shoulder), not bare skin.
+    const end = rings.length - 1, worn = (y) => { const key = pick(0, y, 1); return key === undefined ? base : tone(key)[0]; };
+    poly(geo, rings[0], worn(sections[0][0]), [0, sections[0][0] - sections[1][0], 0]);
+    poly(geo, rings[end], worn(sections[end][0]), [0, sections[end][0] - sections[end - 1][0], 0]);
     return geo;
   };
   // An authored block map, read a row at a time: the reader's (row, xn, zn) is the colour of the block that shows at
@@ -553,17 +605,24 @@
   //   cuffs / anklets: { wrap, wrapDark, trim }; boot: { color, sole, detail }; pecs: the line between a bare chest's two
   //   halves and its nipples' colour; emblem(geo, z, y0, y1): what the chest's front carries
   const build = (k, o) => {
-    // A body that names no build is drawn in the Ooga's own (a worn body's, `traits.slim`).
-    const slim = o.slim === undefined ? !!k.traits.slim : !!o.slim, u = k.u, B = buildOf(slim, k.traits.bodyShape), skin = rgb(o.skin);
+    // A body that names no build is drawn in the Ooga's own (a worn body's, `traits.slim`), and so is a character's own
+    // model (`dressing`), whose file names the build it was drawn in.
+    const slim = dressing ? dressing.slim : o.slim === undefined ? !!k.traits.slim : !!o.slim, u = k.u, B = buildOf(slim, k.traits.bodyShape), skin = rgb(o.skin);
     const torso = geometry(), spans = B.torso.length - 1, [cy0, cy1, cz0, cz1] = B.chest, chestZ = (y) => cz0 + (cz1 - cz0) * (y - cy0) / (cy1 - cy0);
     // `paint` has the body wear what a block map wore (see `wear`): { tone, torso, arm, forearm, leg }, each part a
     // { breaks, pick } for `paintedLoft`, and the limbs one for each side (right, then left).
     const paint = o.paint;
     if (paint) paintedLoft(torso, B.torso, paint.torso.breaks, paint.torso.pick, paint.tone, skin, paint.print);
     else loft(torso, B.torso, Array.from({ length: spans }, (_, i) => o.torso && o.torso[i] || skin));
+    // The belt follows the trunk round the waist, `BELT_OUT` proud of it all the way, so it neither sinks into the
+    // trunk where the trunk swells nor stands off it where the trunk draws in, on any build or shape.
+    // The belt goes round the trunk's own rings, `BELT_OUT` proud of them all the way, so it sits snug at the waist on
+    // every build and shape, neither sinking in where the trunk swells nor standing off where it draws in.
+    const T = trunk(slim, k.traits.bodyShape), round = (y, out) => { const [hx, hz, cut, cz] = T.ring(y); return [y, hx + out, hz + out, cut + out * 0.4, 0, cz]; };
     if (o.belt) {
-      loft(torso, [[B.belt[0], B.belt[2], B.belt[3], 0.62], [B.belt[1], B.belt[2], B.belt[3], 0.62]], o.belt.color);
-      if (o.belt.gold) buckle(torso, (B.belt[0] + B.belt[1]) / 2, B.belt[3], o.belt);
+      const mid = (B.belt[0] + B.belt[1]) / 2;
+      loft(torso, [round(B.belt[0], BELT_OUT), round(mid, BELT_OUT), round(B.belt[1], BELT_OUT)], o.belt.color);
+      if (o.belt.gold) buckle(torso, mid, T.front(mid) + BELT_OUT, o.belt);
     }
     if (o.pecs && B.nipple) {
       // A faint line down the breastbone, and a nipple well out on each half.
@@ -571,20 +630,36 @@
       const [nx, ny] = B.nipple;
       for (const side of [-1, 1]) slab(torso, rect(nx * side - 0.22, nx * side + 0.22, ny - 0.2, ny + 0.2, chestZ(ny) - 0.02), FRONT, 0.07, 0.85, o.pecs);
     }
-    if (o.strap) strap(torso, o.strap, B.depthAt);
+    if (o.strap) strap(torso, o.strap, B.depthAt, B.backAt);
     // The crotch: a wedge under the trunk between the tops of the thighs, in what the thighs wear, so trousers read as one
     // garment and no slot of sky shows between the legs. It stands well inside each thigh and behind their faces, so
-    // only the part between them shows, and narrows as it drops so a striding leg never uncovers its side.
+    // only the part between them shows, and narrows as it drops so a striding leg never uncovers its side. Over bare
+    // thighs it is bare too, so shorts end flat at their own hem and nothing in their colour hangs below it.
     {
-      const lx = B.legX || 2, deep = Math.min(B.leg[0][2], B.leg[1][2]) * 0.8;
+      const lx = B.legX || 2, deep = Math.min(B.leg[0][2], B.leg[1][2]) * 0.8, low = B.torso[0][0], same = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
       const [worn] = paint ? paint.tone(paint.leg[0].pick(0, -0.6, 1)) : [o.legs || skin];
-      loft(torso, [[B.torso[0][0] + 0.3, lx * 0.75, deep, 0.4], [-1, lx * 0.68, deep * 0.94, 0.4], [-1.9, lx * 0.4, deep * 0.62, 0.3]], worn);
+      loft(torso, [[low + 0.3, lx * 0.75, deep, 0.4], [-1, lx * 0.68, deep * 0.94, 0.4], [-1.9, lx * 0.4, deep * 0.62, 0.3]], worn);
+      // The seat: under its foot the trunk tapers in over `SEAT` to the tops of the thighs, so its underside slopes to
+      // the legs rather than standing square over them. It wears what the thighs wear, so trousers carry on into it and
+      // shorts or a loincloth end at their own hem over it.
+      const f = B.torso[0], tx = Math.min(f[1], lx + Math.max(B.leg[0][1], B.leg[1][1])), tz = Math.min(f[2], Math.max(B.leg[0][2], B.leg[1][2]));
+      // It runs straight down a little first (`SEAT_BAND`), as a pair of shorts does, then slopes in.
+      const foot = [f[1], f[2], f[3], 0, f[5] || 0], seat = [[low + 0.01, ...foot], [low - SEAT_BAND, ...foot], [low - SEAT, tx, tz, Math.min(0.6 * Math.min(tx, tz), Math.max(f[3], 0.8)), 0, 0]];
+      // Over bare thighs it wears what the hips wear (shorts, a loincloth), so no skin shows over the garment's hem.
+      const bareLegs = !paint ? same(worn, skin) : paint.leg[0].pick(0, -0.6, 1) === paint.skinKey;
+      const at = (xn, zn) => bareLegs ? paint.torso.pick(xn, low + 0.05, zn) : paint.leg[0].pick(xn, -0.6, zn);
+      if (paint) paintedLoft(torso, seat, [], (xn, y, zn) => at(xn, zn), paint.tone, skin, paint.print);
+      else loft(torso, seat, bareLegs && o.torso && o.torso[0] || worn);
     }
-    // The skirt hangs from the hips under the belt (`B.skirt`: how wide and deep it is there). With `hem`, for a body
+    // The skirt hangs from the hips under the belt. With `hem`, for a body
     // that wears no belt, it is the hem of what the trunk wears instead: it starts in the trunk's own bottom edge, so
     // it is one piece with the trunk and not a thing laid over it. Its side shards lean out as far as the thighs do.
     if (o.skirt) {
-      const low = B.torso[0], ring = o.hem ? [low[0], low[1] + 0.01, low[2] + 0.01, low[3]] : [B.belt[0] + 0.15, B.skirt[0], B.skirt[1], 0.62];
+      // Under a belt it hangs from the trunk's own ring there, just inside the belt, so it lies flat on the hips.
+      // It clears the trunk just below where it hangs too (a slim build's hips swell under the belt), within the
+      // shards' top (`SKIRT_CLEAR`): further down their own lean carries them clear, and the trunk's foot is not met.
+      const hang = B.belt[0] + 0.15, clear = (ring) => { for (const r of B.torso) if (r[0] < hang && r[0] >= hang - SKIRT_CLEAR) { ring[1] = Math.max(ring[1], r[1] + SKIRT_OUT); ring[2] = Math.max(ring[2], r[2] + Math.abs(r[5] || 0) + SKIRT_OUT); } return ring; };
+      const low = B.torso[0], ring = o.hem ? [low[0], low[1] + 0.01, low[2] + 0.01, low[3]] : clear(round(hang, SKIRT_OUT));
       fur(torso, ring, o.skirt, slim ? 1.05 : 1.25, 3, [Math.max(0, B.thigh + 0.05 - ring[1]), 0]);
     }
     if (o.emblem) o.emblem(torso, chestZ, cy0, cy1);
@@ -621,6 +696,9 @@
         const [worn, lit] = paint ? paint.tone(paint.leg[side].pick(0, (B.knee[0] + B.knee[1]) / 2, 1)) : [o.legs || skin, 0];
         slab(g, rect(-B.knee[2], B.knee[2], B.knee[0], B.knee[1], B.knee[3] - 0.12, 0.3), FRONT, 0.3, 0.78, worn, shade(worn, 0.86), lit);
       }
+      // A male build's shin is longer (`SHIN`): the leg itself is drawn longer under the knee, and what is put on it
+      // below (a boot, its sole and foot, anklets, toes) goes down whole, never taller.
+      const shinFrom = g.verts.length, longer = slim ? 0 : SHIN;
       if (o.boot) {
         // A boot: a shaft up the shin, a sole, and a foot as blunt and tall at the toe as a bare one.
         const a = B.ankle, f = B.foot;
@@ -639,6 +717,7 @@
         for (const x of [-gap, 0, gap]) poly(g, [[x - line, -6.98, back(x - line) + 0.012], [x + line, -6.98, back(x + line) + 0.012], [x + line, -7 + B.toe, back(x + line) + 0.012], [x - line, -7 + B.toe, back(x - line) + 0.012]], shade(skin, 0.7), FRONT);
         if (o.anklets) cuff(g, B.ankle[0] + 0.3, B.ankle[1], B.ankle[2], o.anklets, 1, 0.62);
       }
+      if (longer) for (let i = 1; i < g.verts.length; i += 3) g.verts[i] -= i < shinFrom ? shin(g.verts[i]) : longer;
       return g;
     };
     // A painted body's left arm and leg are their own meshes only where they wear something the right ones do not. Bare
@@ -669,11 +748,12 @@
     path: [[-0.45, 2.2, 0, 1], [0.35, 2.25, 0, 1], [4.9, 2.83, 0, 1], [6.6, 2.74, 0, 1], [7.6, 2.42, 0.45, 0.89], [8.12, 1.5, 0.85, 0.53], [8.2, 0, 1, 0],
       [8.12, -1.5, 0.85, -0.53], [7.6, -2.34, 0.45, -0.89], [6.6, -2.42, 0, -1], [0.35, -2.25, 0, -1], [-0.45, -2.2, 0, -1]] };
   // `deep(y)` (a shaped build's, see SHAPES) moves each station out with the trunk's front or back at its height.
-  const strap = (geo, { color, edge, print }, deep = null) => {
+  // `back(y)` the same for its stations on the back, which a shape keeps at its own depth (`buildOf`'s `backAt`).
+  const strap = (geo, { color, edge, print }, deep = null, back = deep) => {
     const [ax, ay] = STRAP.from, [bx, by] = STRAP.to, len = Math.hypot(bx - ax, by - ay), dx = (bx - ax) / len, dy = (by - ay) / len, nx = dy, ny = -dx;
     const across = [-STRAP.half, STRAP.edge - STRAP.half, STRAP.half - STRAP.edge, STRAP.half];
     const rows = STRAP.path.map(([along, z, oa, od]) => {
-      const ol = Math.hypot(oa, od), out = [dx * oa / ol, dy * oa / ol, od / ol], px = ax + dx * along, py = ay + dy * along, depth = deep ? z * deep(py) : z;
+      const ol = Math.hypot(oa, od), out = [dx * oa / ol, dy * oa / ol, od / ol], px = ax + dx * along, py = ay + dy * along, depth = deep ? z * (z < 0 ? back : deep)(py) : z;
       return { out, inner: across.map((w) => [px + nx * w, py + ny * w, depth]), outer: across.map((w) => [px + nx * w + out[0] * STRAP.thick, py + ny * w + out[1] * STRAP.thick, depth + out[2] * STRAP.thick]) };
     });
     for (let i = 0; i + 1 < rows.length; i++) {
@@ -893,8 +973,28 @@
   // outside it from a point p on it, straight out from the surface whatever way that faces (`rough` only has to
   // point roughly outward). Cloth whose every corner is lifted stands that far off the body all over, corners
   // and ledges included.
+  // While a character's own model is built (`dressing`, from models.js), its trunk is the body being built: a file names
+  // its own build (`trunk(true)`), which a worn body (the wardrobe's Body slot) may have changed.
+  let dressing = null;
+  const dressed = (traits, make) => {
+    const was = dressing;
+    dressing = { slim: !!traits.slim, shape: traits.bodyShape };
+    try { return make(); } finally { dressing = was; }
+  };
+  // `from(y)` takes a height on the build the file names (`own`, that build's trunk) to the same place on the build worn:
+  // its hips, belt and shoulders line up, and between them it is eased in proportion; `to(y)` goes back. A garment drawn
+  // at heights read off its own build (a belt, the top of shorts) stands in the same place on any body.
+  const landmarks = (B) => [B.torso[0][0], B.belt[0], B.belt[1], B.shoulder];
+  const between = (a, b, y) => {
+    let i = 1;
+    while (i < a.length - 1 && y > a[i]) i++;
+    return b[i - 1] + (y - a[i - 1]) * (b[i] - b[i - 1]) / (a[i] - a[i - 1]);
+  };
   const trunk = (slim, shape) => {
+    const named = { slim, shape }, worn = !!dressing;
+    if (dressing) ({ slim, shape } = dressing);
     const B = buildOf(slim, shape), rings = B.torso, low = rings[0][0], belt = B.belt[0], top = B.shoulder;
+    const mine = landmarks(buildOf(named.slim, named.shape)), here = landmarks(B);
     const at = (y, i) => {
       let n = 1;
       while (n < rings.length - 1 && rings[n][0] < y) n++;
@@ -931,7 +1031,12 @@
       }
       return q;
     };
-    return { low, belt, top, at, ring, heights: rings.map((r) => r[0]), front: (y) => at(y, 5) + at(y, 2), back: (y) => at(y, 5) - at(y, 2), side, face, over, clear, lift,
+    let own = null;
+    const was = () => { if (!own) { const d = dressing; dressing = null; try { own = trunk(named.slim, named.shape); } finally { dressing = d; } } return own; };
+    // How far the belt stands out past the trunk's front or back at a height (0 off the belt), for what is laid on it.
+    const beltOut = (y) => y < B.belt[0] || y > B.belt[1] ? 0 : BELT_OUT;
+    return { low, belt, top, at, ring, beltOut, heights: rings.map((r) => r[0]), from: (y) => between(mine, here, y), to: (y) => between(here, mine, y),
+      get own() { return worn ? was() : this; }, front: (y) => at(y, 5) + at(y, 2), back: (y) => at(y, 5) - at(y, 2), side, face, over, clear, lift,
       rise: (y) => y >= 8 ? top + y - 8 : y >= 3 ? belt + (y - 3) / 5 * (top - belt) : y >= 0 ? low + y / 3 * (belt - low) : low + y };
   };
   // A body for an Ooga that models none of its own: the regular or the slim build, wearing what its authored blocks
@@ -1050,10 +1155,60 @@
       }
     }
     const body = build(k, { skin, slim, belt, skirt, hem: !belt && slim, strap: across, pecs, sternum: !!pecs && bare(0), boot, hands: [arms[0].hand, arms[1].hand],
-      paint: { tone, print: { key: P.fur, color: palette[P.spot] }, torso: { breaks, pick: (xn, y, zn) => { const row = rowAt(y); return row < 0 ? skinKey : T(row, xn, zn); } },
+      paint: { tone, skinKey, print: { key: P.fur, color: palette[P.spot] }, torso: { breaks, pick: (xn, y, zn) => { const row = rowAt(y); return row < 0 ? skinKey : T(row, xn, zn); } },
         arm: arms.map((a) => a.arm), forearm: arms.map((a) => a.forearm), leg: legs.map((l) => l.leg) } });
     if (built) body.torso = merge(body.torso, built);
     return body;
   };
-  BL.heroBody = { wear, trunk, SHAPES, buildOf, head, club, nunchaku, poly, both, loft, slab, noseBlock, rect, fur, cuff, buckle, hand, build, shade, scaled, FRONT, BUILD, HAND: [HAND_Y, HAND_Z] };
+  // A character's model handed the worn build's limbs (`wear()`) and merged details of its own onto them (a boot's
+  // bands, a cuff, the legs of shorts) drawn for its own build's limbs. Everything past what it was handed is fitted to
+  // the worn limb as it was handed: at each height the limb's surface out to each side, front and back is read off the
+  // limb its own build would have handed (`own`) and the worn one, and a detail stands as far past the worn surface,
+  // in proportion, as it stood past its own. So a boot's details sit on any boot, however much wider its shaft is.
+  const STEP = 0.25;
+  // A face counts at every height it spans, so a tall shaft with corners only at its ends is read all the way down.
+  const profile = (g, u) => {
+    const v = g.verts, rows = new Map();
+    for (const f of g.faces) {
+      let y0 = Infinity, y1 = -Infinity, x = 0, zf = -Infinity, zb = Infinity;
+      for (const id of f.i) {
+        const y = v[id * 3 + 1] / u, z = v[id * 3 + 2] / u;
+        y0 = Math.min(y0, y); y1 = Math.max(y1, y); x = Math.max(x, Math.abs(v[id * 3]) / u); zf = Math.max(zf, z); zb = Math.min(zb, z);
+      }
+      for (let r = Math.round(y0 / STEP), end = Math.round(y1 / STEP); r <= end; r++) {
+        let p = rows.get(r);
+        if (!p) rows.set(r, p = [0, -Infinity, Infinity]);
+        if (x > p[0]) p[0] = x; if (zf > p[1]) p[1] = zf; if (zb < p[2]) p[2] = zb;
+      }
+    }
+    return (y) => {
+      const r = Math.round(y / STEP);
+      for (let d = 0; d < 6; d++) for (const k of d ? [r - d, r + d] : [r]) { const p = rows.get(k); if (p) return p; }
+      return null;
+    };
+  };
+  const refit = (model, handed, own, u, longer = 0) => {
+    const done = new Set();
+    for (const key of ["leg", "legL", "forearm", "forearmL", "arm", "armL"]) {
+      const g = model[key], h = handed[key], o = own[key];
+      if (!g || !h || !o || g === h || done.has(g) || g.verts.length <= h.verts.length) continue;
+      done.add(g);
+      const worn = profile(h, u), mine = profile(o, u), v = g.verts;
+      // Inside the surface a point keeps its share of the way out; past it, its distance past it.
+      const fit = (d, from, to) => Math.abs(d) < from ? d * to / from : Math.sign(d) * (Math.abs(d) - from + to);
+      const leg = key === "leg" || key === "legL";
+      for (let i = h.verts.length; i < v.length; i += 3) {
+        // A detail drawn for its own build's leg below the knee (a boot's bands) goes down a longer shin whole, as the
+        // boot does (`shin`).
+        const y0 = v[i + 1] / u;
+        if (leg && longer && y0 < SHIN_BELOW) v[i + 1] -= longer * u;
+        const y = v[i + 1] / u, a = mine(y0), b = worn(y);
+        if (!a || !b) continue;
+        if (a[0] > 0.05) v[i] = fit(v[i] / u, a[0], b[0]) * u;
+        const z = v[i + 2] / u, ma = (a[1] + a[2]) / 2, mb = (b[1] + b[2]) / 2, ha = (a[1] - a[2]) / 2, hb = (b[1] - b[2]) / 2;
+        if (ha > 0.05) v[i + 2] = (mb + fit(z - ma, ha, hb)) * u;
+      }
+    }
+  };
+  BL.heroBody = { wear, trunk, dressed, refit, SHIN, SHIN_BELOW, shin, SHAPES, buildOf, head, club, nunchaku, poly, both, loft, slab, noseBlock, rect, fur, cuff, buckle, hand, build, shade, scaled, FRONT, BUILD, HAND: [HAND_Y, HAND_Z] };
 })();

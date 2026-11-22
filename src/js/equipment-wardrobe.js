@@ -10,11 +10,14 @@
   const HASH = /^[a-f0-9]{64}$/, HEX = /^#[0-9a-f]{6}$/, LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
   const MAX_ITEMS = 1024, MAX_BYTES = 256 * 1024, MAX_CELLS = 4096, MAX_COLOURS = 64, MAX_VERTICES = 20000, MAX_FACES = 12000;
   // In the order the studio lists them. The body is the build an Ooga is drawn in, male or female and its shape
-  // (hero-body.js `SHAPES`), never its height; skin, hair and eye colour are its own colours, each a swatch. `kind` says what a piece is; `none` names taking it off where an Ooga can go
+  // (hero-body.js `SHAPES`), and its height is a slot of its own (`HEIGHT`, in hundredths of the game's height); skin,
+  // hair and eye colour are its own colours, each a swatch. `kind` says what a piece is; `none` names taking it off where an Ooga can go
   // without one; `sized` slots save a size as the hat does; `head` slots draw on the stock head (hero-body.js `head`),
   // `body` slots on the authored blocks a body wears (`paint`), and the mask and weapon are meshes of their own.
   const SLOTS = Object.freeze([
     ["body", "Body", "body", null, false, "frame"],
+    ["height", "Height", "height", null, false, "frame"],
+    ["pet", "Pet", "pet", null, false, "pet"],
     ["skin", "Skin", "colour", null, false, "tone"],
     ["hairColor", "Hair color", "colour", null, false, "tone"],
     ["eyeColor", "Eye color", "colour", null, false, "tone"],
@@ -34,6 +37,10 @@
     ["weapon", "Primary weapon", "weapon", null, false, "hand"]
   ].map(([id, label, kind, none, sized, place]) => Object.freeze({ id, label, kind, none, sized, place })));
   const SLOT = new Map(SLOTS.map((slot) => [slot.id, slot]));
+  // How tall a player may make their Ooga, in hundredths of the game's height: the cast's own run from 0.8 to 1.16.
+  const HEIGHT = Object.freeze({ min: 80, max: 120 });
+  // How big a player may make their Ooga's pet, in per cent of the size its file builds it: never its owner's height.
+  const PET = Object.freeze({ min: 50, max: 150 });
   // The slots this module keeps; the hat keeps its own registry and history.
   const WORN = Object.freeze(SLOTS.filter((slot) => slot.id !== "hat").map((slot) => slot.id));
   // The authored colours an Ooga's own palette names (models.js `P`): a piece in one of them takes the wearer's own.
@@ -137,7 +144,7 @@
     } else if (slot.kind === "weapon") {
       if (!own(content, ["format", "slot", "geometry", "rest", "carry", "axe"]) || !angles(content.rest) || !angles(content.carry) || typeof content.axe !== "boolean") fail();
       mesh(content.geometry, 8);
-    }
+    } else fail();
     return content;
   };
   let items = Object.freeze([]), byId = new Map(), bySlot = new Map(), seeded = false;
@@ -162,10 +169,20 @@
   const get = (id) => byId.get(id) || null;
   const has = (id, version) => typeof id === "string" && typeof version === "string" && byId.get(id)?.version === version;
   // One saved choice for a slot: an item, or taking the slot's piece off, or for an Ooga's own colour (skin, hair or
-  // eyes) any colour the player mixed (`custom`, its `color` a lower-case hex). The character's own look is no entry at all.
+  // eyes) any colour the player mixed (`custom`, its `color` a lower-case hex), or for the height any height in `HEIGHT`
+  // (`custom`, its `height` in hundredths), or for the pet any size in `PET` (`custom`, its `size` in per cent). The
+  // character's own look is no entry at all.
   const choice = (slotId, value) => {
     const slot = SLOT.get(slotId);
     if (!slot || slot.id === "hat" || !plain(value)) fail("Invalid wardrobe choice");
+    if (value.item === "custom" && slot.kind === "pet") {
+      if (!own(value, ["item", "version", "size"]) || value.version !== null || !Number.isInteger(value.size) || value.size < PET.min || value.size > PET.max) fail("Invalid wardrobe choice");
+      return Object.freeze({ item: "custom", version: null, size: value.size });
+    }
+    if (value.item === "custom" && slot.kind === "height") {
+      if (!own(value, ["item", "version", "height"]) || value.version !== null || !Number.isInteger(value.height) || value.height < HEIGHT.min || value.height > HEIGHT.max) fail("Invalid wardrobe choice");
+      return Object.freeze({ item: "custom", version: null, height: value.height });
+    }
     if (value.item === "custom") {
       if (slot.place !== "tone" || !own(value, ["item", "version", "color"]) || value.version !== null || typeof value.color !== "string" || !HEX.test(value.color)) fail("Invalid wardrobe choice");
       return Object.freeze({ item: "custom", version: null, color: value.color });
@@ -188,7 +205,7 @@
     for (const id of WORN) if (Object.hasOwn(value, id)) out[id] = choice(id, value[id]);
     return Object.keys(out).length ? Object.freeze(out) : null;
   };
-  const key = (value) => value ? WORN.filter((id) => value[id]).map((id) => id + ":" + (value[id].color || value[id].version || "none") + (value[id].size ? "@" + value[id].size : "")).join(",") : "";
+  const key = (value) => value ? WORN.filter((id) => value[id]).map((id) => id + ":" + (value[id].color || value[id].height || value[id].version || "none") + (value[id].size ? "@" + value[id].size : "")).join(",") : "";
   // Content the page holds (equipment-wardrobe-data.gen.js), checked against its hash once on arrival by the caller.
   const seed = (map) => {
     for (const [version, content] of Object.entries(map)) {
@@ -228,7 +245,7 @@
     if (lit) authored.lit = lit;
   };
   const hexRgb = (hex) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
-  BL.equipmentWardrobe = { SLOTS, SLOT, WORN, TOKENS, TRAITS, PARTS, MAX_BYTES, regionOf, validateContent, register, get, has, choice, selection, key,
+  BL.equipmentWardrobe = { SLOTS, SLOT, WORN, HEIGHT, PET, TOKENS, TRAITS, PARTS, MAX_BYTES, regionOf, validateContent, register, get, has, choice, selection, key,
     seed, paint, encode, canonical, hexRgb, content: (version) => contents.get(version) || null, slotItems: (id) => bySlot.get(id) || Object.freeze([]),
     get items() { return items; }, get seeded() { return seeded; } };
 })();

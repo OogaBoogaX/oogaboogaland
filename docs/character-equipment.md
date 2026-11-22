@@ -78,7 +78,7 @@ while trying other hats.
 ## The wardrobe
 
 Beside the hat, an Ooga wears a body and something in each of these slots, in the
-studio's order: body, skin, hair colour, eye colour, hair, eyes, glasses, mask, mouth, beard, shirt, gloves, belt, pants,
+studio's order: body, height, pet, skin, hair colour, eye colour, hair, eyes, glasses, mask, mouth, beard, shirt, gloves, belt, pants,
 shoes, back (wings, capes and what else is built out past the trunk) and its
 primary weapon. `src/js/equipment-wardrobe.js` is the contract, shared unchanged
 by the page, the Worker and the authoring script: the slots (`SLOTS`), what a
@@ -123,23 +123,81 @@ body the character does not model, the mask a head it did not shape, and the
 weapon a hand without a nunchaku. The studio says so on the row.
 
 The body is the build an Ooga is drawn in: **Male** or **Female** (the regular and
-slim builds), each also **lean** (a narrower trunk, thinner limbs) or **big-boned**
+slim builds), each also **lean** (a narrower trunk, thinner limbs, and on the male build smaller feet) or **big-boned**
 (a bigger, softer frame: the waist filled out, the chest's step and the limbs'
-swells evened, sloped shoulders domed over the top (`dome`, extra rings between
-the trunk and the arm's cap), corners rounded off, no kneecap or line down the
+swells evened, the arms only a little thicker, sloped shoulders domed over the top (`dome`, extra rings between
+the trunk and the shoulder, and the arm topped by a round cap), corners rounded off, no kneecap or line down the
 breastbone; its nipples stay, on the chest's flat face), the shapes in
-`hero-body.js` `SHAPES`. Every shape keeps the build's own gap between the tops of
-its thighs, however thick they are, and every body has a crotch under the trunk
-between them in what the thighs wear, so trousers read as one garment. It never changes height, hands, feet or the head, so
-nothing that stands, seats or aims an Ooga by its height has anything to follow.
+`hero-body.js` `SHAPES`. Every body has a crotch under the trunk
+between them in what the thighs wear, so trousers read as one garment; over bare thighs it
+is bare, so shorts end flat at their own hem. Under its foot every trunk tapers in over
+`SEAT` to the tops of the thighs (straight down a little first, `SEAT_BAND`, then sloping in), in
+what the thighs wear, or over bare thighs what the hips wear, so the seat slopes to the legs
+rather than standing square over them; this reaches every Ooga's own look. A build without a shape keeps its own
+crotch exactly. The regular (male) build's trunk widens a little toward its foot, so its
+thighs meet the trunk's sides there rather than standing out past it; this reaches every
+male Ooga's own look. On every build and shape a belt goes round the trunk's own rings a
+snug `BELT_OUT` proud of them, and a skirt under it hangs from the trunk's ring there
+(`SKIRT_OUT`), so both lie flat on the hips. A shape fits its legs to the trunk's foot
+(`buildOf`): where its thighs would stand out past it, the whole leg is drawn smaller and the
+legs closer together (`THIGH_IN` inside the trunk's sides, the build's own gap between the
+thighs); a shape with a `legGap` (the big-boned male) draws its legs larger instead, `legGap`
+apart, until their outsides meet the trunk's sides. Either way the feet keep their length and
+narrow only as far as they must not to meet (`FEET_GAP`). The big-boned female's thighs are
+thicker (`slimThigh`) so her legs fill her waist.
+
+A male (regular) build's shins are drawn `SHIN` (0.9) units longer (`hero-body.js`): the
+leg is stretched between `SHIN_RAMP`, under the knee and above any boot, and what is put on
+the leg below (a boot, its foot, anklets, toes, a model's boot bands) goes down whole, never
+taller. Every male Ooga stands about 3.5% taller; its hip
+(`cave.hip`), eyes and root follow, and a body swap between builds moves the root so the
+feet stay on the ground.
+
+What a model merges onto the limbs it was handed (`wear()`: a boot's bands, a cuff, the
+legs of shorts) is fitted to the worn limb automatically (`heroBody.refit`): the surface
+of the limb its own build would have handed and of the worn one are read at each height,
+and a detail keeps its share of the way out inside the surface and its distance past it
+outside, so a boot band drawn for a slim boot stands on a male boot as on its own.
+
+A file draws for its own build, so a worn build moves what it drew to the same place on
+the new one. `trunk()` lines a height up between the two by their hips, belt and
+shoulders (`from`, `to`, and `own`, the file's own build's trunk), so a garment drawn at
+heights read off its own body (a belt, the hem of a top) sits where it did. What a
+hook hung on the trunk (`models.js`, after the model) moves the same way, measured by
+where its mesh shows: up or down with the heights, out to the worn side (a bag at the hip),
+and out with the worn front, back or belt (SatsMason's pockets). A shape never changes height, hands, feet or the
+head; the height is its own slot (below).
 Everything drawn on the body (worn pieces, belt, skirt, strap, cuffs, boots, what a
 hook laid on the trunk) is drawn on the shape's own rings, so it fits them. The swap
 also moves each part the new build stands differently (a female build's arms and
 legs) where the crew has not posed it away, and the crew measures the body's girth
 again. A female build's face takes no beard or mouth piece. A character that models
-its own body keeps it unless its model has been reviewed in every build and shape
-(`character-wardrobe.js` `REVIEWED_BODIES`: w-s-bitcoin, whose body is the modelled
-body's own builder with its belt, skirt, cuffs and anklets).
+its own body keeps its build and height until its model has been reviewed in every
+build, shape and height (`character-wardrobe.js` `REVIEWED_BODIES`: six of the seven today;
+midy-machete joins it with her fitted file, which is in the character lane).
+While a model is built, `hero-body.js` gives its `trunk()` and `build()` the build
+being worn (`dressed`), whatever build the file names, so a garment laid on the trunk
+(YellowBrokeIt's tank top, rules-without-rulers' straps) and a
+body built by hand (tiffanyvarty) follow it. A new character that models its body is
+added to the list once it has been drawn in every combination.
+
+The height is a slider under the body's dropdown, read out in metres from the Ooga's
+feet to its crown: any whole hundredth of the game's height from 0.80 to 1.20
+(`equipment-wardrobe.js` `HEIGHT`; the cast's own heights run from 0.8 to 1.16),
+saved as `{ item: "custom", version: null, height: 80..120 }`, and the Ooga's own
+height is Original. The body is built again at that height, pieces and all, and
+stands on the same feet: the swap moves its hip (`baseY`), eyes (`headOffset`) and
+`traits.height`, and the crew measures again what it hung on the body (the gun's
+flash, the stun birds, a worn jetpack, its height and girth); another player's copy
+reads its hip and height from the body. A pet keeps the size its file built it at,
+whatever height its Ooga is worn at: the swap leaves the pet's node alone and keeps it
+on the ground (the crew's `pet.lift` follows the hip).
+
+The Pet section, shown only for an Ooga with a pet (`parts.dog`), sets the pet's own
+height, read out in metres: any whole per cent from 50 to 150 of the height its file
+builds it at (`equipment-wardrobe.js` `PET`),
+saved as `{ item: "custom", version: null, size: 50..150 }` and set as the pet node's
+scale (with its lying-down drop), so it builds nothing again.
 
 The colour slots take a swatch from a short palette, the character's own colour
 (the first swatch), or any colour from the wheel at the end of the swatches or typed
