@@ -315,7 +315,7 @@
     };
     const spot = { x: 0, y: 0, z: 0 }, home = pose(), from = pose(), to = pose();
     const net = BL.net, sharedPose = new Array(12).fill(0);
-    let sharedToken = "", sharedConnection = "", queueShown = false, queueRoom = "", queueSeen = null, queueVisible = false, queueHere = true, sharedDone = "", poseAt = 0, touchAt = 0, wasShared = false;
+    let sharedToken = "", sharedConnection = "", queueShown = false, queueRoom = "", queueSeen = null, queueVisible = false, queueHere = true, sharedDone = "", poseAt = 0, touchAt = 0, wasShared = false, sharedIdle = false;
     const shared = () => G === ISLAND_GUIDE && !!net.state.me && net.state.tessShared;
     const queue = () => net.state.tessGuide;
     const active = () => shared() && net.state.room === "live" && queue()?.phase === "active" && queue().token !== sharedDone && queue().until > net.serverNow();
@@ -423,15 +423,29 @@
       rig.push(x, y, z);
       if (track) rig.track();
     };
-    const toWork = () => {
-      if (shared()) { sharedDone = queue()?.token || ""; queueAction("cancel"); sharedToken = ""; queueShown = false; queueRoom = ""; }
+    // Off to another of her machines.
+    const nextSite = () => {
       let site = state.site;
       while (site === state.site) site = Math.floor(Math.random() * WORKS.length);
       state.site = site;
       const w = WORKS[site].at;
       flyTo(w[0], w[1], w[2], 4);
       state.stage = "fly";
+    };
+    const toWork = () => {
+      if (shared()) { sharedDone = queue()?.token || ""; queueAction("cancel"); sharedToken = ""; queueShown = false; queueRoom = ""; }
+      nextSite();
       show("work");
+    };
+    // Her work, a machine at a time: fly there, beam on it a while, rest, and on to the next.
+    const work = (dt) => {
+      if (state.stage === "fly") {
+        if (rig.steer(dt)) { state.stage = "beam"; state.timer = 6 + Math.random() * 4; }
+      } else if ((state.timer -= dt) <= 0) {
+        if (state.stage === "beam") { state.stage = "rest"; state.timer = 0.6; }
+        else return true;
+      }
+      return false;
     };
     // In front of the view and to its right, a little below its middle; or ahead of the Ooga the visitor drives, off to
     // its right at head height, where the view over its shoulder shows her.
@@ -709,6 +723,7 @@
         sharedConnection = net.state.connectionToken; queueAction("watch");
       }
       if (active()) {
+        sharedIdle = false;
         if (sharedToken !== queue().token) {
           if (busy()) { sharedDone = queue().token; queueAction("cancel"); return true; }
           if (state.holding) release();
@@ -720,18 +735,23 @@
       }
       if (sharedToken || state.holding || state.ask) {
         if (state.holding) release();
-        rig.hush(); show("work"); sharedToken = ""; queueRoom = "";
+        rig.hush(); show("work"); sharedToken = ""; queueRoom = ""; sharedIdle = false;
       }
-      const q = queue(), a = q?.pose, w = WORKS[0];
-      rig.clearPath(4, 1); rig.aims = null;
+      const q = queue(), a = q?.pose;
+      rig.aims = null;
       if (a) {
+        rig.clearPath(4, 1); rig.stop(); sharedIdle = false;
         const k = 1 - Math.exp(-dt * 16);
         position.x += (a[0] - position.x) * k; position.y += (a[1] - position.y) * k; position.z += (a[2] - position.z) * k;
         rig.mode = a[3]; rig.aim.x = a[4]; rig.aim.y = a[5]; rig.aim.z = a[6];
         rig.watch.x = a[7]; rig.watch.y = a[8]; rig.watch.z = a[9]; rig.watching = !!a[10]; rig.steady = !!a[11];
       } else {
-        position.x = w.at[0]; position.y = w.at[1]; position.z = w.at[2];
-        rig.mode = 1; rig.aim.x = w.aim[0]; rig.aim.y = w.aim[1]; rig.aim.z = w.aim[2]; rig.watching = rig.steady = false;
+        // Nobody's turn: she works her machines as she does for a signed-out visitor, each page on its own, since
+        // nobody is publishing where she is.
+        if (!sharedIdle) { sharedIdle = true; nextSite(); }
+        if (work(dt)) nextSite();
+        const w = WORKS[state.site];
+        rig.mode = state.stage === "beam" ? 1 : 0; rig.aim.x = w.aim[0]; rig.aim.y = w.aim[1]; rig.aim.z = w.aim[2]; rig.watching = rig.steady = false;
       }
       rig.calm = !!q?.busy;
       // She greets only a visitor who lands on the island's own ground: one who arrives off it could not join anyway,
