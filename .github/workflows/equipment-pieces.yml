@@ -1,0 +1,135 @@
+name: Equipment pieces
+
+# After character files reach rock, authors the wardrobe pieces they make and opens (or refreshes) one PR,
+# automation/equipment-pieces, with any new ones for a maintainer to review and merge. Hats are only reported
+# (docs/character-equipment.md, "The equipment pipeline"). Nothing here deploys.
+on:
+  push:
+    branches: [rock]
+    paths:
+      - 'src/characters/**'
+      - 'src/equipment/**'
+      - 'src/js/equipment-wardrobe.js'
+      - 'scripts/equipment-wardrobe.mjs'
+      - 'scripts/equipment-hats.mjs'
+      - 'scripts/equipment-pieces.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: equipment-pieces
+  cancel-in-progress: true
+
+jobs:
+  # Runs every character file in the authoring sandbox, so it holds no write token and no secret.
+  author:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      # Only while its PR is open, and only the names changed on the branch: everything else stays rock's.
+      - name: Keep names a maintainer gave on the open PR
+        run: |
+          branch=automation/equipment-pieces
+          if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')" ]; then
+            base="$(gh api "repos/$GITHUB_REPOSITORY/compare/rock...$branch" --jq .merge_base_commit.sha)"
+            raw() { gh api "repos/$GITHUB_REPOSITORY/contents/src/equipment/wardrobe/labels.json?ref=$1" -H "Accept: application/vnd.github.raw" || echo '{}'; }
+            raw "$base" > "$RUNNER_TEMP/base-labels.json"
+            raw "$branch" > "$RUNNER_TEMP/branch-labels.json"
+            node scripts/equipment-pieces.mjs --labels "$RUNNER_TEMP/base-labels.json" "$RUNNER_TEMP/branch-labels.json"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Author the pieces and report
+        run: |
+          node scripts/equipment-pieces.mjs --author untracked/equipment-pieces
+          cat untracked/equipment-pieces/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: equipment-pieces
+          path: |
+            src/equipment/wardrobe/
+            untracked/equipment-pieces/
+
+  # Takes the authored data only, checks it as every build does (no character code runs) and opens the PR.
+  propose:
+    needs: [author]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Repository-scoped token
+        if: vars.CHARACTER_APP_CLIENT_ID != ''
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.CHARACTER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CHARACTER_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          token: ${{ steps.app.outputs.token || github.token }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: equipment-pieces
+          path: ${{ runner.temp }}/authored
+      - name: Apply and check the authored pieces
+        run: node scripts/equipment-pieces.mjs --apply "$RUNNER_TEMP/authored/src/equipment/wardrobe"
+      # Hats are never published here, so they wait on one issue, open while any does and closed when none is left.
+      - name: Report the hats waiting on a maintainer
+        run: |
+          title="Equipment: hats waiting on a maintainer"
+          hats="$RUNNER_TEMP/authored/untracked/equipment-pieces/hats.md"
+          issue="$(gh issue list --state open --limit 200 --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -n1)"
+          if [ -s "$hats" ]; then
+            printf '\nFrom `%s` by the Equipment pieces workflow (docs/character-equipment.md, The equipment pipeline). It closes by itself once no hat is waiting.\n' "$GITHUB_SHA" >> "$hats"
+            if [ -n "$issue" ]; then gh issue edit "$issue" --body-file "$hats"; else gh issue create --title "$title" --body-file "$hats"; fi
+          elif [ -n "$issue" ]; then
+            gh issue close "$issue" --comment "No hat is waiting at $GITHUB_SHA."
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Open or refresh the PR
+        run: |
+          branch=automation/equipment-pieces
+          report="$RUNNER_TEMP/authored/untracked/equipment-pieces/report.md"
+          open="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          git add src/equipment/wardrobe src/js/equipment-wardrobe.gen.js src/js/equipment-wardrobe-data.gen.js
+          if git diff --cached --quiet; then
+            echo "Every piece the characters make is published."
+            if [ -n "$open" ]; then gh pr close "$open" --comment "Nothing left to publish at $GITHUB_SHA." --delete-branch; fi
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q -m "Publish the equipment pieces the characters make at ${GITHUB_SHA::8}"
+          git push -f origin "HEAD:refs/heads/$branch"
+          { cat "$report"; printf '\nAuthored from `%s` by the Equipment pieces workflow. Check each new piece in the studio (`npm run character:studio -- <handle>`), then merge. A later merge to rock refreshes this PR.\n' "$GITHUB_SHA"; } > "$RUNNER_TEMP/body.md"
+          if [ -n "$open" ]; then
+            gh pr edit "$open" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr create --base rock --head "$branch" --title "Equipment: publish new wardrobe pieces" --body-file "$RUNNER_TEMP/body.md"
+          fi
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
