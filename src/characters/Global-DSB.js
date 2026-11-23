@@ -64,7 +64,7 @@
         const white = k.color("#ffffff");
         const black = k.color("#080808");
 
-        for (const x of [1, 4]) {
+        for (const x of [1, 5]) {
           v.set(x, 5, 5, white);
           v.set(x, 5, 6, black);
           k.eyeCells.push([x, 5]);
