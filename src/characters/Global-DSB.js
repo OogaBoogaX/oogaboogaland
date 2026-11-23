@@ -1,6 +1,67 @@
+
 (() => {
   "use strict";
+
   const BL = window.BL;
+  const { geometry, pushVert, face, merge } = BL.models;
+  const { hexToRgb } = BL.math;
+
+  // Build a rounded, irregular stone boulder.
+  const boulderGeometry = (h) => {
+    const geo = geometry();
+    const u = h / 16;
+
+    const rings = [
+      { y: 1, r: 1.7 },
+      { y: 2, r: 2.5 },
+      { y: 4, r: 3.1 },
+      { y: 6, r: 2.8 },
+      { y: 7, r: 1.9 }
+    ];
+
+    const segments = 8;
+    const colors = ["#777777", "#686868", "#929292", "#555555"];
+    const vertices = [];
+
+    for (let r = 0; r < rings.length; r++) {
+      const ring = [];
+      for (let i = 0; i < segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        const wobble = 1 + 0.08 * Math.sin(i * 4 + r * 2);
+        ring.push(pushVert(
+          geo,
+          Math.cos(angle) * rings[r].r * wobble * u,
+          rings[r].y * u,
+          Math.sin(angle) * rings[r].r * wobble * u
+        ));
+      }
+      vertices.push(ring);
+    }
+
+    const bottom = pushVert(geo, 0, 0.5 * u, 0);
+    const top = pushVert(geo, 0, 7.5 * u, 0);
+
+    for (let i = 0; i < segments; i++) {
+      const next = (i + 1) % segments;
+      face(geo, [bottom, vertices[0][next], vertices[0][i]], hexToRgb(colors[i % 4]));
+
+      for (let r = 0; r < rings.length - 1; r++) {
+        const shade = hexToRgb(colors[(i + r) % 4]);
+        face(geo, [
+          vertices[r][i],
+          vertices[r][next],
+          vertices[r + 1][next],
+          vertices[r + 1][i]
+        ], shade);
+      }
+
+      face(geo, [vertices[rings.length - 1][i],
+        vertices[rings.length - 1][next], top],
+        hexToRgb(colors[(i + 2) % 4]));
+    }
+
+    return geo;
+  };
 
   BL.characters.add({
     handle: "Global-DSB",
@@ -12,11 +73,11 @@
       hairless: true,
       cleanShaven: true,
       noBrow: true,
-      noPupils: true,
+      noPupils: false,
       face: "none",
       height: 1.10,
-      skin: "#e52b20",
-      hair: "#cc2119",
+      skin: "#ed3025",
+      hair: "#ed3025",
       fur: "#ed3025",
       eyeColor: "#ffffff",
       eyeGlow: 0
@@ -27,7 +88,7 @@
       idle: [
         "DSB loves rocks!",
         "DSB is happy!",
-        "Where is DSB's club?",
+        "Where is DSB's boulder?",
         "DSB likes red!",
         "DSB smash big rock!",
         "DSB wants cookies!",
@@ -38,24 +99,24 @@
     dress: {
       skull(k, v) {
         const red = k.color("#ed3025");
-        const redDark = k.color("#b91d18");
-        const orange = k.color("#ff8c00");
+        const dark = k.color("#b91d18");
         const white = k.color("#ffffff");
-        const black = k.color("#090909");
+        const black = k.color("#080808");
+        const orange = k.color("#ff8c00");
 
-        v.fill(0, 6, 0, 6, 0, 5, red);
-        v.fill(1, 5, 0, 6, 1, 4, red);
-        v.fill(0, 6, 1, 5, 5, 5, red);
+        const redJ = k.jit(red, dark, 0.08);
 
-        v.fill(1, 2, 5, 7, 3, 4, white);
-        v.fill(4, 5, 5, 7, 3, 4, white);
+        v.fill(-1, 7, 0, 7, -1, 5, redJ);
 
-        v.set(2, 5, 7, black);
-        v.set(4, 5, 7, black);
+        // Eyes
+        for (const x of [1, 5]) {
+          v.set(x, 5, 6, white);
+          v.set(x, 5, 7, black);
+          k.eyeCells.push([x, 5]);
+        }
 
+        // Orange nose
         v.fill(2, 4, 5, 7, 6, 7, orange);
-
-        v.fill(2, 4, 3, 5, 7, 7, redDark);
 
         return true;
       },
@@ -67,38 +128,27 @@
         for (const x of [1, 5]) {
           v.set(x, 5, 5, white);
           v.set(x, 5, 6, black);
-          k.eyeCells.push([x, 5]);
         }
 
         return true;
       },
 
-      hat(k, v) {
-        const brown = k.color("#754421");
-        const light = k.color("#a66b38");
-        const bone = k.color("#eee1c5");
+      torso(k, v) {
+        const red = k.color("#ed3025");
+        const dark = k.color("#b91d18");
+        const redJ = k.jit(red, dark, 0.08);
 
-        v.fill(0, 6, 8, 8, 0, 5, brown);
-        v.fill(1, 5, 9, 9, 1, 5, light);
+        v.fill(0, 7, 0, 7, 0, 5, redJ);
 
-        v.set(2, 7, 9, bone);
-        v.set(3, 7, 9, bone);
-        v.set(4, 7, 9, bone);
+        return true;
       },
 
-      torso(k, v) {
-        const brown = k.color("#754421");
-        const light = k.color("#a66b38");
-        const dark = k.color("#482713");
-        const red = k.color("#ed3025");
-
-        v.fill(0, 7, 0, 7, 0, 5, red);
-
-        v.fill(1, 6, 2, 6, 5, 5, brown);
-        v.fill(2, 5, 2, 5, 6, 6, light);
-
-        v.fill(1, 6, 1, 1, 6, 6, dark);
-        v.set(3, 7, 6, light);
+      club(k) {
+        return {
+          default: boulderGeometry(k.h),
+          rest: { x: 0, y: Math.PI / 2, z: 0.24 },
+          carry: { x: 0, y: Math.PI / 2, z: 0.95 }
+        };
       }
     }
   });
