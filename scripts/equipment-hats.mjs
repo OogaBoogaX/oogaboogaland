@@ -221,14 +221,17 @@ export const authorEquipmentHats = (base = root, selected = null) => {
 
 // Explicit source execution, kept outside ordinary build/CI. Unrelated file changes are provenance only.
 export const checkEquipmentHatSources = (base = root) => {
-  const saved = readEquipmentHats(base), sourceChanged = [], geometryChanged = [];
+  const saved = readEquipmentHats(base), sourceChanged = [], geometryChanged = [], failed = [];
   for (const definition of sourceDefinitions(base)) {
     const row = saved.catalog.items.find((item) => item.id === definition.id); checkIdentity(row, definition);
-    const extracted = extractDefinition(base, definition, saved);
+    // A creator's file that no longer builds its hat is reported with the rest, not thrown past them.
+    let extracted;
+    try { extracted = extractDefinition(base, definition, saved); }
+    catch (error) { failed.push({ id: definition.id, error: String(error?.message || error).slice(0, 200) }); continue; }
     if (saved.catalog.sources?.[definition.id] !== extracted.source) sourceChanged.push(definition.id);
     if (!row || !unchanged(saved.revisions[row.current], extracted)) geometryChanged.push({ id: definition.id, current: row?.current || null, extracted: extracted.version });
   }
-  return { items: saved.catalog.items.length, sourceChanged, geometryChanged };
+  return { items: saved.catalog.items.length, sourceChanged, geometryChanged, failed };
 };
 
 export const writeEquipmentHats = (base = root) => {
@@ -246,5 +249,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     throw new Error("Usage: node scripts/equipment-hats.mjs [--author [item ...]|--check-sources]");
   const result = mode === "--check-sources" ? checkEquipmentHatSources() : mode === "--author" ? authorEquipmentHats(root, selected.length ? selected : null) : writeEquipmentHats();
   console.log(JSON.stringify(result));
-  if (mode === "--check-sources" && result.geometryChanged.length) process.exitCode = 1;
+  if (mode === "--check-sources" && (result.geometryChanged.length || result.failed.length)) process.exitCode = 1;
 }

@@ -377,7 +377,8 @@
       "creators": [
         "SVRNSociety"
       ],
-      "version": "e70e17f6143de22874100bcbcb446a3761bb26f05ab88f5ee143e729cb0d05e0"
+      "version": "e70e17f6143de22874100bcbcb446a3761bb26f05ab88f5ee143e729cb0d05e0",
+      "retired": true
     },
     {
       "id": "hair-9ab19128051a4ed1",
@@ -399,6 +400,15 @@
         "NEEDcreations"
       ],
       "version": "bb4218f86dc779ef4c3b347ac93a99f791720f93d725f32e33f061eaec0e6652"
+    },
+    {
+      "id": "hair-2c9c0c4db11ef1bc",
+      "slot": "hair",
+      "label": "Blonde long hair",
+      "creators": [
+        "kitsboy"
+      ],
+      "version": "2c9c0c4db11ef1bce0237c15257aea85f78afbd801b578a51642aa76fd0b2e36"
     },
     {
       "id": "hair-c1f33358e2d6e46f",
@@ -539,6 +549,15 @@
       "version": "afefcbaf4d2121195c9cf3658087bff64a2c426d994f221ceaa2042f622b05c7"
     },
     {
+      "id": "eyes-643a5d8eab3e7bbf",
+      "slot": "eyes",
+      "label": "Glowing golden eyes",
+      "creators": [
+        "kitsboy"
+      ],
+      "version": "643a5d8eab3e7bbfbc51932b3ff662653d14eb782ca11f0ad72e07071ec2140e"
+    },
+    {
       "id": "eyes-8f53a07e635a6706",
       "slot": "eyes",
       "label": "Glowing orange blank eyes",
@@ -572,7 +591,8 @@
       "creators": [
         "SVRNSociety"
       ],
-      "version": "956f6e4f03cd5a1af7c2dd9e19e705331b015137d69aaacc504b3df7cf1d843a"
+      "version": "956f6e4f03cd5a1af7c2dd9e19e705331b015137d69aaacc504b3df7cf1d843a",
+      "retired": true
     },
     {
       "id": "glasses-1c5e50082c7c9699",
@@ -834,7 +854,8 @@
       "creators": [
         "Global-DSB"
       ],
-      "version": "c3394acb3432a93d7e503e5ad71585a9e0ad0da29c0de5c3fe8b4640625037b3"
+      "version": "c3394acb3432a93d7e503e5ad71585a9e0ad0da29c0de5c3fe8b4640625037b3",
+      "retired": true
     },
     {
       "id": "shirt-f62645755ce7d2e2",
@@ -889,6 +910,15 @@
         "RandyMcMillan"
       ],
       "version": "abd30424d896210659a0cf5c0e10c02a0cc33c082b06ef2f3aaca5bbcccb4157"
+    },
+    {
+      "id": "shirt-c89e96b6e4e6d225",
+      "slot": "shirt",
+      "label": "Red fur with hide vest",
+      "creators": [
+        "Global-DSB"
+      ],
+      "version": "c89e96b6e4e6d2255f6bd76afc3ad9d2db9fd910851becb921e638ae3c6e36eb"
     },
     {
       "id": "shirt-f1caf2743baadc47",
@@ -1033,7 +1063,8 @@
       "creators": [
         "Global-DSB"
       ],
-      "version": "227fccf3dc78e3ededd3a4d6f93cc8c257e4df8892703fb97f934910023b7d41"
+      "version": "227fccf3dc78e3ededd3a4d6f93cc8c257e4df8892703fb97f934910023b7d41",
+      "retired": true
     },
     {
       "id": "pants-1c2c8a86830c084f",
@@ -1079,6 +1110,15 @@
         "ibrihamturay-coder"
       ],
       "version": "14364aa1b437721d82a7f50b1ac17f97760a221848d38fc6ce7b691036d2559f"
+    },
+    {
+      "id": "pants-9f9cc3eb6f12b4ea",
+      "slot": "pants",
+      "label": "Red fur pants",
+      "creators": [
+        "Global-DSB"
+      ],
+      "version": "9f9cc3eb6f12b4eabff780788b84f7eba66c01fa0a71eef243f272d93839dd52"
     },
     {
       "id": "pants-40cbb1fafdbe9e44",
@@ -1215,6 +1255,15 @@
         "itsLiran"
       ],
       "version": "883c86410d1d4ee617ae7564d1e123dd8b2ed7dcab6bbfca236ad21171134de0"
+    },
+    {
+      "id": "weapon-f33a585f802acf2a",
+      "slot": "weapon",
+      "label": "Gold SVRN sword",
+      "creators": [
+        "SVRNSociety"
+      ],
+      "version": "f33a585f802acf2ac911cbc11766b020c0371d8161beb2536affb1ffcd70d68e"
     },
     {
       "id": "weapon-c613e3d3ce156d6c",

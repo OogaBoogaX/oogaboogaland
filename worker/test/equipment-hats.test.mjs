@@ -694,7 +694,9 @@ test("normal archive builds allow one-file character edits; explicit authoring r
     // The ordinary archive builder neither evaluates nor parses the character source.
     writeFileSync(sourceFile, unrelated + "\nthrow new Error('source execution probe');\n");
     writeEquipmentHats(folder); unchanged();
-    assert.throws(() => checkEquipmentHatSources(folder), /source execution probe/); unchanged();
+    // A source that no longer builds is reported against its hat, not thrown past the rest (the equipment pipeline).
+    const broken = checkEquipmentHatSources(folder);
+    assert.deepEqual(broken.failed.map(row => row.id), [first.id]); assert.match(broken.failed[0].error, /source execution probe/); unchanged();
     const hatEdit = unrelated.replace('"#d8c08a"', '"#d9c08a"');
     assert.notEqual(hatEdit, unrelated); writeFileSync(sourceFile, hatEdit);
     writeEquipmentHats(folder); unchanged();
@@ -707,7 +709,7 @@ test("normal archive builds allow one-file character edits; explicit authoring r
     const next = JSON.parse(readFileSync(indexFile, "utf8"));
     assert.notEqual(next.items[0].current, first.current); assert.ok(next.items[0].versions.includes(first.current));
     const changed = extractHat(folder, first.id); assert.equal(changed.version, next.items[0].current);
-    assert.deepEqual(checkEquipmentHatSources(folder), { items: baseline.items.length, sourceChanged: [], geometryChanged: [] });
+    assert.deepEqual(checkEquipmentHatSources(folder), { items: baseline.items.length, sourceChanged: [], geometryChanged: [], failed: [] });
     writeFileSync(oldFile, bytes + " "); assert.throws(() => writeEquipmentHats(folder), /hash\/size/); writeFileSync(oldFile, bytes);
     next.items[0].versions = [next.items[0].current]; writeFileSync(indexFile, JSON.stringify(next));
     assert.throws(() => writeEquipmentHats(folder), /removed from its catalog/);
