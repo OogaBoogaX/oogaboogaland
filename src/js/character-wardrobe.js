@@ -11,7 +11,7 @@
   const own = (cave) => cave?.traits?.dress || {};
   // A character that models its own body wears a body and a height only once its model has been seen in every build,
   // shape and height: built while `heroBody.dressed` gives its trunk and builder the build worn, so it follows it.
-  const REVIEWED_BODIES = new Set(["w-s-bitcoin", "bitcoin-bill", "yellowbrokeit", "natalievarty", "tiffanyvarty", "rules-without-rulers"]);
+  const REVIEWED_BODIES = new Set(["w-s-bitcoin", "bitcoin-bill", "yellowbrokeit", "natalievarty", "midy-machete", "tiffanyvarty", "rules-without-rulers"]);
   const stockHead = (dress) => !(dress.model || dress.skull || dress.hat || dress.crown || dress.eyes || dress.mark || dress.refine);
   // Whether this body can wear a slot's pieces: head pieces only on the stock head, a beard and a mouth only on the
   // regular build's face, a mask on any head the character did not shape itself, body pieces on a body it does not model.

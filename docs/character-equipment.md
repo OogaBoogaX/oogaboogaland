@@ -157,14 +157,15 @@ What a model merges onto the limbs it was handed (`wear()`: a boot's bands, a cu
 legs of shorts) is fitted to the worn limb automatically (`heroBody.refit`): the surface
 of the limb its own build would have handed and of the worn one are read at each height,
 and a detail keeps its share of the way out inside the surface and its distance past it
-outside, so a boot band drawn for a slim boot stands on a male boot as on its own.
+outside, so midy-machete's boot bands stand on a male boot as on hers. midy-machete's shorts run
+straight down at the trunk's width, and their legs are fitted with her boots.
 
 A file draws for its own build, so a worn build moves what it drew to the same place on
 the new one. `trunk()` lines a height up between the two by their hips, belt and
 shoulders (`from`, `to`, and `own`, the file's own build's trunk), so a garment drawn at
-heights read off its own body (a belt, the hem of a top) sits where it did. What a
+heights read off its own body (midy's belt, the hem of her top) sits where it did. What a
 hook hung on the trunk (`models.js`, after the model) moves the same way, measured by
-where its mesh shows: up or down with the heights, out to the worn side (a bag at the hip),
+where its mesh shows: up or down with the heights, out to the worn side (midy's bag),
 and out with the worn front, back or belt (SatsMason's pockets). A shape never changes height, hands, feet or the
 head; the height is its own slot (below).
 Everything drawn on the body (worn pieces, belt, skirt, strap, cuffs, boots, what a
@@ -173,11 +174,10 @@ also moves each part the new build stands differently (a female build's arms and
 legs) where the crew has not posed it away, and the crew measures the body's girth
 again. A female build's face takes no beard or mouth piece. A character that models
 its own body keeps its build and height until its model has been reviewed in every
-build, shape and height (`character-wardrobe.js` `REVIEWED_BODIES`: six of the seven today;
-midy-machete joins it with her fitted file, which is in the character lane).
+build, shape and height (`character-wardrobe.js` `REVIEWED_BODIES`, all seven today).
 While a model is built, `hero-body.js` gives its `trunk()` and `build()` the build
 being worn (`dressed`), whatever build the file names, so a garment laid on the trunk
-(YellowBrokeIt's tank top, rules-without-rulers' straps) and a
+(YellowBrokeIt's tank top, rules-without-rulers' straps, midy-machete's top) and a
 body built by hand (tiffanyvarty) follow it. A new character that models its body is
 added to the list once it has been drawn in every combination.
 
