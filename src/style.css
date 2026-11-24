@@ -1963,6 +1963,14 @@ body[data-active-scene="block"] .mode-hud {
 @media (pointer: coarse) {
   .players-chat-open { min-height: 44px; }
 }
+/* A chevron at the row's end says it opens something: the chat's preview. */
+.players-chat-open { grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; }
+.players-chat-open > * { grid-column: 1; }
+.players-chat-open::after {
+  content: "\203A"; grid-column: 2; grid-row: 1 / span 2; align-self: center; padding-right: 4px;
+  color: rgba(243, 239, 228, 0.45); font-size: 20px; font-weight: 700; line-height: 1;
+}
+.players-chat-open:is(:hover, :focus-visible, .virtual-hover)::after { color: var(--accent-text); }
 
 /* Change chats? (cloud-panel.js `openChat`): the question on a slab, Stay and the amber Switch chats under it. */
 .hosted-switch { width: 360px; }

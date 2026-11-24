@@ -1100,8 +1100,16 @@
     if (navigator.userActivation && navigator.userActivation.hasBeenActive) rejoin();
   };
 
-  // Joining the island's voice hangs up a hosted chat's (chat-call.js): one voice at a time, the visitor's choice.
-  const join = () => { if (BL.net.state.call && BL.chatCall) BL.chatCall.leave(); spokeElsewhere = false; endRecovery(); return enable().then(() => { if (stats.publishing) rememberJoined(true); }); };
+  // Joining the island's voice hangs up a hosted chat's (chat-call.js): one voice at a time, the visitor's choice. A host
+  // leaves only by handing the chat to a co-host or ending it (chat-hosts.js), so for them the island's voice waits.
+  const join = () => {
+    if (BL.net.state.call && BL.chatCall && BL.chatCall.room?.you?.rank === "host") {
+      if (BL.hud && BL.hud.toast) BL.hud.toast("You're hosting a chat · hand it to a co-host or end it to join island voice");
+      return Promise.resolve();
+    }
+    if (BL.net.state.call && BL.chatCall) BL.chatCall.leave();
+    spokeElsewhere = false; endRecovery(); return enable().then(() => { if (stats.publishing) rememberJoined(true); });
+  };
 
   // The footer's button: join, then mute and unmute. An Unmute while a returning visitor connects waits for that.
   const toggle = () => {

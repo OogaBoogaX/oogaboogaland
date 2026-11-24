@@ -685,7 +685,12 @@
           links.delete(connection);
           setTimeout(() => status("ended"), 50);
         },
-        speaking: () => active
+        speaking: () => active,
+        // A sample member's connection dropped or back: their row reconnecting, as the server's quiet hold shows it.
+        drop(login, on) {
+          const p = people.find((q) => q.login === login);
+          if (p && !closed) delta([{ ...p, reconnecting: on }]);
+        }
       };
       if (r) {
         if (r.ended) { setTimeout(() => status("ended"), 50); return { zone() {}, resync() {}, request: () => 0, wake() {}, dispose() {} }; }
@@ -720,6 +725,8 @@
       }, 60))
     });
     const rtc = fakeRtc(voice);
+    // For the checks: a sample member's connection drops (`on`) or comes back in every open feed.
+    BL.oogaChatFixtures.drop = (login, on = true) => { for (const f of feeds) f.drop?.(login, on); };
     const commons = (boot, { message, status }) => {
       // Voice links as the island keeps them: linked with Sample Oak, an ask waiting on Sample-Fern, who asked back.
       let closed = false, next = HISTORY.length + 1;

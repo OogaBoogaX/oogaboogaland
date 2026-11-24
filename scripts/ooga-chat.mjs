@@ -134,7 +134,7 @@ const hash = (bytes) => createHash("sha256").update(bytes).digest("hex").slice(0
 // colour, at most `fill` of the side (a maskable icon keeps inside the platform's safe circle). The favicons are the
 // island's set (distribution-icons.mjs): 32px and 64px PNGs, here the mark on a rounded square of the theme colour,
 // favicon.ico holding both, and the Apple touch icon the 64px one at twice its size on the theme colour.
-export const APP = { name: "Ooga Chat", description: "Listen to the island. Speak from the clouds.", theme: "#0a0a0b" };
+export const APP = { name: "Ooga Chat", description: "Voice chats from Ooga Booga Land: join one and ask to speak.", theme: "#0a0a0b" };
 export const ICON_SIZES = [{ size: 192, fill: 0.75, purpose: "any" }, { size: 512, fill: 0.75, purpose: "any" }, { size: 512, fill: 0.5, purpose: "maskable" }];
 export const FAVICON_SIZES = [32, 64];
 const OUTLINE = "#2b1b10", DOT = "#b18aff";

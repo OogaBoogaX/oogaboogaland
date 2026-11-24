@@ -123,7 +123,7 @@
 @media (max-width: 399px) { .iv-live { min-height: 44px; } .iv-stage { max-height: 180px; } }
 /* In a chat on a narrow screen the footer keeps to two rows rather than spilling past the panel's foot: the visitor's
    name with the links (Leave, Sign out), then the buttons on one row, each as wide as its words (Unmute, Join Voice,
-   Go there or Leave, Request to speak, End chat). Any note a button carries goes under them. */
+   Go there or Go back, Request to speak, End chat). Any note a button carries goes under them. */
 @media (max-width: 479px) {
   .panel[data-space="on"] .cloud-foot { gap: 6px 8px; }
   .panel[data-space="on"] .cloud-foot-actions { display: contents; }
@@ -137,3 +137,35 @@
    covers it, and scrolls itself when long. Placed last so it wins over the floating pop-up's phone sheet. */
 .hc-pop.hc-docked { position: static; z-index: auto; width: auto; max-width: none; margin: 6px 0 0; padding: 0; inset: auto; }
 .hc-pop.hc-docked .hc-pop-slab { max-height: min(40vh, 320px); overflow-y: auto; }
+
+/* Review fixes (desktop and phone). The invite and co-host offer cards are slabs but never stretch to fill the panel. */
+.panel > .hc-invite { flex: none; align-content: start; }
+/* A chat's counts keep on one line; under 400px the land's tag goes under the counts, so the title keeps its width. */
+.hc-chat-row-count { white-space: nowrap; }
+@media (max-width: 399px) {
+  .hc-chat-row { flex-wrap: wrap; }
+  .hc-chat-row-text { flex-basis: calc(100% - 46px); }
+  .hc-chat-row > .panel-chip { margin-left: 46px; }
+  /* The preview's ways in, stacked full width with the amber one first. */
+  .hc-preview .hc-start-go { flex-direction: column-reverse; }
+  .hc-preview .hc-start-go .foot-button { width: 100%; }
+}
+/* In a chat, Sign out waits in the other tabs (it sat beside Leave chat, a slip away); Leave chat and Back to chats are
+   real tap targets on a touch screen. */
+.panel[data-space="on"] .cloud-foot-actions > .link:not(.hc-leave) { display: none; }
+@media (pointer: coarse) {
+  .panel[data-space] :is(.hc-room-back, .hc-leave) { min-height: 40px; padding: 0 8px; }
+}
+/* On a narrow screen a chat keeps one whole row of its roster, names and roles included, under a smaller island view. */
+@media (max-width: 479px) {
+  .panel[data-space="on"] > .cloud-roster { min-height: 116px; }
+  .panel[data-space="on"] .iv-stage { max-height: 132px; }
+}
+/* The pop-ups' buttons by what they do, as every pop-up's are: the one amber action, red for what removes someone or
+   ends the chat, stone for the rest (Cancel, Not now, Decline, a tile menu's other choices). The tile menu's Cancel
+   stands apart at its foot. */
+:is(.hc-pop, .hc-start, .hc-preview, .hc-invite) .foot-button:not(.foot-primary, .hc-danger) { background: var(--stone); }
+:is(.hc-pop, .hc-start, .hc-preview, .hc-invite) .foot-button:not(.foot-primary, .hc-danger):is(:hover, :focus-visible):not(:disabled, [aria-disabled="true"]) { background: var(--stone-lt); }
+.hc-danger { background: linear-gradient(#ef6a55, var(--danger)); color: #fff; }
+.hc-danger:is(:hover, :focus-visible) { background: linear-gradient(#f5806d, #ef5a44); }
+.hc-pop-cancel { margin-top: 4px; }

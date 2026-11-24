@@ -187,6 +187,15 @@ test("access ends: signing out or losing eligibility closes the account's member
   const a = await h.member(4, "dee"), b = await h.member(4, "dee"), c = await h.member(4, "dee"), d = await h.member(4, "dee");
   assert.equal([a, b, c].every((m) => m.ws.closed === null), true);
   assert.equal(d.ws.closed.code, 4429);
+  // At the limit, the account's own pages that went away without closing make room at once, not at the next sweep:
+  // one silent past SILENT_MS goes, one heard from lately stays.
+  const { SILENT_MS } = await import("../src/room-commons.js");
+  h.advance(SILENT_MS - 1000);
+  await h.send(b.ws, { t: "chat", text: "still here", clientId: "b1" });
+  h.advance(2000);
+  const e = await h.member(4, "dee");
+  assert.deepEqual([a.ws.closed && a.ws.closed.code, b.ws.closed, c.ws.closed && c.ws.closed.code, e.ws.closed], [4000, null, 4000, null],
+    "a page back after a phone slept gets in, its dead sockets gone");
 });
 
 test("with only members here the sweep runs every four minutes, and a player arriving brings it back to one a minute", async () => {
@@ -217,6 +226,19 @@ test("a woken Room keeps its members as members, never as players", async () => 
   const isle = await woken.player(1, "amy");
   await woken.send(ws, { t: "chat", text: "still here", clientId: "w1" });
   assert.deepEqual(lines(isle).map((l) => [l.login, l.text]), [["bea", "still here"]]);
+});
+
+test("after a wake, an account at its limit still makes room from its own silent sockets", async () => {
+  // With only members here the Room hibernates between frames: the page coming back is what wakes it, and its dead
+  // sockets must not look heard from at that wake.
+  const { SILENT_MS } = await import("../src/room-commons.js");
+  const accepted = [], start = 1_800_000_000_000;
+  const first = await harness({ accepted, start });
+  const pages = [await first.member(4, "dee"), await first.member(4, "dee"), await first.member(4, "dee")];
+  const woken = await harness({ accepted, start: start + SILENT_MS + 5000 });
+  const back = await woken.member(4, "dee");
+  assert.equal(back.ws.closed, null, "the page back after a phone slept gets in");
+  assert.ok(pages.every((p) => p.ws.closed && p.ws.closed.code === 4000), "its silent sockets went");
 });
 
 test("rolled out reading first: without `commons-send` a member reads the conversation and its lines are refused, draft kept", async () => {
@@ -371,4 +393,20 @@ test("the edge's Commons name: only an eligible GitHub contributor's save from t
   assert.equal((await save(amy, { display: "x" })).status, 400, "the island's rules refuse it");
   forgetHello();
   assert.equal((await save(amy, { display: "Amy" }, { e: { ...env, FEATURES: "github" } })).status, 503, "the Commons off");
+});
+
+test("a member hears how many are in hosted chats through Ooga Chat, as the island's pages do", async () => {
+  const h = await harness({ features: "bridge,commons,commons-send,chats" });
+  const { ws: first } = await h.member(4, "dee");
+  assert.equal(first.sent[0].chatOnline, undefined, "no chats, no number");
+  await h.room.chatMembers("AAAAAAAAAAAAAAAA", "Dev call", 2, 3, ["x:9", "gh:7"]);
+  assert.deepEqual(first.sent.filter((m) => m.t === "chat-online").at(-1), { t: "chat-online", n: 2, mine: false });
+  const { ws: next } = await h.member(5, "eve");
+  assert.deepEqual([next.sent[0].chatOnline, next.sent[0].chatMine], [2, false], "a member's welcome carries it");
+  // Another page of dee's in a chat: dee is among the number, so dee's pages count them once; nobody's id goes out.
+  await h.room.chatMembers("AAAAAAAAAAAAAAAA", "Dev call", 2, 3, ["x:9", "gh:4"]);
+  assert.deepEqual(first.sent.filter((m) => m.t === "chat-online").at(-1), { t: "chat-online", n: 2, mine: true }, "the same total, now with dee among it");
+  assert.deepEqual(next.sent.filter((m) => m.t === "chat-online").at(-1), { t: "chat-online", n: 2, mine: false });
+  const { ws: again } = await h.member(4, "dee");
+  assert.equal(again.sent[0].chatMine, true);
 });

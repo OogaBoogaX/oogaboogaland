@@ -97,13 +97,25 @@
       el.addEventListener("click", () => actions.signIn(provider), { signal });
       return [provider, el];
     }));
+    // Its words follow the service: with hosted chats anyone signed in may ask to speak and contributors start chats.
+    const ledeOne = make("span", ""), ledeTwo = make("span", ""), lede = make("p", "oc-lede", ledeOne, make("br"), ledeTwo);
+    const noteText = make("span", ""), foot = make("p", "oc-foot");
     const signedOut = make("div", "slab oc-slab oc-signin",
-      art,
-      make("p", "oc-lede", "Listen to the island.", make("br"), "Speak from the clouds."),
+      art, lede,
       make("div", "oc-providers", providers.github, providers.x),
-      make("div", "oc-note", make("strong", "", "Everyone can listen."),
-        make("span", "", "Team Ooga Booga contributors signed in with GitHub can also speak from a cloud.")),
-      make("p", "oc-foot", "X accounts join as listeners."));
+      make("div", "oc-note", make("strong", "", "Everyone can listen."), noteText), foot);
+    let wordsFor = null;
+    const sayWelcome = (chats) => {
+      if (wordsFor === chats) return;
+      wordsFor = chats;
+      ledeOne.textContent = chats ? "Voice chats from the island." : "Listen to the island.";
+      ledeTwo.textContent = chats ? "Join one and ask to speak." : "Speak from the clouds.";
+      noteText.textContent = chats ? "Anyone signed in can ask to speak. Team Ooga Booga contributors signed in with GitHub can also start a chat."
+        : "Team Ooga Booga contributors signed in with GitHub can also speak from a cloud.";
+      foot.textContent = chats ? "" : "X accounts join as listeners.";
+      foot.hidden = chats;
+    };
+    sayWelcome(false);
     const space = audience(ctx);
     // The tag in the title's corner names the one zone the space shows for now, as the island's panel does.
     const head = panelHead("Ooga Chat");
@@ -147,7 +159,9 @@
       // out keeps the space's footer, which says so, until the server confirms.
       signedOut.hidden = !!who || mode === "loading" || live && auth === "checking";
       node.dataset.space = who ? chats && !state.room ? "list" : "on" : busy === "signout" ? "foot" : "off";
-      set(head.chip, "textContent", who ? state.room && BL.chatHosts ? BL.chatHosts.ZONE_NAMES[state.room.zone] || "" : ZONE_NAMES[state.zone] : "");
+      // In a chat its land; on the chats list none (no zone is shown there), even before the chats' views have loaded.
+      set(head.chip, "textContent", who ? state.room && BL.chatHosts ? BL.chatHosts.ZONE_NAMES[state.room.zone] || "" : chats ? "" : ZONE_NAMES[state.zone] : "");
+      if (live) sayWelcome(!!boot.features.chats);
       let words = STATUS[mode] || "";
       if (live && auth === "checking") words = "Checking your sign-in…";
       if (chats && !hosts) words = "Opening chats…";
@@ -158,8 +172,11 @@
       reload.hidden = mode !== "stale" && !(live && boot.newer);
       again.hidden = mode !== "unavailable";
       alert.update(live ? shown : null, busy);
+      // A provider that is off is not offered, while another is on; with none on, each says it is unavailable.
+      const anyOn = live && Object.keys(providers).some((p) => boot.features[p]);
       for (const [provider, el] of Object.entries(providers)) {
         const on = live && boot.features[provider], [label, opening, off] = PROVIDERS[provider];
+        el.hidden = anyOn && !on;
         el.disabled = !on || auth === "checking" || !!busy || !state.device.online;
         el.textContent = busy === provider ? opening : on || !live ? label : off;
         el.setAttribute("aria-busy", String(busy === provider));
@@ -204,9 +221,9 @@
   const ZONE_NAMES = { main: "Main Island", dsb: "DSB Land" };
   const HEARD = {
     connecting: () => "Connecting…",
-    joining: (zone) => `Joining ${ZONE_NAMES[zone]}…`,
+    joining: (zone, chat) => chat ? "Joining the chat…" : `Joining ${ZONE_NAMES[zone]}…`,
     reconnecting: () => "Reconnecting… this list may be out of date.",
-    full: (zone) => `${ZONE_NAMES[zone]} is full right now. Ooga Chat will try again.`,
+    full: (zone, chat) => `${chat ? "This chat" : ZONE_NAMES[zone]} is full right now. Ooga Chat will try again.`,
     closed: () => "Listening is off right now. Ooga Chat will try again in a few minutes.",
     unavailable: () => "Live audio isn't open here yet.",
     stale: () => "This page is older than Ooga Chat's service. Reload to keep listening."
@@ -383,8 +400,9 @@
       // The feed's state first; then voice's (playback the browser held back, a receiver that gave up, what the last try
       // to speak said); then an empty zone.
       const failed = now.status === "live" && state.voice.phase === "failed";
-      const words = HEARD[now.status]?.(zone) || (now.status !== "live" ? "" : state.voice.blocked ? "Tap anywhere to hear this zone."
-        : failed ? "Can't hear this zone right now. " : state.voice.notice || (!now.list.length ? "Nobody is here yet." : ""));
+      const place = state.room ? "chat" : "zone";
+      const words = HEARD[now.status]?.(zone, !!state.room) || (now.status !== "live" ? "" : state.voice.blocked ? `Tap anywhere to hear this ${place}.`
+        : failed ? `Can't hear this ${place} right now. ` : state.voice.notice || (!now.list.length ? "Nobody is here yet." : ""));
       set(statusText, "textContent", words);
       set(retryVoice, "hidden", !failed);
       set(heard, "hidden", !words);
@@ -411,7 +429,7 @@
     };
     return { nodes: [heard, list, volumeBox, footRow], update, focus, dispose, parts: { list, footRow, foot: foot.parts }, setMenu(fn) { menu = fn; } };
   };
-  // The Ooga Chat panel's footer, the island's: the visitor's name (a purple dot only while speaking from Ooga Chat), the
+  // The Ooga Chat panel's footer, the island's: the visitor's name (Ooga Chat's purple dot while signed in), the
   // fixed-width microphone, always first and off for a listener, Join Voice for a listener the server allows to speak
   // (Leave Voice for a speaker), and Sign out. A disabled button says why on itself. The voice state is the seam's
   // (`state.voice`); nothing here opens a microphone.
@@ -446,7 +464,7 @@
       if (!who) return;
       set(name, "textContent", who.identity.display);
       const speaker = state.voice.role === "speaker", allowed = state.room ? { joinVoice: state.room.you?.speak === "eligible" || !!state.voice.elsewhere, why: null } : gates(state, Date.now());
-      const source = speaker ? "chat" : "";
+      const source = "chat";
       if (name.dataset.source !== source) name.dataset.source = source;
       set(mute, "disabled", !speaker || !!state.busy || state.voice.busy);
       set(mute, "textContent", speaker && !state.voice.muted ? "Mute" : "Unmute");

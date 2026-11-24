@@ -351,7 +351,7 @@
     slab.append(body, note, go);
     dialog.append(head, slab);
     document.body.append(dialog);
-    const self = switcher = { dialog, body, note, change, from: null, run: null };
+    const self = switcher = { dialog, body, note, change, stay, from: null, run: null };
     // Every way out gives the focus back to the chat row pressed at once; the close event only for any other way.
     const shut = () => {
       self.run = null;
@@ -375,8 +375,8 @@
     dialog.addEventListener("close", () => { if (!dialog.open) shut(); });
     return switcher;
   };
-  // What leaving the chat the visitor is in costs them, said only to its host: their chat waits for them, then moves on.
-  const leaving = () => calls.room?.you?.rank === "host" ? "You host it: it waits 2 minutes for you, then passes to a co-host, or ends if there is none." : "";
+  // A host can't simply switch: they hand the chat to a co-host as they leave it (Leave chat), or end it, first.
+  const hostingNow = () => calls.room?.you?.rank === "host";
   let opener = null;
   const preview = async (id, from = null) => {
     if (!calls.available()) return;
@@ -402,13 +402,15 @@
       showPanel();
     };
     if (!calls.room || calls.room.id === entry.id) return open();
-    const s = switchDialog();
-    s.body.textContent = `You're in ${calls.room.title}. Leave it and join ${entry.title}?`;
-    s.note.textContent = leaving();
+    const s = switchDialog(), host = hostingNow();
+    s.body.textContent = host ? `You host ${calls.room.title}. Before joining ${entry.title}, hand it to a co-host with Leave chat, or end it.`
+      : `You're in ${calls.room.title}. Leave it and join ${entry.title}?`;
+    s.note.textContent = "";
+    s.change.hidden = host;
     s.from = from && from.isConnected ? from : null;
-    s.run = open;
+    s.run = host ? null : open;
     if (!s.dialog.open) s.dialog.showModal();
-    s.change.focus();
+    (host ? s.stay : s.change).focus();
   };
 
   if (fixture) { model.setDesired(ZONE); model.apply(sample(model.desired)); }

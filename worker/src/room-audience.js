@@ -34,6 +34,14 @@ const enabled = (room) => !room.copy && !!room.env && !!room.env.AUDIENCE && bri
 // The outdoor handshake and Ooga Chat speakers heard on the island: the island's `outdoor` switch, which is its kill switch.
 const outdoorOn = (room) => enabled(room) && bridgeFeatures(room.env).outdoor;
 const isOpen = (p) => !!p.outdoor && p.outdoor.state === "open";
+// Whether the public conversation must hear the island's word: while the `outdoor` switch runs it, and after it is
+// turned off until every grant it left open or closing has been confirmed closed there.
+const heard = (room) => {
+  if (outdoorOn(room)) return true;
+  if (!enabled(room)) return false;
+  for (const p of room.players.values()) if (p.outdoor && p.outdoor.state !== "none") return true;
+  return false;
+};
 // Accounts `id` holds a voice link with (both asked; protocol.js `voiceLinked`, kept here to stay out of its import).
 const partnersOf = (room, id) => {
   const wants = room.links && room.links.get(id);
@@ -105,7 +113,9 @@ export const audienceRoom = {
 
   // The zones with a panel open, sent only when that set changes.
   watch(room) {
-    if (!enabled(room)) return;
+    // The public conversation alone has island panels to watch, and it runs only with the `outdoor` switch: hosted
+    // chats never ask the singleton for anything, so with it off the Room says nothing to it.
+    if (!outdoorOn(room)) return;
     const zones = [...new Set([...room.players.values()].map((p) => p.audienceZone).filter(isZone))].sort();
     const sig = zones.join(",");
     if (room.audienceWatch === sig) return;
@@ -116,7 +126,10 @@ export const audienceRoom = {
   // The island's word on its players, sent only when it changes (or `force`d), newest `seq` winning at the Audience.
   world(room, force = false) {
     // A Room waking from hibernation or a deploy speaks once its stored voice links are loaded (room.js), never before.
-    if (!enabled(room) || room.linksReady === false) return null;
+    // Only the public conversation hears the island's word, and only while the `outdoor` switch runs it (or a grant it
+    // left still waits to be closed there): hosted chats never ask for it, so with the switch off every voice join,
+    // leave, hand and link change costs no call.
+    if (!heard(room) || room.linksReady === false) return null;
     const speakers = [], active = [], linked = [];
     for (const p of room.players.values()) {
       // In the island's voice at all: its source wins.
@@ -415,7 +428,7 @@ export const audienceRoom = {
       if (p.outdoor.state === "closing") room.background(audienceRoom.retire(room, p, p.outdoor.reason || "left"));
       else audienceRoom.check(room, p);
     }
-    if (enabled(room)) audienceRoom.world(room);
+    if (heard(room)) audienceRoom.world(room);
   },
 
   // --- reactions and clouds (#668) ---

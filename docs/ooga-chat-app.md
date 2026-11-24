@@ -67,7 +67,7 @@ Shared with the island, one copy each:
 | `src/js/format-large.js`, `src/js/roster-panel.js`, `src/js/contributor-identities.js`, `src/js/activity-repos.js` | Contributing Oogas (#656): the island's own panel over `/api/chat/public/contributors` (#664), its contribution states and ages, Oogatron's reading normalized as the island normalizes it, and lazy faces supplied by `ooga-chat-portraits.js`: a revision-matched catalog atlas or bundled `art/ooga-faces.png` fallback, outside the first-load budget. Open stats strips repaint when the atlas changes. A contributor in The Commons sees whose Ooga is on the island now; a stale or unreadable reading says so under the list |
 | `src/js/emoji-data.js`, `src/js/reaction-bar.js` | The island's own emoji panel (#655), in the Ooga Chat panel's footer: the ten reactions, the raised hand and the picker over every emoji, its skin tones and heart colours, from this browser's own choices (`ooga-reactions*`). `ooga-chat-app.js` hands it the audience socket as its connection: a tap is a `reaction` request, the hand a `hand` request an active speaker alone may make, and every reaction the server sends the zone pops over that participant's circle |
 | `src/js/voice-handoff.js` | The voice switch prompt's card, the island's and Ooga Chat's alike (Voice on another device, below): Switch here inside its click, Not now, and no focus taken by itself |
-| `src/js/chat-policy.js`, `src/js/reaction-policy.js`, `src/js/zone-map.js`, `src/js/commons-log.js` | The Commons and Online Oogas for an eligible contributor (#670): the island's chat rules, the raised hand in each tone, the zones as the island's Online Oogas groups them, and the conversation's log and composer, run over the app's own `/api/chat/commons` socket (`ooga-chat-http.js` `commons`), with the island's name field at the Commons' top, saved as the island's display name (`commonsName`, `POST /api/chat/commons/name`). Their look is placed by `ooga-chat.css`; no distance or crosshair, which are the island's alone. Online Oogas shows the island's voice links on its players' rows (`links` on the Commons socket, the click a `link` frame) and Main Island's Ooga Chat listeners after its players in gray |
+| `src/js/chat-policy.js`, `src/js/reaction-policy.js`, `src/js/zone-map.js`, `src/js/commons-log.js` | The Commons and Online Oogas for an eligible contributor (#670): the island's chat rules, the raised hand in each tone, the zones as the island's Online Oogas groups them, and the conversation's log and composer, run over the app's own `/api/chat/commons` socket (`ooga-chat-http.js` `commons`), with the island's name field at the Commons' top, saved as the island's display name (`commonsName`, `POST /api/chat/commons/name`). Their look is placed by `ooga-chat.css`; no distance or crosshair, which are the island's alone. Online Oogas shows no voice links (a chat's voice is the only voice here, and no link reaches it) and, while the public conversation runs, Main Island's Ooga Chat listeners after its players in gray |
 | `src/js/qr.js`, `src/js/banana-icon.js`, `src/js/jumbotron-font.js`, `src/js/factory-kiosk-core.js`, `src/js/factory-kiosk.js`, `src/js/donation-popup.js` | Feed the Oogas: the island's donation dialog and its kiosk screen, with the QR codes, the banana and the 5x7 letters they draw. The app opens it from its Bananas tab while the feed is live (the fixture entry's demo aside), real over its own `/donations` relay, with `ooga-chat-donor.js` as its `game`; its frame is placed by `ooga-chat.css` |
 | `src/js/native-icons.js` | `BL.nativeIcons`: the panel tabs' pixel icons (`bananas`, `roster`, `players`, `chat`), Ooga Chat's mark `cloud` (the tab icon on both, and the app's favicons and icons), DSB Land's destination mark `dsb` (the island's `dsb-island-icon` paths, held equal by the suite) and `voice()`, the roster's voice mark. `hud.js` fills the island's tab slots (`data-native-icon`) from it and draws its roster's voice mark with it |
 
@@ -123,7 +123,9 @@ panel, under its own carved title (the page's `h1` is for assistive technology o
 the island's drawer is: the frame takes the page's height (up to 900px), the panel the frame's, and the panel's slab
 whatever its fixed parts leave, scrolling its own overflow. The account controls sit where the island keeps them: the
 Ooga Chat panel's footer while signed in, and the island's account row at the foot of Contributing Oogas, Online Oogas
-and The Commons (while signed out, the sign-in screen's own Continue with GitHub). Bananas has none.
+and The Commons (while signed out, the sign-in screen's own Continue with GitHub). Bananas has none. With hosted chats
+on and no chat joined, those three tabs' emoji bars stand down (`outOfChat`, `data-chat="none"`): a reaction belongs to
+a chat.
 
 ## The bootstrap contract (v1)
 
@@ -326,9 +328,13 @@ server's acknowledged lease makes one. While joining the button reads Joining…
 
 **Account row.** The island's (`hud.js` `showAccount`), at the foot of Contributing Oogas, Online Oogas and The
 Commons: while signed out (and GitHub sign-in is on), the sign-in screen's own Continue with GitHub, the design's sign-in
-button in place of the island's amber Contributor sign-in; else the name, with a green dot
-and how many are on the island while The Commons is live, Join voice (Mute or Unmute for a speaker), Leave voice for
-a speaker, and Sign out.
+button in place of the island's amber Contributor sign-in; else the name, always with a purple dot (the member is
+online here, in Ooga Chat), how many are online while The Commons is live (the island's players, everyone in hosted
+chats through Ooga Chat, and the member while in no chat and not on the island), Join voice (Mute or Unmute for a
+speaker), Leave voice for a speaker, and Sign out. With hosted chats on, voice is a chat's, as in the Ooga Chat tab:
+outside a chat, or in one that has not given the member leave to speak, the row has neither Unmute nor Join voice; a
+chat's host keeps Mute but never Leave voice, since a host steps down only by handing the chat to a co-host or ending
+it ([ooga-chat-hosts.md](ooga-chat-hosts.md)).
 
 ## Voice (#654)
 
@@ -503,8 +509,8 @@ with no weapon in hand, with a purple glow on the cloud round them, their NPC a 
 and their reactions and raised hand over them (remote-players.js); Online Oogas lists them with purple dots and a
 crosshair to their cloud (players.js), and Contributing Oogas gives their rows the same purple dot (roster-panel.js,
 `online(row)` answering `"cloud"`). The app's two panels do the same from its own audience list: an Ooga Chat speaker
-is purple in Contributing Oogas and has a purple row with the main island's players in Online Oogas, the member's own
-included while they speak; the emoji bar sits under the list in both, on the island's Contributing Oogas too. `?debug=1&clouds=a,b,c` seats sample speakers for review. `?debug=1&audience=fixture` shows a generated
+is purple in Contributing Oogas and has a purple row with the main island's players in Online Oogas, and the member's
+own row is purple in both whether or not they speak, since they are online through Ooga Chat; the emoji bar sits under the list in both, on the island's Contributing Oogas too. `?debug=1&clouds=a,b,c` seats sample speakers for review. `?debug=1&audience=fixture` shows a generated
 roster of named samples for review and sends nothing.
 
 ## Fixtures

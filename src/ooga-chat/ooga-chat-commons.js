@@ -28,7 +28,11 @@
   const linksOf = (raw) => raw && Array.isArray(raw.wants) && Array.isArray(raw.linked)
     ? { wants: new Set(raw.wants.filter(id).slice(0, 64)), linked: new Set(raw.linked.filter(id).slice(0, 64)) } : null;
   const create = () => {
-    const state = { you: null, send: false, epoch: 0, unicode: false, players: new Map(), lines: [], links: null };
+    const state = { you: null, send: false, epoch: 0, unicode: false, players: new Map(), lines: [], links: null, chatOnline: 0, chatMine: false };
+    // The island's one number in hosted chats through Ooga Chat and not on the island (its welcome's `chatOnline`, its
+    // `chat-online`), which every "N online" adds, as the island's do, and whether the member's own account is among it
+    // (`chatMine`: another of their pages in a chat), so it is counted once.
+    const chatCount = (n) => Number.isSafeInteger(n) && n >= 0 && n <= 100000 ? n : 0;
     const subscribers = new Set();
     const emit = (...args) => { for (const fn of subscribers) fn(...args); };
     const keep = (list, joined) => {
@@ -50,12 +54,21 @@
         state.epoch = Number.isSafeInteger(frame.epoch) ? frame.epoch : 0;
         state.unicode = Array.isArray(frame.features) && frame.features.includes(BL.chatPolicy.FEATURE);
         state.links = linksOf(frame.links);
+        state.chatOnline = chatCount(frame.chatOnline);
+        state.chatMine = frame.chatMine === true;
         state.players.clear();
         for (const raw of frame.players.slice(0, 256)) {
           const p = playerOf(raw);
           if (p) state.players.set(p.id, p);
         }
         emit("welcome");
+      } else if (frame.t === "chat-online") {
+        if (!state.you) return;
+        const n = chatCount(frame.n), mine = frame.mine === true;
+        if (n === state.chatOnline && mine === state.chatMine) return;
+        state.chatOnline = n;
+        state.chatMine = mine;
+        emit("players");
       } else if (frame.t === "links") {
         const links = linksOf(frame);
         if (!links || !state.you) return;
@@ -100,7 +113,7 @@
       }
     };
     const reset = () => {
-      state.you = null; state.send = false; state.epoch = 0; state.unicode = false; state.links = null;
+      state.you = null; state.send = false; state.epoch = 0; state.unicode = false; state.links = null; state.chatOnline = 0; state.chatMine = false;
       state.players.clear();
       state.lines.length = 0;
       emit("welcome");
