@@ -337,6 +337,154 @@
     pilot.transformView(cloudMoveMatrix, 0);
     cameraPreviousValid = cameraTerrainValid = false;
   };
+  // A hosted chat's copy of Main Island (chat-copy.js, which this visit hands its pieces through `copyHooks`): the same
+  // island with only the chat's members on it. While `copyOn` every crew Ooga but the visitor's, every gorilla and their
+  // gear are put away (`copyMask`, as Cloud Hopper puts them away, the NPCs' simulation held by `npcPaused`), the
+  // island's world and the crew's sync rest, the clouds are dealt again for the chat's benches (`layoutClouds`), and
+  // every cave mouth, HQ's ramps among them, is sealed with the stone face a dark mouth wears, ₿IFRÖST's field barred
+  // and the Mempool island's tunnels refused (`copyBarred`, through `crossesSealedCave`); the doors that change scene
+  // refuse with SEALED. The visitor's own Ooga beams out and in through `copyBeam` (sleep-beam.js) and, between, stands
+  // hidden (`copySelfHidden`).
+  let copyOn = false, copyBeam = null, copySelfHidden = false;
+  const copyHidden = new Map(), copySealNodes = [], copyPlanes = [];
+  const COPY_SEALED = "Sealed while you're on the chat's island";
+  const copyHide = (node) => {
+    if (!node) return;
+    if (!copyHidden.has(node)) copyHidden.set(node, node.visible);
+    node.visible = false;
+  };
+  const copyMask = () => {
+    if (copyOn) {
+      for (const cave of crew.list) if (cave !== crew.player) {
+        copyHide(cave.root); copyHide(cave.sleepWeapons); copyHide(cave.breathBatch);
+        if (cave.pet) copyHide(cave.pet.node);
+        if (cave.magazineModels) for (const magazine of cave.magazineModels) copyHide(magazine?.node);
+        if (cave.stunGear) for (const drop of cave.stunGear.drops) copyHide(drop.node);
+      }
+      for (const entry of clankers.list) copyHide(entry.root);
+      for (const item of clankerEquipment) copyHide(item.node);
+    }
+    const own = copySelfHidden && crew.player;
+    if (own) { own.root.visible = false; if (own.pet) own.pet.node.visible = false; }
+  };
+  // Every open mouth's stone face, and ₿IFRÖST's field, as planes a walker may not cross.
+  const copySeal = (on) => {
+    for (const node of copySealNodes) removeChild(node.parent, node);
+    copySealNodes.length = copyPlanes.length = 0;
+    if (!on) return;
+    for (const entry of CAMERA_OPENINGS) {
+      if (entry.blocked) continue;
+      const m = entry.mouth, geometry = hubModels.sealedCaveFace(sealedCaveVariant(entry.id)), stop = 0.52 + geometry.frontZ + 0.01;
+      const node = createNode({ geometry, position: { x: m.x + entry.sr * 0.52, y: m.floorY, z: m.z + entry.cr * 0.52 }, rotation: { x: 0, y: m.ry, z: 0 }, sightHidden: true });
+      addChild(root, node);
+      copySealNodes.push(node);
+      copyPlanes.push({ x: m.x, z: m.z, floor: m.floorY, sr: entry.sr, cr: entry.cr, stop, minX: PORTAL_MIN_X, maxX: PORTAL_MAX_X, top: PORTAL_MAX_Y });
+    }
+    if (bifrostIsle) {
+      const q = bifrostIsle.site.portal;
+      copyPlanes.push({ x: q.x, z: q.z, floor: q.floorY, sr: Math.sin(q.ry), cr: Math.cos(q.ry), stop: q.fieldZ + 0.35, minX: -q.halfW, maxX: q.halfW, top: q.opening.ceilingY });
+    }
+  };
+  const copyBarred = (fromX, fromZ, toX, toZ, y) => {
+    for (let i = 0; i < copyPlanes.length; i++) {
+      const s = copyPlanes[i];
+      if (y < s.floor - STEP_MAX || y > s.floor + s.top) continue;
+      const a = (fromX - s.x) * s.sr + (fromZ - s.z) * s.cr - s.stop, b = (toX - s.x) * s.sr + (toZ - s.z) * s.cr - s.stop;
+      if (a * b > 0 || a === b) continue;
+      const k = a / (a - b), across = (lerp(fromX, toX, k) - s.x) * s.cr - (lerp(fromZ, toZ, k) - s.z) * s.sr;
+      if (across >= s.minX && across <= s.maxX) return true;
+    }
+    // Into the rock of the Mempool island (its tunnels, the way down to the chamber) from the open air.
+    return !!mempoolIsland && mempoolIsland.coveredAt(toX, y + 0.5, toZ) && !mempoolIsland.coveredAt(fromX, y + 0.5, fromZ);
+  };
+  // Where the visitor's Ooga stands now: its feet, heading and zone.
+  const copySpot = () => {
+    const cave = crew.player, p = cave.root.position;
+    return { x: p.x, y: p.y - cave.baseY, z: p.z, yaw: cave.root.rotation.y, zone: BL.net.state.zone || "outside" };
+  };
+  const copyMode = (on) => {
+    if (on === copyOn) return;
+    copyOn = on;
+    if (on) {
+      clankers.cancelSleepBeams();
+      clankers.setAway(true);
+      npcStatusBeams?.clear();
+      if (islandWorld) { islandWorld.dispose(); islandWorld = null; }
+      // Tess belongs to the island, not the chat's copy: put away (her offer and any tour ended) until the trip ends.
+      islandGuide.suspend();
+      islandGuide.root.visible = false;
+      copyMask();
+    } else {
+      for (const [node, visible] of copyHidden) node.visible = visible;
+      copyHidden.clear();
+      islandGuide.root.visible = true;
+      islandGuide.resume();
+      clankers.setAway(gameMode);
+      crew.refreshStates(true);
+      if (!islandWorld) startIslandWorld();
+    }
+    copySeal(on);
+    layoutClouds(on);
+    solids.sync();
+  };
+  // The Ooga set down at `to` (its feet and heading), the view with it, as Cloud Hopper's `cloudMove` does.
+  const copyMove = (to) => {
+    const cave = crew.player, p = cave.root.position;
+    math.mat4.identity(cloudMoveMatrix);
+    cloudMoveMatrix[12] = to.x - p.x;
+    cloudMoveMatrix[13] = to.y + cave.baseY - p.y;
+    cloudMoveMatrix[14] = to.z - p.z;
+    crew.relocatePlayer(to, to.yaw);
+    pilot.transformView(cloudMoveMatrix, 0);
+    cameraPreviousValid = cameraTerrainValid = false;
+    playerCaveIndex = 0;
+    setVec(PLAYER_PREVIOUS, p.x, p.y, p.z);
+    setVec(PLAYER_POSITION, p.x, p.y, p.z);
+  };
+  const copyHooks = {
+    refusal() {
+      const cave = pilot.player;
+      if (!cave || crew.player !== cave) return clankerPlay?.active ? "Let go of the gorilla first" : "Take your own Ooga first";
+      if (cloudHopper?.active) return "Finish Cloud Hopper first";
+      if (gameMode) return "Not during an island event";
+      if (BL.net.cabinet) return "Leave the cabinet first";
+      if (BL.duel.active?.duel) return "Finish the duel first";
+      if (cave.hammockRest) return "Get out of the hammock first";
+      if (BL.outdoorScope.state.scope !== "main") return "Go out onto the island's open air first";
+      return pilot.travelRefusal() || "";
+    },
+    spot: copySpot,
+    hold(on) { pilot.setActive(!on); if (on) hud.tooltip.hide(); },
+    beam(progress, incoming) {
+      const cave = crew.player;
+      if (progress < 0 || !cave) { if (copyBeam) copyBeam.hide(0); return; }
+      copyBeam ||= BL.sleepBeam.create({ root, capacity: 1 });
+      const p = cave.root.position;
+      copyBeam.show(0, p.x, p.y - cave.baseY, p.z, cave.root.rotation.y, progress, incoming, cave.root);
+    },
+    show(on) {
+      copySelfHidden = !on;
+      const cave = crew.player;
+      if (on && cave) { cave.root.visible = true; if (cave.pet) cave.pet.node.visible = true; }
+      copyMask();
+    },
+    // Into the copy: the island put away and sealed, and the Ooga beside the pile by the hub's own arrival search.
+    enter() {
+      copyMode(true);
+      pilot.setActive(true, true);
+      const cave = crew.player;
+      if (cave) { cave.root.visible = true; navigate("pile", true, true); }
+      pilot.setActive(false);
+      copyMask();
+      return copySpot();
+    },
+    // Out of it: the island as it was and, unless the visit is ending, the Ooga back exactly where it stood.
+    exit(home) {
+      copyMode(false);
+      if (home && crew.player) copyMove(home);
+    }
+  };
+
   // GAME MODE's ring (`updateGameRing`): the group holding its veils, how far it has risen (0 to 1) and the seconds left
   // before it starts up; the veils themselves, each with its ripples.
   let gameRing = null, gameRingK = 0, gameRingWait = 0;
@@ -5120,6 +5268,7 @@
   };
   const crossesSealedCave = (fromX, fromZ, toX, toZ, y = 0) => {
     if (crossesGameRing(fromX, fromZ, toX, toZ, y)) return true;
+    if (copyOn && copyBarred(fromX, fromZ, toX, toZ, y)) return true;
     for (let i = 0; i < sealedCaves.length; i++) {
       const sealed = sealedCaves[i], m = sealed.mouth, sr = sealed.sr, cr = sealed.cr;
       if (y < m.floorY - STEP_MAX || y > m.floorY + PORTAL_MAX_Y) continue;
@@ -5430,6 +5579,7 @@
   };
   const buildClouds = () => {
     let treetop = BL.terrain.MAX_HEIGHT;
+    cloudsCopied = false;
     for (const o of scenery) if (o.prop === "tree") {
       const node = o.node;
       treetop = Math.max(treetop, node.position.y + BL.scene.boundsOf(node.geometry).max[1] * node.scale.y);
@@ -5445,12 +5595,16 @@
         radius: track.radius,
         baseY: seats ? treetop + 2 - BL.scene.boundsOf(node.geometry).min[1] - Math.min(0, waveY * 4) : track.baseY,
         waveY };
+      // The island's own layout, which a chat's copy deals again (`layoutClouds`) and gives back.
+      cloud.shape = shape;
+      cloud.home = { geometry: node.geometry, speed: cloud.speed, phase: cloud.phase, radius: cloud.radius, baseY: cloud.baseY, waveY: cloud.waveY };
       cloud.angle = cloudAngle(cloud, cloudNow());
       placeCloud(cloud);
       addChild(root, node);
       placed.push(node);
       clouds.push(cloud);
     }
+    cloudTreetop = treetop;
   };
   // Ooga Chat speakers on clouds (#659): the room's seats, three to a cloud on three of the largest clouds (main-cloud-1
   // to 3 on the first, 4 to 6 on the second, 7 on), each sitting on its own third of it along the cloud's long axis, the
@@ -5493,8 +5647,10 @@
   };
   const cloudSeat = (rec, out) => {
     if (rec.zone !== "main") return false;
-    const n = Number(rec.seat.slice(rec.seat.lastIndexOf("-") + 1)) - 1, cloud = clouds[SPEAKER_CLOUDS[Math.floor(n / 3)]];
+    const n = Number(rec.seat.slice(rec.seat.lastIndexOf("-") + 1)) - 1, cloud = cloudsCopied ? copyBenches[Math.floor(n / 3)] : clouds[SPEAKER_CLOUDS[Math.floor(n / 3)]];
     if (!cloud || !cloud.node.visible) return false;
+    // In a chat's copy a bench stands only on a cloud someone sits on.
+    if (cloudsCopied) cloud.node.geometry = cloud.bench;
     const node = cloud.node, seat = thirdsOf(node.geometry)[n % 3], c = Math.cos(node.rotation.y), s = Math.sin(node.rotation.y);
     let glow = seatGlows[n];
     if (!glow || glow.parent !== node) {
@@ -5512,6 +5668,44 @@
   // The glow under each seat (hub-models.js `cloudSeatGlow`), hung on its cloud's node the first time the seat is
   // taken, all hidden before the speakers are seated each frame and shown again under each one seated.
   const seatGlows = [];
+  // A chat's copy seats all its speakers not walking it (cloud-seats-v2, main-cloud-1 to 32): the clouds are dealt
+  // again, COPY_BENCHES of them on the high track with today's three-seat bench at the speaker clouds' height (so none
+  // flies under the meadow), seats 1 to 3 on the first, 4 to 6 on the next, and the rest on the low track; a bench shows
+  // only while someone sits on it (`copyBenchesPlain` each frame, then `cloudSeat`). Leaving gives every cloud back its
+  // own track, height and mesh.
+  const COPY_BENCHES = 11;
+  const copyBenches = [];
+  let cloudTreetop = 0, cloudsCopied = false;
+  const layoutClouds = (copy) => {
+    if (copy === cloudsCopied || !clouds.length) return;
+    cloudsCopied = copy;
+    for (let i = 0; i < seatGlows.length; i++) if (seatGlows[i]) { if (seatGlows[i].parent) removeChild(seatGlows[i].parent, seatGlows[i]); seatGlows[i] = null; }
+    copyBenches.length = 0;
+    const high = CLOUD_TRACKS[1], low = CLOUD_TRACKS[0], lows = clouds.length - COPY_BENCHES, t = cloudNow();
+    for (let i = 0; i < clouds.length; i++) {
+      const cloud = clouds[i], h = cloud.home;
+      if (!copy) {
+        cloud.speed = h.speed; cloud.phase = h.phase; cloud.radius = h.radius; cloud.baseY = h.baseY; cloud.waveY = h.waveY;
+        cloud.node.geometry = h.geometry;
+      } else if (i < COPY_BENCHES) {
+        cloud.bench ||= hubModels.benchCloud(cloud.shape);
+        cloud.plain ||= hubModels.cloud(cloud.shape);
+        const waveY = high.waveY * SPEAKER_SWING;
+        cloud.speed = high.speed; cloud.phase = high.phase + i * Math.PI * 2 / COPY_BENCHES; cloud.radius = high.radius; cloud.waveY = waveY;
+        cloud.baseY = cloudTreetop + 2 - BL.scene.boundsOf(cloud.bench).min[1] - Math.min(0, waveY * 4);
+        cloud.node.geometry = cloud.plain;
+        copyBenches.push(cloud);
+      } else {
+        cloud.plain ||= hubModels.cloud(cloud.shape);
+        cloud.speed = low.speed; cloud.phase = low.phase + (i - COPY_BENCHES) * Math.PI * 2 / lows; cloud.radius = low.radius;
+        cloud.baseY = low.baseY; cloud.waveY = low.waveY;
+        cloud.node.geometry = cloud.plain;
+      }
+      cloud.angle = cloudAngle(cloud, t);
+      placeCloud(cloud);
+    }
+  };
+  const copyBenchesPlain = () => { for (let i = 0; i < copyBenches.length; i++) copyBenches[i].node.geometry = copyBenches[i].plain; };
   // Seats are taken in any order, so the list may have holes below the highest seat used.
   const hideSeatGlows = () => { for (let i = 0; i < seatGlows.length; i++) if (seatGlows[i]) seatGlows[i].visible = false; };
   // A cloud speaker's seat, for the live players tab's crosshair (players.js `setCloudSpot`).
@@ -6124,6 +6318,7 @@
         break;
       case "timechainkeypad": {
         const gate = timechainIsland.gate, player = pilot.player, at = player && player.root.position;
+        if (copyOn) { hud.toast(COPY_SEALED); break; }
         if (gate.busy) break;
         if (!player) hud.toast("Only an Ooga can go in. Double-tap one, then walk it up to the keypad.");
         else if (!gate.nearKeypad(at.x, at.y - player.baseY + 1.1, at.z)) hud.toast(gate.fromBridge() ? "Click a room number on the keypad, then Enter." : "Walk up to the keypad beside the doors.");
@@ -6225,8 +6420,8 @@
       HAMMOCK_FROM.x = x; HAMMOCK_FROM.z = z;
       return hammock.free(HAMMOCK_FROM) || HAMMOCK_FULL;
     }
-    if (arcadeMouth) { const near = arcadeMouth.entrance.nearby(x, y, z, player); if (near) return near; }
-    if (player && timechainIsland.gate && timechainIsland.gate.nearKeypad(x, y, z)) return timechainIsland.gate.action;
+    if (arcadeMouth && !copyOn) { const near = arcadeMouth.entrance.nearby(x, y, z, player); if (near) return near; }
+    if (player && !copyOn && timechainIsland.gate && timechainIsland.gate.nearKeypad(x, y, z)) return timechainIsland.gate.action;
     if (player && nearChalkboard(x, y, z)) return CHALK_ACTION;
     return null;
   };
@@ -6263,6 +6458,7 @@
   };
   const enterScene = (view, id) => {
     if (entering) return;
+    if (copyOn) return hud.toast(COPY_SEALED);
     // A game still being built is unregistered unless the page opted in (director.js, `wip`).
     if (!BL.scenes[id]) return hud.toast("Not open yet. Ooga still building it.");
     entering = true;
@@ -6514,7 +6710,7 @@
       else BL.bifrostIsle.update(b.site, dt, b.effectsTime, NaN, NaN, NaN);
     }
     b.heimdall.update(dt, elapsed, at ? at.x : orbit.tx, at ? at.y - player.baseY : orbit.ty, at ? at.z : orbit.tz, !!player);
-    if (!player || entering || bifrostWalk?.active) return;
+    if (!player || entering || bifrostWalk?.active || copyOn) return;
     const sr = Math.sin(p.ry), cr = Math.cos(p.ry);
     const along = (at.x - p.x) * sr + (at.z - p.z) * cr, across = (at.x - p.x) * cr - (at.z - p.z) * sr;
     const feet = at.y - player.baseY - p.floorY;
@@ -6719,7 +6915,7 @@
     const o = hit.owner;
     switch (o.kind) {
       case "tess":
-        islandGuide.tap();
+        if (!copyOn) islandGuide.tap();
         break;
       case "caveman":
         crew.pokeCave(o.cave);
@@ -6758,7 +6954,8 @@
         // Engaged at the keypad, the click is a press there; from the bridge's half nearer the sphere it chooses without
         // taking the Ooga or the view, until Enter.
         const gate = timechainIsland.gate, player = pilot.player;
-        if (!player) hud.toast("Only an Ooga can go in. Double-tap one, then walk it up to the keypad.");
+        if (copyOn) hud.toast(COPY_SEALED);
+        else if (!player) hud.toast("Only an Ooga can go in. Double-tap one, then walk it up to the keypad.");
         else if (o.dim && !gate.askingPin) hud.toast(`Room ${o.key} is empty.`);
         else if (gate.busy) gate.press(o.key);
         else if (!gate.pressFromBridge(o.key)) hud.toast("Walk onto the bridge up to the doors to use the keypad.");
@@ -8089,6 +8286,9 @@
       cloudPile.visible = pile.shown > 0;
       cloudPileSolids.sync();
     }
+    // A chat's copy (chat-copy.js): its trip moves on, and the island stays put away while it lasts.
+    BL.chatCopy.update(dt);
+    copyMask();
     // Four cheap proximity reads a second, without building a visit or changing its actor/account state.
     if (elapsed >= prefetchAt) {
       prefetchAt = elapsed + 0.25;
@@ -8288,7 +8488,7 @@
     // The island's world (island-world.js, off only with `islandworld=0`) places the Oogas it follows before they move;
     // without it, the room's crew host decides whether they follow it or hold (npc-sync.js `prepare`).
     if (islandWorld && !cloudPlaying()) islandWorld.update(dt);
-    else if (!cloudPlaying()) npcSync.prepare();
+    else if (!cloudPlaying() && !copyOn) npcSync.prepare();
     if (!cloudHopper?.held) crew.update(dt, elapsed);
     cloudHopper?.postUpdate();
     if (hammock) {
@@ -8310,10 +8510,11 @@
     footsteps.update(crew.player);
     // With the island's world, this page never follows the room's crew host (the world places its Oogas), but while it
     // is the host it goes on sending the crew as the world moves it, so pages without the world see the same crew.
-    if (!cloudPlaying() && (!islandWorld || BL.net.state.room === "live" && BL.net.state.hostId === BL.net.state.selfId)) npcSync.update(dt);
-    if (!cloudPlaying()) npcStatusBeams?.update(dt);
+    if (!cloudPlaying() && !copyOn && (!islandWorld || BL.net.state.room === "live" && BL.net.state.hostId === BL.net.state.selfId)) npcSync.update(dt);
+    if (!cloudPlaying() && !copyOn) npcStatusBeams?.update(dt);
     shareDrivenActor(dt);
     hideSeatGlows();
+    if (cloudsCopied) copyBenchesPlain();
     remotes.update(dt);
     updatePhysics(dt);
     duels.update(dt);
@@ -8371,7 +8572,7 @@
     if (!cloudPlaying()) timechainIsland.gate.view(dt);
     if (factoryMouth && !cloudPlaying()) factoryWalk.eyes.view(dt);
     // Tess moves after the view is set, so a tour's glide has the last word on it.
-    if (!cloudHopper?.active && !architectCave?.active && !architectCave?.arriving) islandGuide.update(dt, elapsed);
+    if (!cloudHopper?.active && !architectCave?.active && !architectCave?.arriving && !copyOn) islandGuide.update(dt, elapsed);
     if (architectCave) {
       architectCave.update(dt); RENDER_OPTS.cameraFeeds = architectCave.active ? architectCave.renderFeeds : null;
       ARCHITECT_OPTS.viewRoots = architectCave.viewRoots;
@@ -8392,6 +8593,7 @@
       RENDER_OPTS.cutawayFade = RENDER_OPTS.cutawayRockMix = RENDER_OPTS.cutawayRegionCount = 0;
       if (cloudPlaying()) cloudMask();
     }
+    copyMask();
     updateAreaLabel();
     if (POSITION_DEBUG && elapsed >= positionDebugNext) {
       positionDebugNext = elapsed + 0.1;
@@ -8894,8 +9096,9 @@
   };
   // The level the driven body stands at, against nothing but where it is: its zone never changes what it hears.
   const shareBlend = (driven, gorilla, zone) => {
-    // The Observatory shares no acoustic level with the island above it.
-    if (zone === "mirror") { BL.net.setBlend(null, 0); return; }
+    // The Observatory shares no acoustic level with the island above it, and a chat's copy none at all: there every
+    // speaker is heard at full, wherever their Ooga stands.
+    if (zone === "mirror" || copyOn) { BL.net.setBlend(null, 0); return; }
     const p = driven.root.position, feet = p.y - (gorilla ? 0 : driven.baseY);
     if (levelOf(p.x, feet, p.z, zone, LEVEL_AT)) BL.net.setBlend(LEVEL_AT.to, LEVEL_AT.t);
     else BL.net.setBlend(null, 0);
@@ -11271,6 +11474,7 @@
     bindArcadeEntrance(ctx);
     BL.players.setDoors(doorToward);
     BL.players.setCloudSpot(cloudSpotOf);
+    BL.chatCopy.attach(copyHooks);
     spotPlace = ctx.place || "";
     const donate = ctx.place === "donate", routedPlace = donate || ctx.place === "cloud-hopper-return" ? null : ctx.place;
     const bifrostCrossing = ctx.from === "bifrost" ? world.bifrostCrossing : null;
@@ -11680,7 +11884,7 @@
     shared.onJump = cave => cloudHopper?.onJump(cave);
     // Space with both jumps spent: Cloud Hopper's sky feather, when one is held.
     shared.spentJump = cave => !!cloudHopper?.updraft(cave);
-    shared.npcPaused = cloudPlaying;
+    shared.npcPaused = () => cloudPlaying() || copyOn;
     shared.tickerVisible = donationTickerVisible;
     shared.abyssAt = (x, z, y, actor) => !cloudHopper?.active && abyssAt(x, z, y, actor);
     shared.animationInterval = animationInterval;
@@ -12395,6 +12599,7 @@
     bindArcadeEntrance(ctx);
     BL.players.setDoors(doorToward);
     BL.players.setCloudSpot(cloudSpotOf);
+    BL.chatCopy.attach(copyHooks);
     const initialFirstPerson = ctx.from === null && preloadedFirstPerson && !initialGorilla;
     if (initialFirstPerson) pilot.enterClose(true);
     // The /donate route: the island's own view with the donation popup open. As a routed place it keeps Tess from
@@ -12470,6 +12675,11 @@
         get footsteps() { return footsteps; },
         get chalkboardAt() { return chalkboardClearance; },
         slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, delivery: pile.delivery, spillEffect: pile.spillEffect, cavemen: crew.cavemen, lab: null, hud, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, routineLayout, get islandWorld() { return islandWorld; }, trimPool: fx.trimPool,
+        // A chat's copy (chat-copy.js), for a check: whether it is on, what a step would cross, its seals and benches, a
+        // cloud speaker's seat.
+        copy: { get on() { return copyOn; }, barred: (fromX, fromZ, toX, toZ, y) => crossesSealedCave(fromX, fromZ, toX, toZ, y), get seals() { return copySealNodes.length; },
+          get planes() { return copyPlanes.length; }, get benches() { return copyBenches.map((c) => ({ y: c.node.position.y, bottom: c.node.position.y + BL.scene.boundsOf(c.bench).min[1], bench: c.node.geometry === c.bench, radius: c.radius })); },
+          get treetop() { return cloudTreetop; }, cloudSpot: cloudSpotOf, mouths: () => CAMERA_OPENINGS.filter((e) => !e.blocked).map((e) => ({ id: e.id, x: e.mouth.x, z: e.mouth.z, floor: e.mouth.floorY, sr: e.sr, cr: e.cr })) },
         get shown() {
           return pile.shown;
         },
@@ -12634,6 +12844,10 @@
     pilot.controls.reset(); input.reset(); pilot.setActive(true);
   };
   const leave = (destroy = false) => {
+    // A trip to a chat's copy ends with the visit, silently: the socket goes home and the island is put back.
+    BL.chatCopy.detach();
+    if (copyBeam) { copyBeam.dispose(); copyBeam = null; }
+    copySelfHidden = false;
     bifrostWalk?.reset(); bifrostWalk = null;
     if (arcadeMouth) arcadeMouth.entrance.unbind();
     // Left by Back or Forward, the logo or any other way than a door of its own (which handed its Ooga over and set
@@ -12876,6 +13090,7 @@
     architectCave?.liveGeometry(set);
     if (cloudHopper?.cabinet.frames) for (const geometry of cloudHopper.cabinet.frames) set.add(geometry);
     cloudHopper?.liveGeometry(set);
+    if (copyBeam) copyBeam.liveGeometry(set);
     if (islandGuide) islandGuide.liveGeometry(set);
     mempoolIsland.water.liveGeometry(set);
     pile.liveGeometry(set);
@@ -13006,6 +13221,7 @@
   hubScene.navigationReturn = () => pilot?.endLook();
   hubScene.navigationStatus = name => {
     if (!hubScene.navigationReady) return "Finish the current interaction first.";
+    if (copyOn && (name === "underground" || name === "basement" || name === "mempool")) return COPY_SEALED;
     return clankerPlay?.active ? clankerPlay.travelRefusal() : "";
   };
   const MAP_ZONES = { pile: "outside", gate: "outside", lab: "lab", mirror: "mirror", factory: "factory.hall", arcade: "arcade.hall", bca: "bca", underground: "hq", basement: "hq", mempool: "rainforest", bifrost: "bifrost.chamber", timechain: "sphere", repos: "repos" };
@@ -13034,6 +13250,8 @@
     return false;
   };
   hubScene.beginCoaching = () => islandGuide.escape();
+  // The island the hub built, for the island view's Live view (island-view-live.js), which draws its ground again.
+  Object.defineProperty(hubScene, "liveIsland", { get: () => island || null });
   Object.defineProperty(hubScene, "coachingReady", { get: () => islandGuide?.coachingReady && !gameMode });
   Object.defineProperty(hubScene, "navigationReady", { get: () => !!islandGuide && !islandGuide.holding && !cloudHopper?.active && !factoryDeparting && !bifrostDeparting && !timechainIsland?.gate.busy });
   hubScene.controlsHelpHold = on => { clankerPlay?.cancelInput(); if (on) clankerPlay?.freeCursor(); cloudHopper?.controlsHelpHold(on); pilot.controls.reset(); pilot.setMenuOpen(on, false); };

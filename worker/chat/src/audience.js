@@ -12,6 +12,7 @@ import { capabilityFor } from "./capability.js";
 import { effective } from "./config.js";
 import { allowed, fromSite, refusal } from "./http.js";
 import { avatarPath, readSession } from "./session.js";
+import { chatParam } from "./chats.js";
 
 const SOCKET_HEADERS = ["upgrade", "connection", "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions"];
 
@@ -45,16 +46,24 @@ export const handleAudienceSocket = async (request, env, deps) => {
   if (request.method !== "GET") return refusal("method_not_allowed", 405);
   if (request.headers.get("upgrade") !== "websocket") return refusal("upgrade_required", 426);
   if (!fromSite(request, env.SITE_ORIGIN)) return refusal("forbidden", 403);
-  if (!effective(env, await bridgeHello(env)).listen) return closedSocket(4503, "unavailable");
+  const features = effective(env, await bridgeHello(env));
+  if (!features.listen) return closedSocket(4503, "unavailable");
+  // A hosted chat names itself (docs/ooga-chat-hosts.md); an unreadable name, or chats switched off, is no socket.
+  const chat = chatParam(new URL(request.url));
+  if (chat === null) return closedSocket(4404, "ended");
+  if (chat !== undefined && !features.chats) return closedSocket(4503, "unavailable");
   let found;
   try { found = await readSession(request, env); } catch { return closedSocket(1013, "try_again"); }
   if (!found) return closedSocket(4401, "auth_required");
   const p = found.principal;
   if (!(await allowed(env.CHAT_SOCKET_LIMITER, p.id))) return closedSocket(4429, "rate_limited");
   const headers = new Headers({ "x-ooga-chat-assertion": JSON.stringify(await assertionFor(env, found, deps)) });
+  if (chat) headers.set("x-chat-id", chat);
   for (const name of SOCKET_HEADERS) { const value = request.headers.get(name); if (value !== null) headers.set(name, value); }
   try {
-    return await env.OBL.fetch(new Request("https://chat-bridge.invalid/audience", { headers }));
+    const res = await env.OBL.fetch(new Request("https://chat-bridge.invalid/audience", { headers }));
+    // A chat that has ended answers 404 at the bridge: the page hears it as a socket closed so.
+    return res.status === 404 && chat ? closedSocket(4404, "ended") : res;
   } catch {
     return closedSocket(1013, "try_again");
   }

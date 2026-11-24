@@ -9,6 +9,7 @@ import { bridgeHello } from "./bridge.js";
 import { effective } from "./config.js";
 import { allowed, fromSite, readBody, refusal } from "./http.js";
 import { readSession } from "./session.js";
+import { chatParam } from "./chats.js";
 
 export const MEDIA_OPS = ["ice", "renegotiate", "leave", "receive/open", "receive/sync", "receive/close", "publish/open", "publish/offer", "publish/ready", "publish/close"];
 const BODY_MAX = 256 * 1024;
@@ -23,11 +24,15 @@ export const handleMedia = async (request, env, url, deps) => {
   let found;
   try { found = await readSession(request, env); } catch { return refusal("unavailable", 503, { retryable: true, retryAfter: 5 }); }
   if (!found) return refusal("auth_required", 401);
-  if (op.startsWith("publish/") && (!features.speak || found.principal.provider !== "github")) return refusal("capability_required", 403);
+  // In a hosted chat a host decides who speaks, X accounts included (docs/ooga-chat-hosts.md); the chat checks the lease.
+  const chat = chatParam(url);
+  if (chat === null || chat !== undefined && !features.chats) return refusal("not_found", 404);
+  if (op.startsWith("publish/") && !chat && (!features.speak || found.principal.provider !== "github")) return refusal("capability_required", 403);
   if (!(await allowed(env.CHAT_MEDIA_LIMITER, found.principal.id))) return refusal("rate_limited", 429, { retryable: true, retryAfter: 60 });
   const body = await readBody(request, BODY_MAX);
   if (body === null) return refusal("too_large", 413);
   const headers = new Headers({ "content-type": "application/json", "x-ooga-chat-assertion": JSON.stringify(await assertionFor(env, found, deps)) });
+  if (chat) headers.set("x-chat-id", chat);
   try {
     const res = await env.OBL.fetch(new Request(`https://chat-bridge.invalid/media/${op}`, { method: "POST", headers, body }));
     return new Response(res.body, { status: res.status, headers: { "content-type": "application/json", "cache-control": "no-store", "x-content-type-options": "nosniff" } });

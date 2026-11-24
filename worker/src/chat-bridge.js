@@ -24,7 +24,10 @@ import { handleCharacterPortrait, portraitsFor } from "./character-portraits.js"
 import { publicOps } from "./chat-public.js";
 import { displayOps } from "./chat-display.js";
 import { deleteChatOnlyPlayer, getPlayer } from "./db.js";
-import { AUDIENCE_NAME } from "./audience.js";
+import { AUDIENCE_NAME, chatName, CHAT_ID, DIRECTORY_NAME } from "./audience.js";
+import { previewChat, revokeChats, startChat } from "./chat-directory.js";
+import { decideCapability } from "./chat-capability.js";
+import { listChats } from "./chats.js";
 
 const refuse = (code, retryable = false, extra = {}) => ({ ok: false, error: { code, retryable, ...extra } });
 
@@ -65,6 +68,8 @@ export const revokeOps = {
       if (!envelope.principal) return { revoked: 0 };
       const p = envelope.principal;
       const audience = env.AUDIENCE ? await env.AUDIENCE.getByName(AUDIENCE_NAME).revoke({ id: p.id }, reason) : { revoked: 0 };
+      // Every live hosted chat it is in, too (docs/ooga-chat-hosts.md).
+      audience.revoked += await revokeChats(env, { id: p.id }, reason).catch(() => 0);
       // The Commons is a GitHub contributor's alone: its sockets close too (#670).
       const github = p.provider === "github" && /^[1-9][0-9]{0,15}$/.test(String(p.providerUserId)) ? Number(p.providerUserId) : 0;
       const commons = github && env.ROOM ? await env.ROOM.getByName("island").communityRevoke(github, reason).catch(() => ({ revoked: 0 })) : { revoked: 0 };
@@ -86,7 +91,35 @@ export const readinessOps = {
   readiness: { run: async (env) => env.AUDIENCE ? env.AUDIENCE.getByName(AUDIENCE_NAME).readiness() : { sfu: "off", cleanup: "ok" } },
 };
 
-export const OPS = { ...BASE_OPS, ...capabilityOps({ contributorForEnv }), ...publicOps({ catalogFor, portraitsFor }), ...revokeOps, ...readinessOps,
+// Hosted chats (docs/ooga-chat-hosts.md): the list for any signed-in principal, and starting one for a GitHub account the
+// island's contributor rule calls eligible now, whatever the edge's cached answer said.
+export const chatOps = ({ contributorForEnv: lookup }) => ({
+  chats: { run: async (env, envelope) => {
+    if (!bridgeFeatures(env).chats || !env.CHATS) throw new BridgeRefusal("unavailable", true);
+    if (!envelope.principal) throw new BridgeRefusal("auth_required");
+    return { chats: await listChats(env) };
+  } },
+  chatPreview: { run: async (env, envelope) => {
+    if (!bridgeFeatures(env).chats || !env.CHATS) throw new BridgeRefusal("unavailable", true);
+    if (!envelope.principal) throw new BridgeRefusal("auth_required");
+    const id = envelope.payload && envelope.payload.id;
+    const preview = typeof id === "string" ? await previewChat(env, id) : null;
+    if (!preview) throw new BridgeRefusal("ended");
+    return preview;
+  } },
+  startChat: { run: async (env, envelope) => {
+    if (!bridgeFeatures(env).chats || !env.CHATS) throw new BridgeRefusal("unavailable", true);
+    const answer = await decideCapability(env, envelope.principal, lookup(env));
+    if (answer.state !== "eligible") throw new BridgeRefusal(answer.state === "unknown" ? "capability_unavailable" : "capability_required", answer.state === "unknown");
+    const p = envelope.principal, payload = envelope.payload || {};
+    const res = await startChat(env, { id: `gh:${p.providerUserId}`, login: p.login, display: typeof payload.display === "string" ? payload.display.slice(0, 50) : p.login,
+      character: answer.character }, payload);
+    if (!res.ok) throw new BridgeRefusal(res.code, !!res.retryable, res.retryAfter || 0);
+    return { chat: res.chat };
+  } },
+});
+
+export const OPS = { ...BASE_OPS, ...chatOps({ contributorForEnv }), ...capabilityOps({ contributorForEnv }), ...publicOps({ catalogFor, portraitsFor }), ...revokeOps, ...readinessOps,
   ...displayOps({ contributorForEnv }) };
 
 const SOCKET_HEADERS = ["upgrade", "connection", "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions"];
@@ -131,16 +164,23 @@ export const bridgeFetch = async (env, request) => {
   if (!assertion || assertion.v !== BRIDGE_VERSION || assertion.env !== env.ENVIRONMENT || !assertion.principal || typeof assertion.principal !== "object")
     return new Response("Forbidden", { status: 403 });
   if (!bridgeFeatures(env).bridge || !env.AUDIENCE) return new Response("Unavailable", { status: 503 });
+  // A hosted chat (docs/ooga-chat-hosts.md), named by the edge from the page's `?chat=`: only a live one is reached, so
+  // no page makes an object by guessing an id. Without one, the old public object.
+  const chat = request.headers.get("x-chat-id");
+  if (chat !== null) {
+    if (!bridgeFeatures(env).chats || !env.CHATS) return new Response("Unavailable", { status: 503 });
+    if (!CHAT_ID.test(chat) || !(await env.CHATS.getByName(DIRECTORY_NAME).has(chat))) return new Response("Ended", { status: 404 });
+  }
   const headers = new Headers();
   if (media) headers.set("content-type", "application/json");
   else for (const name of SOCKET_HEADERS) { const value = request.headers.get(name); if (value !== null) headers.set(name, value); }
   const p = assertion.principal;
   headers.set("x-audience-principal", JSON.stringify({ principal: p.id, provider: p.provider, providerUserId: p.providerUserId, login: p.login,
     display: p.display, avatar: p.avatar, character: assertion.character, eligible: assertion.eligible === true, sessionExpiresAt: assertion.sessionExpiresAt }));
-  const stub = env.AUDIENCE.getByName(AUDIENCE_NAME);
+  const stub = env.AUDIENCE.getByName(chat !== null ? chatName(chat) : AUDIENCE_NAME);
   // A media call (#666): its body (a connection and an SDP) goes on as it is; the Audience reads it bounded.
   if (media) return stub.fetch(new Request(`https://audience.invalid/media/${media}`, { method: "POST", headers, body: await request.text() }));
-  return stub.fetch(new Request("https://audience.invalid/connect", { headers }));
+  return stub.fetch(new Request(`https://audience.invalid/connect${chat !== null ? `?chat=${chat}` : ""}`, { headers }));
 };
 
 export class ChatBridge extends WorkerEntrypoint {

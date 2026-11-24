@@ -15,6 +15,7 @@ import { handleAvatar } from "./avatar.js";
 import { bootstrap, effective, health, version } from "./config.js";
 import { handleDonations } from "./donations.js";
 import { handleMedia } from "./media.js";
+import { handleChats } from "./chats.js";
 import { handlePublic } from "./public.js";
 import { allowed, clientIp, json, refusal } from "./http.js";
 import { metricLine } from "./metrics.js";
@@ -52,6 +53,7 @@ const dispatch = async (request, env, deps) => {
     return json(await read(env));
   }
   if (path === "/api/chat/audience") return handleAudienceSocket(request, env, deps);
+  if (path === "/api/chat/chats") return handleChats(request, env, deps);
   if (path === "/api/chat/commons/name") return handleCommonsName(request, env, deps);
   if (path === "/api/chat/commons") return handleCommonsSocket(request, env, deps);
   if (path.startsWith("/api/chat/media/")) return handleMedia(request, env, url, deps);

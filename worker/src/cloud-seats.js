@@ -5,6 +5,13 @@
 // Land's sky, seen only there: no identity heard in one zone is drawn in the other. Pure; loaded in Node.
 
 export const SEAT_REVISION = "cloud-seats-v1";
+// A hosted chat's copy of Main Island (docs/ooga-chat-hosts.md) seats every speaker not walking it, up to the speaker cap:
+// `main-cloud-1` … `main-cloud-32`, the same names as the island's first eight, drawn by the copy's own renderer.
+export const COPY_REVISION = "cloud-seats-v2";
+export const COPY_SEATS = 32;
+export const COPY = Object.freeze(Array.from({ length: COPY_SEATS }, (_, i) => `main-cloud-${i + 1}`));
+/** The first copy seat nobody in `taken` holds, or null. */
+export const freeCopySeat = (taken) => COPY.find((seat) => !taken.has(seat)) || null;
 export const SEATS_PER_ZONE = 8;
 export const SEATS = Object.freeze({
   main: Object.freeze(Array.from({ length: SEATS_PER_ZONE }, (_, i) => `main-cloud-${i + 1}`)),

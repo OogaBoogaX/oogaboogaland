@@ -32,7 +32,7 @@
     // release runbook's order (docs/ooga-chat-operations.md): GitHub sign-in first, before anything else.
     // Staging also listens and speaks (#654's staging check): the audience, its roster and receive-only audio for anyone
     // signed in, and contributors speaking from Ooga Chat, seated on the island's clouds (#659).
-    "FEATURES": "github,feed,commons,listen,speak,cloud",
+    "FEATURES": "github,feed,commons,listen,speak,chats",
     // OogaBoogaX's "Ooga Chat (staging)" OAuth App (callback <SITE_ORIGIN>/auth/github/callback). A client id is public.
     "GITHUB_CLIENT_ID": "Ov23limsSaK7tng3ziBP",
     // @w_s_bitcoin's "Ooga Chat" X app, OAuth 2.0 confidential client (callbacks for both environments). Public.

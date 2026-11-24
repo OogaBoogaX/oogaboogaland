@@ -1776,6 +1776,12 @@ body[data-active-scene="block"] .mode-hud {
   cursor: pointer;
 }
 .players-link[hidden] { display: none; }
+/* In a hosted chat's voice (players.js `call`, call-v1): Ooga Chat's purple cloud where the voice mark would stand. */
+.call-mark { display: inline-flex; }
+/* The island's emoji bar is its room's, so a hosted chat's panel (cloud-panel.js `data-space`) offers none. */
+#cloud-panel[data-space] #cloud-reactions { display: none; }
+.call-mark[hidden] { display: none; }
+.call-mark svg { width: 12px; height: 12px; shape-rendering: crispEdges; }
 .players-link svg { width: 11px; height: 11px; shape-rendering: crispEdges; }
 .players-link:hover, .players-link:focus-visible { color: #fff; outline: none; }
 .players-link:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
@@ -1931,6 +1937,43 @@ body[data-active-scene="block"] .mode-hud {
 }
 
 .players-volume[hidden] { display: none; }
+
+/* In Ooga Chat (players.js): a button a chat, its title wrapping and its counts under it. */
+.players-rows li.players-chat { display: block; padding: 0; }
+.players-chat-open {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--paper);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.players-chat-open:hover, .players-chat-open.virtual-hover { background: rgba(255, 255, 255, 0.05); }
+.players-chat-open:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
+.players-chat-title { font-size: 12px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+.players-chat-counts { color: rgba(243, 239, 228, 0.78); font-size: 11px; }
+.players-chat-here { color: var(--accent-text); font-size: 11px; font-weight: 700; }
+.players-chat-here[hidden] { display: none; }
+@media (pointer: coarse) {
+  .players-chat-open { min-height: 44px; }
+}
+
+/* Change chats? (cloud-panel.js `openChat`): the question on a slab, Stay and the amber Switch chats under it. */
+.hosted-switch { width: 360px; }
+.hosted-switch-slab { display: grid; gap: 8px; padding: 12px; }
+.hosted-switch-text { margin: 0; font-size: 12px; line-height: 1.45; color: rgba(243, 239, 228, 0.88); overflow-wrap: anywhere; }
+.hosted-switch-note { margin: 0; font-size: 11px; line-height: 1.4; color: rgba(243, 239, 228, 0.7); }
+.hosted-switch-note:empty { display: none; }
+.hosted-switch-go { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+@media (max-width: 399px) {
+  .hosted-switch-go .foot-button { min-height: 44px; flex: 1 1 auto; }
+}
 
 .players-volume-range {
   width: 100%;

@@ -5,7 +5,8 @@
 // page carries no inline code under its policy (`script-src 'self'; style-src 'self'`), but for the scripts tagged
 // `data-defer="<group>"`: each group is staged as js/ooga-chat-<group>-<hash>.js, kept out of the first load and named
 // in `BL.oogaChatScripts` at the head of the first-load script, which fetches it when a tab needs it or once the page
-// is idle (ooga-chat-chunks.js); the service worker keeps them all. Every picture under art/ the
+// is idle (ooga-chat-chunks.js); a stylesheet tagged the same way is that group's own css/ooga-chat-<group>-<hash>.css,
+// named in `BL.oogaChatScripts` as `<group>.css` for that group's code to link; the service worker keeps them all. Every picture under art/ the
 // views name moves to art/<name>-<hash>.<ext>. The page may load only its own modules and the shared ones in SHARED:
 // anything else (a renderer, a scene, the island's socket) fails the build. `--fixtures` also stages fixture.html with
 // the offline fixture adapter, for review only; without it no fixture code is in the folder. build.json records the
@@ -27,7 +28,15 @@ const app = join(root, "src", "ooga-chat");
 export const SHARED = ["../js/sign-glyphs.js", "../js/native-icons.js", "../js/donations.js", "../js/banana-panel.js", "../js/qr.js", "../js/banana-icon.js",
   "../js/jumbotron-font.js", "../js/factory-kiosk-core.js", "../js/factory-kiosk.js", "../js/donation-popup.js", "../js/chat-policy.js", "../js/emoji-data.js", "../js/reaction-policy.js",
   "../js/zone-map.js", "../js/commons-log.js", "../js/format-large.js", "../js/roster-panel.js", "../js/contributor-identities.js", "../js/activity-repos.js",
-  "../js/audience-tiles.js", "../js/reaction-bar.js", "../js/voice-handoff.js", "../js/duel-listening.js"];
+  "../js/audience-tiles.js", "../js/reaction-bar.js", "../js/voice-handoff.js", "../js/duel-listening.js", "../js/chat-hosts.js",
+  // The island view (island-view.js, with the hosted chats), and its opt-in Live view: the game's own renderer and the
+  // island's ground (OPT_IN, fetched only when a viewer turns it on).
+  "../js/island-view-data.js", "../js/island-view.js", "../js/math.js", "../js/daylight.js", "../js/scene.js", "../js/compact-geometry.js",
+  "../js/mirror-ripples.js", "../js/mirror-body.js", "../js/dsb-water.js", "../js/gl-renderer.js", "../js/build-tasks.js", "../js/models.js", "../js/convex.js",
+  "../js/terrain.js", "../js/island-view-live.js"];
+// Deferred groups a visit fetches only on the visitor's word, never ahead of it: kept out of the idle prefetch
+// (ooga-chat-chunks.js) and the service worker's shell, so an install never downloads them either.
+export const OPT_IN = ["live"];
 // What a first visit may cost over the wire (index.html, the first-load script, the stylesheet and the art it shows),
 // gzipped, never the deferred chunks. The
 // staged foundation measured about 91 KB, most of it the sign-in picture. The original picture at Retina size (about
@@ -48,8 +57,11 @@ export const SHARED = ["../js/sign-glyphs.js", "../js/native-icons.js", "../js/d
 // just above it, so a tab's code cannot slip back into the first load unnoticed. The emoji bar and its picker with the
 // whole emoji list (emoji-data.js and reaction-bar.js, about 24 KB), wanted only signed in, then moved into a chunk of
 // their own too, once reaction-policy.js read the list when first asked rather than at load: about 153.3 KB, then 154.1 KB
-// with the voice links and listeners in Online Oogas (#861) and each chunk's guard against running twice.
-export const FIRST_LOAD_BUDGET = 156 * 1024;
+// with the voice links and listeners in Online Oogas (#861) and each chunk's guard against running twice. Hosted chats
+// (docs/ooga-chat-hosts.md) put their views and look in a chunk of their own, `hosts`, with its own stylesheet, and only
+// their glue in the first load (the adapter's routes, the roster's ranks, the chosen chat, the tile menu's hook): 156.0 KB.
+// On 2026-11-23 the maintainer raised the budget to 256 KB for hosted chats, the first load then about 155.9 KB.
+export const FIRST_LOAD_BUDGET = 256 * 1024;
 // The island's own rules for the panels the app shows as the island does (src/style.css), taken by selector each time
 // the app builds, so the two look the same from one source: every rule whose selectors begin with one of ISLAND_RULES
 // (a rule's other selectors, another panel's, left behind), in an @media, @supports or @container block too, and every
@@ -59,8 +71,9 @@ export const ISLAND_RULES = [".roster", ".players-", ".chat-", ".section-head", 
   ".help", ".link", ".account", ".foot-button", ".foot-primary", ".cloud-status", ".panel > .cloud-roster", ".cloud-tile",
   ".cloud-face", ".cloud-portrait", ".cloud-react", ".cloud-hand", ".cloud-pop", ".cloud-name", ".cloud-role",
   ".cloud-mic", ".cloud-foot", ".cloud-mute", ".cloud-voice", ".reaction", ".panel-foot", ".voice-handoff"];
-// Pictures the app loads only when they are wanted, never on a first visit: the face sheet, when a stats strip opens.
-export const LAZY_ART = ["ooga-faces.png"];
+// Pictures the app loads only when they are wanted, never on a first visit: the face sheet, when a stats strip opens, and
+// the island view's map, when a chat's speaker walks its island.
+export const LAZY_ART = ["ooga-faces.png", "island-view-main.webp"];
 // Smaller copies of a picture in a view's srcset, which a visit loads in place of the full one: the first load counts
 // only the full one, the most a visit can fetch.
 export const ALTERNATE_ART = ["sign-in-island-520.webp", "sign-in-island-680.webp"];
@@ -182,8 +195,11 @@ export const favicon = (size, mark = cloudMark()) => {
 const read = (page) => readFileSync(join(app, page), "utf8");
 // A script tag, with the group it is deferred to, if any.
 const SCRIPT_TAG = /^([ \t]*)<script src="([^"]+)"(?: data-defer="([a-z]+)")?><\/script>\r?\n/gm;
+const SHEET_TAG = /^([ \t]*)<link rel="stylesheet" href="([^"]+)"(?: data-defer="([a-z]+)")?>\r?\n/gm;
 const listOf = (html, page) => {
-  const sheets = [...html.matchAll(/^[ \t]*<link rel="stylesheet" href="([^"]+)">\r?\n/gm)].map((m) => m[1]);
+  const links = [...html.matchAll(SHEET_TAG)], sheets = links.filter((m) => !m[3]).map((m) => m[2]);
+  // A deferred group's own stylesheet, by group; only a group with scripts may have one.
+  const styles = new Map(links.filter((m) => m[3]).map((m) => [m[3], m[2]]));
   const tags = [...html.matchAll(SCRIPT_TAG)], scripts = tags.map((m) => m[2]);
   // Every script's group, "" for the first load; the last script (the app) always loads first.
   const groups = new Map(tags.map((m) => [m[2], m[3] || ""]));
@@ -196,7 +212,8 @@ const listOf = (html, page) => {
   }
   if (!html.includes(`content="${POLICY}"`)) throw new Error(`${page}: its content policy differs from scripts/ooga-chat.mjs POLICY`);
   if (groups.get(scripts.at(-1))) throw new Error(`${page}: the app itself cannot be deferred`);
-  return { sheets, scripts, groups };
+  for (const group of styles.keys()) if (![...groups.values()].includes(group)) throw new Error(`${page}: a stylesheet is deferred to ${group}, which has no scripts`);
+  return { sheets, scripts, groups, styles };
 };
 
 // The two entries differ only by the fixture adapter, loaded just before the app starts.
@@ -205,7 +222,8 @@ export const entries = () => {
   const main = listOf(index, "index.html"), review = listOf(fixture, "fixture.html");
   if (main.scripts.includes("ooga-chat-fixtures.js") || index.includes("data-adapter=")) throw new Error("index.html: the production entry must not load or select fixtures");
   const expected = [...main.scripts.slice(0, -1), "ooga-chat-fixtures.js", main.scripts.at(-1)];
-  if (review.scripts.join() !== expected.join() || review.sheets.join() !== main.sheets.join() || main.scripts.some((src) => review.groups.get(src) !== main.groups.get(src))) {
+  if (review.scripts.join() !== expected.join() || review.sheets.join() !== main.sheets.join() || main.scripts.some((src) => review.groups.get(src) !== main.groups.get(src))
+    || [...main.styles].join() !== [...review.styles].join()) {
     throw new Error("fixture.html: must load index.html's files plus ooga-chat-fixtures.js just before ooga-chat-app.js");
   }
   return { index, fixture, main, review };
@@ -268,7 +286,13 @@ export const build = (out, { fixtures = false } = {}) => {
   const chunkOf = (group) => `(() => {\nif (window.BL && window.BL.oogaChatChunks && window.BL.oogaChatChunks.present(${JSON.stringify(group)})) return;\n\n${bundle(main.scripts.filter((src) => main.groups.get(src) === group))}})();\n`;
   const chunks = Object.fromEntries(deferredOf(main).map((group) => [group, chunkOf(group)]));
   const scripts = Object.fromEntries(Object.entries(chunks).map(([group, code]) => [group, named("js", `ooga-chat-${group}`, "js", code)]));
-  const head = `window.BL = window.BL || {};\nwindow.BL.oogaChatScripts = ${JSON.stringify(scripts)};\n\n`;
+  const styleOf = (path) => {
+    const text = `${read(path).trim().replace(/\r\n/g, "\n")}\n`;
+    if (/url\(/.test(text)) throw new Error("ooga-chat: a stylesheet loads a url(); name pictures from the views instead");
+    return text;
+  };
+  const styles = Object.fromEntries([...main.styles].map(([group, path]) => [`${group}.css`, named("css", `ooga-chat-${group}`, "css", styleOf(path))]));
+  const head = `window.BL = window.BL || {};\nwindow.BL.oogaChatScripts = ${JSON.stringify({ ...scripts, ...styles })};\n\n`;
   const firstLoad = (entry) => `${head}${bundle(entry.scripts.filter((src) => !entry.groups.get(src)))}`;
   const used = new Set();
   const js = firstLoad(main);
@@ -296,21 +320,23 @@ export const build = (out, { fixtures = false } = {}) => {
       let first = true;
       return (text) => text.replace(pattern, (_, indent) => first ? (first = false, `${indent}${tag}\n`) : "");
     };
-    const shell = [once(/^([ \t]*)<link rel="stylesheet" href="[^"]+">\r?\n/gm, `<link rel="stylesheet" href="${sheet}">`),
+    const shell = [once(SHEET_TAG, `<link rel="stylesheet" href="${sheet}">`),
       once(SCRIPT_TAG, `<script src="${scriptPath}"></script>`)].reduce((text, step) => step(text), html)
       .replace('<meta name="ooga-chat-build" content="dev">', `<meta name="ooga-chat-build" content="${buildId}">${head}`);
     if (!shell.includes(`content="${buildId}"`) || (shell.match(/<script /g) || []).length !== 1) throw new Error(`ooga-chat: ${page} did not stage`);
     write(page, shell);
   };
   const script = named("js", "ooga-chat", "js", js);
-  const buildId = hash(`${js}${Object.values(chunks).join("")}${css}`);
+  const buildId = hash(`${js}${Object.values(chunks).join("")}${css}${Object.values(styles).join("")}`);
   // Only the production entry is installable: the review entry links no manifest and registers no worker.
   stage(index, "index.html", script, buildId, `${iconLinks}\n  <link rel="manifest" href="/manifest.webmanifest">\n  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">`);
   write("manifest.webmanifest", `${JSON.stringify({ id: "/", name: APP.name, short_name: APP.name, description: APP.description, start_url: "/", scope: "/",
     display: "standalone", background_color: APP.theme, theme_color: APP.theme,
     icons: icons.map((icon) => ({ src: icon.path, sizes: `${icon.size}x${icon.size}`, type: "image/png", purpose: icon.purpose })) }, null, 2)}\n`);
-  // The worker's shell: the page and every hashed file of this build, never the fixture entry, the manifest or the 404.
-  const shell = ["/", ...files.filter((path) => /^(js|css|art|icons)\//.test(path)).sort().map((path) => `/${path}`)];
+  // The worker's shell: the page and every hashed file of this build, never the fixture entry, the manifest, the 404 or
+  // an opt-in chunk.
+  const optIn = new Set(OPT_IN.map((group) => scripts[group]).filter(Boolean));
+  const shell = ["/", ...files.filter((path) => /^(js|css|art|icons)\//.test(path) && !optIn.has(`/${path}`)).sort().map((path) => `/${path}`)];
   const worker = read("service-worker.js").replace('const VERSION = "dev";', `const VERSION = ${JSON.stringify(buildId)};`).replace("const SHELL = [];", `const SHELL = ${JSON.stringify(shell)};`);
   if (!worker.includes(buildId) || worker.includes("const SHELL = [];")) throw new Error("ooga-chat: the service worker did not stage");
   write("sw.js", worker);

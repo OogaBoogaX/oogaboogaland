@@ -1,0 +1,398 @@
+# Hosted chats
+
+Hosts and co-hosts in Ooga Chat (OC, `ooga.chat`) and in Ooga Booga Land's (OBL, the island's) Ooga Chat panel: who
+starts a conversation, who may speak in it, and how a listener asks. Agreed with the maintainer on 2026-11-22 before any
+code; this file is the design both PRs build to. Roles follow X Spaces and Clubhouse: host, co-host, speaker, listener.
+
+## The model
+
+**A chat is started, not found.** Today's always-on public conversation (one roster for each outdoor zone, island
+players heard in OC by walking into a public zone, OC speakers on clouds over the real island) is replaced. A chat
+exists only while a host keeps it: a contributor starts one, picks its zone (Main Island or DSB Land) and gives it a
+title. Two hosts picking the same zone start two chats, each in its own parallel copy of that zone, with nothing shared
+between them.
+
+**Signing in joins nothing.** Signing in to OBL or OC puts nobody in a chat. A visitor is in one only after opening it
+from the list and joining it, as a listener, then speaker or co-host. The main island goes back to plain proximity
+voice: nothing said on it is heard in OC, and nothing said in a chat is heard on it.
+
+**Two pieces, two PRs.**
+
+1. **Chats and roles** (this design's first PR): the chat objects, the list, roles, requests and the host's tools, in
+   OC and in the island's Ooga Chat panel. An island visitor joins a chat by voice while their Ooga stays where it is.
+2. **The copies of zones** (the second PR): each chat's own instance of its zone, which an island player travels into
+   with their Ooga (the list's Go there), with the chat's OC speakers on its clouds. Out of scope here except where the
+   first PR must leave room for it.
+
+## Roles
+
+| Role | Who | May |
+|---|---|---|
+| Host | the contributor who started the chat; one a chat | everything a co-host may, plus make and remove co-hosts, hand the chat over to a co-host, end the chat |
+| Co-host | up to 3, made by the host from the chat's speakers or listeners | approve and decline requests, invite a listener, mute a speaker, move a speaker to listening, remove a listener or speaker from the chat; never touch the host or another co-host, never end the chat |
+| Speaker | approved by a host or co-host, and remembered for the chat (below) | speak, mute and unmute themselves, raise the hand, go back to listening and return with Join Voice |
+| Listener | anyone signed in who joined (GitHub or X) | listen, react, request to speak |
+
+- **The host is on stage from the start**, muted, as in X Spaces: Start chat opens their microphone on the strength of
+  that press (refused, they stay host with no microphone, and Join Voice asks again). A co-host joins the stage only by
+  pressing Join Voice. A host's tile is labelled **Host** and a co-host's **Co-host** in place of Speaker or Listener,
+  with no separate badge; the microphone mark still shows whether one on stage is speaking or muted.
+- **Co-hosting is offered.** Make co-host sends the person an offer, which holds one of the three slots (co-hosts and
+  open offers together; the host cannot offer more while all three are held). Accepting makes them a co-host and puts
+  them on stage at once (their Accept is the press the microphone is asked for on); Not now frees the slot. A co-host
+  who leaves voice is a listener again with the offer back, their slot kept; one who drops and does not return within
+  the stage's hold gets the same if still in the chat, and frees the slot if gone. The host may withdraw an offer, or
+  make a co-host a plain speaker who stays on stage. Leaving the chat frees an offer's slot. A row with an offer has
+  `request: "cohost"`.
+- **Who may start a chat:** a GitHub account the island's contributor policy calls `eligible` (`chat-capability.js`,
+  the rule that let someone speak until now), checked again by the island when the chat starts. One live chat a host.
+- **Who may request:** anyone signed in, GitHub or X. Eligibility no longer decides speaking: a host does. An X
+  speaker, or any speaker without an Ooga, gets no cloud in the second PR's copy (clouds carry GitHub ids).
+- **Speakers** count the host and co-hosts: at most 32 a chat (`CHAT_SPEAKERS`, a setting that may lower it, never raise it: a copy holds 32 Oogas; every listener
+  receives one voice per speaker, about 32 kb/s each while they talk, much less while muted, and the media server sends
+  speakers × listeners streams, about 16,000 at 32 to 500), at most 500 listeners
+  (`AUDIENCE_LISTENERS`). No speaker needs a cloud seat: a chat's clouds are its copy's, a seat each, in the second PR. Roles are an identity's (`gh:<id>`, `x:<id>`), never a tab's: every tab of an account shows
+  the same role, and one account holds one voice lease across every chat (joining another chat's stage leaves the
+  first's).
+- **Once approved, remembered.** Anyone a host or co-host let on the stage (an approved request, an invite, an open
+  stage, co-hosting) may take it again with Join Voice for the rest of the chat, after going back to listening or a drop
+  of any length, with no new approval. Only **Move to listener** or **Remove from chat** takes that away: then they
+  request again (`cleared` in chat-roles.js; the speaker cap still holds).
+- **A short drop shows nobody anything.** When a speaker's, co-host's or host's last connection to the chat drops,
+  everyone keeps seeing their tile exactly as it was for 5 s (`QUIET_MS`). Past that it stays in its place, dimmed, with
+  **Reconnecting…** for its role and no microphone mark, for as long as their place is held: a minute on the stage
+  (`STAGE_HOLD_MS`, a co-host's rank too), the host's 2-minute hold for the host, or until a host or co-host moves them
+  to listener or removes them. Their place counts against the speaker cap all the while, so the stage never reshuffles.
+  Back and speaking again (Ooga Chat does it by itself), their tile carries on where it stood; still gone when the hold
+  ends, the roster shows them gone. A microphone that only publishes again after a failed connection (`publish/close`
+  with `recover`) keeps the place, rank and tile the same way; Leave Voice is the speaker's own word and gives the place
+  (and a co-host's rank) up.
+- **Mute:** a host or co-host can mute a speaker; only the speaker can unmute themselves (X Spaces' rule). Move to
+  listener ends their lease. Remove from chat closes every connection of that account to the chat and keeps it out of
+  that chat until a host or co-host allows them back or it ends. **Allow back** (from the Removed list in the
+  Requests pop-up) lets them join again as a listener only: no request, invite, rank or place on the stage returns.
+
+## Requests
+
+- A listener's footer reads **Request to speak** where it read Join Voice; pressed, it reads **Requested · Cancel**.
+  A requester's tile carries a small microphone badge. The raised hand keeps its meaning for speakers only.
+- The host and co-hosts see a **Requests N** chip in the chat's title; it opens the queue in the panel's own flow under
+  the chat's bar (pushing the roster down, never covering it, and scrolling itself in a short panel), oldest first, each row with
+  Approve and Decline. A tile's menu (press a tile, or Enter on the focused tile) offers what the viewer's role allows:
+  Invite to speak, Mute, Move to listener, Make co-host (dimmed with "All 3 co-host slots are taken" while every slot is
+  held), Withdraw co-host invitation, Make speaker (a co-host on stage; Make listener off it), Make host, Remove from chat.
+  A tile holding an offer carries a star badge and reads "invited to co-host". The person offered gets a card, **The
+  host invited you to co-host** (**You left the stage. Rejoin as co-host?** when it came back), with Accept and Not now.
+- **Approve, or invite** a listener directly: the listener gets an invite card, **A host invited you to speak**, with
+  Start speaking and Not now. Start speaking asks for the microphone (inside the press, as Safari needs) and puts them
+  on stage muted. Nobody is put on stage without their own press. An invite lapses after 60 s, and the person goes back
+  to listening with no request.
+- **Decline:** the request goes; the person may ask again after 60 s. Cancel takes a request back at any time.
+- One request an identity a chat; the queue holds at most 50 a chat (a full queue refuses, retryable).
+- **Open stage**: the host (alone) can switch it on at the top of the Requests pop-up ("Open stage: anyone who asks may
+  speak"); everyone sees an Open stage tag beside the chat's title while it is on, and on the island Request to speak
+  reads Speak now. While it is on, every request is approved the
+  moment it is made, as an invite, and switching it on approves everyone waiting. Removed accounts stay out and the
+  speaker cap still holds.
+- **Preview and joining as either**: a chat in the Chats list opens a preview pop-up of its stage (the host, co-hosts
+  and speakers, as the chat orders them), how many listen and wait, and whether its stage is open, with **Join as
+  listener** and **Join as speaker**. Joining as a speaker joins and asks at once; on an open stage that press goes
+  straight on to Start speaking (it is the person's own press), and otherwise they wait in the queue as any asker.
+
+## The host leaving
+
+The host role is held 2 minutes after the host's last connection to the chat goes, for a reconnect. After that the
+longest-serving co-host becomes host; with no co-host, the chat ends. The host may hand over to a co-host or End chat
+at any time. When a chat ends, everyone in it sees **The chat ended**, its voice closes, and it leaves the list.
+
+## Where each control lives
+
+**OC** (`src/ooga-chat/`): the Ooga Chat tab opens on the **Chats** list (title, zone tag, the host's portrait, how
+many speak and listen), with **Start a chat** for a contributor: one dialog with a title (prefilled "<name>'s chat",
+editable, at most 60 characters, checked by the island's chat policy) and three picture cards to choose the land: **Voice
+only** first (chosen first in Ooga Chat), Main Island and DSB Land. Voice only is a chat with no land (zone `none`: Ooga Chat voice alone, never a
+copy, clouds or Go there), then Start chat (the one amber action) or Cancel. The island's panel opens the
+same dialog with the zone the visitor's Ooga stands in chosen first. A chat opens the panel the app has today (`audience-tiles.js` roster, the emoji bar,
+the footer) with a Back to chats control, the Requests chip for a host or co-host (in the panel's top right corner,
+to the right of the zone tag), a role badge on host and co-host
+tiles, and the footer's Request to speak or, for a host, End chat beside Leave.
+
+**OBL** (`src/js/cloud-panel.js`): the same Chats list and chat view in the sheet's cloud tab, through the same shared
+modules, so the two apps never drift. Joining a chat by voice there is like taking a call: the island's proximity voice
+pauses until the visitor leaves the chat, and their Ooga carries an "in a chat" mark so nearby players know why they
+can't hear them (the room's `call-v1`: the page sends `{ t: "call", on }`, every page hears `call { id, on }`
+and finds `call: true` on such a player in `welcome` and `join`). Online Oogas lists island players by zone, and after
+every zone's group, **In Ooga Chat**: every live hosted chat with how many speak and listen in it (below).
+The same holds across devices: a chat tells the island room when a GitHub account takes or leaves its stage
+(`chatVoice`, kept in the room's storage as `chatVoices`). The room ends that account's island voice (`voice-moved`,
+whose toast says Ooga Chat took it), marks its Ooga in a call on every page, and tells its island page its voice is
+elsewhere (`voice-elsewhere`, unless that page is itself in the chat), whose Switch here takes it back: island voice
+going live while a chat holds the stage ends the lease there (`yieldVoice`), so one account has one voice either way. In the second PR the list also offers **Go
+there**, which takes the visitor's Ooga into the chat's copy of its zone.
+
+**Who the island sees in chats.** Each chat tells the island room its title and counts as they change (the Room's RPC
+`chatMembers(chat, title, speakers, listeners, ids)`, from `reportMembers` in `audience.js`, `summaryOf`): how many of
+its rows, a quiet hold's included, speak (its host and co-hosts always, on the stage or not, as its preview and the
+Chats list count them; `tally`) and how many listen, and which accounts are there through Ooga Chat's app by id
+(`ids`, every one the chat's limits let in: a row whose connections are none of them the island page's own `ob_` principal, `via` "app"), never
+a name. A report goes at most every 2 s a chat, one in flight, a one-shot timer sending a burst's last change and nothing
+while the counts are what the room was told; a report that fails goes again with the next change. As the chat ends it
+sends zeros, kept in its storage (`membersGone`) and sent again from its alarm until the room takes them. The room
+(`room-chat-members.js`) keeps each chat's title, counts and app ids, and nothing else, in memory and in storage (`chatMembers`,
+so a hibernation wake keeps them; an entry stored with names by an earlier version keeps only its counts), replaces
+them on each report and drops the chat when nobody is in it, and at the sweep it already runs while players are
+connected drops any chat the directory no longer lists, adding no timer. Pages hear it only where the welcome lists
+`chat-summary-v1` (on with the `chats` switch, beside `call-v1`): the welcome carries every chat's (`chatSummaries`)
+and each change goes to every page as `{ t: "chat-summary", chat, title, speakers, listeners }`, all zero when it
+ends; no page ever gets an id. The room also works out one number, how many are in chats through the app and not on the
+island, each account once however many chats it is in, again whenever a chat reports or a player joins or leaves, and
+sends it when it moves (`{ t: "chat-online", n }`, the welcome's `chatOnline`). The page (`net.js` `state.chatMembers`,
+chat id to a frozen `{ title, speakers, listeners }`, and `state.chatOnline`, emptied with the socket) lists in In Ooga Chat one button a chat (`players.js`): its title, whole and wrapping, and its counts under
+it ("3 speaking · 12 listening", a count of nobody left out: "1 speaking" while nobody listens; a chat always has its
+host as a speaker), "You're in
+this chat" on the one the visitor is in, busiest first and then by title. Every "N online" on the island adds the room's
+number (`cloud-panel.js` `inChats`), so nobody is counted twice. A chat pressed
+(`cloud-panel.js` `preview`) asks the live list (`/api/chats`), says **That chat has ended** if it is no longer listed,
+and otherwise opens the chat's preview, the same pop-up the Chats list opens (`chat-hosts.js` `preview`, standing in
+the page's body while the Ooga Chat tab is hidden): its stage, its counts, the Open stage tag, **Join as listener** and
+**Join as speaker**, either of which shows the Ooga Chat tab and opens the chat there. The chat the visitor is in
+already only shows the tab. A visitor already in another chat is asked first, **Change chats?** (a modal dialog:
+"You're in <title>. Leave it and join <title>?", with what leaving costs them, said only to the chat's host: its 2-minute
+hold before the chat passes to a co-host or ends), **Switch chats** leaving that chat and opening this one, **Stay**
+changing nothing and giving the chat's row the focus back.
+
+**Clouds belong to the copies.** OC speakers are never seen or heard over the real island any more: a chat's speakers
+sit on clouds only inside that chat's own copy of its zone (the second PR), one seat each, however many chats share a
+zone.
+
+**Switched off by the first PR, deleted later:** the outdoor voice bridge (`outdoor-voice.js`, the Room's
+`outdoor-voice-v1`, `outdoor-policy.js`, the island's overhearing) and the clouds over the real island
+(`cloud-seats-v1`) stay in the code with their switches off (the island's `outdoor`, `cloud` and `commons`-free
+`OOGA_CHAT_FEATURES`, the edge's `cloud`), and are removed in a follow-up once hosted chats are live. Clouds come back
+in the second PR inside each chat's copy.
+
+## Notifications
+
+| Event | Who | What |
+|---|---|---|
+| a request arrives | host and co-hosts | the Requests chip's count, the cloud tab's unread badge (`sheet.setBadge`) while the panel is not watched, a toast "bea asked to speak" (at most one every 5 s, joined into "bea and 2 others asked to speak"), a soft chime once a burst |
+| approved or invited | the requester | the invite card and a toast; a chime |
+| declined | the requester | the footer goes back to Request to speak; a quiet note "Your request wasn't accepted" |
+| muted by a host | the speaker | a toast "A host muted you" |
+| moved to listening | the speaker | a toast "A host moved you to listening" |
+| offered co-hosting | that person | the co-host card, focused |
+| accepted or turned down co-hosting | hosts and co-hosts; the host | "bea is co-host now"; "bea said not now to co-hosting" |
+| offer withdrawn, or co-host taken back | that person | "The host withdrew the co-host invitation"; "You're no longer a co-host" |
+| host handed over | everyone | the badge moves; a toast for the new host |
+| removed from the chat | that person | "A host removed you from this chat", back to the list |
+| the chat ended | everyone in it | "The chat ended", back to the list |
+
+Screen readers hear every one of these through one polite live region a panel; nothing is announced twice across the
+toast and the region.
+
+## Accessibility and phones
+
+- The Chats list is a list of buttons. The roster keeps its one tab stop and arrow keys; Enter or Space on a focused
+  tile opens its menu, the arrows move in it, Escape closes it and focus returns to the tile.
+- The queue is a list whose rows each have two named buttons ("Approve bea", "Decline bea").
+- The invite card takes focus when it opens (it is the one thing waiting on the person) and closes on Not now or
+  Escape.
+- Under 400 px the tile menu and the queue open as sheets from the panel's foot, 44 px controls.
+- Every pop-up follows AGENTS.md's look (wood frame, words on slabs, one amber action) and joins `pad-focus.js`.
+
+## Server
+
+- **One Durable Object a chat.** The `Audience` class, today one object named `audience` for both zones, becomes one
+  object a chat, named `chat:<id>` (`<id>` a random 16-character token). It keeps its sockets, roster model, leases,
+  media broker, reactions and limits, and gains the roles, the queue and invites. The `audience` singleton goes unused.
+- **One directory.** A new class `ChatDirectory` (`worker/src/chat-directory.js`, migration `v6`, binding `CHATS`),
+  one object named `chats`: the live chats (id, title, zone, host, counts), at most 20 at once (`CHATS_MAX`), one a
+  host, a start a host every 5 minutes (`START_GAP_MS`). A chat tells it its counts and host whenever they change
+  (`update`) and when it ends (`end`). It also keeps which chat each account last took the stage in (`claim`,
+  `release`): taking the stage in another chat ends the lease in that one (`yieldVoice`), so one account has one
+  voice. It runs no timer.
+- **Switches.** The island's `OOGA_CHAT_FEATURES` names `chats` (`bridgeFeatures(env).chats`): by itself it turns on
+  the island's own routes, and with `bridge` the bridge's. The edge's `FEATURES` names `chats` too
+  (`effective(...).chats`, which also needs `listen`); its bootstrap then lists `features.chats`, `paths.chats`
+  (`/api/chat/chats`) and audience protocol 2 in `protocols.audience`.
+  `copies`, with `chats`, turns on each Main Island chat's copy (`/api/chats/<id>/world`, `travel-v1`, Go there); it is
+  the island's alone, and both configs deploy it on with `chats`.
+
+### Routes
+
+| | Ooga Chat (edge, `worker/chat/src/chats.js`) | The island (`worker/src/chats.js`) |
+|---|---|---|
+| live chats | `GET /api/chat/chats` → `{ chats }` | `GET /api/chats` → `{ chats }` |
+| (zones) | `main`, `dsb`, or `none` for a chat with no land | the same |
+| a chat's preview | `GET /api/chat/chats?chat=<id>` | `GET /api/chats/<id>` |
+| start one | `POST /api/chat/chats` `{ title, zone }` → `201 { chat }` | `POST /api/chats` `{ title, zone }` → `201 { chat }` |
+| a chat's socket | `GET /api/chat/audience?chat=<id>` | `GET /api/chats/<id>/live` |
+| its media | `POST /api/chat/media/<op>?chat=<id>` | `POST /api/chats/<id>/media/<op>` |
+
+Both need a session. A list entry is `{ id, title, zone, host: { login, display, character }, startedAt, speakers,
+listeners, open }`, never an account id, busiest first then newest; a preview is `{ chat, stage, listeners, requests }`,
+`stage` the host, co-hosts and speakers as rows (no request or `self`); the island's is read through a 2 s edge cache. Starting
+one needs a GitHub account the island's contributor rule calls eligible (every island account is); refusals are
+`bad_title` (the island's chat policy, at most 60 characters), `zone_unavailable`, `already_hosting` (409),
+`rate_limited` and `chats_full` (with `retryAfter`), `capability_required` (403). A chat id is 16 characters of
+base64url. A socket or media call for a chat the directory doesn't list never reaches an object: the edge closes the
+socket with 4404 and the island answers 404. The island hands a chat its own principal, `ob_<GitHub id>`, with the
+account's Ooga, and no avatar (an Ooga Chat avatar is that origin's alone; the island draws the Ooga's face).
+
+### The chat's socket (audience protocol 2)
+
+Everything audience protocol 1 has (docs/ooga-chat-app.md), with these differences.
+
+- **Join** is `{ "type": "join", "protocol": 2 }`. A chat with no land (`chat.zone` `none`) keeps its roster in the
+  `main` zone, which is the zone its frames name. The zone is the chat's own; a `zone` naming another is refused
+  (`error`, `zone_unavailable`). Protocol 1 on a chat closes it with 4426.
+- **Snapshot** carries `chat: { id, title, zone, startedAt, host, cohosts, offers, open }` (`offers`: who holds an
+  open co-host offer) (the host's and co-hosts' participant
+  ids, and whether the stage is open); `{ type: "chat", chat }` sends it again to everyone whenever the host, co-hosts or
+  the open stage change. An `invited` notice from an open stage carries `open: true`.
+- **Rows** carry `rank` (`host` or `cohost`, absent for everyone else) with `rankSince` (ms, when a co-host was made
+  one) and, while one is open, `request` (`asked` or `invited`) with `askedAt` (ms; the queue's order, oldest first).
+  `since` (ms) is when a speaker took the stage, or when a listener's earliest connection joined; `via` is `island` or
+  `app`, the app they listen or speak from (an island page's `ob_` principal, else Ooga Chat).
+- **Order** in a chat, in both apps: the host first, then co-hosts, the longest-serving first (`rankSince`), then
+  speakers, the longest on stage first (`since`), then listeners with an open request, the longest-lived request first
+  (`askedAt`; an invited listener at the head of the rest), then the other listeners, the longest here first (`since`);
+  ties by name, then id. A speaker's ring says where their Ooga is in the chat's world: green while it walks the chat's
+  copy of the zone (the second PR), purple while they sit on a cloud, whichever app they speak from. Until the copies
+  exist every chat speaker is purple. Listeners carry no mark. `via` stays in the rows for the server's own use. A host's or co-host's rank does not make them a
+  speaker: `role` is still `speaker` only under an active lease.
+- **You** adds `rank` (`host`, `cohost` or `""`), `request` (`asked`, `invited` or `""`) and, while invited,
+  `inviteUntil` (ms). `speak` is `eligible` exactly when the visitor may take a lease now (a rank, a live invite, or a
+  place on the stage), so the app's Join Voice flow is unchanged: Start speaking on the invite card is Join Voice.
+- **Requests**, each `{ type, requestId, ... }` answered by `{ type: "result", requestId, ok, error?: { code,
+  retryable, retryAfter? }, you }`:
+
+  | type | fields | who |
+  |---|---|---|
+  | `ask` | | a listener: Request to speak |
+  | `cancel` | | the asker: Cancel |
+  | `decline` | | the invited: Not now |
+  | `invite` | `id` | a host or co-host, to anyone they outrank who isn't on the stage |
+  | `answer` | `id`, `approve` (boolean) | a host or co-host, to an open request: approve is an invite |
+  | `mute` | `id` | a host or co-host, to a speaker they outrank |
+  | `demote` | `id` | Move to listener, the same |
+  | `cohost` | `id`, `on` (boolean) | the host alone: on offers co-hosting; off withdraws an offer, or makes a co-host a plain speaker |
+  | `cohostAnswer` | `accept` (boolean) | the person offered co-hosting: Accept (a co-host, on stage at once) or Not now |
+  | `handover` | `id` (a co-host) | the host alone |
+  | `remove` | `id` | a host or co-host, to anyone they outrank |
+  | `allow` | `id` | a host or co-host, to someone removed: Allow back |
+  | `open` | `on` (boolean) | the host alone: an open stage |
+  | `end` | | the host alone |
+
+  `setRole`, `setMic`, `reaction` and `hand` are protocol 1's. Refusal codes: `not_host`, `not_allowed`,
+  `already_allowed`, `not_asked`, `not_speaking`, `cooldown`, `rate_limited`, `queue_full`, `cohosts_full`, `removed`,
+  `ended`, `malformed`; `setRole` speaker without leave is `not_allowed`. A speaker a host muted may unmute themselves
+  with `setMic`; until then their voice is not pulled by anyone.
+- **Notices**, `{ type: "notice", kind, id?, by?, until?, reason? }`, to whom they concern:
+
+  | kind | to | means |
+  |---|---|---|
+  | `asked` | hosts and co-hosts | `id` asked to speak |
+  | `not_now` | hosts and co-hosts | `id` turned an invite down |
+  | `invited` | the invited | `by` invited them; good `until` |
+  | `declined` | the asker | `by` declined their request |
+  | `expired` | the invited | their invite lapsed |
+  | `muted` | the speaker | `by` muted them: the page mutes its microphone |
+  | `demoted` | the speaker | `by` moved them to listening (their lease has ended) |
+  | `cohost_offer` | that person | `by` offered them co-hosting (`again` when it came back as they left the stage) |
+  | `cohost_retracted` | that person | `by` withdrew the offer |
+  | `cohost` | hosts and co-hosts | `id` accepted and is a co-host |
+  | `cohost_declined` | the host | `id` turned the offer down |
+  | `uncohost` | that person | `by` made them a plain speaker |
+  | `host` | everyone | `id` is the host now (`by` the old host on a handover) |
+  | `removed` | that person | `by` removed them; the socket then closes with 4403 |
+  | `ended` | everyone | the chat ended (`reason` `ended` or `host_left`); every socket then closes with 4404 |
+
+- **Removed list**, `{ type: "removed", list: [{ id, at, login, display }] }`, earliest first, to hosts and co-hosts
+  alone: after their snapshot, whenever it changes, and to anyone who becomes host or co-host. Refusal `not_removed`.
+- **Close codes** add 4403 (removed: don't reconnect, back to the list) and 4404 (ended or unknown: back to the list).
+
+- **Pure model.** The rules live in `worker/src/chat-roles.js`, pure and allocation-light
+  (`worker/test/chat-roles.test.mjs`), and the objects are checked through a fake host
+  (`worker/test/ooga-chat-hosts.test.mjs`): every rule in this file (who may do what to whom, the caps, the queue, invites,
+  cooldowns, the host hold and succession, removal, one lease an identity).
+- **No idle timers.** A chat's alarm is set only for the earliest of a held host's 2 minutes, a held place on the stage,
+  a quiet hold's 5 s and its end, an invite's 60 s, a pending lease, a re-authentication, or a word the island room has yet to take
+  (kept and retried even after the chat ends, the one thing an ended chat keeps until it is delivered); an empty chat with nothing pending sets none and hibernates. Roles, queue,
+  invites and removals are stored (they are small), and the sockets' attachments carry each connection, so a woken
+  chat carries on at the same revision.
+- **Limits.** Control actions share the socket's existing bucket (10 a second, burst 20); a request at most once every
+  10 s an identity, 60 s after a decline; one chat started an account every 5 minutes; a title through the island's
+  `chat-policy.js`.
+
+## Open for the second PR
+
+Agreed 2026-11-23:
+
+- **What a copy carries:** the zone's open air as it is (scenery, the banana pile, the clouds), the chat's members'
+  Oogas, nothing else: no NPC crew or gorillas, cave mouths and doors sealed, no games.
+- **Who goes:** speakers alone (the host, co-hosts and invited speakers) who are signed into the island with an Ooga.
+  Listeners stay where they are and listen.
+- **Getting there and back:** Go there in the chat beams the Ooga out of the main world in the island's green glyph
+  stream and into the copy beside the banana pile; Leave beams it back to exactly where it stood, as does leaving the
+  stage or the chat.
+- **Size:** up to 32 Oogas, the speaker cap, and the island room's own.
+- **Voice in a chat has no place in it.** Every speaker in a chat is heard at full by everyone in it, wherever their
+  Ooga stands in the copy: no level or crossing blending (voice-blend.js) and no hearing range, which stay the main
+  land's alone. A chat's voice is the chat's own media (Ooga Chat's controller, chat-call.js on the island), never the
+  island's voice.js; the copy carries no voice and ignores the island's `blend` frames.
+- **The copy's server** is the island's own `Room` class in a copy mode, one object a chat (`chat:<id>`), with
+  everything island-only off (NPCs, games, chalk, the World Map's report, island voice, the text chat) and a check
+  pinning what a copy offers. Only the chat's current speakers are admitted, and leaving the stage, removal or the end
+  sends them home.
+- **Main Island first:** Go there is off for DSB Land chats until DSB Land's copy (an arrival spot and clouds in its
+  sky) lands in a later PR; they work as voice chats meanwhile.
+- **The live island view** uses the game's own renderer and models, loaded only when someone turns Live view on.
+- **Ooga Chat's first-load limit** may rise to 256 KB gzipped.
+- **Cloud seats:** today's three-seat bench on 11 of the 18 clouds (33 seats for the 32 speakers), all on the high
+  track so none flies under the meadow, filled a bench at a time so a small chat looks like today's island; a cloud
+  with nobody on it shows no bench.
+- **Clouds:** every speaker not walking the copy sits on a cloud in it, a seat each, 32 seats: Ooga Chat's, and the
+  island's whose Ooga is still on the main land. A speaker with no Ooga of their own (an X account, or a GitHub account
+  with no character) sits there as a default Ooga hashed from their handle, under a name no login can have (as
+  `kortik/factory` is), so it never borrows a real contributor's look; their ring is purple as every cloud speaker's is.
+
+**The island view** (agreed 2026-11-22, built in the second PR): at the top of a chat, for every OC speaker and listener
+tuned into it, a zoomed-out view of the chat's copy of its zone, shown only while at least one of the chat's speakers
+is walking the copy with their Ooga. By default a drawn map: a baked overhead picture of the zone with each such
+speaker's Ooga face where they stand, pulsing while they talk, from positions the chat relays a couple of times a second.
+Speakers alone are drawn, never listeners. An opt-in **Live view**, off by default and remembered per viewer, is a camera feed as
+the Observatory's screens are (`observatory-cameras.js`): a fixed camera far out over the copy, its feed rendered into a
+texture at a capped rate and shown as a screen, of a reduced graph of the zone (terrain and landmarks, no NPCs or
+interactions, as `observatory-bifrost.js` and its siblings build theirs) with the speakers' bodies stood from the poses
+the chat relays (`observatory-visitors.js`). It is drawn in the viewer's own browser: no player's page captures or
+uploads video. The first PR leaves room for it at the top of the chat panel.
+
+As built (`src/js/island-view.js`, drawn by the shared views, chat-hosts.js, in `.hc-room-strip` in both apps):
+
+- **Asking for places.** A chat member's socket asks with `{ type: "view", on: true }` only while the strip shows (a row
+  with `walking`), the panel is shown and the page is visible, and says `on: false` as any of that ends; a new connection
+  asks again. Only then does the Audience send `{ type: "walk", seq, p: [id, x, y, z, yaw, …] }` (at most twice a second,
+  `walk-v1`), which reaches the views through the page's `hear` (ooga-chat-app.js, chat-call.js). A frame is read whole
+  or not at all (`parseWalk`); each walker is eased from where it was shown over the time between frames, and one missing
+  from a frame leaves. The copy relays places only after a snapshot, so a walker who has not moved since a viewer asked
+  shows once they next move.
+- **The map.** `scripts/island-view.mjs` (after `npm run build`) bakes it in the suite's Chrome: the built hub at midday
+  on day 80, its Oogas, gorillas, Tess and clouds left out, straight down through an orthographic camera over Main Island
+  and the lands round it, 512 x 384. It writes `src/ooga-chat/art/island-view-main.webp` (Ooga Chat's lazy art), the same
+  bytes as `src/js/island-view-art.js` (the island page's copy, served as a file under `art/` on a hosted page,
+  `PICTURE_MODULES`), and `src/js/island-view-data.js`, the capture camera's world-to-picture matrix (checked against the
+  renderer's own projection) and the hub's light at that hour. Faces are the roster's (`rowFace`), else the native Ooga
+  face; a talking walker's green ring pulses. The canvas draws a frame at a time only while the strip shows and can be
+  seen, and allocates nothing a frame.
+- **Live view.** A switch on the strip, off until chosen and kept in this browser (Ooga Chat's `island-live` key, the
+  island's `ooga-island-view-live`). `src/js/island-view-live.js` makes one renderer (gl-renderer.js, Low tier) on the
+  strip's own canvas, drawing the island's ground and the banana pile from a fixed camera south of it, a body for each
+  walker, under the baked light, at most six times a second; the faces stand over their heads on the 2D canvas above it.
+  Ooga Chat fetches it with the renderer, the models and the terrain as its own `live` chunk only when the switch is
+  turned on (never prefetched and never in the service worker's shell, `OPT_IN` in scripts/ooga-chat.mjs) and builds the
+  island in slices; the island page has the code and hands it the island the hub built (`hubScene.liveIsland`). Only the
+  main island's ground is drawn: the Mempool island, Merge Rock, the Timechain Sphere's islet and ₿IFRÖST's are not, so a
+  walker there stands over the sea in Live view (the map shows them all).
+- `?chats=on` (Ooga Chat's fixture) and `?debug=1&chats=fixture` (the island's) mark two of Sample Oak's chat's
+  speakers as walking and send their places twice a second while the view asks.

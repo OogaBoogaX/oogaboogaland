@@ -29,7 +29,8 @@
 //   publish/open     a publish session, under a pending or active lease of `generation`
 //   publish/offer    the microphone's offer: one local audio track, answered
 //   publish/ready    the publication is connected: the lease becomes an active, muted speaker
-//   publish/close    stop publishing and go back to listening (the receive session stays)
+//   publish/close    stop publishing and go back to listening (the receive session stays); `recover: true` when the
+//                    page is only publishing again after a failed connection, so a chat keeps the speaker's place and row
 //   leave            give up everything
 
 import { sfuClient, turnCredentials, sessionGone, cleanupPass } from "./sfu.js";
@@ -133,7 +134,8 @@ export const createMediaBroker = (aud) => {
       if (s.zone === conn.zone && s.id !== conn.id && s.pub && s.pub.session && s.pub.track && !out.has(s.id)) out.set(s.id, { session: s.pub.session, track: s.pub.track, gen: s.pub.gen || 0 });
     }
     for (const c of aud.model.conns.values()) {
-      if (c.zone !== conn.zone || c.id === conn.id || !c.lease || c.lease.state !== "active") continue;
+      // A speaker a host muted is not heard until they unmute themselves (docs/ooga-chat-hosts.md).
+      if (c.zone !== conn.zone || c.id === conn.id || !c.lease || c.lease.state !== "active" || c.forced) continue;
       const m = states.get(c.connId);
       // Source kind is part of the generation: the Room and Audience clocks can issue the same number on handoff.
       if (m && m.pub && m.track && !out.has(c.id)) out.set(c.id, { session: m.pub, track: m.track, gen: -m.gen - 1 });
@@ -181,7 +183,7 @@ export const createMediaBroker = (aud) => {
     // A linked publication is announced to its partners' connections alone, keyed by identity.
     for (const l of aud.island.linked || []) if (l.pub) for (const to of l.to) now.set(`@${to}`, `${now.get(`@${to}`) || ""}|${l.id}:${l.pub.gen || 0}`);
     for (const c of aud.model.conns.values()) {
-      if (!c.zone || !c.lease || c.lease.state !== "active") continue;
+      if (!c.zone || !c.lease || c.lease.state !== "active" || c.forced) continue;
       const m = states.get(c.connId);
       if (m && m.pub && m.track) now.set(c.zone, `${now.get(c.zone) || ""}|${c.id}:${-m.gen - 1}`);
     }
@@ -356,7 +358,12 @@ export const createMediaBroker = (aud) => {
       return answer({ ok: true, publication: s.gen });
     }
     if (op === "publish/close") {
+      // A page publishing again after a failure keeps its row standing meanwhile (a quiet hold).
+      const recover = body && body.recover === true;
+      if (recover && aud.roles) aud.holdQuiet(conn.connId);
       const lease = aud.model.endLease(conn.connId);
+      // Leave Voice, on the speaker's own word: a hosted chat's place on the stage goes with it. A recovery keeps it held.
+      if (lease && aud.roles) aud.stageLeft(conn.id, !recover);
       await retirePublication(conn.connId);
       aud.save(conn.connId);
       await aud.flush();
@@ -364,7 +371,8 @@ export const createMediaBroker = (aud) => {
       return answer({ ok: true });
     }
     if (op === "leave") {
-      aud.model.endLease(conn.connId);
+      const lease = aud.model.endLease(conn.connId);
+      if (lease && aud.roles) aud.stageLeft(conn.id, true);
       await releaseAll(conn.connId);
       aud.save(conn.connId);
       await aud.flush();

@@ -13,15 +13,16 @@
     return !!owner && !panel.hidden && !owner.hidden && owner.dataset.open === "true" && !!owner.getClientRects().length;
   };
   const tabFor = (panel) => panel.closest(".sheet")?.querySelector(`[data-tab="${panel.dataset.panel}"]`);
-  // Unread counts on the players and chat tabs (#430) belong to the page, not to one scene's sheet: players.js and
-  // chat.js keep them, and whichever sheet is up paints them.
-  const badges = { players: 0, chat: 0 };
+  // Unread counts on the players and chat tabs (#430), and on Ooga Chat's for a hosted chat's requests to speak
+  // (cloud-panel.js), belong to the page, not to one scene's sheet: those files keep them, and whichever sheet is up
+  // paints them.
+  const badges = { players: 0, chat: 0, cloud: 0 };
   // What the counts are of, oldest first, for the bell's list: a line for each sign-in and sign-out (`note`, its `kind`
   // "in" or "out" choosing the line's mark), and for The Commons a line a run of messages, "3 new messages": lines
   // heard one after another with no other notice between them share one. At most NOTICES_KEPT lines; older ones are
   // only counted (`earlier`). A tab's lines go with its count.
   const NOTICES_KEPT = 8;
-  const notices = [], earlier = { players: 0, chat: 0 };
+  const notices = [], earlier = { players: 0, chat: 0, cloud: 0 };
   let paintBadges = null;
   // Runs of messages left side by side, once the line between them has gone, are one run.
   const mend = () => {
@@ -261,7 +262,7 @@
           button.setAttribute("aria-expanded", String(shown));
           detail.hidden = !shown;
         }
-        showBadge(badge, shown ? 0 : badges.players + badges.chat);
+        showBadge(badge, shown ? 0 : badges.players + badges.chat + badges.cloud);
       };
       const reset = () => { hovered = focused = pinned = false; paint(); };
       on(button, "pointerenter", (e) => { if (e.pointerType !== "touch") { hovered = true; paint(); } });
@@ -292,7 +293,7 @@
         lines.push(notice.kind === "chat" ? `${badgeText(notice.count)} new ${notice.count === 1 ? "message" : "messages"}` : notice.text);
         kinds.push(notice.kind);
       }
-      const older = earlier.players + earlier.chat;
+      const older = earlier.players + earlier.chat + earlier.cloud;
       if (older) { lines.push(`${badgeText(older)} earlier`); kinds.push("earlier"); }
       if (!lines.length) { lines.push("No new notifications"); kinds.push("none"); }
       for (const item of notificationViews) { item.list(lines, kinds); item.paint(); }

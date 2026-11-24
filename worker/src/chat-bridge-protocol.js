@@ -21,13 +21,16 @@ export class BridgeRefusal extends Error {
 
 // The island's switch for the bridge (`OOGA_CHAT_FEATURES`, comma-separated): `bridge` turns every operation on but
 // those marked always-on; `outdoor`, `cloud` and `commons` each also need `bridge`, and `commons-send` (members may send
-// lines, not only read them, #670) needs `commons`.
-export const FEATURES = ["bridge", "outdoor", "cloud", "commons", "commons-send"];
+// lines, not only read them, #670) needs `commons`. `chats` turns hosted chats on (docs/ooga-chat-hosts.md): for the
+// island's own pages by itself, and through the bridge with `bridge` too. `copies` (needs `chats`) opens each chat's copy
+// of its zone to its speakers' Oogas (room-copy.js).
+export const FEATURES = ["bridge", "outdoor", "cloud", "commons", "commons-send", "chats", "copies"];
 export const bridgeFeatures = (env) => {
   const named = new Set(String(env.OOGA_CHAT_FEATURES || "").split(",").map((name) => name.trim()).filter((name) => FEATURES.includes(name)));
   const bridge = named.has("bridge");
   const commons = bridge && named.has("commons");
-  return { bridge, outdoor: bridge && named.has("outdoor"), cloud: bridge && named.has("cloud"), commons, commonsSend: commons && named.has("commons-send") };
+  return { bridge, outdoor: bridge && named.has("outdoor"), cloud: bridge && named.has("cloud"), commons, commonsSend: commons && named.has("commons-send"),
+    chats: named.has("chats"), copies: named.has("chats") && named.has("copies") };
 };
 
 export const newRequestId = () => crypto.randomUUID().replaceAll("-", "");

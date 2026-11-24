@@ -63,14 +63,15 @@ test("catalog endpoint exposes only public revision data and never caches an act
 
 test("Worker routes catalogs and reports authority outages as retryable during service admission", async () => {
   let catalogCalls = 0;
+  // The session lookup as http.js runs it, over a session whose character the catalog cannot tell now.
+  const http = load("http", { parseCookies: () => new Map([["session", "token"]]), cookieNames: () => ({ session: "session" }),
+    getSession: async () => ({ player: { id: 1, login: "ooga" }, session: {} }), contributorForEnv: () => null,
+    contributorDecision: async () => ({ character: null, fresh: false }), oogatron: () => null }, "{ serviceSession, asPlayer, text }");
   const worker = load("index", {
     handleCharacterCatalog: async () => { catalogCalls++; return new Response("catalog"); },
-    getSessionFromRequest: async (_request, _env, strict) => {
-      assert.equal(strict, true); throw Object.assign(new Error("unavailable"), { code: "character_unavailable" });
-    },
+    ...http,
     fromSite: () => true,
     gameName: () => "ghost-hunt:halloween",
-    text: (body, status, headers) => new Response(body, { status, headers })
   }, "worker");
   const env = { GAMES: {} };
   assert.equal(await (await worker.fetch(request(), env, {})).text(), "catalog");

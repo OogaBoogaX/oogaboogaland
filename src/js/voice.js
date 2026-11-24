@@ -986,7 +986,7 @@
     overhear();
   }
   const overhear = async () => {
-    if (!passiveWanted || passive || passiveOpening || stats.enabled || stats.joining || armed || rejoining || BL.net.state.room !== "live") return;
+    if (!passiveWanted || passive || passiveOpening || stats.enabled || stats.joining || armed || rejoining || BL.net.state.call || BL.net.state.room !== "live") return;
     const s = support();
     if (!s.secure || !s.webrtc) return;
     if (!(navigator.userActivation && navigator.userActivation.hasBeenActive)) {
@@ -1091,7 +1091,8 @@
   const resume = () => {
     // While the account speaks from Ooga Chat on another device, coming back by itself would take that voice away: the
     // visitor is asked instead (voice-handoff.js), and Join voice is their answer.
-    if (armed || stats.enabled || stats.joining || BL.net.state.zone === STUDIO_ZONE || elsewhere() || !joinedBefore()) return;
+    // In a hosted chat's voice (chat-call.js) the island's waits until the visitor leaves it, which puts it back.
+    if (armed || stats.enabled || stats.joining || BL.net.state.call || BL.net.state.zone === STUDIO_ZONE || elsewhere() || !joinedBefore()) return;
     armed = stats.returning = stats.muted = true;
     window.addEventListener("pointerup", firstPress, true);
     window.addEventListener("keydown", firstPress, true);
@@ -1099,7 +1100,8 @@
     if (navigator.userActivation && navigator.userActivation.hasBeenActive) rejoin();
   };
 
-  const join = () => { spokeElsewhere = false; endRecovery(); return enable().then(() => { if (stats.publishing) rememberJoined(true); }); };
+  // Joining the island's voice hangs up a hosted chat's (chat-call.js): one voice at a time, the visitor's choice.
+  const join = () => { if (BL.net.state.call && BL.chatCall) BL.chatCall.leave(); spokeElsewhere = false; endRecovery(); return enable().then(() => { if (stats.publishing) rememberJoined(true); }); };
 
   // The footer's button: join, then mute and unmute. An Unmute while a returning visitor connects waits for that.
   const toggle = () => {

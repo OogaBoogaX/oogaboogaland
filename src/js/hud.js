@@ -2086,10 +2086,12 @@
     // returning visitor's voice failed rather than offering an unexplained Unmute.
     const inVoice = voice.enabled || voice.returning || voice.reconnecting, micOn = inVoice && !reason;
     const failed = micOn && !voice.reconnecting && voiceFailure, asMic = micOn && !voice.reconnecting && !voiceFailure;
-    writeAccount("account-mute", "hidden", !live);
+    // On a chat's island (chat-copy.js) the island's voice waits paused: its controls step aside for the chat's.
+    const copy = !!state.copy;
+    writeAccount("account-mute", "hidden", !live || copy);
     writeAccount("account-mute", "disabled", !micOn);
     writeAccount("account-mute", "textContent", micOn && voice.reconnecting ? "Reconnecting voice" : failed ? `Voice: ${voiceFailure}` : asMic && !voice.muted ? "Mute" : "Unmute");
-    writeAccount("account-voice", "hidden", !live || inVoice);
+    writeAccount("account-voice", "hidden", !live || inVoice || copy);
     writeAccount("account-voice", "textContent", reason ? reason : voice.joining ? "Joining…" : voiceFailure ? `Voice: ${voiceFailure}` : "Join voice");
     writeAccount("account-voice", "disabled", !!reason);
     // A blocked WebRTC explains itself in a tooltip, and only while it is the reason: a VPN's leak protection is what
@@ -2099,7 +2101,7 @@
       : "";
     writeAccount("account-voice", "title", inVoice ? "" : voiceTip);
     writeAccount("account-mute", "title", failed ? voiceTip : "");
-    writeAccount("account-voice-leave", "hidden", !live || !inVoice);
+    writeAccount("account-voice-leave", "hidden", !live || !inVoice || copy);
     const pressed = String(asMic && voice.muted), onlineDot = String(live);
     for (const row of fieldsFor("account")) if (row.dataset.live !== onlineDot) row.dataset.live = onlineDot;
     const mic = asMic ? voice.muted ? "muted" : "live" : "";
