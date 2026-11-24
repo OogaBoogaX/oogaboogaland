@@ -96,7 +96,7 @@ voice: nothing said on it is heard in OC, and nothing said in a chat is heard on
   speaker cap still holds.
 - **Preview and joining as either**: a chat in the Chats list opens a preview pop-up of its stage (the host, co-hosts
   and speakers, as the chat orders them), how many listen and wait, and whether its stage is open, with **Join as
-  listener** and **Join as speaker**. Joining as a speaker joins and asks at once; on an open stage that press goes
+  listener** and **Ask to speak** (**Join as speaker** on an open stage). Asking joins and asks at once; on an open stage that press goes
   straight on to Start speaking (it is the person's own press), and otherwise they wait in the queue as any asker.
 
 ## The host leaving
@@ -115,7 +115,17 @@ copy, clouds or Go there), then Start chat (the one amber action) or Cancel. The
 same dialog with the zone the visitor's Ooga stands in chosen first. A chat opens the panel the app has today (`audience-tiles.js` roster, the emoji bar,
 the footer) with a Back to chats control, the Requests chip for a host or co-host (in the panel's top right corner,
 to the right of the zone tag), a role badge on host and co-host
-tiles, and the footer's Request to speak or, for a host, End chat beside Leave.
+tiles, and the footer's Request to speak or, for a host, End chat beside Leave chat.
+
+A host steps down only by handing the chat over or ending it. While hosting they stay on the stage (Mute, no Leave
+Voice, in the chat's footer and in Ooga Chat's account rows alike), and the island's own Join voice, which otherwise
+leaves a chat for the island's voice, only says so in a toast. Leave chat, and Back to chats, open **Choose who hosts
+the chat after you leave**: one button a co-host, "Make <name> host and leave", connected co-hosts first, the
+longest-serving of them amber, and Cancel; the chat is handed over (`handover`) and only then left. A co-host whose
+connection dropped stays listed but dimmed, "Reconnecting…" under it, since handed the chat they would leave it with no
+host there; the picker follows them as they drop or come back, and with every co-host reconnecting it says to wait for
+them or end the chat. With no co-host neither Leave chat nor Back to chats shows, and End chat is the way out. A host's dropped connection
+still waits two minutes and passes to a co-host, as below.
 
 **OBL** (`src/js/cloud-panel.js`): the same Chats list and chat view in the sheet's cloud tab, through the same shared
 modules, so the two apps never drift. Joining a chat by voice there is like taking a call: the island's proximity voice
@@ -146,7 +156,7 @@ connected drops any chat the directory no longer lists, adding no timer. Pages h
 and each change goes to every page as `{ t: "chat-summary", chat, title, speakers, listeners }`, all zero when it
 ends; no page ever gets an id. The room also works out one number, how many are in chats through the app and not on the
 island, each account once however many chats it is in, again whenever a chat reports or a player joins or leaves, and
-sends it when it moves (`{ t: "chat-online", n }`, the welcome's `chatOnline`). The page (`net.js` `state.chatMembers`,
+sends it when it moves (`{ t: "chat-online", n }`, the welcome's `chatOnline`; relayed to an Ooga Chat member with `mine`, the welcome's `chatMine`, whether its own account is among the number, never anyone's id). The page (`net.js` `state.chatMembers`,
 chat id to a frozen `{ title, speakers, listeners }`, and `state.chatOnline`, emptied with the socket) lists in In Ooga Chat one button a chat (`players.js`): its title, whole and wrapping, and its counts under
 it ("3 speaking · 12 listening", a count of nobody left out: "1 speaking" while nobody listens; a chat always has its
 host as a speaker), "You're in
@@ -155,11 +165,11 @@ number (`cloud-panel.js` `inChats`), so nobody is counted twice. A chat pressed
 (`cloud-panel.js` `preview`) asks the live list (`/api/chats`), says **That chat has ended** if it is no longer listed,
 and otherwise opens the chat's preview, the same pop-up the Chats list opens (`chat-hosts.js` `preview`, standing in
 the page's body while the Ooga Chat tab is hidden): its stage, its counts, the Open stage tag, **Join as listener** and
-**Join as speaker**, either of which shows the Ooga Chat tab and opens the chat there. The chat the visitor is in
+**Ask to speak** (**Join as speaker** on an open stage), either of which shows the Ooga Chat tab and opens the chat there. The chat the visitor is in
 already only shows the tab. A visitor already in another chat is asked first, **Change chats?** (a modal dialog:
-"You're in <title>. Leave it and join <title>?", with what leaving costs them, said only to the chat's host: its 2-minute
-hold before the chat passes to a co-host or ends), **Switch chats** leaving that chat and opening this one, **Stay**
-changing nothing and giving the chat's row the focus back.
+"You're in <title>. Leave it and join <title>?"), **Switch chats** leaving that chat and opening this one, **Stay**
+changing nothing and giving the chat's row the focus back. Its host is told instead to hand the chat over with Leave
+chat, or end it, first, and offered only Stay.
 
 **Clouds belong to the copies.** OC speakers are never seen or heard over the real island any more: a chat's speakers
 sit on clouds only inside that chat's own copy of its zone (the second PR), one seat each, however many chats share a
@@ -334,7 +344,7 @@ Agreed 2026-11-23:
 - **Who goes:** speakers alone (the host, co-hosts and invited speakers) who are signed into the island with an Ooga.
   Listeners stay where they are and listen.
 - **Getting there and back:** Go there in the chat beams the Ooga out of the main world in the island's green glyph
-  stream and into the copy beside the banana pile; Leave beams it back to exactly where it stood, as does leaving the
+  stream and into the copy beside the banana pile; Go back beams it back to exactly where it stood, as does leaving the
   stage or the chat.
 - **Size:** up to 32 Oogas, the speaker cap, and the island room's own.
 - **Voice in a chat has no place in it.** Every speaker in a chat is heard at full by everyone in it, wherever their

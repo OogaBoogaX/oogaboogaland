@@ -124,6 +124,13 @@ test("the Room admits a scope only where its own view agrees, and refuses everyt
   assert.ok(!c.sent.find((m) => m.t === "welcome").features.includes("outdoor-voice-v1"));
   await off.outdoor(c, { op: "enter", epoch: 1, scope: "main" });
   assert.deepEqual(off.frames(c).at(-1), { op: "refused", epoch: 1, reason: "unavailable" });
+  // With the switch off and no grant left to close, nothing the island does reaches the public conversation: hosted
+  // chats never ask for its word.
+  await off.join(4, "b");
+  await off.send(c, { t: "hand", on: true });
+  await off.send(c, { t: "mute", on: true });
+  await off.settle();
+  assert.equal(off.audience.calls.length, 0, "no call to the unused public conversation");
 });
 
 test("the transition gap: a page that keeps saying `main` after its body went indoors is closed by the Room's own view", async () => {

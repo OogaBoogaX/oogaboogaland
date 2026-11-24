@@ -47,13 +47,14 @@
     if (!hooks) return "Go there from Main Island";
     return hooks.refusal() || "";
   };
-  // The footer's button: Go there, or Leave while in the copy (greyed while a beam runs), for a speaker in a Main
+  // The footer's button: Go there, or Go back while in the copy (Going…, greyed, while a beam runs), for a speaker in a Main
   // Island chat on the island page.
   const button = (room) => {
     if (!room || room.zone !== "main" || !active() && !speaker(room)) return null;
     if (active()) {
       const busy = phase !== "there";
-      return { label: "Leave", words: "Leave the chat's island", disabled: busy, title: busy ? "On the way…" : "Back to where your Ooga stood" };
+      // "Go back", never "Leave": the chat's own Leave chat stands beside it and means leaving the chat.
+      return { label: busy ? "Going…" : "Go back", words: "Go back from the chat's island", disabled: busy, title: busy ? "On the way…" : "Back to where your Ooga stood" };
     }
     const refused = refusal(room);
     return { label: "Go there", words: "Go to the chat's island", disabled: !!refused, title: refused || "Walk your Ooga into the chat's own island" };

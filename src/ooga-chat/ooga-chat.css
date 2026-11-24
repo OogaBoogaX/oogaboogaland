@@ -182,6 +182,21 @@ body {
 
 /* In the account row, the sign-in button spans the panel as it does on the sign-in screen. */
 .account > .oc-account-signin { flex: 1 1 100%; }
+/* Signed in, the visitor is online here, in Ooga Chat: their name's dot is its purple, whether or not The Commons is up. */
+.oc-panel .account .account-name::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #b18aff;
+  box-shadow: 0 0 5px rgba(177, 138, 255, 0.6);
+  vertical-align: 1px;
+}
+/* The Commons' online tag in the title's top right corner, as Online Oogas has it (the island's Commons keeps its
+   help button there, which pushes the tag over). */
+.panel.oc-commons[data-panel="chat"] > .panel-title h2 { margin-right: auto; }
 
 /* A notice that needs the visitor: an expired sign-in, a failed check, an unconfirmed sign-out, with its retry. */
 .oc-notice {
@@ -323,3 +338,6 @@ body {
   .oc-tab-face { padding: 6px 11px 4px; }
   .oc-slab { padding: 14px 16px; }
 }
+/* With hosted chats on and no chat joined, the other tabs' emoji bars stand down: reactions belong to a chat
+   (ooga-chat-panels.js `outOfChat`). */
+.oc-panel[data-chat="none"] > .panel-foot > .reactions { display: none; }

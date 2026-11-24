@@ -33,14 +33,15 @@ const entry = (title, speakers, listeners, ids) => {
 };
 const message = (chat, e) => ({ t: "chat-summary", chat, title: e ? e.title : "", speakers: e ? e.speakers : 0, listeners: e ? e.listeners : 0 });
 /** In chats through the app and not on the island, each account once. */
-const online = (room) => {
+const inChats = (room) => {
   const seen = new Set();
   for (const e of room.chatRosters ? room.chatRosters.values() : []) for (const id of e.ids) {
     if (id.startsWith("gh:") && room.players.has(Number(id.slice(3)))) continue;
     seen.add(id);
   }
-  return seen.size;
+  return seen;
 };
+const online = (room) => inChats(room).size;
 
 export const chatMembersRoom = {
   FEATURE: CHAT_SUMMARY_FEATURE,
@@ -80,11 +81,16 @@ export const chatMembersRoom = {
   players(room) {
     // A chat's copy of the island (room-copy.js) has no Online Oogas of chats: only the island works this out.
     if (room.copy) return;
-    const n = online(room);
-    if (n === room.chatOnline) return;
+    // Who is counted moves the number for an Ooga Chat member whose own account comes or goes in it (`counted`), even
+    // when the total stands, so the frame goes on a change of either; a page ignores a number it already has.
+    const seen = inChats(room), n = seen.size, who = [...seen].sort().join();
+    if (n === room.chatOnline && who === room.chatOnlineWho) return;
     room.chatOnline = n;
+    room.chatOnlineWho = who;
     if (on(room)) room.broadcast({ t: "chat-online", n });
   },
+  /** Whether a GitHub account is among the number in chats: an Ooga Chat member's own pages then add nobody for it. */
+  counted(room, id) { return inChats(room).has(`gh:${id}`); },
   /** What a page's welcome carries: every chat's, only where the feature is on. */
   welcome(room) {
     if (!on(room) || !room.chatRosters || !room.chatRosters.size) return {};

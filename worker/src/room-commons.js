@@ -18,17 +18,29 @@ import { bridgeFeatures } from "./chat-bridge-protocol.js";
 import { getPlayer } from "./db.js";
 import { audienceRoom } from "./room-audience.js";
 import { duel } from "./duel.js";
+import { chatMembersRoom } from "./room-chat-members.js";
 
 export const COMMONS_V = 1;
 export const COMMONS_FEATURE = "commons-v1";
 export const COMMUNITY_MAX = 128;
 export const COMMUNITY_PER_ACCOUNT = 3;
 export const REAUTH_MS = 60 * 60 * 1000;
-const RELAYED = new Set(["join", "leave", "body", "zone", "vstate", "hand", "chat", "clouds"]);
+// A member's page pings every 30 s, and a hidden tab's timers may run only once a minute: one silent longer than this
+// is a page gone without closing (a phone asleep, a network change), which the next sweep would take, up to four
+// minutes on while nobody plays.
+export const SILENT_MS = 75000;
+// `chat-online` is how many are in hosted chats through Ooga Chat and not on the island, the one number every "N online"
+// adds (room-chat-members.js), so a member's counts agree with the island's.
+const RELAYED = new Set(["join", "leave", "body", "zone", "vstate", "hand", "chat", "clouds", "chat-online"]);
 const CLOSE = { stale: 4000, bad: 4400, auth: 4401, full: 4429 };
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 
 const members = (room) => room.community || (room.community = new Map());
+// When a member was last heard: its own frame, or the ping the runtime answered for it without waking the Room.
+const heardAt = (room, m) => {
+  const pinged = room.ctx.getWebSocketAutoResponseTimestamp(m.ws);
+  return Math.max(m.seenAt, pinged ? pinged.getTime() : 0);
+};
 // The Room's chat memory's life: set on the first member touch after the Room was built (a wake or a restart builds a
 // new one with an empty ring), so a reconnecting app that sees a new epoch knows lines it missed are gone, not quiet.
 const epochOf = (room, now) => room.communityEpoch || (room.communityEpoch = now);
@@ -37,7 +49,12 @@ const inVoice = (p) => !!p.voice && (!!p.voice.track || !!p.voice.sub && p.muted
 export const presenceOf = (p) => ({ id: p.id, login: p.login, display: p.display || p.login, body: p.body || null, zone: p.zone, voice: inVoice(p),
   muted: !!p.muted, hand: !!p.hand, handTone: p.handTone || 0, handEmoji: p.handEmoji || "" });
 
-const attachmentOf = (m) => ({ community: true, connId: m.connId, id: m.id, login: m.login, display: m.display, principal: m.principal, authUntil: m.authUntil });
+// `heard` is when the Room last heard the member itself (its pings are answered without waking it, and their time is the
+// runtime's), kept so a wake never takes a socket that went silent for one just heard from.
+const attachmentOf = (m) => ({ community: true, connId: m.connId, id: m.id, login: m.login, display: m.display, principal: m.principal, authUntil: m.authUntil, heard: m.seenAt });
+// How stale the attachment's `heard` may grow before a frame writes it again: well inside SILENT_MS, so a page that spoke
+// lately is never taken for a silent one after a wake, without a write on every frame.
+const HEARD_WRITE_MS = 30 * 1000;
 
 export const commonsRoom = {
   size: (room) => members(room).size,
@@ -74,11 +91,16 @@ export const commonsRoom = {
     const all = members(room);
     let mine = 0;
     for (const m of all.values()) if (m.id === who.id) mine++;
+    // At its limit, an account's own sockets gone silent make room now rather than at the sweep, so pages that went away
+    // without closing never keep the account's next page out.
+    if (mine >= COMMUNITY_PER_ACCOUNT) {
+      for (const m of [...all.values()]) if (m.id === who.id && now - heardAt(room, m) > SILENT_MS) { commonsRoom.close(room, m, CLOSE.stale, "stale"); mine--; }
+    }
     if (all.size >= COMMUNITY_MAX || mine >= COMMUNITY_PER_ACCOUNT) {
       server.close(CLOSE.full, "full");
       return new Response(null, { status: 101, webSocket: client });
     }
-    const m = { community: true, connId: crypto.randomUUID(), ws: server, ...who, seenAt: now, chatBucket: null };
+    const m = { community: true, connId: crypto.randomUUID(), ws: server, ...who, seenAt: now, savedAt: now, chatBucket: null };
     m.chatBucket = room.chatBucketFor(m.id, m.seenAt);
     all.set(m.connId, m);
     server.serializeAttachment(attachmentOf(m));
@@ -87,6 +109,7 @@ export const commonsRoom = {
       you: { id: m.id, login: m.login, display: m.display }, players: [...room.players.values()].map(presenceOf),
       duels: [...room.duels.values()].map((d) => ({ id: d.id, a: d.a, b: d.b })),
       ...(typeof room.linkViewOf === "function" ? { links: room.linkViewOf(m.id) } : {}),
+      ...(Number.isSafeInteger(chatMembersRoom.welcome(room).chatOnline) ? { chatOnline: chatMembersRoom.welcome(room).chatOnline, chatMine: chatMembersRoom.counted(room, m.id) } : {}),
       features: [globalThis.BL.chatPolicy.FEATURE, COMMONS_FEATURE] });
     room.send(server, { t: "chat-history", messages: room.chat.list() });
     audienceRoom.welcome(room, m);
@@ -96,7 +119,9 @@ export const commonsRoom = {
 
   /** A woken Room's member socket, from its attachment. */
   restore(room, ws, a, now = Date.now()) {
-    const m = { community: true, connId: a.connId, ws, id: a.id, login: a.login, display: a.display, principal: a.principal, authUntil: a.authUntil, seenAt: now, chatBucket: null };
+    // Heard from when it was last heard, never at the wake: else every dead socket looks fresh after one.
+    const heard = Number.isSafeInteger(a.heard) && a.heard <= now ? a.heard : now;
+    const m = { community: true, connId: a.connId, ws, id: a.id, login: a.login, display: a.display, principal: a.principal, authUntil: a.authUntil, seenAt: heard, savedAt: heard, chatBucket: null };
     epochOf(room, now);
     members(room).set(m.connId, m);
   },
@@ -114,6 +139,7 @@ export const commonsRoom = {
     if (msg === false) { commonsRoom.close(room, m, CLOSE.bad, "unreadable message"); return; }
     m.seenAt = now;
     if (m.authUntil <= m.seenAt) { commonsRoom.close(room, m, CLOSE.auth, "auth_required"); return; }
+    if (now - m.savedAt > HEARD_WRITE_MS) { m.savedAt = now; try { ws.serializeAttachment(attachmentOf(m)); } catch { /* closing */ } }
     if (msg && msg.t === "link" && typeof room.linkMessage === "function") { room.linkMessage(m, msg); return; }
     if (!msg || msg.t !== "chat") return;
     // Rolled out reading first (#670): until the island's `commons-send`, a line is refused and the app keeps its draft.
@@ -152,6 +178,11 @@ export const commonsRoom = {
       if (!RELAYED.has(msg.t)) return;
       frame = msg.t === "join" ? { t: "join", p: presenceOf(room.players.get(msg.p.id) || msg.p) } : msg;
     }
+    // The number in chats goes to each member with whether their own account is among it (`mine`), never anyone's id.
+    if (frame.t === "chat-online") {
+      for (const m of room.community.values()) room.send(m.ws, { t: "chat-online", n: frame.n, mine: chatMembersRoom.counted(room, m.id) });
+      return;
+    }
     const out = JSON.stringify(frame);
     for (const m of room.community.values()) room.send(m.ws, out);
   },
@@ -170,8 +201,7 @@ export const commonsRoom = {
   async sweep(room, now, ownedBody, staleMs) {
     for (const m of [...members(room).values()]) {
       if (m.authUntil <= now || !ownedBody(m.login, m.id)) { commonsRoom.close(room, m, CLOSE.auth, "auth_required"); continue; }
-      const pinged = room.ctx.getWebSocketAutoResponseTimestamp(m.ws);
-      if (now - Math.max(m.seenAt, pinged ? pinged.getTime() : 0) > staleMs) { commonsRoom.close(room, m, CLOSE.stale, "stale"); continue; }
+      if (now - heardAt(room, m) > staleMs) { commonsRoom.close(room, m, CLOSE.stale, "stale"); continue; }
       if (room.env && room.env.DB) {
         let row;
         try { row = await getPlayer(room.env.DB, m.id); } catch { continue; }

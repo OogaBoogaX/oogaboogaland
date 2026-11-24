@@ -5585,16 +5585,12 @@
       treetop = Math.max(treetop, node.position.y + BL.scene.boundsOf(node.geometry).max[1] * node.scale.y);
     }
     for (const track of CLOUD_TRACKS) for (let i = 0; i < CLOUDS_PER_TRACK; i++) {
-      // Speaker clouds keep their whole mesh above the rooftop trees, even at the bottom of their gentle rise, and rise
-      // only SPEAKER_SWING as far as their lane over that floor. Measure the canopy and underside once, so a thicker
-      // cloud keeps the same two metres of clearance.
-      const shape = Math.min(2, clouds.length % 4), seats = SPEAKER_CLOUDS.includes(clouds.length);
-      const node = createNode({ geometry: seats ? hubModels.benchCloud(shape) : hubModels.cloud(shape), matrixCloud: true, sightHidden: true });
-      const waveY = seats ? track.waveY * SPEAKER_SWING : track.waveY;
+      // Every one of the island's own clouds is plain: Ooga Chat's speakers sit on benches only in a hosted chat's copy of
+      // the island (`layoutClouds`), which deals them again above the rooftop trees (`cloudTreetop`).
+      const shape = Math.min(2, clouds.length % 4);
+      const node = createNode({ geometry: hubModels.cloud(shape), matrixCloud: true, sightHidden: true });
       const cloud = { node, speed: track.speed, phase: track.phase + i * Math.PI * 2 / CLOUDS_PER_TRACK, angle: 0,
-        radius: track.radius,
-        baseY: seats ? treetop + 2 - BL.scene.boundsOf(node.geometry).min[1] - Math.min(0, waveY * 4) : track.baseY,
-        waveY };
+        radius: track.radius, baseY: track.baseY, waveY: track.waveY };
       // The island's own layout, which a chat's copy deals again (`layoutClouds`) and gives back.
       cloud.shape = shape;
       cloud.home = { geometry: node.geometry, speed: cloud.speed, phase: cloud.phase, radius: cloud.radius, baseY: cloud.baseY, waveY: cloud.waveY };
@@ -5606,15 +5602,15 @@
     }
     cloudTreetop = treetop;
   };
-  // Ooga Chat speakers on clouds (#659): the room's seats, three to a cloud on three of the largest clouds (main-cloud-1
-  // to 3 on the first, 4 to 6 on the second, 7 on), each sitting on its own third of it along the cloud's long axis, the
+  // Ooga Chat speakers on clouds (#659), in a hosted chat's copy of the island alone: three to a bench cloud (main-cloud-1
+  // to 3 on the first, 4 to 6 on the second, and so on), each sitting on its own third of it along the cloud's long axis, the
   // outer two drawn SEAT_SPREAD of the way in toward the middle one, centred front to back on the cloud's top there (a
   // cloud's +z faces the island), facing the banana pile; none while the clouds are put away (game mode, Cloud Hopper),
   // and the purple glow under each one seated.
   // A seat's place on a cloud's mesh is measured once a mesh, from its upward faces (a merged face's corners can lie
   // far from a seat): along the long axis as above, midway between the top's front and back edges there, on the highest
   // upward face over that point.
-  const SPEAKER_CLOUDS = [10, 14, 3], SPEAKER_SWING = 0.5, SEAT_REACH = 0.5, SEAT_SPREAD = 0.7, SEAT_TOP = 0.6;
+  const SPEAKER_SWING = 0.5, SEAT_REACH = 0.5, SEAT_SPREAD = 0.7, SEAT_TOP = 0.6;
   const cloudThirds = new Map();
   const thirdsOf = (geometry) => {
     let thirds = cloudThirds.get(geometry);
@@ -5647,10 +5643,12 @@
   };
   const cloudSeat = (rec, out) => {
     if (rec.zone !== "main") return false;
-    const n = Number(rec.seat.slice(rec.seat.lastIndexOf("-") + 1)) - 1, cloud = cloudsCopied ? copyBenches[Math.floor(n / 3)] : clouds[SPEAKER_CLOUDS[Math.floor(n / 3)]];
+    // Seats are a hosted chat's copy's alone: the island's own clouds carry none since the public conversation went.
+    if (!cloudsCopied) return false;
+    const n = Number(rec.seat.slice(rec.seat.lastIndexOf("-") + 1)) - 1, cloud = copyBenches[Math.floor(n / 3)];
     if (!cloud || !cloud.node.visible) return false;
     // In a chat's copy a bench stands only on a cloud someone sits on.
-    if (cloudsCopied) cloud.node.geometry = cloud.bench;
+    cloud.node.geometry = cloud.bench;
     const node = cloud.node, seat = thirdsOf(node.geometry)[n % 3], c = Math.cos(node.rotation.y), s = Math.sin(node.rotation.y);
     let glow = seatGlows[n];
     if (!glow || glow.parent !== node) {
