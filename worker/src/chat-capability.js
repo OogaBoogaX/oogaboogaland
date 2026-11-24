@@ -39,7 +39,9 @@ export const decideCapability = async (env, principal, contributorFor, now = Dat
   if (env.DB) {
     let row;
     try { row = await env.DB.prepare(COLLISION).bind(id, login).first(); }
-    catch { return answer("unknown", null, "unavailable"); }
+    // `ban-unread`: the ban and collision could not be read, which a hosted chat (that waives the contributor rule but
+    // never a ban) must refuse on, unlike an unread contributor snapshot.
+    catch { return answer("unknown", null, "ban-unread"); }
     if (row && row.banned_at) return answer("ineligible", null, "banned");
     // A login another id holds (renamed away on GitHub, then registered by someone else) is not this account's Ooga.
     if (row && row.collision) return answer("ineligible", null, "identity-collision");

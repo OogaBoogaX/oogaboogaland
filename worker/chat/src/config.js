@@ -9,8 +9,9 @@ import { BRIDGE_VERSION } from "../../src/chat-bridge-protocol.js";
 import { bridgeHello, bridgeReadiness } from "./bridge.js";
 import { publicState } from "./public.js";
 
-export const FLAGS = ["github", "x", "listen", "speak", "feed", "commons", "cloud"];
+export const FLAGS = ["github", "x", "listen", "speak", "feed", "commons", "cloud", "chats"];
 // The protocol revisions this deployment's server speaks, which the page checks against its own.
+// Audience protocol 2 is a hosted chat's (docs/ooga-chat-hosts.md), offered while `chats` is on.
 export const PROTOCOLS = { identity: [1], audience: [1], media: [1] };
 export const PATHS = {
   session: "/api/chat/me",
@@ -18,6 +19,7 @@ export const PATHS = {
   login: { github: "/auth/github", x: "/auth/x" },
   audience: "/api/chat/audience",
   commons: "/api/chat/commons",
+  chats: "/api/chat/chats",
 };
 export const BOOTSTRAP_VERSION = 1;
 
@@ -37,6 +39,8 @@ export const effective = (env, bridge) => {
     feed: on("feed") && !!env.DONATIONS,
     commons: on("commons") && github && reached && !!bridge.features?.commons,
     cloud: on("cloud") && speak && !!bridge.features?.cloud,
+    // Hosted chats: listening through the bridge, with the island's own `chats` switch. A chat lets anyone signed in speak.
+    chats: on("chats") && listen && !!bridge.features?.chats,
     bridge: reached ? "ok" : bridge ? "mismatch" : env.OBL ? "unavailable" : "unbound",
   };
 };
@@ -61,13 +65,13 @@ export const bootstrap = async (env) => {
   if (features.github) login.github = PATHS.login.github;
   if (features.x) login.x = PATHS.login.x;
   const paths = { login, ...(env.DB ? { session: PATHS.session, logout: PATHS.logout } : {}), ...(features.listen ? { audience: PATHS.audience } : {}),
-    ...(features.commons ? { commons: PATHS.commons } : {}) };
+    ...(features.commons ? { commons: PATHS.commons } : {}), ...(features.chats ? { chats: PATHS.chats } : {}) };
   return {
     version: BOOTSTRAP_VERSION,
     build: await appBuild(env),
     environment: env.ENVIRONMENT || "",
-    protocols: PROTOCOLS,
-    features: { github: features.github, x: features.x, voice: features.listen, feed: features.feed, speak: features.speak, commons: features.commons, cloud: features.cloud },
+    protocols: features.chats ? { ...PROTOCOLS, audience: [...PROTOCOLS.audience, 2] } : PROTOCOLS,
+    features: { github: features.github, x: features.x, voice: features.listen, feed: features.feed, speak: features.speak, commons: features.commons, cloud: features.cloud, chats: features.chats },
     paths,
   };
 };

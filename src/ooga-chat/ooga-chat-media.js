@@ -647,7 +647,8 @@
       stopSpeaking(true);
       phase = listening();
       emit();
-      call("publish/close").then(() => { stats.closed++; }, () => request("setRole", { role: "listener" })).then(resume);
+      // `recover`: publishing again, not leaving, so a chat keeps this speaker's place and row meanwhile.
+      call("publish/close", { recover: true }).then(() => { stats.closed++; }, () => request("setRole", { role: "listener" })).then(resume);
     };
     const watchPublish = (pc) => pc.addEventListener("connectionstatechange", () => {
       if (!pub || pub.pc !== pc) return;
@@ -708,7 +709,7 @@
       const fail = (why, retry = false, giveBack = lease > 0) => {
         if (!resumed || !retry || !again || resumes >= RESUME_TRIES) return endSpeaking(why, giveBack);
         stopSpeaking(true);
-        if (giveBack) call("publish/close").then(() => { stats.closed++; }, () => request("setRole", { role: "listener" }));
+        if (giveBack) call("publish/close", { recover: true }).then(() => { stats.closed++; }, () => request("setRole", { role: "listener" }));
         phase = listening();
         const wait = RESUME_WAIT_MS * Math.max(1, resumes);
         resumeAt = Date.now() + wait;

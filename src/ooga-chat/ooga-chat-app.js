@@ -14,7 +14,8 @@
 // controller (#654): it hears the feed's snapshots, `you`, results and media notices, and the views read its state as
 // `state.voice`. A speaker whose page is hidden or leaves has the controller leave word in this tab's session storage
 // (`speaker`: the account, zone, connection and time, nothing else), taken back when the page is shown again, so a page
-// that comes straight back after a refresh speaks again, muted, as after a dropped socket. It starts no island system: no
+// that comes straight back after a refresh speaks again, muted, as after a dropped socket. With hosted chats the feed
+// and voice are the chat chosen (`state.room`, with the server's `you`) until it is left. It starts no island system: no
 // renderer, scene, socket or game. A failure shows a recoverable error with Reload;
 // pagehide disposes the shell, the account and the adapter.
 (() => {
@@ -72,10 +73,10 @@
       bareKey: storageKey(adapter.kind, "voice-bare"),
       // A voice connection dropped, or a lease went unanswered: the feed's socket is asked whether it still lives.
       stall: () => feed?.wake?.(true),
-      broker: () => state.mode === "live" && state.boot ? adapter.media(state.boot) : null,
+      broker: () => state.mode === "live" && state.boot ? adapter.media(state.boot, state.room?.id) : null,
       ...(adapter.rtc ? { rtc: adapter.rtc } : {}),
       request: (type, fields) => feed ? feed.request(type, fields) : 0,
-      allowed: () => state.mode === "live" && !!state.boot && state.boot.features.speak && !!state.boot.paths.audience,
+      allowed: () => state.mode === "live" && !!state.boot && (!!state.room || state.boot.features.speak) && !!state.boot.paths.audience,
       onChange: () => { if (shell && bar) set({}); }
     });
     const tabKey = storageKey(adapter.kind, "tab"), zoneKey = storageKey(adapter.kind, "zone");
@@ -97,7 +98,7 @@
     });
     const town = BL.oogaChatCommons.create();
     let listening = null, heard = 0, refused = 0;
-    let state = { mode: "loading", boot: null, session: null, auth: "checking", notice: null, busy: false, zone, voice: media.state,
+    let state = { mode: "loading", boot: null, session: null, auth: "checking", notice: null, busy: false, zone, voice: media.state, room: null,
       audience: { status: "off", zone, list: [], version: 0 }, commons: { status: "off" }, device: { online: navigator.onLine !== false, install: null, update: false } };
     // The emoji bar's connection (reaction-bar.js, #655): its state follows the session and the audience feed (shown
     // signed in, working while the feed is live), its hand follows the visitor's own row as the server keeps it, and
@@ -149,7 +150,8 @@
     // Voice is pressed while it is. A voice that goes elsewhere later is the visitor's own doing and asks nothing.
     // Switch here joins with `takeover`, inside its click; Not now changes nothing.
     let handoffChecked = false;
-    const handoff = BL.voiceHandoff.build({ onSwitch: () => { if (media.available && gates(state, Date.now()).joinVoice) media.join({ takeover: true }); } });
+    const mayJoin = () => !!state.room || gates(state, Date.now()).joinVoice;
+    const handoff = BL.voiceHandoff.build({ onSwitch: () => { if (media.available && mayJoin()) media.join({ takeover: true }); } });
     document.body.append(handoff.node);
     page.signal.addEventListener("abort", () => handoff.node.remove());
     const set = (patch) => {
@@ -157,7 +159,7 @@
       shell.update(state);
       bar.update(state);
       syncLink();
-      const elsewhere = state.mode === "live" && !!state.session && !!state.voice.elsewhere && media.available && gates(state, Date.now()).joinVoice;
+      const elsewhere = state.mode === "live" && !!state.session && !!state.voice.elsewhere && media.available && mayJoin();
       // The voice controller has the server's word on this connection once it is past `off`: read once.
       const first = !handoffChecked && state.voice.phase !== "off";
       if (first) handoffChecked = true;
@@ -169,23 +171,26 @@
       media.status(status);
       set({ audience: { status, zone: state.zone, list: roster.ready ? roster.list(state.session?.identity.participant) : [], version: ++heard } });
     };
-    // One feed per signed-in principal, for the page's zone; none while signed out. Another principal starts again empty;
-    // a feed restarted for the same one (`kept`) keeps its list until the new snapshot replaces it.
+    // One feed per signed-in principal, for the page's zone (or the chat chosen); none while signed out. Another principal
+    // or chat starts again empty; a feed restarted for the same one (`kept`) keeps its list until the new snapshot replaces it.
+    const heardChat = new Set();
     const listen = (kept = null) => {
       const principal = state.mode === "live" && state.session ? state.session.identity.principal : null;
-      if (principal === listening) return;
+      if (state.room && (!principal || !state.boot.features.chats || state.room.principal !== principal)) state = { ...state, room: null, zone: parseZone(null) };
+      const room = state.room, key = principal && (room ? `${principal} ${room.id}` : state.boot.features.chats ? null : principal);
+      if (key === listening) return;
       clearTimeout(relisten);
       relisten = 0;
       // The same account's feed starting again is a reconnect to the voice, which keeps a speaker's place (its
       // `reconnecting`); anyone else's, or none, ends it.
-      if (principal && principal === kept) media.status("reconnecting");
+      if (key && key === kept) media.status("reconnecting");
       else media.stop();
       feed?.dispose();
       feed = null;
       handRequest = 0;
-      listening = principal;
-      if (principal !== kept) roster.expect(state.zone);
-      if (!principal) return hear("off");
+      listening = key;
+      if (key !== kept) roster.expect(state.zone);
+      if (!key) return hear("off");
       media.identify(state.session.identity.participant);
       feed = adapter.audience(state.boot, {
         message(msg) {
@@ -194,13 +199,22 @@
               for (const fn of pops) fn(msg.participantId, msg.emoji);
             return;
           }
+          if (room && msg?.you && state.room === room) room.you = msg.you;
+          if (room && msg?.chat) room.chat = msg.chat;
+          if (room && /^(notice|result|removed|chat|walk)$/.test(msg?.type)) {
+            if (msg.kind === "muted" && state.voice.role === "speaker" && !state.voice.muted) media.mute();
+            for (const fn of heardChat) fn(msg);
+            if (msg.type === "walk") return;
+            if (msg.type !== "result") return set({});
+          }
           if (msg && msg.type === "result") {
             media.heard(msg);
             // The hand's own answer: the visitor's row decides from here, whatever was shown meanwhile.
             if (msg.requestId === handRequest) { handRequest = 0; syncLink(true); }
+            if (room) set({});
             return;
           }
-          if (msg && (msg.type === "you" || msg.type === "media")) return media.heard(msg);
+          if (msg && (msg.type === "you" || msg.type === "media")) { media.heard(msg); return room && msg.type === "you" && set({}); }
           const result = roster.apply(msg);
           if (result === "gap") feed.resync();
           if (result === "applied") {
@@ -214,6 +228,7 @@
         // Then the feed starts afresh from what the check leaves: the same principal listens again, a signed-out one
         // stops. A server that keeps refusing is asked less often, up to 16 s apart.
         status(next) {
+          if (next === "removed" || next === "ended") return leaveRoom(next);
           if (next !== "signed-out") return hear(next);
           hear("reconnecting");
           const own = feed;
@@ -230,10 +245,24 @@
             });
           }, refused > 1 ? 1000 * 2 ** (refused - 2) : 0);
         }
-      });
+      }, room && room.id);
       media.zone(state.zone);
       feed.zone(state.zone);
     };
+    // A chat chosen from the list, or left (`kind` says why: ended, removed, or null for Leave).
+    const enterRoom = (entry) => {
+      if (!state.session || state.room?.id === entry.id) return;
+      state = { ...state, room: { id: entry.id, title: entry.title, zone: entry.zone, principal: state.session.identity.principal, you: null }, zone: BL.chatHosts.rosterZone(entry.zone) };
+      listen();
+      set({});
+    };
+    function leaveRoom(kind = null) {
+      if (!state.room) return;
+      state = { ...state, room: null, zone: parseZone(null) };
+      listen();
+      set({});
+      if (kind) for (const fn of heardChat) fn({ type: "notice", kind, left: true });
+    }
     const contributor = () => state.mode === "live" && gates(state, Date.now()).contributor;
     // The Commons and Online Oogas (#670): one member socket per eligible contributor while the server offers it. Another
     // principal, or none, starts again empty. A closed session (4401) is checked again, and the socket ends or comes
@@ -314,8 +343,8 @@
       // Asked again at the moment of the click: only the server's answer opens voice, and it decides again there.
       joinVoice: () => {
         // Voice held on another device moves here only on the visitor's word: the prompt asks.
-        if (state.voice.elsewhere) { if (media.available && gates(state, Date.now()).joinVoice) handoff.open(); return; }
-        if (media.available && gates(state, Date.now()).joinVoice) media.join();
+        if (state.voice.elsewhere) { if (media.available && mayJoin()) handoff.open(); return; }
+        if (media.available && mayJoin()) media.join();
       }
     };
     // Feed the Oogas: real over this origin's relay while the feed is live, the simulated kiosk only on the fixture
@@ -343,7 +372,9 @@
           return result;
         } },
       contributors: () => adapter.contributors(),
-      reactions: { bars, onPop(fn) { pops.add(fn); return () => pops.delete(fn); } } };
+      reactions: { bars, onPop(fn) { pops.add(fn); return () => pops.delete(fn); } },
+      chats: { call: (name, ...a) => adapter[name](state.boot, ...a), open: enterRoom, leave: () => leaveRoom(),
+        request: (type, fields) => feed && state.room ? feed.request(type, fields) : 0, hear(fn) { heardChat.add(fn); return () => heardChat.delete(fn); } } };
     shell = BL.oogaChatShell.create({ root, ctx, selected: back ? "chat" : remembered, onSelect(id) {
       try { localStorage.setItem(tabKey, id); } catch { /* Storage may be unavailable. */ }
     }, tabs: [

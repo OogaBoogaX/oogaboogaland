@@ -34,7 +34,7 @@
     // it empty is the kill switch (docs/ooga-chat-backend.md).
     // Production: the bridge's operations, The Commons read and sent, island voices outdoors heard by Ooga Chat, and Ooga
     // Chat's speakers drawn on the island's clouds (#659).
-    "OOGA_CHAT_FEATURES": "bridge,outdoor,cloud,commons,commons-send",
+    "OOGA_CHAT_FEATURES": "bridge,commons,commons-send,chats,copies",
     // The audience's caps a zone (worker/src/audience.js `limitsOf`, docs/ooga-chat-operations.md): listeners (the release
     // runbook's first step, raised in documented steps), cloud speakers (one a cloud seat), and the reaction fan-out budget
     // in frames a second.
@@ -83,7 +83,7 @@
     { "binding": "OOGATRON", "service": "oogatron" }
   ],
   "durable_objects": {
-    "bindings": [{ "name": "ROOM", "class_name": "Room" }, { "name": "GAMES", "class_name": "GameHost" }, { "name": "INSPECTOR", "class_name": "Inspector" }, { "name": "AUDIENCE", "class_name": "Audience" }, { "name": "WORLD", "class_name": "WorldWatch" }],
+    "bindings": [{ "name": "ROOM", "class_name": "Room" }, { "name": "GAMES", "class_name": "GameHost" }, { "name": "INSPECTOR", "class_name": "Inspector" }, { "name": "AUDIENCE", "class_name": "Audience" }, { "name": "WORLD", "class_name": "WorldWatch" }, { "name": "CHATS", "class_name": "ChatDirectory" }],
     // Every active object takes new code the moment a deploy lands, dropping its sockets (pages reconnect on their own),
     // rather than Cloudflare's default of running old code for up to 5 minutes while it waits to hibernate: a fix reaches
     // the room at once, and no Worker on new code talks to a Room, GameHost, Inspector or Audience still on the old.
@@ -92,7 +92,8 @@
   // v2: one GameHost a hosted game's instance (worker/src/games.js names them), apart from the island's Room.
   // v4: Ooga Chat's Audience (worker/src/audience.js), one named `audience`, reached only through ChatBridge and the Room.
   // v5: the World Map's WorldWatch (worker/src/world-watch.js), one named `world`, which map pages listen to.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }, { "tag": "v2", "new_sqlite_classes": ["GameHost"] }, { "tag": "v3", "new_sqlite_classes": ["Inspector"] }, { "tag": "v4", "new_sqlite_classes": ["Audience"] }, { "tag": "v5", "new_sqlite_classes": ["WorldWatch"] }],
+  // v6: hosted chats' directory (worker/src/chat-directory.js), one named `chats`; each chat is an Audience of its own.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }, { "tag": "v2", "new_sqlite_classes": ["GameHost"] }, { "tag": "v3", "new_sqlite_classes": ["Inspector"] }, { "tag": "v4", "new_sqlite_classes": ["Audience"] }, { "tag": "v5", "new_sqlite_classes": ["WorldWatch"] }, { "tag": "v6", "new_sqlite_classes": ["ChatDirectory"] }],
   // Namespaces are per account: production counts in 1001-1008, staging in 2001-2008.
   "ratelimits": [
     // Equipment reads and saves per signed-in account, counted on separate method keys.

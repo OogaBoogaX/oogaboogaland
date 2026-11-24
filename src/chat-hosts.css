@@ -1,0 +1,139 @@
+/* Hosted chats' look (chat-hosts.js, docs/ooga-chat-hosts.md), Ooga Chat's and the island's alike: the list before a
+   chat is chosen (a panel's `data-space="list"`, which hides its roster), then the chat's bar, invite card, badges,
+   pop-ups and the Start a chat dialog. The island joins it after style.css; Ooga Chat stages it with its `hosts` chunk
+   (scripts/ooga-chat.mjs). Under 400px the pop-ups are sheets at the foot of the screen with 44px controls. */
+.panel[data-space="list"] > :is(.cloud-status, .cloud-roster, .oc-volume, .hc-invite, .hc-room-strip),
+.panel[data-space="list"] > .panel-foot > .reactions,
+.panel[data-space="list"] > .panel-title > .panel-chip,
+.hc-chats[hidden], .hc-room-bar[hidden], .hc-invite[hidden], .hc-pop[hidden] { display: none; }
+.hc-chats { display: grid; flex: 1 1 auto; align-content: start; gap: 10px; min-height: 0; overflow-y: auto; padding: 16px 18px; }
+.hc-chats-head, .hc-room-bar, .hc-queue-row { display: flex; align-items: center; gap: 8px; }
+.hc-chats-head .section-head, .hc-room-title, .hc-queue-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.hc-chats-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.hc-chat-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 1px solid rgba(243, 239, 228, 0.12);
+  border-radius: 6px; background: rgba(0, 0, 0, 0.2); color: var(--paper); font: inherit; text-align: left; cursor: pointer;
+}
+.hc-chat-row:hover, .hc-chat-row:focus-visible { border-color: var(--accent); outline: none; }
+.hc-chat-row > .cloud-portrait { --face: 36px; flex: none; width: 36px; height: 36px; }
+.hc-chat-row-text { display: grid; flex: 1; min-width: 0; gap: 2px; font-size: 11px; color: rgba(243, 239, 228, 0.78); }
+.hc-chat-row-title { color: var(--paper); font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+.hc-chats-status { margin: 0; color: rgba(243, 239, 228, 0.7); font-size: 11px; }
+.hc-chats-status .link[hidden] { display: none; }
+.hc-room-bar { flex: none; font-size: 12px; font-weight: 700; color: var(--paper); }
+.hc-dock { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+.hc-chat-notice { flex: none; margin: 0; color: var(--accent-text); font-size: 11px; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6); }
+.hc-chat-notice:empty { display: none; }
+.hc-invite { display: grid; flex: none; gap: 6px; padding: 10px 12px; color: var(--paper); font-size: 11px; }
+.hc-invite:focus { outline: none; }
+.hc-invite strong { color: var(--accent-text); font-size: 12px; }
+.hc-invite-go, .hc-start-go { display: flex; flex-wrap: wrap; gap: 8px; }
+.panel[data-space="on"] .cloud-face { cursor: pointer; }
+/* A microphone over the portrait for an open request (audience-tiles.js `data-request`); a host's or co-host's rank is
+   the label under the name, not a badge. */
+.cloud-tile:is([data-request="asked"], [data-request="invited"]) .cloud-face::before {
+  position: absolute; display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 3px; border: 1px solid var(--wood-edge);
+  border-radius: 8px; background: var(--plank); color: var(--paper); font-size: 8px; font-weight: 700; letter-spacing: 0.04em; line-height: 1;
+}
+.cloud-tile:is([data-request="asked"], [data-request="invited"]) .cloud-face::before { content: "\1F399\FE0F"; top: -5px; right: -7px; z-index: 1; font-size: 9px; background: var(--accent); }
+.cloud-tile[data-request="invited"] .cloud-face::before { background: #22c55e; }
+/* An open co-host offer: a star on the same badge, in paper over the purple of Ooga Chat's hosts' ring. */
+.cloud-tile[data-request="cohost"] .cloud-face::before {
+  position: absolute; display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 3px; top: -5px; right: -7px; z-index: 1;
+  border: 1px solid var(--wood-edge); border-radius: 8px; background: #b18aff; color: var(--ink); content: "\2605"; font-size: 10px; font-weight: 700; line-height: 1;
+}
+/* A dropped speaker's, host's or co-host's tile, kept in place while they reconnect (audience-tiles.js `reconnecting`). */
+.cloud-tile[data-reconnecting] :is(.cloud-face, .cloud-name) { opacity: 0.45; }
+.cloud-tile[data-reconnecting] .cloud-role { color: rgba(243, 239, 228, 0.6); font-style: italic; }
+/* A menu item not open now (chat-hosts.js `disabled`): stone, dimmed, its reason under it. */
+.hc-pop .foot-button[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
+.hc-pop-why { margin-top: -2px; }
+.hc-pop, .hc-start, .hc-preview {
+  border: 3px solid var(--wood-edge); border-radius: var(--radius); background: var(--planks); color: var(--paper);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+.hc-pop { position: fixed; z-index: 980; width: max-content; max-width: min(320px, calc(100vw - 16px)); padding: 8px; }
+.hc-pop-slab, .hc-start-slab { display: grid; gap: 6px; padding: 10px; }
+.hc-pop-slab > .foot-button, .hc-queue-row .foot-button { min-height: 32px; }
+.hc-pop-head { margin: 0; font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+.hc-pop-note { margin: 0; font-size: 11px; color: rgba(243, 239, 228, 0.78); }
+.hc-start { width: 420px; max-width: calc(100vw - 32px); padding: 14px 16px 16px; font: inherit; }
+.hc-start::backdrop, .hc-preview::backdrop { background: rgba(0, 0, 0, 0.6); }
+.hc-start h2 { margin: 0 0 10px; font-size: 14px; filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5)); }
+.hc-start-label { display: grid; gap: 4px; font-size: 11px; }
+.hc-start-title {
+  padding: 8px; border: 2px solid var(--stone-dk); border-radius: 6px; background: rgba(0, 0, 0, 0.3); color: var(--paper); font: inherit; font-size: 16px;
+}
+.hc-start-zones { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.hc-zone-card {
+  display: grid; justify-items: center; gap: 6px; padding: 12px 8px; border: 2px solid var(--stone-dk); border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25); color: var(--paper); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.hc-zone-card[aria-checked="true"] { border-color: var(--accent); background: rgba(216, 137, 43, 0.14); }
+.hc-zone-card:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.hc-zone-art svg { display: block; width: auto; height: 44px; shape-rendering: crispEdges; }
+.hc-start-why { margin: 0; color: #ffb4a6; font-size: 11px; }
+.hc-start-why:empty { display: none; }
+.hc-start-go { justify-content: flex-end; }
+@media (max-width: 399px) {
+  .hc-pop { left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); top: auto; width: auto; max-width: none; }
+  .hc-pop .foot-button, .hc-invite .foot-button, .hc-start .foot-button { min-height: 44px; }
+}
+/* The Requests pop-up's Removed section, under the requests. */
+.hc-pop-section { margin: 6px 0 0; color: rgba(243, 239, 228, 0.5); font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+/* A chat's preview (chat-hosts.js): its title with the zone and Open stage tags, its stage in the chat's circles to look at
+   only, how many listen and wait, and the two ways in. */
+.hc-preview { width: 460px; max-width: calc(100vw - 32px); padding: 14px 16px 16px; font: inherit; }
+.hc-preview-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 10px; }
+.hc-preview-head h2 { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 14px; overflow-wrap: anywhere; filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5)); }
+.hc-preview-stage {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); align-content: start; gap: 10px 4px;
+  max-height: min(40vh, 320px); min-height: 92px; margin: 0; padding: 6px 4px; overflow-y: auto; list-style: none;
+}
+.hc-preview-count { margin: 0; font-size: 11px; color: rgba(243, 239, 228, 0.78); }
+.hc-preview .cloud-mic { cursor: default; }
+/* The Open stage tag, and the host's switch for it in the Requests pop-up. */
+.hc-open-tag { color: #bfeccb; border-color: rgba(34, 197, 94, 0.38); }
+.hc-open-tag[hidden] { display: none; }
+.hc-open-switch { display: flex; align-items: center; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid rgba(243, 239, 228, 0.1); font-size: 11px; cursor: pointer; }
+.hc-open-switch input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+@media (max-width: 399px) {
+  .hc-preview .foot-button { min-height: 44px; }
+  .hc-open-switch input { width: 22px; height: 22px; }
+}
+/* The island view (island-view.js) over a chat's roster while one of its speakers walks the chat's island: the map, or
+   Live view under the same faces, its switch in the corner, and one line saying who walks there. */
+.hc-room-strip { flex: none; }
+.hc-room-strip[hidden], .iv[hidden] { display: none; }
+.iv { display: grid; gap: 4px; }
+.iv-stage {
+  position: relative; width: 100%; aspect-ratio: 4 / 3; max-height: 200px; overflow: hidden;
+  border: 2px solid var(--stone-dk); border-radius: 9px 7px 10px 8px; background: #1f6aa5; box-shadow: var(--tablet-shadow);
+}
+.iv-map, .iv-gl { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.iv-stage[data-live="on"] .iv-map { background: transparent; }
+.iv-live {
+  position: absolute; top: 6px; right: 6px; min-width: 76px; min-height: 28px; padding: 0 8px; border: 2px solid var(--wood-edge); border-radius: 6px;
+  background: var(--stone); color: var(--paper); font: inherit; font-size: 11px; font-weight: 700; cursor: pointer;
+}
+.iv-live:hover { background: var(--stone-lt); }
+.iv-live[aria-pressed="true"] { background: linear-gradient(#e2a04a, var(--accent)); color: var(--ink); box-shadow: 0 3px 0 var(--nail); }
+.iv-live:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.iv-note { margin: 0; color: var(--accent-text); font-size: 11px; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6); overflow-wrap: anywhere; }
+@media (max-width: 399px) { .iv-live { min-height: 44px; } .iv-stage { max-height: 180px; } }
+/* In a chat on a narrow screen the footer keeps to two rows rather than spilling past the panel's foot: the visitor's
+   name with the links (Leave, Sign out), then the buttons on one row, each as wide as its words (Unmute, Join Voice,
+   Go there or Leave, Request to speak, End chat). Any note a button carries goes under them. */
+@media (max-width: 479px) {
+  .panel[data-space="on"] .cloud-foot { gap: 6px 8px; }
+  .panel[data-space="on"] .cloud-foot-actions { display: contents; }
+  .panel[data-space="on"] .cloud-foot .link { order: 1; }
+  .panel[data-space="on"] .cloud-foot::after { content: ""; order: 1; flex-basis: 100%; }
+  .panel[data-space="on"] .cloud-foot .foot-button { order: 2; flex: 1 1 auto; min-width: 0; padding: 0 6px; letter-spacing: 0.04em; }
+  .panel[data-space="on"] .cloud-foot > :not(.cloud-foot-name, .cloud-foot-actions) { order: 3; }
+}
+
+/* The Requests panel in the panel's flow under the chat's bar (chat-hosts.js `dock`): it pushes the roster down, never
+   covers it, and scrolls itself when long. Placed last so it wins over the floating pop-up's phone sheet. */
+.hc-pop.hc-docked { position: static; z-index: auto; width: auto; max-width: none; margin: 6px 0 0; padding: 0; inset: auto; }
+.hc-pop.hc-docked .hc-pop-slab { max-height: min(40vh, 320px); overflow-y: auto; }

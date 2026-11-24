@@ -35,6 +35,8 @@
 // return within REJOIN_QUIET takes that leave's line and count back (`sheet.unnote`). With "Read joins aloud" ticked (this browser's choice, in localStorage) the names are
 // spoken too, one utterance at a time: names that arrive while one plays wait and are said together after it, and the
 // Read joins aloud checkbox alone controls it, independently of environment sound. Speech starts from the box, a gesture.
+// In Ooga Chat (chat-summary-v1, docs/ooga-chat-hosts.md): the last group, after every zone's: each live hosted chat
+// with how many speak and listen in it, a press opening its preview with the way in (cloud-panel.js `preview`).
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -97,12 +99,33 @@
     listenerRows.set(key, row);
     return row;
   };
+  // In Ooga Chat: each live hosted chat (net.js `state.chatMembers`, the room's word), a group of its own after every
+  // zone's: one button a chat, its title (wrapping, never cut short) and its counts under it ("3 speaking · 12 listening",
+  // a count of nobody left out), "You're in this chat" on the one the visitor is in; busiest first, then by title. A press
+  // opens the chat's preview (cloud-panel.js `preview`), whose Join as listener or Join as speaker opens it in the Ooga
+  // Chat tab; the chat the visitor is in only shows that tab.
+  const IN_CHATS = "in-ooga-chat", chatRows = new Map(), chatOrder = [], COLLATE = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+  const chatRow = (id) => {
+    let row = chatRows.get(id);
+    if (row) return row;
+    const li = document.createElement("li"), button = document.createElement("button"), title = document.createElement("span");
+    const counts = document.createElement("span"), here = document.createElement("span");
+    li.className = "players-chat";
+    button.type = "button"; button.className = "players-chat-open"; button.dataset.chat = id;
+    title.className = "players-chat-title"; counts.className = "players-chat-counts";
+    here.className = "players-chat-here"; here.textContent = "You're in this chat"; here.hidden = true;
+    button.append(title, counts, here); li.append(button);
+    row = { li, title, counts, here, name: "", busy: 0, seen: 0, shown: "" };
+    chatRows.set(id, row);
+    return row;
+  };
+  const chatCounts = (c) => [c.speakers ? `${c.speakers} speaking` : "", c.listeners ? `${c.listeners} listening` : ""].filter(Boolean).join(" · ");
   const rowOf = (li) => li.dataset.cloud ? cloudRows.get(li.dataset.cloud) : li.dataset.listener ? listenerRows.get(li.dataset.listener) : rows.get(Number(li.dataset.id));
   const makeRow = () => {
     const li = document.createElement("li"), dots = document.createElement("span"), presence = document.createElement("span"), name = document.createElement("span");
     const label = document.createElement("span"), host = document.createElement("span"), marks = document.createElement("span");
     const voice = document.createElement("button"), look = document.createElement("button"), distance = document.createElement("span");
-    const link = document.createElement("button");
+    const link = document.createElement("button"), call = document.createElement("span");
     const note = document.createElement("span"), id = `players-name-${++serial}`;
     const toggle = document.createElement("button"), volume = document.createElement("div"), volumeLabel = document.createElement("label");
     const slider = document.createElement("input"), value = document.createElement("output");
@@ -133,13 +156,16 @@
     voice.className = "roster-voice"; voice.type = "button"; voice.hidden = true; voice.setAttribute("aria-describedby", id); voice.append(BL.hud.voiceIcon.cloneNode(true));
     // A voice link, offered where the room keeps them; never on the visitor's own row.
     link.className = "players-link"; link.type = "button"; link.hidden = true; link.append(linkIcon.cloneNode(true));
-    marks.append(voice, link);
+    // In a hosted chat's voice (call-v1): the island voice paused, so a cloud where the voice mark would be.
+    call.className = "call-mark"; call.hidden = true; call.setAttribute("role", "img"); call.setAttribute("aria-label", "In a chat"); call.title = "In a chat";
+    call.append(BL.nativeIcons.svg("cloud"));
+    marks.append(call, voice, link);
     look.className = "players-look"; look.type = "button"; look.setAttribute("aria-describedby", id); look.append(crosshair.cloneNode(true));
     distance.className = "players-distance"; distance.append("");
     note.className = "players-note"; note.textContent = ", last known location"; note.hidden = true;
     distance.append(note);
     li.append(dots, name, mark, marks, look, distance, volume);
-    return { li, label, toggle, volume, slider, value, duel, host, voice, link, linkShown: "", linkName: "", mark, hand, handShown: "", react, reacting: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
+    return { li, label, toggle, volume, slider, value, duel, host, voice, call, callOn: false, link, linkShown: "", linkName: "", mark, hand, handShown: "", react, reacting: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
       aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false, faded: false };
   };
   const selfRow = makeRow();
@@ -158,7 +184,7 @@
       groups.set(key, group);
     }
     // Linked partners away from the island are listed under Ooga Chat, which is no zone of the game's.
-    const heading = key === "ooga-chat" ? "Ooga Chat" : Z.heading(key);
+    const heading = key === "ooga-chat" ? "Ooga Chat" : key === IN_CHATS ? "In Ooga Chat" : Z.heading(key);
     if (group.head.textContent !== heading) group.head.textContent = heading;
     return group;
   };
@@ -169,6 +195,8 @@
     cloudRows.clear();
     for (const row of listenerRows.values()) row.li.remove();
     listenerRows.clear();
+    for (const row of chatRows.values()) row.li.remove();
+    chatRows.clear();
     selfRow.li.remove();
     for (const group of groups.values()) group.section.remove();
     groups.clear();
@@ -179,12 +207,14 @@
     if (!showing || stale) return;
     const s = net.state, voice = BL.voice.stats, inVoice = voice.enabled || voice.returning;
     paintMark(selfRow, inVoice ? voice.muted ? "muted" : voice.speaking ? "speaking" : "on" : "", "", inVoice, s.hostId === s.selfId, s.hand ? (s.handEmoji || BL.reactionPolicy.HANDS[s.handTone]) : "");
+    paintCall(selfRow, !!s.call);
     for (const row of rows.values()) {
       const rec = net.remotes.get(row.id);
       if (!rec) continue;
       // A player out of voice shows no mic at all.
       const look = rec.voice ? rec.muted ? "muted" : !row.faded && BL.voice.speaking(rec.id) ? "speaking" : "on" : "";
       paintMark(row, look, rec.login, false, rec.id === s.hostId, rec.hand ? (rec.handEmoji || BL.reactionPolicy.HANDS[rec.handTone]) : "");
+      paintCall(row, !!rec.call);
       paintLink(row, s.voiceLinks ? net.voiceLink(rec.id) : "", rec.display);
       const level = V.volumeOf(row.id), words = `${Math.round(level * 100)}%`;
       if (row.slider.value !== String(level * 100)) row.slider.value = String(level * 100);
@@ -218,6 +248,7 @@
     row.link.setAttribute("aria-pressed", String(state !== "none"));
     row.link.title = words; row.link.setAttribute("aria-label", words);
   };
+  const paintCall = (row, on) => { if (row.callOn !== on) { row.callOn = on; row.call.hidden = !on; } };
   const paintMark = (row, look, login, self, host, hand = "") => {
     if (row.handShown !== hand) {
       row.handShown = hand; row.hand.textContent = hand; row.hand.hidden = !hand;
@@ -410,6 +441,26 @@
       if (row.label.textContent !== row.name) { row.label.textContent = row.name; row.label.title = row.name; }
       if (!row.self) row.slider.setAttribute("aria-label", `Volume for ${row.name}`);
     }
+    // In Ooga Chat comes last, after every zone's group.
+    chatOrder.length = 0;
+    const inChat = BL.chatCall && BL.chatCall.room ? BL.chatCall.room.id : "";
+    for (const [id, c] of s.chatMembers) {
+      const row = chatRow(id), here = id === inChat, shown = `${c.title}\n${chatCounts(c)}\n${here}`;
+      row.name = c.title || "Untitled chat"; row.busy = c.speakers + c.listeners; row.seen = pass;
+      if (row.shown !== shown) {
+        row.shown = shown;
+        row.title.textContent = row.name; row.counts.textContent = chatCounts(c); row.here.hidden = !here;
+      }
+      chatOrder.push(row);
+    }
+    for (const [id, row] of chatRows) if (row.seen !== pass) { row.li.remove(); chatRows.delete(id); }
+    if (chatOrder.length) {
+      chatOrder.sort((a, b) => b.busy - a.busy || COLLATE.compare(a.name, b.name));
+      const chats = groupFor(IN_CHATS);
+      chats.seen = pass;
+      if (list.children[groupIndex] !== chats.section) list.insertBefore(chats.section, list.children[groupIndex] || null);
+      chatOrder.forEach((row, i) => { if (chats.ul.children[i] !== row.li) chats.ul.insertBefore(row.li, chats.ul.children[i] || null); });
+    }
     for (const [key, entry] of groups) if (entry.seen !== pass) { entry.section.remove(); groups.delete(key); }
     measure();
     paintMarks();
@@ -457,6 +508,12 @@
         toggle.setAttribute("aria-expanded", String(open)); row.volume.hidden = !open;
         row.duel.hidden = !(open && BL.duel && BL.duel.offered(row.id));
       }
+      return;
+    }
+    // A chat in In Ooga Chat: its preview, the focus coming back here as it closes.
+    const chat = e.target.closest(".players-chat-open");
+    if (chat) {
+      if (BL.cloudPanel) BL.cloudPanel.preview(chat.dataset.chat, chat);
       return;
     }
     const duel = e.target.closest(".players-duel");
@@ -598,5 +655,5 @@
     cloudSpot = fn;
     measure();
   };
-  BL.players = { setDoors, setCloudSpot, refresh: () => render(), get stats() { return { showing, rows: rows.size, clouds: cloudRows.size, listeners: listenerRows.size, groups: groups.size, unread, speakOn }; } };
+  BL.players = { setDoors, setCloudSpot, refresh: () => render(), get stats() { return { showing, rows: rows.size, clouds: cloudRows.size, listeners: listenerRows.size, chats: chatRows.size, groups: groups.size, unread, speakOn }; } };
 })();

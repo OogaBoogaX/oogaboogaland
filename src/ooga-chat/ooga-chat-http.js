@@ -1,8 +1,8 @@
 // Ooga Chat's production adapter: the bootstrap, the session and sign-in through the same origin's server only.
 // Every answer passes oogaChatConfig's parsers; a failure becomes an explicit unavailable mode, never mock data.
 // The fixture adapter (ooga-chat-fixtures.js) keeps the same interface: `kind`, `bootstrap()`, `session(boot)`,
-// `signIn(boot, provider)`, `signOut(boot)`, `audience(boot, { message, status })`, `commons(boot, { message, status })`,
-// `commonsName(display)`, `media(boot)`, `contributors()`, `dispose()`.
+// `signIn(boot, provider)`, `signOut(boot)`, `audience(boot, { message, status }, chat)`, `commons(boot, { message, status })`,
+// `commonsName(display)`, `media(boot, chat)`, `chats(boot)`, `startChat(boot, { title, zone })`, `contributors()`, `dispose()`.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -84,11 +84,11 @@
     // reaction or the hand, #668). Frames go to `message` as parsed JSON; the roster
     // checks them. `status` hears connecting, reconnecting, full, signed-out (close 4401: the app checks the session),
     // stale (4426: another protocol revision), closed (4503: listening is off, asked again after about 3 min) and
-    // unavailable (no address). Reconnects back off from 1 s to 30 s. The edge refuses by accepting a socket and
+    // unavailable (no address); a hosted chat's (`chat`) joins without a zone, ending at 4403 or 4404. Reconnects back off from 1 s to 30 s. The edge refuses by accepting a socket and
     // closing it at once, so `open` proves nothing: only a frame from the zone resets the backoff.
     // The audience socket pings as the Commons' does (the Audience answers "pong" without waking): a quiet zone sends
     // nothing for minutes otherwise, and a connection a network or proxy drops on idle would take a speaker's lease.
-    const audience = (boot, { message, status }) => {
+    const audience = (boot, { message, status }, chat = null) => {
       let socket = null, zone = null, tries = 0, timer = null, closed = false, requests = 0, ping = null, heardAt = 0, probe = null, backing = false, openingAt = 0;
       const idle = { zone() {}, resync() {}, request: () => 0, wake() {}, dispose() {} };
       if (!boot.paths.audience) {
@@ -96,6 +96,7 @@
         return idle;
       }
       const send = (data) => socket?.readyState === 1 && socket.send(JSON.stringify(data));
+      const join = () => send(chat ? { type: "join", protocol: 2 } : { type: "join", zone, protocol: PROTOCOLS.audience });
       const later = (ms, backoff = false) => { backing = backoff; timer = setTimeout(() => { timer = null; backing = false; open(); }, ms); };
       // A socket that stopped answering: closed here and opened again now, as a reconnect.
       const dead = (own) => {
@@ -118,9 +119,9 @@
         if (closed || !zone) return;
         status(tries ? "reconnecting" : "connecting");
         openingAt = Date.now();
-        const own = socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${boot.paths.audience}`);
+        const own = socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${boot.paths.audience}${chat ? `?chat=${chat}` : ""}`);
         own.addEventListener("open", () => {
-          send({ type: "join", zone, protocol: PROTOCOLS.audience });
+          join();
           heardAt = Date.now();
           clearInterval(ping);
           ping = setInterval(() => {
@@ -146,6 +147,7 @@
           ping = probe = null;
           if (event.code === 4401) return status("signed-out");
           if (event.code === 4426) return status("stale");
+          if (chat && (event.code === 4403 || event.code === 4404)) return status(event.code === 4403 ? "removed" : "ended");
           if (event.code === 4429) {
             status("full");
             return later(FULL_WAIT_MS);
@@ -164,7 +166,7 @@
         zone(next) {
           if (next === zone || closed) return;
           zone = next;
-          if (socket?.readyState === 1) send({ type: "join", zone, protocol: PROTOCOLS.audience });
+          if (socket?.readyState === 1) join();
           else if (!socket && timer === null) open();
         },
         resync: () => send({ type: "resync", zone }),
@@ -261,13 +263,14 @@
         }
       };
     };
-    // Voice's broker (ooga-chat-media.js): one bounded POST an operation. A refusal throws with the server's `code` and
-    // whether trying again may help; the body never carries anything but the page's own connection and SDP.
-    const media = () => ({
+    // Voice's broker (ooga-chat-media.js): one bounded POST an operation, a hosted chat's under `?chat=<id>`. A refusal
+    // throws with the server's `code` and whether trying again may help; the body never carries anything but the page's
+    // own connection and SDP.
+    const media = (boot, chat = null) => ({
       async call(op, body) {
         let response, data;
         try {
-          ({ response, data } = await ask(`${MEDIA_PATH}${op}`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify(body) }, MEDIA_TIMEOUT_MS, json));
+          ({ response, data } = await ask(`${MEDIA_PATH}${op}${chat ? `?chat=${chat}` : ""}`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify(body) }, MEDIA_TIMEOUT_MS, json));
         } catch (error) {
           throw Object.assign(new Error("media unreachable"), { code: disposed ? "disposed" : "unreachable", retryable: !disposed });
         }
@@ -304,7 +307,7 @@
       for (const controller of pending) controller.abort();
       pending.clear();
     };
-    return { kind: "http", bootstrap, session, signIn, signOut, audience, commons, commonsName, media, contributors, dispose, get pending() { return pending.size; } };
+    return { kind: "http", bootstrap, session, signIn, signOut, audience, commons, commonsName, media, ...Object.fromEntries(["chats", "startChat", "chatPreview"].map((n) => [n, (...a) => BL.oogaChatHosts[n](ask, json, ...a)])), contributors, dispose, get pending() { return pending.size; } };
   };
   BL.oogaChatHttp = { create, TIMEOUT_MS, MEDIA_PATH };
 })();

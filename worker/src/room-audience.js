@@ -29,7 +29,8 @@ const NAME = "audience";
 
 const selfOf = (p) => `gh:${p.id}`;
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
-const enabled = (room) => !!room.env && !!room.env.AUDIENCE && bridgeFeatures(room.env).bridge;
+// A chat's copy (room-copy.js) never speaks to the audience singleton: its word is the island's alone.
+const enabled = (room) => !room.copy && !!room.env && !!room.env.AUDIENCE && bridgeFeatures(room.env).bridge;
 // The outdoor handshake and Ooga Chat speakers heard on the island: the island's `outdoor` switch, which is its kill switch.
 const outdoorOn = (room) => enabled(room) && bridgeFeatures(room.env).outdoor;
 const isOpen = (p) => !!p.outdoor && p.outdoor.state === "open";

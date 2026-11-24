@@ -26,7 +26,7 @@
     // Each lecture of the Lecture Hall's course, a group of its own (lecture-btc.js names them a to n).
     ...Object.fromEntries([..."abcdefghijklmn"].map((k, i) => [`lecture-btc-${k}`, () => !!(BL.lectures && BL.lectures.get(`btc-${String(i + 1).padStart(2, "0")}`))])),
     // HALLOWEEN: the arcade's ghost hunt, and each track of its playlist.
-    halloween: () => !!BL.halloween, ...Object.fromEntries(["boss", "colt", "martial", "nightmare", "synthed", "nr"].map((k) => [`halloween-track-${k}`, () => !!(BL.ghostMusic && BL.ghostMusic[k])])) };
+    halloween: () => !!BL.halloween, "chats-fixture": () => !!BL.oogaChatFixtures, ...Object.fromEntries(["boss", "colt", "martial", "nightmare", "synthed", "nr"].map((k) => [`halloween-track-${k}`, () => !!(BL.ghostMusic && BL.ghostMusic[k])])) };
   // Only scene implementation groups depend on a base group, and the Timechain rooms on the Block Party's radio, which
   // the keypad outside loads alone to start it early; no base group depends on a scene shell. The Lightning Jet
   // Hangar, walked into from the Factory and left back into it, builds on the Factory's scene group.

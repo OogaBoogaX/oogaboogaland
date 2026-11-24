@@ -35,10 +35,12 @@
     const feed = raw.features?.feed === true ? "live" : options.fixture && raw.features?.feed === "demo" ? "demo" : "off";
     // The Commons and Online Oogas (#670) at their fixed address, for an eligible contributor while the server says so.
     // `speak`: the deployment lets eligible contributors publish (the session's own capability says who); `voice` listening.
-    const features = { github: !!login.github, x: !!login.x, voice: raw.features?.voice === true, speak: raw.features?.speak === true, feed, commons: raw.features?.commons === true };
+    // Hosted chats (docs/ooga-chat-hosts.md), with audience protocol 2 for their sockets.
+    const chats = raw.features?.chats === true && pathOk(paths.chats) && !!audience && raw.protocols.audience.includes(2) ? paths.chats : null;
+    const features = { github: !!login.github, x: !!login.x, voice: raw.features?.voice === true, speak: raw.features?.speak === true, feed, commons: raw.features?.commons === true, chats: !!chats };
     // A newer deployment's build is worth a reload; an absent or matching one is not.
     const newer = typeof raw.build === "string" && raw.build.length <= 64 && build && raw.build !== build ? raw.build : null;
-    return { ok: true, mode: "live", features, paths: { login, session, logout, audience }, protocols, newer };
+    return { ok: true, mode: "live", features, paths: { login, session, logout, audience, chats }, protocols, newer };
   };
   // The signed-in account as the session address reports it (identity protocol 1, docs/ooga-chat-app.md); anything else
   // is signed out. `principal` is the server's opaque identity: equality, deduplication and every per-person state key
@@ -98,7 +100,7 @@
   // `sweep` removes any other key under this adapter's prefix and any older unversioned `ooga-chat.` key (a saved
   // screen, role or speaker flag), so nothing saved can bring back a choice panel or a microphone. The one word a
   // speaker leaves is the tab's own, in session storage (`speaker`, ooga-chat-app.js): for the page that replaces it at once.
-  const STORED = ["tab", "zone", "recent-bar", "donor", "roster-sort"];
+  const STORED = ["tab", "zone", "recent-bar", "donor", "roster-sort", "island-live"];
   const prefixOf = (adapter) => `ooga-chat.${adapter === "fixture" ? "fixture." : ""}v1.`;
   const storageKey = (adapter, name) => `${prefixOf(adapter)}${name}`;
   const sweep = (storage, adapter) => {

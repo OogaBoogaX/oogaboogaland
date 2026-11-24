@@ -32,15 +32,17 @@ test("the bridge answers hello always and every other operation only with its `b
   const env = island();
   const ok = await handleEnvelope(env, makeEnvelope("staging", "hello"));
   assert.equal(ok.ok, true);
-  assert.deepEqual(ok.result, { version: BRIDGE_VERSION, environment: "staging", features: { bridge: false, outdoor: false, cloud: false, commons: false, commonsSend: false }, voice: true });
+  assert.deepEqual(ok.result, { version: BRIDGE_VERSION, environment: "staging", features: { bridge: false, outdoor: false, cloud: false, commons: false, commonsSend: false, chats: false, copies: false }, voice: true });
   const ops = { ...BASE_OPS, echo: { run: (_env, envelope) => envelope.payload } };
   assert.deepEqual((await handleEnvelope(env, makeEnvelope("staging", "echo", { a: 1 }), ops)).error, { code: "disabled", retryable: false });
   const on = island({ OOGA_CHAT_FEATURES: " bridge , nonsense,commons" });
-  assert.deepEqual(bridgeFeatures(on), { bridge: true, outdoor: false, cloud: false, commons: true, commonsSend: false });
+  assert.deepEqual(bridgeFeatures(on), { bridge: true, outdoor: false, cloud: false, commons: true, commonsSend: false, chats: false, copies: false });
   assert.deepEqual((await handleEnvelope(on, makeEnvelope("staging", "echo", { a: 1 }), ops)).result, { a: 1 });
   // A sub-feature named without `bridge` stays off: the kill switch is one word.
-  assert.deepEqual(bridgeFeatures(island({ OOGA_CHAT_FEATURES: "outdoor,cloud,commons,commons-send" })), { bridge: false, outdoor: false, cloud: false, commons: false, commonsSend: false });
+  assert.deepEqual(bridgeFeatures(island({ OOGA_CHAT_FEATURES: "outdoor,cloud,commons,commons-send" })), { bridge: false, outdoor: false, cloud: false, commons: false, commonsSend: false, chats: false, copies: false });
   assert.equal(bridgeFeatures(island({ OOGA_CHAT_FEATURES: "bridge,commons-send" })).commonsSend, false, "sending needs `commons`");
+  assert.equal(bridgeFeatures(island({ OOGA_CHAT_FEATURES: "copies" })).copies, false, "a chat's copy needs `chats`");
+  assert.equal(bridgeFeatures(island({ OOGA_CHAT_FEATURES: "chats,copies" })).copies, true);
 });
 
 test("the bridge refuses a wrong version, another environment, a bad id, an unknown operation and an oversized envelope", async () => {
@@ -84,7 +86,7 @@ test("a feature counts only with everything it needs; the bridge must be this en
   const hello = { version: BRIDGE_VERSION, environment: "staging", features: { bridge: true, outdoor: true, cloud: true, commons: true }, voice: true };
   const all = edge();
   assert.deepEqual(flagsOf({ FEATURES: "github, x ,bogus" }), new Set(["github", "x"]));
-  assert.deepEqual(effective(all, hello), { github: true, x: true, listen: true, speak: true, feed: true, commons: true, cloud: true, bridge: "ok" });
+  assert.deepEqual(effective(all, hello), { github: true, x: true, listen: true, speak: true, feed: true, commons: true, cloud: true, chats: false, bridge: "ok" });
   assert.equal(effective(edge({ GITHUB_CLIENT_SECRET: "" }), hello).github, false, "no secret, no GitHub button");
   assert.equal(effective(edge({ DB: undefined }), hello).github, false, "no database, no sign-in");
   const noGithub = effective(edge({ GITHUB_CLIENT_SECRET: "" }), hello);
@@ -99,7 +101,7 @@ test("a feature counts only with everything it needs; the bridge must be this en
   assert.equal(effective(all, null).bridge, "unavailable");
   assert.equal(effective(edge({ OBL: undefined }), null).bridge, "unbound");
   assert.equal(effective(edge({ DONATIONS: undefined }), hello).feed, false);
-  assert.deepEqual(effective(edge({ FEATURES: "" }), hello), { github: false, x: false, listen: false, speak: false, feed: false, commons: false, cloud: false, bridge: "ok" });
+  assert.deepEqual(effective(edge({ FEATURES: "" }), hello), { github: false, x: false, listen: false, speak: false, feed: false, commons: false, cloud: false, chats: false, bridge: "ok" });
 });
 
 test("the bootstrap is the app's contract: version 1, its protocols, flags, same-origin paths, and no secret", async () => {
@@ -111,7 +113,7 @@ test("the bootstrap is the app's contract: version 1, its protocols, flags, same
   assert.equal(body.version, 1);
   assert.equal(body.build, "e310d64685e87b14");
   assert.deepEqual(body.protocols, { identity: [1], audience: [1], media: [1] });
-  assert.deepEqual(body.features, { github: true, x: true, voice: true, feed: true, speak: true, commons: true, cloud: true });
+  assert.deepEqual(body.features, { github: true, x: true, voice: true, feed: true, speak: true, commons: true, cloud: true, chats: false });
   assert.deepEqual(body.paths, { login: { github: "/auth/github", x: "/auth/x" }, session: "/api/chat/me", logout: "/api/chat/logout", audience: "/api/chat/audience",
     commons: "/api/chat/commons" });
   const flat = (value) => typeof value === "string" ? [value] : value && typeof value === "object" ? Object.values(value).flatMap(flat) : [];
@@ -202,8 +204,8 @@ test("the configs keep staging and production apart, and the edge apart from the
     assert.equal(chat.vars.ENVIRONMENT, env);
     assert.equal(isle.vars.ENVIRONMENT, env, "the bridge refuses an edge from another environment");
     // Each environment turns its switches on in the runbook's order, and only known ones.
-    for (const flag of chat.vars.FEATURES.split(",").filter(Boolean)) assert.ok(["github", "x", "listen", "speak", "feed", "commons", "cloud"].includes(flag), `${env} ${flag}`);
-    for (const flag of isle.vars.OOGA_CHAT_FEATURES.split(",").filter(Boolean)) assert.ok(["bridge", "outdoor", "cloud", "commons", "commons-send"].includes(flag), `${env} ${flag}`);
+    for (const flag of chat.vars.FEATURES.split(",").filter(Boolean)) assert.ok(["github", "x", "listen", "speak", "feed", "commons", "cloud", "chats"].includes(flag), `${env} ${flag}`);
+    for (const flag of isle.vars.OOGA_CHAT_FEATURES.split(",").filter(Boolean)) assert.ok(["bridge", "outdoor", "cloud", "commons", "commons-send", "chats", "copies"].includes(flag), `${env} ${flag}`);
     for (const path of ["/api/*", "/auth/*", "/donations/*"]) assert.ok(chat.assets.run_worker_first.includes(path), path);
     const obl = chat.services.find((s) => s.binding === "OBL"), pay = chat.services.find((s) => s.binding === "DONATIONS");
     assert.deepEqual(obl, { binding: "OBL", service: isle.name, entrypoint: "ChatBridge" });

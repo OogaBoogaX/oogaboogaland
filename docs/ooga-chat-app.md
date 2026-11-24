@@ -42,6 +42,7 @@ is unchanged and never stages the app.
 | `src/ooga-chat/ooga-chat-views.js` | `BL.oogaChatViews`: the Ooga Chat tab (sign-in, or the island's Ooga Chat panel: the zones, the roster and its footer), the stand-in for a tab whose chunk is on its way (`deferred`), the stand-in for a panel not built yet, and the kit the chunks' views build with. Every view is the island's own panel in its markup (#656) |
 | `src/ooga-chat/ooga-chat-bananas.js` | in the `bananas` chunk: the Bananas tab's view |
 | `src/ooga-chat/ooga-chat-panels.js` | in the `panels` chunk: Contributing Oogas, Online Oogas and The Commons, with the island's account row at their foot |
+| `src/js/chat-hosts.js`, `src/chat-hosts.css`, `src/ooga-chat/ooga-chat-hosts.js` | the `hosts` chunk, with its own stylesheet: hosted chats ([ooga-chat-hosts.md](ooga-chat-hosts.md)) where the bootstrap lists `features.chats`. The views and their look are shared with the island's cloud tab (`chat-hosts.js`, `chat-hosts.css`): the Chats list, the Start a chat dialog, and in a chat its bar, Requests chip and queue, invite card, tile menu, the footer's Request to speak, End chat and Leave, and one polite notice line. `ooga-chat-hosts.js` hands them the app's chats, voice and face sheet and links the stylesheet |
 | `src/ooga-chat/ooga-chat-http.js` | `BL.oogaChatHttp`: the production adapter |
 | `src/ooga-chat/ooga-chat-media.js` | `BL.oogaChatMedia`: voice (#654), one controller apart from the views: hearing the zone through the server's media operations and speaking from it (Voice, below) |
 | `src/ooga-chat/ooga-chat-faces.js` | `BL.oogaChatFaces`: the bundled fallback index for `art/ooga-faces.png`, by handle, with a default face. Generated with the sheet by `npm run ooga-chat:faces` (`scripts/ooga-chat-faces.mjs`, the island's own renderer in the suite's Chrome), never edited |
@@ -83,10 +84,13 @@ module reads nothing at load but `window.BL` and the document.
 `ooga-chat-http.js`, `ooga-chat-media.js`, `ooga-chat-donor.js`, `ooga-chat-commons.js`, `ooga-chat-faces.js`, `ooga-chat-portraits.js`, `ooga-chat-bananas.js`, `ooga-chat-panels.js`, then (fixture entry only) `ooga-chat-fixtures.js`, then `ooga-chat-app.js`. The build checks that
 `fixture.html` loads exactly `index.html`'s files plus the fixtures, just before the app, each in the same group.
 
-**Chunks.** A script tagged `data-defer="bananas"`, `data-defer="panels"` or `data-defer="emoji"` in both entries
+**Chunks.** A script tagged `data-defer="bananas"`, `data-defer="panels"`, `data-defer="emoji"` or `data-defer="hosts"` in both entries
 leaves the first load in a staged build. `bananas` is `donations.js`, `banana-panel.js`, Feed the Oogas (`qr.js` through `donation-popup.js`),
 `ooga-chat-donor.js` and `ooga-chat-bananas.js`; `panels` is `zone-map.js`, `commons-log.js`, `format-large.js`,
 `roster-panel.js`, `contributor-identities.js`, `activity-repos.js` and `ooga-chat-panels.js`; `emoji` is
+`chat-hosts.js` and `ooga-chat-hosts.js` are `hosts`, hosted chats, asked for once a signed-in account's service offers them; a stylesheet
+tagged the same way (`../chat-hosts.css`) is staged as that group's own `css/ooga-chat-<group>-<hash>.css`, named in
+`BL.oogaChatScripts` as `<group>.css`, and linked by the group's code as it runs. `emoji` is
 `emoji-data.js` and `reaction-bar.js`, the emoji bar and its picker over the whole list, which only a signed-in visitor
 sees, so the app asks for it as soon as an account is signed in (until then a view's bar waits, its slot hidden, and a
 reaction heard is let go; `reaction-policy.js` stays and reads the list only when first asked). Each runs after the whole
@@ -521,6 +525,12 @@ microphone refused), `blocked` (playback held until a gesture), `refused` (the z
 deployment that doesn't let anyone speak) and `elsewhere` (the account's voice is on the island, on another device,
 until the visitor takes it with the prompt's Switch here). `BL.oogaChatFixtures.rtc.stats` counts captures, live tracks and playing
 elements for the checks.
+`&chats=on` offers hosted chats ([ooga-chat-hosts.md](ooga-chat-hosts.md)) from an in-memory directory: two sample
+chats (one with a host, a co-host, a muted speaker, two requests and an invite out; the other with an open stage), their
+previews from the same state, the roles' rules on a chat's feed (the host's open stage and Allow back among them),
+and sample hosts that answer as a host would: a request is approved 1.5 s after it is made, and a microphone opened
+there is muted by its host 2.5 s later. A chat the visitor starts fills with two samples who ask to speak; one invited
+takes the stage a second later; End chat ends it.
 The accounts are named samples with no picture, never real people. Fixtures are isolated three ways:
 
 - a separate entry: `index.html` never loads `ooga-chat-fixtures.js`, and the build refuses one that does or that
@@ -578,7 +588,7 @@ to 176.6 KB (`index.html` 0.6 KB, script 85.7 KB, stylesheet 12.6 KB, sign-in pi
 42.1 KB on most phones and 1x screens, Artwork below), and the budget down to 180 KB, just above it, so a tab's code cannot slip back into the first load unnoticed. The emoji bar and its picker
 with the whole emoji list (`emoji`, 24.4 KB), wanted only signed in, followed once `reaction-policy.js` read the list
 when first asked rather than at load (the island and the Worker load it first anyway): the first load came to 153.3 KB
-(script 62.4 KB), 154.1 KB with the voice links and listeners in Online Oogas (#861), and the budget is 156 KB. A chunk that cannot be fetched offers Try again; one gone after a deploy (a 404
+(script 62.4 KB), 154.1 KB with the voice links and listeners in Online Oogas (#861), about 155.9 KB with hosted chats' glue (their views in the `hosts` chunk), and the budget is 256 KB, raised by the maintainer on 2026-11-23. A chunk that cannot be fetched offers Try again; one gone after a deploy (a 404
 to a HEAD, on a page the service worker does not keep) offers Reload.
 
 ## Artwork

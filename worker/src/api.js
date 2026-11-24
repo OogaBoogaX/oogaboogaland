@@ -11,6 +11,7 @@ import { fromSite, getSessionForRemoval, getSessionFromRequest, json, text } fro
 import { turnConfigured } from "./sfu.js";
 import { GAME_KINDS } from "./games.js";
 import { equipmentEnabled } from "./equipment-model.js";
+import { revokeChats } from "./chat-revoke.js";
 
 const BODY_MAX = 1024;
 
@@ -44,6 +45,8 @@ const me = async (request, env) => {
     await deletePlayer(env.DB, found.player.id);
     // The room's voice links are by account; one that cannot be reached now must not undo the deletion.
     await Promise.resolve().then(() => env.ROOM.getByName("island").forgetVoiceLinks(found.player.id)).catch(() => {});
+    // Its hosted chat sockets from the island close; one that cannot be reached now must not undo the deletion.
+    await revokeChats(env, { id: `ob_${found.player.id}` }, "deleted").catch(() => 0);
     if (equipmentEnabled(env)) await Promise.resolve().then(() => env.ROOM.getByName("island").forgetEquipment(found.player.id)).catch(() => {});
     const clear = serializeCookie(cookieNames(env.SITE_ORIGIN).session, "", { maxAge: 0, secure: isSecureOrigin(env.SITE_ORIGIN) });
     return new Response(null, { status: 204, headers: { "set-cookie": clear, "cache-control": "no-store" } });

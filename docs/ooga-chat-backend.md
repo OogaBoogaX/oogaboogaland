@@ -384,6 +384,23 @@ snapshot after a reconnect as a confirmation (the review on #677). The two clien
 `app`/`chat`, `face`/`avatar`, `muted`/`mic`). The server sends each client its own shape from one model, and a single
 shape later is welcome.
 
+## Hosted chats
+
+Hosts, co-hosts, speakers and listeners in chats a contributor starts are their own design, in
+[ooga-chat-hosts.md](ooga-chat-hosts.md): the roles and requests, the `ChatDirectory` object (migration `v6`), one
+`Audience` object a chat (`chat:<id>`) speaking audience protocol 2, the island's `/api/chats` routes and the edge's
+`/api/chat/chats`, and the `chats` switch on both sides (`OOGA_CHAT_FEATURES` on the island, `FEATURES` on the edge). A
+chat's socket is this section's audience socket with `?chat=<id>`, its media the media section's with the same, and the
+bridge reaches a chat only while the directory lists it (`x-chat-id`, else 404). Inside a chat, a host's leave replaces
+the contributor rule below for speaking: anyone signed in, X included, may be invited; a GitHub account is still refused
+while banned or while another account holds its login.
+
+A Main Island chat also has its own copy of the zone, where its speakers walk their Oogas: the island's `Room` class
+run as `chat:<id>` (`worker/src/room-copy.js`), reached by the island page through `GET /api/chats/<id>/world` behind
+the island's `copies` switch, with the chat deciding who walks it. Clouds seat the chat's other speakers there, and the
+chat relays the walkers' places to connections that asked for the island view (`walk-v1`). Nothing from a copy reaches
+the real island; Ooga Chat's clients never connect to one.
+
 ## Media (#666)
 
 Ooga Chat's audio goes publisher to SFU to listener on the environment's one Realtime SFU app, the island's own, so a

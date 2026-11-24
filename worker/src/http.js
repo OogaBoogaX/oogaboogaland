@@ -87,3 +87,24 @@ export const getSessionFromRequest = (request, env, strict = false) => findSessi
 // Losing character eligibility must not prevent clearing one's sessions or deleting one's account.
 // This authenticates ownership only; use exclusively for those removal operations.
 export const getSessionForRemoval = (request, env, strict = false) => findSession(request, env, true, strict);
+
+// A temporary catalog outage must not tell a reconnecting client that its account was signed out.
+export const serviceSession = async (request, env) => {
+  try { return await getSessionFromRequest(request, env, true); }
+  catch (error) {
+    return error.code === "character_unavailable"
+      ? text("Characters temporarily unavailable", 503, { "retry-after": "15" }) : null;
+  }
+};
+
+// The request passed on to a socket's object, with the player as the session says and nothing a client sent of its own.
+export const asPlayer = (request, found, extra = null) => {
+  const headers = new Headers(request.headers);
+  for (const name of [...headers.keys()]) if (name.startsWith("x-player-") || name === "x-game-name") headers.delete(name);
+  headers.set("x-player-id", String(found.player.id));
+  headers.set("x-player-login", found.player.login);
+  headers.set("x-player-display", found.player.display || found.player.login);
+  headers.set("x-player-contributor", "1");
+  if (extra) for (const [name, value] of Object.entries(extra)) headers.set(name, value);
+  return new Request(request, { headers });
+};

@@ -13,8 +13,13 @@ import { audienceRoom, overhearing } from "./room-audience.js";
 export { audienceRoom, overhearing };
 import { commonsRoom } from "./room-commons.js";
 export { commonsRoom };
+// A hosted chat's copy of its zone, and the island's side of a trip there (room-copy.js).
+export { copyRoom, COPY_FEATURE, COPY_MESSAGES } from "./room-copy.js";
+export { chatMembersRoom } from "./room-chat-members.js";
 export { roomCatalog } from "./room-catalog.js";
 export { equipmentRoom } from "./equipment-room.js";
+// The island's bridge switches, for the Room's `call-v1` (hosted chats, docs/ooga-chat-hosts.md).
+import { bridgeFeatures } from "./chat-bridge-protocol.js";
 // The Durable Object inspector's reporter (inspect-report.js), here so the room and game host take it with the rest.
 export { inspectReporter, INSPECT_FEATURE } from "./inspect-report.js";
 // The World Map's reporter (world-report.js), likewise.
@@ -42,6 +47,9 @@ import "../../src/js/reaction-policy.js";
 //                 { t: "prop", k, a }            a follower's round, blow or poke at a loose prop, for the host
 //                 { t: "visible", on }           this page is visible (Block Frenzy's host candidates, block.js)
 //                 { t: "mute", on }              this page muted its own microphone, for everyone's roster
+//                 { t: "call", on }              this page is in a hosted chat's voice, its island voice paused (call-v1)
+//                 { t: "travel" }                this page's Ooga is beaming to a chat's copy of the zone (travel-v1): the
+//                                                room keeps its seat while it is away and others beam it out
 //                 { t: "hp", v, ko }             the driven body's health (normalized 0-100) and knockout flag
 //                 pose.g                         optional gorilla locomotion: [flags, speed, stride, climb, side, swim]
 //                 pose.j                         optional jetpack, for drawing only: 1 while an Ooga wears one, plus its
@@ -85,6 +93,13 @@ import "../../src/js/reaction-policy.js";
 //                 release { name, reason }   the Ooga this socket claimed is not, or no longer, its to drive
 //                 host { id, followers }     who runs the NPCs now (0 for nobody) and how many pages follow
 //                                            them (a host with none sends nothing); binary NPC frames from them
+//                 call { id, on }            a player went into or out of a hosted chat's voice (call-v1); welcome and
+//                                            join carry `call: true` on a player who is in one
+//                 chat-summary { chat, title, speakers, listeners, app }  a hosted chat's title and counts now: how
+//                                            many speak, how many listen, and how many of them are there through
+//                                            Ooga Chat's app rather than the island; all zero as it ends
+//                                            (chat-summary-v1, room-chat-members.js); welcome carries every chat's as
+//                                            `chatSummaries`
 //                 vstate { id, voice, muted }  a player's microphone went live or off, or they muted it; welcome
 //                                            and join carry the same two fields on every player, and hp and ko
 //                 hp { id, v, ko }           a player's driven Ooga's health changed
@@ -290,7 +305,12 @@ export const SWING_HZ = 4;
 export const SWING_BURST = 4;
 // The frames that change who sees and hears whom, each fanned out to the whole room: well over anything a page sends,
 // and low enough that one account cannot saturate the island's only room.
-export const CONTROL_FRAMES = new Set(["hub", "visible", "zone", "poker-voice", "mute", "body", "audience-view", "audience-resync"]);
+export const CONTROL_FRAMES = new Set(["hub", "visible", "zone", "poker-voice", "mute", "call", "travel", "body", "audience-view", "audience-resync"]);
+export const TRAVEL_FEATURE = "travel-v1";
+// A page in a hosted chat's voice (docs/ooga-chat-hosts.md) says so, and its Ooga carries the mark on every page.
+export const CALL_FEATURE = "call-v1";
+export const callOn = (env) => bridgeFeatures(env || {}).chats;
+export const callFeatures = (env) => callOn(env) ? [CALL_FEATURE] : [];
 export const CONTROL_HZ = 8;
 export const CONTROL_BURST = 20;
 // Chalkboard: the EntropyLab board on the island, kept for good. One page at a time holds it, and only while its
@@ -431,6 +451,8 @@ export const parseClientMessage = (text) => {
   if (msg.t === "prop") return PROP_KINDS.has(msg.k) && Array.isArray(msg.a) && msg.a.length === 6 && msg.a.every((n) => typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= PROP_RANGE) ? { t: "prop", k: msg.k, a: msg.a } : null;
   if (msg.t === "visible") return typeof msg.on === "boolean" ? { t: "visible", on: msg.on } : null;
   if (msg.t === "mute") return typeof msg.on === "boolean" ? { t: "mute", on: msg.on } : null;
+  if (msg.t === "call") return typeof msg.on === "boolean" ? { t: "call", on: msg.on } : null;
+  if (msg.t === "travel") return { t: "travel" };
   if (msg.t === "hp") return finite(msg.v) && typeof msg.ko === "boolean" ? { t: "hp", v: Math.max(0, Math.min(100, Math.round(msg.v))), ko: msg.ko } : null;
   if (msg.t === "zone") return typeof msg.name === "string" && ZONE_NAME.test(msg.name) ? { t: "zone", name: msg.name } : null;
   if (msg.t === "blend") return msg.to === null && msg.k === 0 ? { t: "blend", to: null, k: 0 }
