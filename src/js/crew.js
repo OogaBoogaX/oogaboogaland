@@ -6242,7 +6242,8 @@
       p.x = f.x; p.z = f.z;
       cave.root.rotation.y = f.heading;
       work.site = f.site;
-      if (f.act !== cave.followAct) {
+      const fresh = f.act !== cave.followAct;
+      if (fresh) {
         if (cave.followAct === FOLLOW_RELOAD && w.reloading) stopReload(cave, true);
         if (f.act === FOLLOW_STAND || f.act === FOLLOW_SIT) { a.kind = "idle"; a.said = false; a.sayAt = elapsed + 0.8 + Math.random() * 2; a.until = Infinity; }
         // A fresh magazine for each cave: the bananas on the rifle count down as it fires.
@@ -6257,8 +6258,17 @@
         if (moved > 1e-5) walkPose(cave, cave.followGait); else { standPose(cave); p.y = groundY(cave) + cave.hop; }
         return;
       }
+      // A resting Ooga stands up once, as it starts resting, and is posed whole that frame: `runIdle` poses it only on
+      // its animation's due frames, so far off a stand every frame would undo its seat between them.
+      if (f.act === FOLLOW_STAND || f.act === FOLLOW_SIT || !working) {
+        if (fresh) {
+          const an = cave.animation;
+          standPose(cave);
+          if (!an.due) { an.due = true; an.dt = an.pending; an.pending = 0; }
+        }
+        work.phase = ""; runIdle(cave, dt); return;
+      }
       standPose(cave);
-      if (f.act === FOLLOW_STAND || f.act === FOLLOW_SIT || !working) { work.phase = ""; runIdle(cave, dt); return; }
       p.y = groundY(cave) + cave.hop;
       if (f.act === FOLLOW_AIM || f.act === FOLLOW_FIRE) {
         const site = workSites && workSites[f.site];

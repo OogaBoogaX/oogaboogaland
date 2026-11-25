@@ -1857,5 +1857,5 @@
       }
     };
   };
-  BL.timechainRoomKinds.temple = { plan, steps, animate, door, statue, STATUE_STEPS };
+  BL.timechainRoomKinds.temple = { plan, steps, animate, door, statue, STATUE_STEPS, VOICES };
 })();
