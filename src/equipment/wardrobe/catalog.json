@@ -912,13 +912,23 @@
       "version": "abd30424d896210659a0cf5c0e10c02a0cc33c082b06ef2f3aaca5bbcccb4157"
     },
     {
+      "id": "shirt-902c5473195a27ad",
+      "slot": "shirt",
+      "label": "Red fur with hide vest (Global-DSB)",
+      "creators": [
+        "Global-DSB"
+      ],
+      "version": "902c5473195a27ad816047b870b9984e2e52fbeecdc877d04fe3d80b64f1070c"
+    },
+    {
       "id": "shirt-c89e96b6e4e6d225",
       "slot": "shirt",
       "label": "Red fur with hide vest",
       "creators": [
         "Global-DSB"
       ],
-      "version": "c89e96b6e4e6d2255f6bd76afc3ad9d2db9fd910851becb921e638ae3c6e36eb"
+      "version": "c89e96b6e4e6d2255f6bd76afc3ad9d2db9fd910851becb921e638ae3c6e36eb",
+      "retired": true
     },
     {
       "id": "shirt-f1caf2743baadc47",
@@ -1112,13 +1122,23 @@
       "version": "14364aa1b437721d82a7f50b1ac17f97760a221848d38fc6ce7b691036d2559f"
     },
     {
+      "id": "pants-86e08154d7d03c5f",
+      "slot": "pants",
+      "label": "Red fur pants (Global-DSB)",
+      "creators": [
+        "Global-DSB"
+      ],
+      "version": "86e08154d7d03c5f4d1c74d416a12c6f2726c354c8a2bffc7a76a549b2a4d79d"
+    },
+    {
       "id": "pants-9f9cc3eb6f12b4ea",
       "slot": "pants",
       "label": "Red fur pants",
       "creators": [
         "Global-DSB"
       ],
-      "version": "9f9cc3eb6f12b4eabff780788b84f7eba66c01fa0a71eef243f272d93839dd52"
+      "version": "9f9cc3eb6f12b4eabff780788b84f7eba66c01fa0a71eef243f272d93839dd52",
+      "retired": true
     },
     {
       "id": "pants-40cbb1fafdbe9e44",
@@ -1230,6 +1250,15 @@
       "version": "f5cdd21ab4c0de8c4e8c3eb7102c84b4dbf9daa8fafd69b1eb2be2ceb65dcabf"
     },
     {
+      "id": "weapon-cc2bd4b44799571f",
+      "slot": "weapon",
+      "label": "amlozano1's weapon",
+      "creators": [
+        "amlozano1"
+      ],
+      "version": "cc2bd4b44799571fe5fe9fc92f16aba87c40dab57922855cf7cf00aff3dcec1d"
+    },
+    {
       "id": "weapon-4bc4348a8ffaba25",
       "slot": "weapon",
       "label": "Bouquet",
@@ -1255,6 +1284,15 @@
         "itsLiran"
       ],
       "version": "883c86410d1d4ee617ae7564d1e123dd8b2ed7dcab6bbfca236ad21171134de0"
+    },
+    {
+      "id": "weapon-8ac8422313b6b282",
+      "slot": "weapon",
+      "label": "Global-DSB's weapon",
+      "creators": [
+        "Global-DSB"
+      ],
+      "version": "8ac8422313b6b28259d28e09eae4eb729ab79aa20360c7fbe078892f285ad817"
     },
     {
       "id": "weapon-f33a585f802acf2a",
