@@ -2,6 +2,7 @@
 // queue orders HTTP saves; revision checks also guard reads finishing after a newer write.
 import { equipmentCommand, equipmentEnabled, equipmentFitSize, equipmentRecord } from "./equipment-model.js";
 import { readEquipment, writeEquipment } from "./equipment-store.js";
+import { copyRoom } from "./room-copy.js";
 
 const queue = (room, step) => {
   if ((room.equipmentPending || 0) >= 64) return Promise.reject(new Error("Equipment queue full"));
@@ -17,6 +18,8 @@ const publish = (room, p) => {
   const message = { t: "equipment", ...row(p) };
   for (const other of room.players.values()) if (other !== p && room.equipmentVisible(other.zone, p.zone)) room.send(other.ws, message);
   own(room, p);
+  // A chat's copy tells its island view (room-copy.js `looked`).
+  if (room.copy) copyRoom.looked(room);
 };
 const apply = (room, p, record, tell = true) => {
   if (room.players.get(p.id) !== p || !record || (p.equipment && record.revision < p.equipment.revision)) return;

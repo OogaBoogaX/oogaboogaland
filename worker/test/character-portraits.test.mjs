@@ -71,6 +71,22 @@ test("Chat portrait proxy strips credentials and binds environment and immutable
   assert.equal(new URL(observed.url).pathname, `/portraits/${revision}/${manifest.image}.png`);
 });
 
+test("Chat catalog proxy strips credentials, binds the environment, passes only a well-formed compatibility query and refuses other methods", async () => {
+  let observed;
+  const env = { ENVIRONMENT: "staging", OBL: { fetch: async (request) => { observed = request; return new Response("{}"); } } };
+  const ask = (query, init = {}) => { const request = new Request(`https://chat.invalid/api/chat/public/characters/catalog${query}`, init); return handlePublic(request, env, new URL(request.url), {}); };
+  assert.equal(await (await ask("", { headers: { cookie: "private=secret", authorization: "Bearer secret", "x-ooga-chat-environment": "production" } })).text(), "{}");
+  assert.equal(observed.headers.get("x-ooga-chat-environment"), "staging");
+  assert.equal(observed.headers.get("cookie"), null); assert.equal(observed.headers.get("authorization"), null);
+  assert.equal(observed.url, "https://island.invalid/catalog");
+  await ask(`?baseline=${baseline}&engine=island-character-data-v1&extra=1`);
+  assert.equal(observed.url, `https://island.invalid/catalog?baseline=${baseline}&engine=island-character-data-v1`);
+  observed = null;
+  assert.equal((await ask("?baseline=nope")).status, 400);
+  assert.equal((await ask("", { method: "POST" })).status, 405);
+  assert.equal(observed, null, "nothing malformed reaches the island");
+});
+
 test("validated portrait cache preserves HEAD and conditional reads and limits only public misses", async () => {
   const f = portraitFixture(), cached = new Map(), limited = [];
   const deps = { cache: { match: async (key) => cached.get(key)?.clone(), put: async (key, value) => { cached.set(key, value); } } };

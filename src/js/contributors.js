@@ -225,38 +225,9 @@
     }
     for (const notify of listeners) notify();
   };
-  const { fnv1a, mulberry32 } = BL.math;
   const voiceFor = (name) => BL.characters.get(name)?.voice || null;
-  const SKINS = ["#c98a5b", "#a9744c", "#8a5a3a", "#d9a06b", "#b58057"];
-  const HAIRS = ["#2b1b10", "#4a2c14", "#151312", "#5c4425", "#7a2e12"];
-  const FURS = ["#d98a2e", "#cc7f28", "#c98936", "#e09a40", "#c27a24", "#d4913a"];
-  // A character's look overrides the hashed skin, hair and fur and carries its
-  // flags into the traits; its dress hooks go to models.buildCaveman.
-  const traitsFor = (name) => {
-    const character = BL.characters.get(name);
-    const look = character?.look || {};
-    const slim = look.build === "slim";
-    const rand = mulberry32(fnv1a(name));
-    const skin = SKINS[Math.floor(rand() * SKINS.length)];
-    // Either build's hashed hair is one of the same browns.
-    const hashedHair = HAIRS[Math.floor(rand() * HAIRS.length)];
-    const traits = {
-      ...look,
-      name,
-      display: character?.display || byName.get(name.toLowerCase())?.display || name,
-      slim,
-      skin: look.skin || skin,
-      hair: look.hair || hashedHair,
-      fur: look.fur || FURS[Math.floor(rand() * FURS.length)],
-      height: 0.92 + rand() * 0.24,
-      belly: (0.9 + rand() * 0.35) * (slim ? 0.8 : 1),
-      rand: mulberry32(fnv1a(name + "/body")),
-      dress: character?.dress
-    };
-    // An explicit stature replaces the hashed one after every draw, so the
-    // other hashed traits keep their sequence.
-    if (look.height) traits.height = look.height;
-    return traits;
-  };
+  // The look an Ooga is built from (characters.js `traitsFor`, which Ooga Chat's 3D view shares), named here as the
+  // roster names it.
+  const traitsFor = (name) => BL.characters.traitsFor(name, byName.get(name.toLowerCase())?.display);
   BL.contributors = { roster, activeRoster, solo, debugState, debugRoster, addTemporary, addLocal, stateFor, ageLabel, contributionStateFor, contributionAgeLabel, traitsFor, voiceFor, hasRecentActivity, applyActivity, applySnapshot, subscribe, seedDebugActivity };
 })();

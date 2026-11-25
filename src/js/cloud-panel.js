@@ -276,7 +276,8 @@
         // Go there: the speaker's own Ooga onto the chat's island (chat-copy.js), the island's page alone.
         goThere: { state: (room) => BL.chatCopy.button(room), press: () => BL.chatCopy.toggle(), subscribe: BL.chatCopy.subscribe },
         // The island view: the page's own copy of the map, Live view on the renderer the page has, over the island the hub built.
-        islandView: { picture: BL.islandViewArt.main, loadLive: () => null, island: () => BL.scenes.hub?.liveIsland || null, storageKey: "ooga-island-view-live" } });
+        // The island view: the page's own copy of the map. The island page is the island already, so it keeps the flat view.
+        islandView: { picture: BL.islandViewArt.main } });
       else {
         hosts?.dispose(); hosts = null;
         delete panel.dataset.space;

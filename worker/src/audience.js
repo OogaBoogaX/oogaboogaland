@@ -66,13 +66,47 @@ export const isChatLand = (land) => CHAT_LANDS.includes(land);
 export const rosterZone = (land) => (land === "dsb" ? "dsb" : "main");
 export const CHAT_OPS = new Set(["ask", "cancel", "invite", "answer", "decline", "mute", "demote", "cohost", "cohostAnswer", "handover", "remove", "allow", "open", "end"]);
 const TARGETED = new Set(["invite", "answer", "mute", "demote", "cohost", "handover", "remove", "allow"]);
-export const AUDIENCE_FEATURES = ["roles-v1", "reactions-v1", "hand-emoji-v1", "walk-v1"];
+export const AUDIENCE_FEATURES = ["roles-v1", "reactions-v1", "hand-emoji-v1", "walk-v1", "handoff-v1"];
+// Go there (docs/ooga-chat-hosts.md): a speaker's page asks for a ticket (`handoff`), one a speaker at a time, kept in
+// storage HANDOFF_MS with whether their microphone was open; the island's page, opened in the same tab, hands it back
+// (`redeem`) on a connection of the same account, once, and so takes the voice straight over with no card. A link
+// without one only listens: nobody else can mint one for that account.
+export const HANDOFF_MS = 60 * 1000;
+const TICKET = /^[A-Za-z0-9_-]{22}$/;
 // The island view (docs/ooga-chat-hosts.md): walkers' positions relayed from the chat's copy to the connections that
 // asked for them (`{ type: "view", on }`), at most WALK_HZ a second, fewer as subscribers pass WALK_FANOUT frames a
 // second in all; a frame arriving sooner is dropped (the copy sends the next within half a second).
 export const WALK_HZ = 2;
 export const WALK_FANOUT = 2000;
+// A viewer whose connection and device can take more asks for up to WALK_HZ_MAX a second (`{ type: "view", on, hz }`,
+// one of WALK_RATES); each viewer is sent at its own rate, all of them scaled down together past WALK_FANOUT frames a
+// second, and the copy is told how often to report (`walk`'s `ms`) by the fastest viewer it has.
+// The faster rates are the 3D view's, which for now only a GitHub contributor is offered (`eligible`): anyone else is
+// held to WALK_HZ.
+export const WALK_RATES = Object.freeze([2, 4, 6]);
+export const WALK_HZ_MAX = 6;
 const BOUND_XZ = 400;
+// Who sits on the copy's clouds, for the island view (`{ type: "clouds", at, clouds: [{ id, character, seat }] }`): each
+// active speaker not walking it, the Ooga they sit as and their seat, with the server's clock (`at`, ms) the view moves
+// the clouds by, as the copy does; sent to every connection viewing whenever the list changes, whether or not anyone
+// walks, and to a viewer as it starts (`cloudsFrame`).
+const cloudsView = (list) => JSON.stringify(list.map((c) => ({ id: c.id, character: c.character, seat: c.seat })));
+// How the walkers look (`looks`): an entry each, at most LOOKS_MAX characters of them all.
+export const LOOKS_MAX = 64 * 1024;
+const lookPlain = (v) => !!v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype;
+// A look's shape, bounded (the page checks each piece against its own catalog, equipment.js as ever): a hat's
+// selection, its size, a wardrobe of a choice a slot, and a hand and a jetpack.
+const LOOK_HASH = /^[a-f0-9]{64}$/, LOOK_ITEM = /^[a-z0-9][a-z0-9-]{0,79}$/, LOOK_COLOR = /^#[0-9a-f]{6}$/;
+const lookChoice = (v) => lookPlain(v) && Object.keys(v).length <= 3 && Object.entries(v).every(([k, x]) => k === "item" ? typeof x === "string" && (x === "none" || x === "custom" || LOOK_ITEM.test(x))
+  : k === "version" ? x === null || typeof x === "string" && LOOK_HASH.test(x) : k === "color" ? typeof x === "string" && LOOK_COLOR.test(x)
+  : (k === "size" || k === "height") && Number.isInteger(x) && x >= 0 && x <= 200);
+const lookEquipment = (e) => e === null || lookPlain(e) && Object.keys(e).every((k) => k === "selection" || k === "size" || k === "wardrobe")
+  && (e.selection === null || e.selection === undefined || lookChoice(e.selection))
+  && (e.size === undefined || Number.isInteger(e.size) && e.size >= 80 && e.size <= 120)
+  && (e.wardrobe === null || e.wardrobe === undefined || lookPlain(e.wardrobe) && Object.keys(e.wardrobe).length <= 32
+    && Object.entries(e.wardrobe).every(([k, x]) => /^[a-zA-Z]{1,16}$/.test(k) && lookChoice(x)));
+const validLook = (v) => lookPlain(v) && Object.keys(v).every((k) => k === "e" || k === "w" || k === "j")
+  && (v.e === undefined || lookEquipment(v.e)) && (v.w === undefined || v.w === 1 || v.w === 2) && (v.j === undefined || v.j === 1);
 // A transient reaction's life on every client (players.js shows the island's for the same time), and the limits on
 // sending them: per identity across its tabs (as the island's room has it) and per zone, which bounds any zone's fanout.
 export const REACTION_MS = 2600;
@@ -161,6 +195,11 @@ export class Audience extends DurableObject {
     this.copyOpened = false;
     this.copySeats = new Map();
     this.copyGone = null;
+    // How each walker looks, as the copy last said (`looks`), kept as the text sent to viewers.
+    this.looksText = "";
+    this.lookSeq = 0;
+    // Who sits on the copy's clouds, as viewers were last told (`clouds`); null: not worked out since a wake.
+    this.cloudsText = null;
     // What the island room was last told of this chat's counts (`reportMembers`): its signature, when, the one-shot
     // timer for a burst's last change, the one report in flight, and the chat whose end it has not yet heard (`gone`,
     // stored, so the alarm says it again even after the chat is gone).
@@ -191,6 +230,8 @@ export class Audience extends DurableObject {
         this.walkers = new Set(copy.walkers || []);
         this.copyOpened = copy.opened === true;
         this.copySeats = new Map(copy.seats || []);
+        const looks = await ctx.storage.get("looks");
+        this.looksText = typeof looks === "string" ? looks : "";
       }
       // An older save's words are a bare `on` for the chat it held.
       this.islandWords = new Map(((await ctx.storage.get("islandWords")) || []).map(([id, w]) => [id, typeof w === "boolean" ? { on: w, chat: chat && chat.id } : w])
@@ -305,7 +346,7 @@ export class Audience extends DurableObject {
     if (!ws || !c) return;
     const p = this.model.people.get(c.id);
     ws.serializeAttachment({ conn: { connId: c.connId, id: c.id, principal: c.principal, providerUserId: c.providerUserId, zone: c.zone, lease: c.lease,
-      mic: c.mic, hand: c.hand, eligible: c.eligible, authUntil: c.authUntil, forced: c.forced, joinedAt: c.joinedAt, viewing: !!c.viewing }, info: p.info });
+      mic: c.mic, hand: c.hand, eligible: c.eligible, authUntil: c.authUntil, forced: c.forced, joinedAt: c.joinedAt, viewing: !!c.viewing, viewHz: c.viewHz || WALK_HZ }, info: p.info });
   }
 
   /** Commit what changed, store the revisions, and send every zone's delta to its clients and to a watching Room. */
@@ -395,8 +436,10 @@ export class Audience extends DurableObject {
   cloudsChanged() {
     if (this.chat) {
       // A chat's clouds are its copy's: told only while someone walks it (an empty copy is never woken), and
-      // `copyMember`'s answer carries them to the first who arrives.
+      // `copyMember`'s answer carries them to the first who arrives. Its island view's viewers hear them whenever they
+      // change, walked or not.
       const list = this.chatClouds(), sig = JSON.stringify(list);
+      this.viewClouds(list);
       if (!this.walkers.size) { this.cloudsSig = null; return; }
       if (sig === this.cloudsSig) return;
       this.cloudsSig = sig;
@@ -416,6 +459,26 @@ export class Audience extends DurableObject {
       }
     });
     this.background(this.roomQueue);
+  }
+
+  /** The `clouds` frame for the island view: the list (worked out now if it has not been since a wake) and the clock. */
+  cloudsFrame() {
+    if (this.cloudsText === null) this.cloudsText = cloudsView(this.chatClouds());
+    return `{"type":"clouds","at":${Date.now()},"clouds":${this.cloudsText}}`;
+  }
+
+  /** Who sits on the clouds to every connection viewing a Main Island chat's view, when that changed. */
+  viewClouds(list) {
+    if (this.chat.zone !== "main") return;
+    const text = cloudsView(list);
+    if (text === this.cloudsText) return;
+    this.cloudsText = text;
+    let frame = null;
+    for (const c of this.model.conns.values()) {
+      if (!c.viewing) continue;
+      const ws = this.sockets.get(c.connId);
+      if (ws) this.send(ws, frame ||= this.cloudsFrame());
+    }
   }
 
   /**
@@ -737,8 +800,19 @@ export class Audience extends DurableObject {
     // A client that saw a revision gap asks again: counted, the one sign of a gap the server can see.
     if (msg.type === "resync") { if (c.zone && msg.zone === c.zone) { this.inspect.count("resync"); this.sendSnapshot(ws, c); } return; }
     // The island view shown (or not): only a connection that asked hears walkers' positions.
-    if (msg.type === "view" && this.chat) { if (typeof msg.on === "boolean" && !!c.viewing !== msg.on) { c.viewing = msg.on; this.save(c.connId); } return; }
-    if (msg.type === "setRole" || msg.type === "setMic" || msg.type === "reaction" || msg.type === "hand" || this.roles && CHAT_OPS.has(msg.type)) return this.onRequest(c, msg);
+    if (msg.type === "view" && this.chat) {
+      if (typeof msg.on !== "boolean") return;
+      const hz = msg.on && c.eligible && WALK_RATES.includes(msg.hz) ? msg.hz : WALK_HZ;
+      const began = msg.on && !c.viewing;
+      if (!!c.viewing !== msg.on || (c.viewHz || WALK_HZ) !== hz) { c.viewing = msg.on; c.viewHz = hz; this.save(c.connId); }
+      // A viewer starting hears how the walkers look now and who sits on the clouds; a change comes as it happens
+      // (`looks`, `clouds`).
+      if (began && this.looksText) this.send(ws, `{"type":"looks","looks":${this.looksText}}`);
+      if (began && this.chat.zone === "main") this.send(ws, this.cloudsFrame());
+      return;
+    }
+    if (msg.type === "setRole" || msg.type === "setMic" || msg.type === "reaction" || msg.type === "hand" || this.roles && CHAT_OPS.has(msg.type)
+      || this.chat && (msg.type === "handoff" || msg.type === "redeem")) return this.onRequest(c, msg);
   }
 
   async onJoin(c, msg) {
@@ -772,7 +846,7 @@ export class Audience extends DurableObject {
   }
 
   result(connId, requestId, outcome) {
-    const reply = { type: "result", requestId, ok: outcome.ok, ...(outcome.ok ? {} : { error: { code: outcome.code, retryable: !!outcome.retryable, ...(outcome.retryAfter ? { retryAfter: outcome.retryAfter } : {}) } }), you: this.youFor(connId) };
+    const reply = { type: "result", requestId, ok: outcome.ok, ...(outcome.ok ? outcome.reply || {} : { error: { code: outcome.code, retryable: !!outcome.retryable, ...(outcome.retryAfter ? { retryAfter: outcome.retryAfter } : {}) } }), you: this.youFor(connId) };
     let kept = this.replies.get(connId);
     if (!kept) this.replies.set(connId, kept = new Map());
     kept.set(requestId, reply);
@@ -794,6 +868,8 @@ export class Audience extends DurableObject {
     } else if (this.roles && CHAT_OPS.has(msg.type)) outcome = await this.chatOp(c, msg);
     else if (msg.type === "reaction") outcome = typeof msg.emoji === "string" && msg.emoji.length <= 32 ? this.react(c, msg.emoji) : { ok: false, code: "malformed" };
     else if (msg.type === "hand") outcome = this.hand(c, msg);
+    else if (msg.type === "handoff") outcome = await this.mintHandoff(c);
+    else if (msg.type === "redeem") outcome = await this.redeemHandoff(c, msg);
     else if (msg.role === "listener") { const lease = this.model.endLease(c.connId); if (lease) this.leaseEnded(c.connId, lease, "listener"); outcome = { ok: true }; }
     else if (msg.role === "speaker") { outcome = await this.requestSpeaker(c, msg); this.inspect.count(outcome.ok ? "speakerGranted" : "speakerRefused"); }
     else outcome = { ok: false, code: "malformed" };
@@ -802,6 +878,29 @@ export class Audience extends DurableObject {
     await this.flush();
     this.result(c.connId, msg.requestId, outcome);
     await this.scheduleAlarm();
+  }
+
+  /** Go there's ticket for a speaker on the stage: a fresh one replaces any the account held, and stale ones are dropped. */
+  async mintHandoff(c) {
+    if (!c.lease || c.lease.state !== "active") return { ok: false, code: "not_speaking" };
+    const now = Date.now(), bytes = crypto.getRandomValues(new Uint8Array(16));
+    const ticket = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const all = (await this.ctx.storage.get("handoffs")) || {};
+    for (const [t, h] of Object.entries(all)) if (h.until <= now || h.id === c.id) delete all[t];
+    all[ticket] = { id: c.id, mic: c.mic === "on", until: now + HANDOFF_MS };
+    await this.ctx.storage.put("handoffs", all);
+    return { ok: true, reply: { ticket } };
+  }
+
+  /** A ticket handed back, once, by the same account within its time: whether the microphone was open. */
+  async redeemHandoff(c, msg) {
+    if (typeof msg.ticket !== "string" || !TICKET.test(msg.ticket)) return { ok: false, code: "malformed" };
+    const all = (await this.ctx.storage.get("handoffs")) || {}, h = all[msg.ticket];
+    if (!h) return { ok: false, code: "handoff_invalid" };
+    delete all[msg.ticket];
+    await this.ctx.storage.put("handoffs", all);
+    if (h.id !== c.id || h.until <= Date.now()) return { ok: false, code: "handoff_invalid" };
+    return { ok: true, reply: { mic: h.mic } };
   }
 
   /** The island decides afresh, now, whatever the edge's cached answer said; the connection must still be the same. */
@@ -1026,15 +1125,19 @@ export class Audience extends DurableObject {
 
   /**
    * Walkers' positions from the copy (`seq` rising, `ids` GitHub ids, `p` x, y, z and heading for each, in order), for the
-   * island view: one frame, built once, to every connection that asked for it, at a rate the fan-out budget allows. A
-   * walker the chat does not know, or a value out of bounds, drops the frame.
+   * island view: one frame, built once, to each connection that asked for it as often as it asked (`viewHz`), every
+   * rate scaled down together past the fan-out budget. A walker the chat does not know, or a value out of bounds, drops
+   * the frame. The answer's `ms` is how often the copy should report: as often as the fastest viewer is sent to.
    */
   walk(seq, ids, p) {
     if (!this.chat || !Number.isSafeInteger(seq) || seq <= (this.walkSeq || 0) || !Array.isArray(ids) || !Array.isArray(p) || p.length !== ids.length * 4 || ids.length > 64) return { ok: false };
-    let viewers = 0;
-    for (const c of this.model.conns.values()) if (c.viewing) viewers++;
-    const now = Date.now(), hz = Math.max(0.2, Math.min(WALK_HZ, WALK_FANOUT / Math.max(1, viewers)));
-    if (!viewers || now - (this.walkAt || 0) < 1000 / hz) return { ok: true, sent: false };
+    let asked = 0, fastest = 0;
+    for (const c of this.model.conns.values()) if (c.viewing) { const hz = c.viewHz || WALK_HZ; asked += hz; fastest = Math.max(fastest, hz); }
+    const now = Date.now(), scale = Math.min(1, WALK_FANOUT / Math.max(1, asked));
+    const ms = fastest ? Math.round(1000 / Math.max(0.2, fastest * scale)) : 1000 / WALK_HZ;
+    let due = false;
+    for (const c of this.model.conns.values()) if (c.viewing && now - (c.walkSent || 0) >= 1000 / Math.max(0.2, (c.viewHz || WALK_HZ) * scale) - 20) { due = true; break; }
+    if (!asked || !due) return { ok: true, sent: false, ms };
     const out = [];
     for (let i = 0; i < ids.length; i++) {
       const id = `gh:${ids[i]}`, x = p[i * 4], y = p[i * 4 + 1], z = p[i * 4 + 2], yaw = p[i * 4 + 3];
@@ -1042,15 +1145,40 @@ export class Audience extends DurableObject {
       out.push(id, Math.round(x * 10) / 10, Math.round(y * 10) / 10, Math.round(z * 10) / 10, Math.round(yaw * 100) / 100);
     }
     this.walkSeq = seq;
-    this.walkAt = now;
     const text = JSON.stringify({ type: "walk", seq, p: out });
+    for (const c of this.model.conns.values()) {
+      if (!c.viewing || now - (c.walkSent || 0) < 1000 / Math.max(0.2, (c.viewHz || WALK_HZ) * scale) - 20) continue;
+      c.walkSent = now;
+      const ws = this.sockets.get(c.connId);
+      if (ws) this.send(ws, text);
+      this.inspect.count("walkFrames");
+    }
+    return { ok: true, sent: true, ms };
+  }
+
+  /**
+   * How each walker looks, from the copy, for the island view: `looks` an entry each (`gh:<id>`), their saved equipment's
+   * appearance (`e`: its hat and size and its wardrobe, as the island's room relays them) and what they have out (`w`
+   * 1 the primary, 2 the gun; `j` 1 a jetpack worn), sent whole whenever one changes (`seq` rising). Kept, and relayed to
+   * every connection viewing now; a viewer starting hears the last (`view`). Malformed, nothing changes.
+   */
+  async looks(seq, looks) {
+    if (!this.chat || !Number.isSafeInteger(seq) || seq <= this.lookSeq || !lookPlain(looks)) return { ok: false };
+    const ids = Object.keys(looks);
+    if (ids.length > 64 || !ids.every((id) => /^gh:[1-9][0-9]{0,19}$/.test(id) && validLook(looks[id]))) return { ok: false };
+    const text = JSON.stringify(looks);
+    if (text.length > LOOKS_MAX) return { ok: false };
+    this.lookSeq = seq;
+    if (text === this.looksText) return { ok: true };
+    this.looksText = text;
+    await this.ctx.storage.put("looks", text);
+    const frame = `{"type":"looks","looks":${text}}`;
     for (const c of this.model.conns.values()) {
       if (!c.viewing) continue;
       const ws = this.sockets.get(c.connId);
-      if (ws) this.send(ws, text);
+      if (ws) this.send(ws, frame);
     }
-    this.inspect.count("walkFrames");
-    return { ok: true, sent: true };
+    return { ok: true };
   }
 
   /** Who walks the copy now (the copy's whole list, `gh:<id>`): their rows say so, and their clouds stand empty. */
@@ -1384,7 +1512,7 @@ export class Audience extends DurableObject {
     }
     // Nothing else of an ended chat is kept: its title, host and every account id its roles named go (media cleanup's own
     // bookkeeping stays until it drains). Woken again, the object has no chat and refuses every socket as ended.
-    await this.ctx.storage.delete(["chat", "roles", "meta", "world", "watch", "sourcesSig", "cloudsSig", "copy", "quiet", ...(this.islandWords.size ? [] : ["islandWords"])]);
+    await this.ctx.storage.delete(["chat", "roles", "meta", "world", "watch", "sourcesSig", "cloudsSig", "copy", "quiet", "handoffs", "looks", ...(this.islandWords.size ? [] : ["islandWords"])]);
     await this.scheduleAlarm();
   }
 
@@ -1516,6 +1644,7 @@ export class Audience extends DurableObject {
       revoked++;
       if (reason === "eligibility") {
         c.eligible = false;
+        if (c.viewHz) c.viewHz = WALK_HZ;
         const lease = this.model.endLease(c.connId);
         if (lease) this.leaseEnded(c.connId, lease, "revoked");
         this.save(c.connId);

@@ -24,7 +24,7 @@ const socket = () => ({
 globalThis.WebSocketPair = class { constructor() { const client = socket(), server = socket(); const close = server.close; server.close = (code, reason) => { close.call(server, code, reason); client.close(code, reason); }; this[0] = client; this[1] = server; } };
 globalThis.WebSocketRequestResponsePair = class {};
 
-const { Audience, CHAT_PROTOCOL, QUIET_MS, SILENT_MS, SWEEP_MS, LATE_MS, CLOSE, chatName } = await import("../src/audience.js");
+const { Audience, CHAT_PROTOCOL, QUIET_MS, SILENT_MS, SWEEP_MS, LATE_MS, CLOSE, HANDOFF_MS, chatName } = await import("../src/audience.js");
 const { ChatDirectory, startChat, chatTitle, CHATS_MAX, START_GAP_MS } = await import("../src/chat-directory.js");
 const { HOST_HOLD_MS, INVITE_MS, STAGE_HOLD_MS } = await import("../src/chat-roles.js");
 const { bridgeFetch } = await import("../src/chat-bridge.js");
@@ -167,6 +167,32 @@ const speakerOn = async (w, chat, p) => {
   p.a.save(p.connId);
   await p.a.flush();
 };
+
+test("Go there's ticket: only a speaker on the stage gets one, and only another connection of the same account hands it back, once, in time, saying whether the microphone was open", async () => {
+  now += START_GAP_MS;
+  const w = await world();
+  const { chat } = await startChat(w.env, host(1), { title: "Handoff", zone: "main" });
+  const amy = await connect(w, chat.id, 1), bea = await connect(w, chat.id, 2), dot = await connect(w, chat.id, 4);
+  assert.equal((await ask(amy, { type: "handoff" })).error.code, "not_speaking", "not on the stage yet");
+  await ask(amy, { type: "setRole", role: "speaker" });
+  await speakerOn(w, chat, amy);
+  assert.equal((await ask(dot, { type: "handoff" })).error.code, "not_speaking", "a listener gets none");
+  const first = (await ask(amy, { type: "handoff" })).ticket;
+  assert.match(first, /^[A-Za-z0-9_-]{22}$/);
+  assert.equal((await ask(bea, { type: "redeem", ticket: first })).error.code, "handoff_invalid", "another account's page gets nothing");
+  const island = await connect(w, chat.id, 1);
+  assert.equal((await ask(island, { type: "redeem", ticket: first })).error.code, "handoff_invalid", "a ticket tried by anyone else is gone");
+  const ticket = (await ask(amy, { type: "handoff" })).ticket;
+  const again = (await ask(amy, { type: "handoff" })).ticket;
+  assert.equal((await ask(island, { type: "redeem", ticket })).error.code, "handoff_invalid", "a fresh ticket replaces the account's last");
+  const good = await ask(island, { type: "redeem", ticket: again });
+  assert.deepEqual([good.ok, good.mic], [true, true], "the island's page of the same account: the microphone was open");
+  assert.equal((await ask(island, { type: "redeem", ticket: again })).error.code, "handoff_invalid", "once");
+  const late = (await ask(amy, { type: "handoff" })).ticket;
+  now += HANDOFF_MS;
+  assert.equal((await ask(island, { type: "redeem", ticket: late })).error.code, "handoff_invalid", "too late");
+  assert.equal((await ask(island, { type: "redeem", ticket: "nope" })).error.code, "malformed");
+});
 
 test("a host mutes a speaker: muted for everyone and not pulled until they unmute themselves; a co-host never touches the host", async () => {
   now += START_GAP_MS;
@@ -717,18 +743,18 @@ test("a DSB Land chat has no copy yet", async () => {
 
 
 
-test("the island view's feed: walkers' positions to those who asked, at most twice a second, nobody else's and nothing out of bounds", async () => {
+test("the island view's feed: walkers' positions to those who asked, twice a second unless they ask for more, nobody else's and nothing out of bounds", async () => {
   now += START_GAP_MS;
   const w = await world();
   const { chat } = await startChat(w.env, host(1), { title: "View", zone: "main" });
   const amy = await connect(w, chat.id, 1), bea = await connect(w, chat.id, 2), cyd = await connect(w, chat.id, 3);
   const a = w.objects.get(chatName(chat.id)).a;
   await a.walking(["gh:1"]);
-  assert.deepEqual(a.walk(1, [1], [1, 2, 3, 0.5]), { ok: true, sent: false }, "nobody asked: nothing sent");
+  assert.deepEqual(a.walk(1, [1], [1, 2, 3, 0.5]), { ok: true, sent: false, ms: 500 }, "nobody asked: nothing sent");
   await bea.a.webSocketMessage(bea.ws, JSON.stringify({ type: "view", on: true }));
   await cyd.a.webSocketMessage(cyd.ws, JSON.stringify({ type: "view", on: true }));
   now += 1000;
-  assert.deepEqual(a.walk(2, [1], [1.234, 2, -3.06, 0.512]), { ok: true, sent: true });
+  assert.deepEqual(a.walk(2, [1], [1.234, 2, -3.06, 0.512]), { ok: true, sent: true, ms: 500 }, "the copy told to report twice a second");
   const frame = bea.ws.sent.filter((m) => m.type === "walk").at(-1);
   assert.deepEqual(frame, { type: "walk", seq: 2, p: ["gh:1", 1.2, 2, -3.1, 0.51] });
   assert.equal(amy.ws.sent.some((m) => m.type === "walk"), false, "only those who asked");
@@ -742,6 +768,78 @@ test("the island view's feed: walkers' positions to those who asked, at most twi
   const before = cyd.ws.sent.length;
   assert.equal(a.walk(6, [1], [1, 2, 3, 0]).sent, true);
   assert.equal(cyd.ws.sent.length, before, "turned off, none come");
+  // Both ask for six a second: Bea, a contributor (the 3D view's), gets them; Cyd, who is not, is held to two. Each is
+  // sent at their own rate, and the copy is told to report six times.
+  await bea.a.webSocketMessage(bea.ws, JSON.stringify({ type: "view", on: true, hz: 6 }));
+  await cyd.a.webSocketMessage(cyd.ws, JSON.stringify({ type: "view", on: true, hz: 6 }));
+  const got = (p) => p.ws.sent.filter((m) => m.type === "walk").length, [b0, c0] = [got(bea), got(cyd)];
+  let seq = 10, ms = 0;
+  for (let k = 0; k < 6; k++) { now += 167; ms = a.walk(seq++, [1], [1, 2, 3, 0]).ms; }
+  assert.equal(ms, 167, "the copy reports as often as the fastest viewer is sent to");
+  assert.deepEqual([got(bea) - b0, got(cyd) - c0], [6, 2], "a second: six frames to Bea, two to Cyd, who is no contributor");
+  await bea.a.webSocketMessage(bea.ws, JSON.stringify({ type: "view", on: true, hz: 60 }));
+  now += 167;
+  assert.equal(a.walk(seq++, [1], [1, 2, 3, 0]).ms, 500, "a rate it does not offer is two a second");
+});
+
+test("the island view's looks: to viewers alone, on change, the last to a viewer starting, kept across a nap, and nothing malformed", async () => {
+  now += START_GAP_MS;
+  const w = await world();
+  const { chat } = await startChat(w.env, host(1), { title: "Looks", zone: "main" });
+  const amy = await connect(w, chat.id, 1), bea = await connect(w, chat.id, 2), cyd = await connect(w, chat.id, 3);
+  const a = w.objects.get(chatName(chat.id)).a, looksOf = (p) => p.ws.sent.filter((m) => m.type === "looks");
+  await a.walking(["gh:1"]);
+  await bea.a.webSocketMessage(bea.ws, JSON.stringify({ type: "view", on: true }));
+  assert.equal(looksOf(bea).length, 0, "nothing said yet: nothing to start with");
+  const hat = { item: "bc1gui-green-beanie", version: "5fdd8f47b975be5461f88b2bb9464ad08a106a50064e2d783751ef96101aa86c" };
+  const look = { "gh:1": { e: { selection: hat, size: 110, wardrobe: { pet: { item: "custom", version: null, size: 120 } } }, w: 2, j: 1 } };
+  assert.deepEqual(await a.looks(5, look), { ok: true });
+  assert.deepEqual(looksOf(bea).at(-1), { type: "looks", looks: look }, "a viewer hears them");
+  assert.equal(looksOf(amy).length + looksOf(cyd).length, 0, "only those viewing");
+  assert.deepEqual(await a.looks(6, look), { ok: true });
+  assert.equal(looksOf(bea).length, 1, "unchanged: nothing sent");
+  assert.equal((await a.looks(6, { "gh:1": {} })).ok, false, "an older call is dropped");
+  for (const bad of [{ "gh:1": { w: 3 } }, { "gh:1": { e: { selection: { item: "Bad Hat", version: null } } } }, { "gh:1": { e: { size: 200 } } }, { "x:1": {} },
+    { "gh:1": { e: { wardrobe: { shirt: { item: "shirt-1", version: "nothex" } } } } }, { "gh:1": { owner: 1 } }, { "gh:1": { e: { wardrobe: { shirt: { item: "x".repeat(5000) } } } } }])
+    assert.equal((await a.looks(7, bad)).ok, false, `malformed: ${JSON.stringify(bad).slice(0, 60)}`);
+  assert.equal(looksOf(bea).length, 1, "and none relayed");
+  await cyd.a.webSocketMessage(cyd.ws, JSON.stringify({ type: "view", on: true }));
+  assert.deepEqual(looksOf(cyd), [{ type: "looks", looks: look }], "a viewer starting hears the last");
+  await cyd.a.webSocketMessage(cyd.ws, JSON.stringify({ type: "view", on: true, hz: 4 }));
+  assert.equal(looksOf(cyd).length, 1, "a rate change is no new start");
+  assert.deepEqual(await a.looks(8, {}), { ok: true });
+  assert.deepEqual(looksOf(bea).at(-1), { type: "looks", looks: {} }, "nobody walking: nobody to dress");
+  await a.looks(9, look);
+  const { ctx } = w.objects.get(chatName(chat.id)), again = new Audience(ctx, w.env);
+  await ctx.ready;
+  assert.equal(again.looksText, JSON.stringify(look), "kept across a nap");
+});
+
+test("the island view's clouds: who sits where to viewers alone, on change, whether or not anyone walks, with the server's clock, and to a viewer starting", async () => {
+  now += START_GAP_MS;
+  const w = await world();
+  const { chat } = await startChat(w.env, host(1), { title: "Clouds", zone: "main" });
+  const amy = await connect(w, chat.id, 1), bea = await connect(w, chat.id, 2), cyd = await connect(w, chat.id, 3);
+  const a = w.objects.get(chatName(chat.id)).a, cloudsOf = (p) => p.ws.sent.filter((m) => m.type === "clouds");
+  await bea.a.webSocketMessage(bea.ws, JSON.stringify({ type: "view", on: true }));
+  assert.deepEqual(cloudsOf(bea), [{ type: "clouds", at: now, clouds: [] }], "a viewer starting hears who sits there now: nobody yet");
+  await ask(amy, { type: "setRole", role: "speaker" });
+  a.model.activate(amy.connId, a.model.conns.get(amy.connId).lease.generation);
+  await a.flush();
+  assert.deepEqual(cloudsOf(bea).at(-1).clouds, [{ id: "gh:1", character: "amy", seat: "main-cloud-1" }], "a speaker on the stage sits on a cloud, with nobody walking");
+  assert.equal(cloudsOf(amy).length + cloudsOf(cyd).length, 0, "only those viewing");
+  const told = cloudsOf(bea).length;
+  await ask(amy, { type: "setMic", muted: false });
+  await a.flush();
+  assert.equal(cloudsOf(bea).length, told, "a microphone changes nothing the view draws: nothing sent");
+  await a.walking(["gh:1"]);
+  assert.deepEqual(cloudsOf(bea).at(-1).clouds, [], "walking the copy, off the cloud");
+  await cyd.a.webSocketMessage(cyd.ws, JSON.stringify({ type: "view", on: true }));
+  assert.deepEqual(cloudsOf(cyd), [{ type: "clouds", at: now, clouds: [] }], "a viewer starting hears the list as it stands");
+  await cyd.a.webSocketMessage(cyd.ws, JSON.stringify({ type: "view", on: true, hz: 4 }));
+  assert.equal(cloudsOf(cyd).length, 1, "a rate change is no new start");
+  await a.walking([]);
+  assert.equal(cloudsOf(cyd).at(-1).clouds[0].seat, "main-cloud-1", "back from the copy, the same seat");
 });
 
 test("a chat with no land: Ooga Chat voice alone, its roster in the main zone's frames, its land none in the list and the chat", async () => {
@@ -1097,3 +1195,12 @@ test("the island room keeps each chat's title, counts and app accounts for Onlin
 });
 
 
+
+test("the bridge's /catalog: only Ooga Chat's edge of the same environment, answered as the island's own catalog route", async () => {
+  const env = { ENVIRONMENT: "staging" };
+  assert.equal((await bridgeFetch(env, new Request("https://chat-bridge.invalid/catalog"))).status, 403, "no environment header");
+  assert.equal((await bridgeFetch(env, new Request("https://chat-bridge.invalid/catalog", { headers: { "x-ooga-chat-environment": "production" } }))).status, 403);
+  const off = await bridgeFetch(env, new Request("https://chat-bridge.invalid/catalog", { headers: { "x-ooga-chat-environment": "staging" } }));
+  assert.equal(off.status, 404, "no catalog bound: the island's own catalog_disabled");
+  assert.equal((await off.json()).error, "catalog_disabled");
+});

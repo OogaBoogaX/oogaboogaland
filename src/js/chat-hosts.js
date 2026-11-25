@@ -10,9 +10,9 @@
 // if it has one; `shown()` whether the panel can be seen now; `rowFace(row)` a preview tile's portrait; `speakNow`
 // whether Request to speak reads Speak now on an open stage; `goThere`, `{ state(room), press(), subscribe(fn) }`: Go
 // there on the island view (the island's: its Ooga onto the chat's island, Go back while there, chat-copy.js; Ooga
-// Chat's: the chat opened on the island, ooga-chat-hosts.js), `state` its `{ label, words, disabled, title }` or null for none; `islandView`, `{ picture, loadLive(), island(), storageKey }`, the island view's
-// map picture, how the page brings Live view's code, the island it built already (the island page's) and where the
-// viewer's Live view choice is kept (island-view.js). `update(state)` takes the page's state in Ooga Chat's
+// Chat's: the chat opened on the island, ooga-chat-hosts.js), `state` its `{ label, words, disabled, title }` or null for none; `islandView`, `{ picture, loadLive(), liveAllowed(), scenery, fullscreen }`, the island view's
+// map picture, how the page brings the 3D view's code (none: the flat view alone, as the island page has it), where its
+// baked scenery is served and whether it offers full screen (island-view.js). `update(state)` takes the page's state in Ooga Chat's
 // shape: `session.identity` (`provider`, `display`, `login`, `participant`), `room` (the chat chosen, with its
 // `you`), `voice` (`role`, `busy`, `elsewhere`), `device.online` and `audience.list` (the chat's rows in order);
 // `preview(entry, from)` opens a chat's preview from elsewhere on the page (an entry as `parseList` gives it). It adds:
@@ -41,9 +41,10 @@
 //   (`noticeText`), a burst of requests joined into one line at most every ASKED_MS, nothing said twice.
 // - the island view (island-view.js) in `.hc-room-strip` over the roster, in every Main Island chat: the island standing
 //   still, and each speaker walking the chat's copy of it (a row's `walking`) where they stand, with Go there over it.
-//   The chat is asked for walkers' places (`{ type: "view", on: true }`) only while someone walks, the panel is shown
-//   and the page is visible, and told `on: false` as that ends; a new connection asks again. Its `walk` frames come
-//   through `chats.hear`.
+//   The chat is asked for walkers' places (`{ type: "view", on: true }`) only while it has a speaker (walking it or on a
+//   cloud over it), the view is open, the panel is shown and the page is visible, and told `on: false` as that ends; a
+//   new connection asks again. Its `walk` frames come through `chats.hear`, and how the walkers look (`looks`) and who
+//   sits on the clouds (`clouds`), whenever either changes, the same way.
 // Pop-ups (a tile's menu, the queue, a confirmation) are one wood-framed box, a sheet at the screen's foot under 400px;
 // the look is chat-hosts.css. The pure parts (`parseList`, `actionsFor`, `noticeText`, `joinNames`) need no document.
 (() => {
@@ -117,7 +118,9 @@
     const mine = LEVEL[viewer.rank] || 0, theirs = LEVEL[row.rank] || 0, out = [];
     if (!row || row.id === viewer.id || !mine || mine <= theirs) return out;
     const speaker = row.role === "speaker";
-    if (!speaker && row.request !== "invited" && row.request !== "cohost") out.push({ type: "invite", label: "Invite to speak" });
+    // Someone who asked is answered, as the Requests list answers them; anyone else is invited.
+    if (!speaker && row.request === "asked") out.push({ type: "answer", approve: true, label: "Approve request to speak" }, { type: "answer", approve: false, label: "Decline request" });
+    else if (!speaker && row.request !== "invited" && row.request !== "cohost") out.push({ type: "invite", label: "Invite to speak" });
     if (speaker && !row.muted) out.push({ type: "mute", label: "Mute" });
     if (speaker) out.push({ type: "demote", label: "Move to listener" });
     if (viewer.rank === "host") {
@@ -280,15 +283,18 @@
     const faceOf = (character) => character ? portrait(character) : "";
     const drawList = () => {
       const github = state?.session?.identity.provider === "github";
-      startOpen.hidden = !github;
+      // Hosting one already, the visitor's way back is its row; there is no second chat to start.
+      startOpen.hidden = !github || !!entries && entries.some(hosting);
       if (!entries) { rows.replaceChildren(); return; }
       rows.replaceChildren(...entries.map((c) => {
-        const face = make("span", "cloud-portrait"), url = faceOf(c.host.character);
+        const face = make("span", "cloud-portrait"), url = faceOf(c.host.character), own = hosting(c);
         if (url) { const img = make("img", ""); img.alt = ""; img.src = url; face.append(img); } else face.append(BL.nativeIcons.svg("roster"));
-        const pick = tap("hc-chat-row", face, make("span", "hc-chat-row-text", make("span", "hc-chat-row-title", c.title),
-          make("span", "hc-chat-row-host", `Hosted by ${c.host.display}`), make("span", "hc-chat-row-count", `${c.speakers} speaking · ${c.listeners} listening`)),
+        const pick = tap(own ? "hc-chat-row hc-chat-mine" : "hc-chat-row", face, make("span", "hc-chat-row-text", make("span", "hc-chat-row-title", c.title),
+          make("span", "hc-chat-row-host", own ? "Hosted by you" : `Hosted by ${c.host.display}`), make("span", "hc-chat-row-count", `${c.speakers} speaking · ${c.listeners} listening`)),
         make("span", "panel-chip", ZONE_NAMES[c.zone]));
         pick.addEventListener("click", () => showPreview(c, pick));
+        // A row drawn again while its preview is open (a portrait arriving) is where Cancel hands the focus back.
+        if (previewing && previewing.id === c.id && previewFrom && rows.contains(previewFrom)) previewFrom = pick;
         return make("li", "", pick);
       }));
       set(listNote, "textContent", entries.length ? "" : github ? "Nobody is chatting right now. Start one and others can join." : "Nobody is chatting right now. A contributor can start one; you can join and ask to speak.");
@@ -302,7 +308,8 @@
       // Signed out while it was asked: the answer was for the account that left, so it is not kept.
       if (listeners.signal.aborted || !state?.session) return;
       const parsed = parseList(answer.chats);
-      if (parsed) entries = parsed;
+      // The visitor's own chat first, the rest in the server's order.
+      if (parsed) entries = parsed.filter(hosting).concat(parsed.filter((c) => !hosting(c)));
       again.hidden = !!parsed;
       if (!parsed) set(listNote, "textContent", entries ? "The list may be out of date: it couldn't be read." : "The chats couldn't be read.");
       drawList();
@@ -348,6 +355,11 @@
       t.micWords = speaker ? `${p.display}: ${p.muted ? "Muted their microphone" : "In voice"}` : ""; t.rank = p.rank || ""; t.request = ""; t.reconnecting = !!p.reconnecting;
     };
     let previewing = null, previewFrom = null, previewTimer = 0, wantSpeak = "";
+    // The visitor's own chat (its host is this account): never previewed or joined as a listener, only gone back to, on
+    // the stage, inside the press that chose it (`rejoin`). Roles belong to the account, so the chat still knows them.
+    // Only a GitHub account hosts (the list names the host by login alone), so an X handle that spells the same is not them.
+    const hosting = (entry) => state?.session?.identity.provider === "github" && entry.host.login.toLowerCase() === state.session.identity.login.toLowerCase();
+    const rejoin = (entry) => { wantSpeak = entry.id; chats.open(entry); };
     const readPreview = async () => {
       const entry = previewing;
       if (!entry) return;
@@ -357,13 +369,21 @@
       const shown = parsePreview(answer);
       if (!shown) return;
       previewOpen.hidden = !shown.open;
-      set(joinSpeaker, "textContent", shown.open ? "Join as speaker" : "Ask to speak");
+      // A co-host (or the host, under another name) on its stage goes back as what they are: one button, no listening.
+      const mine = shown.stage.find((p) => p.id === me && (p.rank === "host" || p.rank === "cohost"));
+      joinListener.hidden = !!mine;
+      joinSpeaker.classList.toggle("foot-primary", !!mine);
+      set(joinSpeaker, "textContent", mine ? (mine.rank === "host" ? "Back to your chat" : "Rejoin as co-host") : shown.open ? "Join as speaker" : "Ask to speak");
+      if (mine && document.activeElement === joinListener) joinSpeaker.focus();
       previewTiles.draw(shown.stage, previewDescribe);
       set(previewCount, "textContent", `${shown.listeners} listening · ${shown.requests} waiting to speak`);
     };
     // Read when it opens and every PREVIEW_MS while it stays open; nothing runs once it closes. Opened from elsewhere on
     // the page (the island's Online Oogas, `preview`) while the panel is hidden, it stands in the page's body until it closes.
     const showPreview = (entry, from) => {
+      if (hosting(entry)) return rejoin(entry);
+      joinListener.hidden = false;
+      joinSpeaker.classList.remove("foot-primary");
       if (!node.offsetParent && preview.parentNode !== node.ownerDocument.body) node.ownerDocument.body.append(preview);
       previewing = entry;
       previewFrom = from;
@@ -583,7 +603,7 @@
       const items = actionsFor({ id: me, rank, slots }, row);
       if (!items.length) return;
       openPop(`menu:${id}`, tile, row.display, [...items.map((a) => ({ label: a.label, disabled: a.disabled, reason: a.reason, danger: a.type === "remove", run: () => {
-        const fields = { id, ...(a.on === undefined ? {} : { on: a.on }) };
+        const fields = { id, ...(a.on === undefined ? {} : { on: a.on }), ...(a.approve === undefined ? {} : { approve: a.approve }) };
         if (a.confirm) return confirm(tile, a.confirm, a.label, () => send(a.type, fields), a.type === "remove");
         closePop();
         send(a.type, fields);
@@ -625,6 +645,8 @@
     // What the chat says: notices, answers to this page's own requests, and the island view's walkers.
     const off = chats.hear((msg) => {
       if (msg.type === "walk") { isle?.walk(msg); return; }
+      if (msg.type === "looks") { isle?.looks(msg); return; }
+      if (msg.type === "clouds") { isle?.clouds(msg); return; }
       if (msg.type === "result") {
         if (!mine.has(msg.requestId)) return;
         const after = mine.get(msg.requestId);
@@ -755,21 +777,24 @@
       if (!room) drawList();
       watch();
     };
-    // The island view: shown while someone walks the chat's island, the walkers' places asked for only while it can be
-    // seen. `viewSent` is what this connection was last told (null: nothing yet, or a new connection).
-    const isle = islandView && BL.islandView ? BL.islandView.create({ picture: islandView.picture, faceOf: rowFace, loadLive: islandView.loadLive,
-      island: islandView.island, storageKey: islandView.storageKey }) : null;
+    // The island view: in every Main Island chat, the walkers' places and the clouds' sitters asked for only while it
+    // has a speaker and can be seen, at the rate the view says this viewer can take (`hz`). `viewSent` is what this connection was last told
+    // ("on:hz", "off", or null: nothing yet, or a new connection).
+    const isle = islandView && BL.islandView ? BL.islandView.create({ picture: islandView.picture, faceOf: rowFace, loadLive: islandView.loadLive || null,
+      liveAllowed: islandView.liveAllowed, scenery: islandView.scenery, fullscreen: !!islandView.fullscreen, onFold: () => syncView() }) : null;
     let viewSent = null;
     function syncView() {
       if (!state) return;
       // Every Main Island chat shows its island, standing still until someone walks it; only walkers' places are asked for.
-      const place = !!isle && !!room && room.zone === "main", seen = place && shown() && !document.hidden;
-      const want = seen && people.some((p) => p.walking);
+      const place = !!isle && !!room && room.zone === "main", seen = place && shown() && !document.hidden && !isle.folded;
+      const want = seen && people.some((p) => p.walking || p.role === "speaker");
       set(strip, "hidden", !place);
+      if (isle) set(isle.fold, "hidden", !place);
       if (isle) isle.update({ place, rows: room ? people : [], talking: state.voice.talking || [], speaking: !!state.voice.speaking, self: me, active: seen });
       if (!room || state.audience.status !== "live") { viewSent = null; return; }
-      if (viewSent === want || viewSent === null && !want) return;
-      if (chats.request("view", { on: want })) viewSent = want;
+      const hz = isle ? isle.hz : 2, told = want ? `on:${hz}` : "off";
+      if (viewSent === told || viewSent === null && !want) return;
+      if (chats.request("view", { on: want, ...(want ? { hz } : {}) })) viewSent = told;
     }
     let observing = false;
     const attach = () => {
@@ -781,7 +806,9 @@
     // The Requests chip stands in the panel's title, right of the zone tag.
     const zoneTag = head.querySelector(".panel-chip");
     if (zoneTag) zoneTag.after(requests); else head.append(requests);
-    // The strip over the roster: the island view, while someone walks the chat's island.
+    // The island view's fold button stands after them, in every Main Island chat.
+    if (isle) { isle.fold.hidden = true; requests.after(isle.fold); }
+    // The strip over the roster: the island view, in every Main Island chat.
     const strip = make("div", "hc-room-strip");
     strip.hidden = true;
     if (isle) { strip.append(isle.node); isle.stage.append(goTo); }
