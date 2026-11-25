@@ -7,13 +7,17 @@
 // recommended fee tiers and the difficulty epoch, in the shapes the REST endpoints serve them.
 // One of the page's live feeds (chain.js polls REST and the price, oogatron-live.js the org stats).
 //
+// While a place shows the next block's own transactions (`track(true)`, the Genesis Museum's ceiling), the socket
+// also tracks projected block 0 (`track-mempool-block`): a snapshot of its transactions on each connect and each
+// block, about 335 KB, then deltas of a few KB a second, kept in `state.next` (txid → [fee rate, vsize]) and told
+// with { type: "next" }; `track(false)` stops it. `state.projected` is the latest mempool-blocks projection.
 // The socket `want`s blocks, stats and mempool-blocks, never `track-mempool`, which streams every
 // transaction at ~225 MB an hour. The tip list on connect only seeds the height; `total_fee` arrives
 // in BTC and leaves in sats. Backoff resets on the first message, not on open, and a link silent for
 // STALL_MS is dropped and redialled. `setHidden` (the director's visibility pause) closes the socket
 // while the tab is hidden and forgets the height, so the tip list on return seeds it silently rather
 // than striking, toasting or paying the mine for blocks found while away. Exports start, setHidden,
-// subscribe, dispose, parse, emit and state (with nextFee, projectedBlocks and inflow); the director
+// subscribe, track, dispose, parse, emit and state (with nextFee, projectedBlocks, projected, next and inflow); the director
 // leaves it off under `nosim` and `mempool=0`.
 (() => {
   "use strict";
@@ -24,7 +28,8 @@
   // that has said nothing for this long is half-open and is dropped rather than trusted.
   const STALL_MS = 20000;
   const subscribers = new Set();
-  const state = { enabled: false, hidden: false, connected: false, attempts: 0, stats: 0, blocks: 0, height: 0, nextFee: 0, projectedBlocks: 0, inflow: 0, messages: 0, bytes: 0, lastKeys: "", lastAt: 0 };
+  const state = { enabled: false, hidden: false, connected: false, attempts: 0, stats: 0, blocks: 0, height: 0, nextFee: 0, projectedBlocks: 0, inflow: 0, messages: 0, bytes: 0, lastKeys: "", lastAt: 0,
+    projected: null, tracking: false, next: new Map(), nextSeq: -1, nextRev: 0 };
   let socket = null, timer = 0, watch = 0, backoff = BACKOFF_MIN;
 
   const emit = (event) => {
@@ -36,6 +41,16 @@
     if (!b || !(b.height > state.height)) return;
     state.height = b.height;
     emit({ type: "block", height: b.height, txCount: b.tx_count || 0 });
+  };
+  // One of the next block's transactions, [txid, fee, vsize, value, rate, flags, ...]: its effective fee rate and vsize.
+  const putNext = (t) => { if (Array.isArray(t) && typeof t[0] === "string" && t[2] > 0) state.next.set(t[0], [Number(t[4]) > 0 ? Number(t[4]) : t[1] / t[2], t[2]]); };
+  const askNext = () => { if (socket && state.connected) socket.send(JSON.stringify({ "track-mempool-block": state.tracking ? 0 : -1 })); };
+  const track = (on) => {
+    on = !!on;
+    if (state.tracking === on) return;
+    state.tracking = on; state.nextSeq = -1;
+    if (!on) { state.next.clear(); state.nextRev++; }
+    askNext();
   };
   const onMessage = (text) => {
     state.messages++;
@@ -66,7 +81,23 @@
       const first = projected[0];
       state.nextFee = first && first.medianFee > 0 ? first.medianFee : 0;
       state.projectedBlocks = projected.length;
+      state.projected = projected;
       emit({ type: "fees", nextFee: state.nextFee, blocks: projected.length });
+    }
+    // The next block's transactions: a whole snapshot, or a delta on the last one; a delta out of sequence asks
+    // for a fresh snapshot.
+    const pb = data["projected-block-transactions"];
+    if (pb && pb.index === 0 && state.tracking) {
+      if (Array.isArray(pb.blockTransactions)) { state.next.clear(); for (const t of pb.blockTransactions) putNext(t); state.nextSeq = pb.sequence; }
+      else if (pb.delta && pb.sequence === state.nextSeq + 1) {
+        const d = pb.delta;
+        if (Array.isArray(d.removed)) for (const id of d.removed) state.next.delete(id);
+        if (Array.isArray(d.added)) for (const t of d.added) putNext(t);
+        if (Array.isArray(d.changed)) for (const c of d.changed) { const x = Array.isArray(c) && state.next.get(c[0]); if (x && Number(c[1]) > 0) x[0] = Number(c[1]); }
+        state.nextSeq = pb.sequence;
+      } else if (pb.delta) askNext();
+      state.nextRev++;
+      emit({ type: "next", count: state.next.size });
     }
     // The socket's `total_fee` is in BTC where REST `/mempool` gives sats; `bytes` is the vsize.
     const info = data.mempoolInfo;
@@ -120,6 +151,7 @@
       state.connected = true;
       state.lastAt = Date.now();
       ws.send(JSON.stringify({ action: "want", data: ["blocks", "stats", "mempool-blocks"] }));
+      if (state.tracking) ws.send(JSON.stringify({ "track-mempool-block": 0 }));
       watch = window.setTimeout(check, STALL_MS / 2);
     };
     ws.onmessage = (e) => onMessage(e.data);
@@ -165,5 +197,5 @@
     drop();
     subscribers.clear();
   };
-  BL.mempool = { ENDPOINT, state, start, setHidden, subscribe, dispose, emit, parse: onMessage };
+  BL.mempool = { ENDPOINT, state, start, setHidden, subscribe, dispose, emit, track, parse: onMessage };
 })();

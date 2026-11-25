@@ -29524,6 +29524,33 @@ scene("hub", { label: "island layout", query: "pos=0&net=0", steps: [{
     })()`));
     record("island world on: with no flag the hub runs the island world, which follows every Ooga it shows working or chilling", r.mode === "local" && r.shown > 0 && r.followed === r.shown && !r.unfollowed.length, JSON.stringify(r));
   }
+}, {
+  name: "island world far sitters", why: "regression: a followed Ooga sitting on a seat was stood up every frame and sat again only on its throttled pose frames, so seen from far off it flickered between sitting and standing", run: async (b) => {
+    const r = JSON.parse(await b.evaluate(`(async () => {
+      const B = __ooga, P = B.pilot, FOLLOW_SIT = 2, now = Date.now();
+      // Every Ooga but the maintainers has contributed two hours ago: chilling, so the world seats some of them.
+      for (const c of B.crew.list) if (!c.avatar && !c.contributor.maintainer) c.contributor.lastContributionAt = now - 2 * 3600e3;
+      const sitting = () => B.crew.list.filter(c => c.follow && c.follow.act === FOLLOW_SIT && c.state === "chilling" && c.root.visible && !c.hop);
+      for (let i = 0; i < 40 && !sitting().length; i++) B.advance(0.5, 1 / 30);
+      P.release(true);
+      P.navigate({ position: { x: 503, y: 303, z: 504 }, target: { x: 500, y: 300, z: 500 }, yaw: 0, pitch: 0.2, dist: 5 });
+      B.advance(1, 1 / 60);
+      let frames = 0, standing = 0, throttled = 0;
+      for (let i = 0; i < 120; i++) {
+        const before = new Set(sitting());
+        B.advance(1 / 60, 1 / 60);
+        for (const c of sitting()) {
+          if (!before.has(c)) continue;
+          frames++;
+          if (!c.animation.due) throttled++;
+          if (Math.abs(c.parts.legR.rotation.x + Math.PI / 2) > 1e-6) standing++;
+        }
+      }
+      P.goPreset("pile"); B.advance(0.1, 1 / 60);
+      return JSON.stringify({ sitters: sitting().length, frames, throttled, standing });
+    })()`));
+    record("island world far sitters: an Ooga the island world seats keeps its legs bent on every frame while its pose is throttled far away", r.frames > 60 && r.throttled > r.frames / 2 && r.standing === 0, JSON.stringify(r));
+  }
 }] });
 
 // No other session's cast holds the default local Ooga or a server-vouched contributor: both join the roster before
@@ -31934,16 +31961,82 @@ const timechainTrip = { name: "timechain round trip", why: "contract: a room lef
     laps.every(l => l.scene === "timechain" && l.room === 0 && l.timers === 0 && l.requests === 0) && grew.length === 0 && donated.scene === "timechain" && donated.donations === 1 && donated.sats === 2100 && donated.bananas === 1.25,
     JSON.stringify({ grew, donated, first: laps[0], second: laps[1] }));
 } };
+// A block's arrival in the Genesis Museum, forced: NEW BLOCK turns round the middle first with its sound (once), then
+// the orange bloom under the whitepaper while the block still waits, then the block falls, and its height stays up in
+// stars until the next block, which fades it for its own; the history road's burst time leaves the bloom dark.
+const timechainMined = { name: "timechain block mined", why: "rule: the Genesis Museum announces a block in order (words and sound, bloom, the fall) and holds its height until the next block", run: async (b) => {
+  await b.evaluate(genesisGo);
+  const r = await b.evaluate(`(async () => {
+    const B = window.__ooga, G = BL.timechainGenesis, P = G.floorPoc, N = B.timechain.built.nodes;
+    const clock = () => (BL.net && typeof BL.net.serverNow === "function" ? BL.net.serverNow() : Date.now()) / 1000;
+    const stars = () => Object.keys(N).filter((k) => k.startsWith("hstar") && N[k].scale.x > 0.05).length;
+    const read = () => ({ td: +(clock() - P.live.dropAt).toFixed(2), words: +N.pocNews.scale.y.toFixed(3), bloom: +N.pocBurst0.scale.x.toFixed(3), block: +N.pocBlock.scale.x.toFixed(3), sounds: G.blockSound.plays - plays0 });
+    // Each moment of the arrival is reached by moving the drop's time, not by waiting for it.
+    const at = (td) => { P.live.dropAt = clock() - td; B.advance(1 / 30, 1 / 30); return read(); };
+    const plays0 = G.blockSound.plays;
+    P.force(P.phases.burst + 1); B.advance(1 / 30, 1 / 30); const road = read(); P.force(-1);
+    P.drop(870000);
+    const lead = -P.live.dropAt + clock(), words = at(lead + 0.8), glow = at(lead + 3), falling = at(0.5);
+    at(300); const five = stars();
+    at(1800); const thirty = stars();
+    // The next block: the height up fades out slowly through its announcement, then the new one gathers.
+    P.drop(870001); B.advance(1 / 30, 1 / 30); const fading = stars();
+    for (const t0 = performance.now(); performance.now() - t0 < 4000;) { B.advance(1 / 30, 1 / 30); await new Promise((done) => setTimeout(done, 30)); }
+    const faded = stars(); at(1); const next = stars();
+    return { road, lead: +lead.toFixed(2), words, glow, falling, five, thirty, fading, faded, next };
+  })()`);
+  record("timechain block mined: a forced block shows NEW BLOCK first with its sound once, then the orange bloom before the block falls, then the fall, its height still up five and thirty minutes on until the next block fades it out for its own, and the history road's burst time leaves the bloom dark",
+    r.road.bloom <= 0.001 && r.lead < -2 && r.words.words > 0.5 && r.words.bloom <= 0.001 && r.words.block <= 0.001 && r.words.sounds === 1
+      && r.glow.td < 0 && r.glow.bloom > 1.5 && r.glow.block <= 0.001 && r.falling.block === 1 && r.falling.sounds === 1 && r.five > 20 && r.thirty > 20 && r.fading > 20 && r.faded === 0 && r.next > 20, JSON.stringify(r));
+} };
+// The Genesis Museum's glass floor on WebGL: one glossy reflector over it, gentle enough that the world under the glass
+// shows through, which the renderer captures once the floor is in view (its Canvas 2D side is `timechainCanvas`).
+const timechainGlass = { name: "timechain glass", why: "rule: the Genesis Museum's glass floor softly mirrors the room on WebGL", run: async (b) => {
+  await b.evaluate(genesisGo);
+  const r = await b.evaluate(`(async () => { const B = window.__ooga, R = B.renderer, n = B.timechain.built.nodes.glassSheen;
+    B.pilot.navigate({ position: { x: 0, y: 0, z: 7.5 }, yaw: 0, pitch: -0.2, dist: 2.4 }); B.pilot.enterClose(); B.advance(0.3, 1 / 30);
+    const f0 = B.renderedFrames; for (const t0 = performance.now(); B.renderedFrames < f0 + 6 && performance.now() - t0 < 10000;) await new Promise((done) => requestAnimationFrame(done));
+    const g = n && n.geometry;
+    return { kind: R.kind, sheen: !!n, visible: !!(n && n.visible), reflector: !!(g && g.reflector), gloss: g ? g.gloss : 0, captured: !!(g && R.cameraFeedReady({ geometry: g })) };
+  })()`);
+  record("timechain glass: on WebGL the Genesis Museum's glass floor carries one gentle glossy reflector, captured once the floor is in view",
+    r.kind === "webgl2" && r.sheen && r.visible && r.reflector && r.gloss > 0 && r.gloss < 1 && r.captured, JSON.stringify(r));
+} };
 // The Genesis Museum's door into the Mining Museum, walked by a solo visitor, and the room left with its reader open and
 // with a block half mined.
+// The door remembers a solve in this browser: a first visit gets the hunt; one who has solved it (or holds a badge saved
+// before the flag) finds the carving in orange and may go straight through, or play the hunt again as a first visit.
+const timechainPass = { name: "timechain portal pass", why: "rule: the Genesis Museum's door lets one who has solved it through without the hunt, or deals it afresh on request", run: async (b) => {
+  await b.evaluate(genesisGo);
+  const r = await b.evaluate(`(async () => {
+    const B = window.__ooga, G = BL.timechainGenesis, P = G.portal, body = document.getElementById("genesis-portal-body"), KEY = "ooga-genesis-portal", mining = BL.timechainRooms.ROOMS.find((room) => room.kind === "mining").id;
+    const look = () => { const s = P.state(); return { phase: s.phase, passed: s.passed, riddles: s.riddles.length, title: (body.querySelector("h3") || {}).textContent || "", buttons: [...body.querySelectorAll("[data-gp]")].map((e) => e.dataset.gp), orange: s.swapped }; };
+    P.force("idle"); B.advance(0.2, 1 / 30); const first = look();
+    P.force("passed"); B.advance(0.2, 1 / 30); const passed = look(), saved = JSON.parse(localStorage.getItem(KEY) || "{}");
+    body.querySelector("[data-gp='begin']").click(); B.advance(0.2, 1 / 30); const again = look();
+    P.force("passed"); B.advance(0.2, 1 / 30); body.querySelector("[data-gp='quick']").click();
+    for (let i = 0; i < 1500 && !(B.scene === "timechain" && B.timechain.room && B.timechain.room.id === mining && !B.transitioning); i++) B.advance(1 / 30, 1 / 30);
+    const through = !!B.timechain.room && B.timechain.room.id === mining;
+    // A badge saved before the solved flag counts as solved on the next visit.
+    localStorage.setItem(KEY, JSON.stringify({ badge: "Proof of Knowledge · earned 2026-11-01" }));
+    return { first, passed, saved, again, through };
+  })()`);
+  await b.evaluate(genesisGo);
+  const back = await b.evaluate(`(() => { const s = BL.timechainGenesis.portal.state(); BL.timechainGenesis.portal.force("idle"); return { passed: s.passed, phase: s.phase }; })()`);
+  record("timechain portal pass: no saved solve means the first-visit hunt; a saved solve offers the orange door straight through and the hunt again, which deals fresh riddles; a badge saved alone counts as solved",
+    r.first.phase === "idle" && !r.first.passed && r.first.title === "TEST YOUR KNOWLEDGE" && r.first.buttons.join() === "begin"
+      && r.passed.passed && r.passed.title === "PROOF OF KNOWLEDGE" && r.passed.buttons.join() === "quick,begin" && r.passed.orange && r.saved.solved === true && typeof r.saved.badge === "string"
+      && r.again.phase === "riddles" && r.again.riddles === 5 && !r.again.passed && !r.again.orange
+      && r.through && back.passed && back.phase === "idle", JSON.stringify({ ...r, back }));
+} };
 const timechainPortal = { name: "timechain portal", why: "contract: the Genesis Museum's door hands a solo visitor into the Mining Museum publishing nothing, and the room left with the reader open or a block half mined leaves nothing behind", run: async (b) => {
-  await b.evaluate(roomGo(8));
+  await b.evaluate(genesisGo);
   const through = await b.evaluate(`(() => { const B = window.__ooga, N = BL.net, G = BL.timechainGenesis, zones = [], bodies = [], zone = N.setZone, body = N.setBody, mining = BL.timechainRooms.ROOMS.find(r => r.kind === "mining").id;
     N.setZone = (z) => { zones.push(z); return zone(z); }; N.setBody = (v) => { bodies.push(v); return body(v); };
     G.portal.force("open"); G.portal.enter();
-    for (let i = 0; i < 1500 && !(B.scene === "timechain" && B.timechain.room.id === mining && !B.transitioning); i++) B.advance(1 / 30, 1 / 30);
+    for (let i = 0; i < 1500 && !(B.scene === "timechain" && B.timechain.room && B.timechain.room.id === mining && !B.transitioning); i++) B.advance(1 / 30, 1 / 30);
     B.advance(0.5, 1 / 30); N.setZone = zone; N.setBody = body;
-    return { room: B.timechain.room.id, mining, zones, bodies, panel: !document.getElementById("genesis-portal").hidden, rows: document.getElementById("genesis-portal-body").childElementCount, kept: ["portal", "live", "mark", "floorPoc", "readLarge"].filter(k => k in G) }; })()`);
+    return { room: B.timechain.room && B.timechain.room.id, mining, zones, bodies, panel: !document.getElementById("genesis-portal").hidden, rows: document.getElementById("genesis-portal-body").childElementCount, kept: ["portal", "live", "disc", "floorPoc", "readLarge"].filter(k => k in G) }; })()`);
   const left = [], back = [];
   for (const how of ["reader", "mine"]) {
     await b.evaluate(roomGo(8));
@@ -32018,61 +32111,72 @@ const timechainMarkLink = { name: "timechain mark link", why: "rule: a press on 
 } };
 // Into the Genesis Museum, waiting across frames: its own code may still be on its way at a first arrival.
 const genesisGo = `(async () => { const B = window.__ooga, t0 = performance.now(); B.go("timechain", "8"); while ((B.transitioning || B.scene !== "timechain" || B.timechain.room.id !== 8) && performance.now() - t0 < 20000) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); B.housekeep(); })()`;
-const timechainMark = { name: "timechain mark", why: "regression: the stream's dots ended their flight in front of the mark's squares and a landing's spark swelled over its neighbours, so squares no dot had reached flashed yellow", run: async (b) => {
-  await untilPage(b, 'B.scene === "timechain" && B.timechain && !B.transitioning', 20000);
+// The ceiling's block on the replay (the suite's pages run without feeds): the ₿ fills first and no bead shows until it
+// is full; full, nothing flashes while it waits; a found block takes the ₿'s squares down and the beads refill it.
+const timechainDisc = { name: "timechain block disc", why: "rule: the Genesis Museum's ceiling block fills the ₿ before its queue, holds calm when full and refills from the queue on a block", run: async (b) => {
   await b.evaluate(genesisGo);
-  // A minute after a block, the room on its own wall clock: most squares white, some turned, dots arriving. Every drawn
-  // frame is read in the task that drew it: each white square's middle pixel, where the dots are, how big a square is.
   const r = await b.evaluate(`(async () => {
-    const B = window.__ooga, G = BL.timechainGenesis, N = B.timechain.built.nodes, R = B.renderer, c = document.getElementById("scene"), was = R.quality;
-    const clock = () => (BL.net && typeof BL.net.serverNow === "function" ? BL.net.serverNow() : Date.now()) / 1000, pause = (ms) => new Promise((done) => setTimeout(done, ms));
-    G.live.lastBlockAt = clock() - 60; R.setQuality("high");
-    B.pilot.navigate({ position: { x: 0, y: 0, z: 3.4 }, yaw: 0, pitch: -1.28, dist: 4 }); B.pilot.enterClose(); B.advance(0.3, 1 / 30);
-    // The dots at the mark's own height and over it (others cross the floor and climb the dome under the same spot).
-    const dots = Object.keys(N).filter((key) => key.startsWith("pocStream")).map((key) => N[key]), plane = N.btile0.position.y, top = plane + 0.07;
-    const over = () => dots.filter((n) => n.scale.x > 0.01 && Math.abs(n.position.x) < 3.1 && Math.abs(n.position.z) < 3.6 && Math.abs(n.position.y - plane) < 1.2);
-    // Two seconds for the mark to settle into that minute, and on until dots are arriving.
-    for (const t0 = performance.now(); (performance.now() - t0 < 2000 || !over().length) && performance.now() - t0 < 15000;) { R.setQuality("high"); B.advance(1 / 30, 1 / 30); await pause(30); }
-    const t = document.createElement("canvas"); t.width = c.width; t.height = c.height;
-    const x = t.getContext("2d", { willReadFrequently: true }), k = c.width / c.clientWidth, o = {}, at = [], seen = [], rest = [];
-    for (let i = 0; i < G.mark.count; i++) { const n = N["btile" + i], p = R.project(n.position.x, n.position.y - 0.08, n.position.z, o); at.push(p ? [Math.round(p.x * k), Math.round(p.y * k)] : null); seen.push([]); rest.push(0); }
-    const xs = at.filter(Boolean).map((p) => p[0]), ys = at.filter(Boolean).map((p) => p[1]), x0 = Math.min(...xs) - 2, y0 = Math.min(...ys) - 2, w = Math.max(...xs) - x0 + 3, h = Math.max(...ys) - y0 + 3;
-    let frames = 0, dotsOver = 0, inFront = 0, swollen = 0; const lit0 = G.mark.lit;
-    for (const t0 = performance.now(); frames < 100 && performance.now() - t0 < 30000;) {
-      await pause(30); R.setQuality("high"); B.advance(1 / 30, 1 / 30);
-      // Not while a block drops: its wave, its fall and the square it takes are another matter.
-      const td = clock() - G.live.dropAt; if (td > -3 && td < 12) continue;
-      x.drawImage(c, 0, 0); frames++;
-      const d = x.getImageData(x0, y0, w, h).data, near = over(); dotsOver += near.length;
-      for (const n of near) if (n.position.y < top) inFront++;
-      for (let i = 0; i < at.length; i++) {
-        const n = N["btile" + i], g = n.geometry, white = g.faces[g.faces.length - 1].color[2] === 234;
-        if (white) rest[i] = n.scale.x; else if (rest[i] && n.scale.x > rest[i] * 1.001) swollen++;
-        if (!white || !at[i]) continue;
-        const q = ((at[i][1] - y0) * w + at[i][0] - x0) * 4; seen[i].push(d[q], d[q + 1], d[q + 2]);
-      }
-    }
-    R.setQuality(was);
-    // Each square against its own middle colour over the frames it stayed white.
-    let worst = 0, squares = 0;
-    for (const s of seen) {
-      const m = s.length / 3; if (m < 10) continue; squares++;
-      for (let ch = 0; ch < 3; ch++) { const v = []; for (let j = 0; j < m; j++) v.push(s[j * 3 + ch]); const mid = v.slice().sort((p, q) => p - q)[m >> 1]; for (const q of v) worst = Math.max(worst, Math.abs(q - mid)); }
-    }
-    return { kind: R.kind, frames, squares, turned: G.mark.lit - lit0, dotsOver, inFront, swollen, worst };
+    const B = window.__ooga, G = BL.timechainGenesis, D = G.disc, P = G.floorPoc, N = B.timechain.built.nodes;
+    const clock = () => (BL.net && typeof BL.net.serverNow === "function" ? BL.net.serverNow() : Date.now()) / 1000;
+    // A block well in the past, so its lock and fall are long over, and an empty replay (the replay's own trickle
+    // keeps arriving, a few kB a second, so empty is under a twentieth of the ₿).
+    P.live.dropAt = clock() - 600; D.clear();
+    // The layout runs at most once a second on the page's clock, so each step waits that long.
+    const settle = async (ms) => { for (const t0 = performance.now(); performance.now() - t0 < ms;) { B.advance(1 / 30, 1 / 30); await new Promise((done) => setTimeout(done, 30)); } return D.state; };
+    await settle(1200);
+    const empty = D.state, fills = [];
+    // Arrivals half a block at a time: every layout the ₿ is full before any bead is lit.
+    let early = 0;
+    for (let i = 0; i < 7; i++) { D.arrive(5e5); const s = await settle(1150); fills.push([+s.fill.toFixed(2), s.beads]); if (s.beads > 0 && s.fill < 0.97) early++; }
+    const full = D.state;
+    // Full and waiting: thirty frames with no square already showing flashing hot (a square still waiting for its dot
+    // may pop in with its landing's flash, and the template's colours shift as arrivals re-sort it; neither is a flash).
+    const sq = Object.keys(N).filter((k) => k.startsWith("dsq")).map((k) => N[k]), shown = sq.map((n) => n.scale.x > 0.01), hot = D.hot();
+    let flips = 0; for (let f = 0; f < 30; f++) { B.advance(1 / 30, 1 / 30); for (let i = 0; i < sq.length; i++) if (shown[i] && sq[i].geometry === hot) flips++; }
+    // Full, no square waits, so the stream's dots land on beads; from an empty ₿ again a trickle of arrivals gives each
+    // layout a few new squares, which wait for the dots and pop in as they land (the stream is well under way by now).
+    const before = D.state; await settle(4000); const dots = D.state;
+    D.clear(); await settle(1200); D.arrive(1.5e4); await settle(1150);
+    const trickle0 = D.state; for (let i = 0; i < 4; i++) { D.arrive(1.5e4); await settle(1150); } await settle(2500); const trickle = D.state;
+    D.arrive(3.6e6); await settle(1200);
+    // A block found now: its fall, then the refill.
+    P.drop(0); P.live.dropAt = clock(); B.advance(1 / 30, 1 / 30);
+    const fallen = D.state; await settle(3600);
+    const after = D.state;
+    // The live feed's next block before any projection (its snapshot can come first): the squares, an empty queue.
+    const st = BL.mempool.state, was = { enabled: st.enabled, connected: st.connected, projected: st.projected };
+    st.enabled = st.connected = true; st.projected = null; st.next.clear();
+    for (let i = 0; i < 600; i++) st.next.set("t" + i, [1 + (i % 40), 250 + (i % 7) * 60]);
+    // The next layout takes it up (at most a second on, however busy the page): wait for it rather than a fixed time.
+    for (const t0 = performance.now(); D.state.source !== 1 && performance.now() - t0 < 8000;) { B.advance(1 / 30, 1 / 30); await new Promise((done) => setTimeout(done, 30)); }
+    const snap = D.state;
+    st.next.clear(); Object.assign(st, was); await settle(1200);
+    const unprojected = { source: snap.source, squares: snap.squares, beads: snap.beads };
+    return { empty: { squares: empty.squares, fill: +empty.fill.toFixed(3), beads: empty.beads }, early, fills, full: { fill: full.fill, beads: full.beads, queue: +full.queue.toFixed(2) }, flips, trickle: { landed: trickle.landed - trickle0.landed, timedOut: trickle.timedOut - trickle0.timedOut }, dots: { landed: dots.landed - before.landed, beads: dots.beadLands - before.beadLands, timedOut: dots.timedOut - before.timedOut }, fallen: fallen.squares, after: { fill: after.fill, beads: after.beads, mined: after.mined }, unprojected };
   })()`);
-  record("timechain mark: between landings every white square of the mark keeps its colour, no dot of the stream comes in front of the squares and no landing's spark grows past its own square",
-    r.frames >= 60 && r.squares > 200 && r.dotsOver > 0 && r.turned > 0 && r.inFront === 0 && r.swollen === 0 && r.worst <= 16, JSON.stringify(r));
+  record("timechain block disc: the ceiling's ₿ fills before its queue, the stream's dots land on its new squares (and on beads when none wait), it holds without flashing when full, on a block its squares go and the queue refills it, and the live next block before any projection lays its squares with nothing queued",
+    r.empty.fill < 0.05 && r.empty.beads === 0 && r.early === 0 && r.full.fill >= 0.97 && r.full.beads > 0 && r.flips === 0 && r.trickle.landed > 0 && r.dots.beads > 0 && r.fallen === 0 && r.after.fill >= 0.97 && r.after.beads < r.full.beads && r.after.mined >= 1
+      && r.unprojected.source === 1 && r.unprojected.squares > 0 && r.unprojected.beads === 0, JSON.stringify(r));
 } };
-const timechainCanvas = { name: "timechain canvas2d", why: "rule: a room boots and paints its dome and live pictures on Canvas 2D", run: async (b) => {
+const timechainCanvas = { name: "timechain canvas2d", why: "rule: a room boots and paints its dome and live pictures on Canvas 2D, and a glass floor keeps no reflection there", run: async (b) => {
   const painted = await untilPage(b, 'B.scene === "timechain" && B.timechain.slots.every(s => s.shown)', 20000);
   const r = await b.evaluate(`({ kind: __ooga.renderer.kind, drawn: __ooga.renderer.stats.drawn, room: __ooga.timechain.room.id, view: __ooga.pilot.mode })`);
   record("timechain canvas2d: the Lecture Hall, a raked hall, boots and paints every live picture on Canvas 2D", painted && r.kind === "canvas2d" && r.room === 1 && r.view === "first-person", JSON.stringify(r));
+  // The Genesis Museum's glass floor: its sheen is WebGL's alone, so on Canvas 2D no reflector of the room is shown.
+  await b.evaluate(genesisGo);
+  const g = await b.evaluate(`(() => { const B = window.__ooga, N = B.timechain.built.nodes, shown = Object.keys(N).filter((k) => N[k].geometry && N[k].geometry.reflector && N[k].visible);
+    // With no dome drawn the ceiling's beads lie level on the cap's plane, a hand's breadth behind its squares.
+    const beads = Object.keys(N).filter((k) => k.startsWith("dbd")).map((k) => N[k].position.y), capY = N.dsq0.position.y;
+    return { kind: B.renderer.kind, room: B.timechain.room.id, sheen: !!N.glassSheen, shown, dome: !!N.discDome && N.discDome.visible, beads: beads.length, offCap: beads.filter((y) => Math.abs(y - capY - 0.08) > 1e-4).length }; })()`);
+  record("timechain canvas2d: the Genesis Museum builds its glass floor's sheen and shows no reflector of it on Canvas 2D, and its ceiling keeps the flat cap with the beads on its plane",
+    g.kind === "canvas2d" && g.room === 8 && g.sheen && g.shown.length === 0 && !g.dome && g.beads > 0 && g.offCap === 0, JSON.stringify(g));
 } };
 scene("timechain", { url: roomPage(0), steps: [timechainRoom, timechainRooms, timechainWallJump, timechainTrip] });
 // The Genesis Museum's own checks in a session of their own, run by itself: the rooms' session keeps its time, and
 // the mark is read on the room's wall clock.
-scene("timechain", { label: "genesis", exclusive: true, url: roomPage(0), steps: [timechainMark, timechainMarkLink, timechainHologram, timechainFirst, timechainPortal] });
+scene("timechain", { label: "genesis", exclusive: true, url: roomPage(0), steps: [timechainDisc, timechainMarkLink, timechainHologram, timechainGlass, timechainMined, timechainFirst] });
+// The door's own checks in a session of their own, so neither session nears its two minutes.
+scene("timechain", { label: "genesis door", exclusive: true, url: roomPage(0), steps: [timechainPass, timechainPortal] });
 scene("timechain", { label: "canvas2d", url: roomPage(1, "canvas2d=1"), steps: [timechainCanvas] });
 const timechainLectureScreens = {
   name: "timechain lecture screens", why: "regression: projected answers, screen focus, gestures, scrub holds, background sync and live popups follow the same lecture clock", run: async b => {

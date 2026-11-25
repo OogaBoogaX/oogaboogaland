@@ -16,7 +16,7 @@
     ["factory", "Lightning Factory"], ["hangar", "Jet Hangar"], ["arcade", "Arcade"],
     ["music", "Music"], ["hunt", "Ghost hunt"], ["hopper", "Cloud Hopper"],
     ["block", "Block Frenzy"], ["drop", "Ooga Drop"], ["mine", "Ooga Mine"], ["race", "Ooga Rally"], ["orbit", "Ooga Orbit"], ["raid", "Ooga Raid"],
-    ["poker", "Poker table"], ["room", "Room hum"], ["temple", "Temple bells"],
+    ["poker", "Poker table"], ["room", "Room hum"], ["temple", "Temple bells"], ["newblock", "New block chime"],
     ["lecture", "Lecture"], ["dsb", "DSB Land"],
     ["workshop", "Workshop hum"], ["wallets", "Wallet alarms"]
   ];

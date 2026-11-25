@@ -13,17 +13,6 @@
       }
     },
     {
-      "id": "global-dsb-spiked-helmet",
-      "label": "Spiked helmet",
-      "creator": "Global-DSB",
-      "profile": "closed-cap",
-      "parent": null,
-      "source": {
-        "kind": "character",
-        "handle": "Global-DSB"
-      }
-    },
-    {
       "id": "bc1gui-green-beanie",
       "label": "Green Bitcoin beanie",
       "creator": "bc1gui",
