@@ -13,8 +13,8 @@ const manifestText = (state) => JSON.stringify(state, null, 2) + "\n";
 const STATUS = "Character intake";
 const BUNDLE_STATUS = "Character bundle safety";
 const IDENTITY_STATUS = "Character identity ownership";
-const title = (lane) => lane === "daily" ? "Daily character updates · automatic at midnight UTC"
-  : lane === "rename" ? "Character display names · maintainer review required" : "[Batch] Character updates · maintainer review required";
+const title = (lane) => lane === "daily" ? "[Batch] Daily character updates · automatic at midnight UTC"
+  : lane === "rename" ? "[Batch] Character display names · maintainer review required" : "[Batch] Character updates · maintainer review required";
 const body = (lane, state) => [
   lane === "daily" ? "Validated data-only character changes. Eligible nonempty bundles merge at the first successful run after midnight UTC."
     : `${lane === "rename" ? "Display names matching existing GitHub owners; all other character bytes are unchanged." : "Custom character code."} A maintainer must review the exact diff and merge this PR manually. The automation never merges this lane.`,
