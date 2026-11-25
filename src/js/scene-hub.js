@@ -341,12 +341,19 @@
   // island with only the chat's members on it. While `copyOn` every crew Ooga but the visitor's, every gorilla and their
   // gear are put away (`copyMask`, as Cloud Hopper puts them away, the NPCs' simulation held by `npcPaused`), the
   // island's world and the crew's sync rest, the clouds are dealt again for the chat's benches (`layoutClouds`), and
-  // every cave mouth, HQ's ramps among them, is sealed with the stone face a dark mouth wears, ₿IFRÖST's field barred
-  // and the Mempool island's tunnels refused (`copyBarred`, through `crossesSealedCave`); the doors that change scene
-  // refuse with SEALED. The visitor's own Ooga beams out and in through `copyBeam` (sleep-beam.js) and, between, stands
-  // hidden (`copySelfHidden`).
+  // every cave mouth but HQ's ramps, which stay open down to HQ and its basement, is sealed with the stone face a dark
+  // mouth wears (`copyBarred`, through `crossesSealedCave`); the doors that change scene refuse with SEALED. Only the
+  // main island stands: the Mempool island, Merge Rock, the Timechain Sphere's islet and ₿IFRÖST's islet go with their
+  // bridges, Heimdall, the Oogatron, the OBL cave's mirror, the signs over the sealed mouths, every cave's banners, the islets
+  // out at sea and the gulls and sails round the island (`copyOffMap`, hidden
+  // in `copyMask`, so they neither draw nor stand anywhere to walk on or bump into: a walker off a bridgehead falls to
+  // the water and comes back by the pile), their lamps take no light (`copyOff`), and none of them runs: the Mempool
+  // island's weather, water, wildlife and paintings, Merge Rock's turn, glow and idle carving, the Sphere's doorway,
+  // ₿IFRÖST's field, window and Heimdall, the Oogatron's repaints, the mirror's ripples and the gulls and sails all rest until the trip
+  // ends, their meshes kept on the GPU for the way back. The visitor's own Ooga beams out and in through `copyBeam`
+  // (sleep-beam.js) and, between, stands hidden (`copySelfHidden`).
   let copyOn = false, copyBeam = null, copySelfHidden = false;
-  const copyHidden = new Map(), copySealNodes = [], copyPlanes = [];
+  const copyHidden = new Map(), copySealNodes = [], copyPlanes = [], copyOffMap = [];
   const COPY_SEALED = "Sealed while you're on the chat's island";
   const copyHide = (node) => {
     if (!node) return;
@@ -363,26 +370,23 @@
       }
       for (const entry of clankers.list) copyHide(entry.root);
       for (const item of clankerEquipment) copyHide(item.node);
+      for (let i = 0; i < copyOffMap.length; i++) copyHide(copyOffMap[i]);
     }
     const own = copySelfHidden && crew.player;
     if (own) { own.root.visible = false; if (own.pet) own.pet.node.visible = false; }
   };
-  // Every open mouth's stone face, and ₿IFRÖST's field, as planes a walker may not cross.
+  // Every open mouth's stone face but HQ's ramps, as planes a walker may not cross.
   const copySeal = (on) => {
     for (const node of copySealNodes) removeChild(node.parent, node);
     copySealNodes.length = copyPlanes.length = 0;
     if (!on) return;
     for (const entry of CAMERA_OPENINGS) {
-      if (entry.blocked) continue;
+      if (entry.blocked || entry.headquarters) continue;
       const m = entry.mouth, geometry = hubModels.sealedCaveFace(sealedCaveVariant(entry.id)), stop = 0.52 + geometry.frontZ + 0.01;
       const node = createNode({ geometry, position: { x: m.x + entry.sr * 0.52, y: m.floorY, z: m.z + entry.cr * 0.52 }, rotation: { x: 0, y: m.ry, z: 0 }, sightHidden: true });
       addChild(root, node);
       copySealNodes.push(node);
       copyPlanes.push({ x: m.x, z: m.z, floor: m.floorY, sr: entry.sr, cr: entry.cr, stop, minX: PORTAL_MIN_X, maxX: PORTAL_MAX_X, top: PORTAL_MAX_Y });
-    }
-    if (bifrostIsle) {
-      const q = bifrostIsle.site.portal;
-      copyPlanes.push({ x: q.x, z: q.z, floor: q.floorY, sr: Math.sin(q.ry), cr: Math.cos(q.ry), stop: q.fieldZ + 0.35, minX: -q.halfW, maxX: q.halfW, top: q.opening.ceilingY });
     }
   };
   const copyBarred = (fromX, fromZ, toX, toZ, y) => {
@@ -394,8 +398,7 @@
       const k = a / (a - b), across = (lerp(fromX, toX, k) - s.x) * s.cr - (lerp(fromZ, toZ, k) - s.z) * s.sr;
       if (across >= s.minX && across <= s.maxX) return true;
     }
-    // Into the rock of the Mempool island (its tunnels, the way down to the chamber) from the open air.
-    return !!mempoolIsland && mempoolIsland.coveredAt(toX, y + 0.5, toZ) && !mempoolIsland.coveredAt(fromX, y + 0.5, fromZ);
+    return false;
   };
   // Where the visitor's Ooga stands now: its feet, heading and zone.
   const copySpot = () => {
@@ -423,9 +426,14 @@
       crew.refreshStates(true);
       if (!islandWorld) startIslandWorld();
     }
+    // The Mempool island's cloud deck, rain and storm go with it, as GAME MODE holds them; its water, wildlife and
+    // paintings rest with its proximity gate (`updatePoolEffectsActivity`), and the lamps choose again without theirs.
+    weather.hold(on || gameMode);
+    updatePoolEffectsActivity();
+    lampSelValid = false;
     copySeal(on);
     layoutClouds(on);
-    solids.sync();
+    solids.sync(); totemSolids.sync();
   };
   // The Ooga set down at `to` (its feet and heading), the view with it, as Cloud Hopper's `cloudMove` does.
   const copyMove = (to) => {
@@ -983,11 +991,13 @@
   // released with the visit's other targets. `toWorld` maps a piece's set coordinates to the island, or null to
   // leave it out (the furniture inside a mouth belongs to the cave, not the facade).
   const PICK_GEOMETRY = { verts: [-0.5, -0.5, -0.5, 0.5, 0.5, 0.5], faces: [], lines: [] };
-  const addPieceTargets = (picks, toWorld) => {
+  // `copyOff`: targets a chat's copy hides with what they stand for (`copyOffMap`).
+  const addPieceTargets = (picks, toWorld, copyOff = false) => {
     for (let i = 0; i < picks.length; i += 6) {
       const at = toWorld(picks[i + 2], picks[i + 3], picks[i + 4], picks[i]);
       if (!at) continue;
       const node = createNode({ position: at, geometry: PICK_GEOMETRY });
+      if (copyOff) copyOffMap.push(node);
       BL.scene.updateWorld(node);
       addTarget(node, { kind: "piece", piece: picks[i], variant: picks[i + 1], node, x: at.x, y: at.y, z: at.z, next: 0, weaponType: "none" }, { radius: Math.max(0.35, picks[i + 5]) });
     }
@@ -1245,6 +1255,8 @@
     for (let i = 0; i < lamps.length; i++) {
       const l = lamps[i], node = l.node;
       if (l.light) registered++;
+      // In a chat's copy the other islands' lamps rest, hidden with them, and take no light (`far`, as out of reach).
+      if (copyOn && l.copyOff) { l.far = true; continue; }
       // GAME MODE puts the meadow's fire pit out: no flame, no light, nothing to catch fire from.
       const k = l === coilLamp ? (coilActive ? 1 : 0) : l === fire && gameMode ? 0 : l.always ? 1 : l.nightOnly ? (lanternsOn ? 1 : 0)
         : Math.min(1, Math.max(0, (RENDER_OPTS.torch - l.order * LAMP_STAGGER) / LAMP_RAMP));
@@ -1485,6 +1497,8 @@
   };
   const THEME_ICON = (slot) => slot.id === "c1" ? "favicon" : THEMES[slot.theme]?.icon || null;
   const trackCaveSign = (node, slot, mouth) => {
+    // A chat's copy seals every mouth but HQ's, and takes down the names over them.
+    if (slot.status !== "headquarters") copyOffMap.push(node);
     signDetails.push({
       node, solid: node.geometry, pixels: hubModels.caveSign(slot.name, THEME_ICON(slot), true, true),
       x: mouth.x + Math.sin(mouth.ry) * node.position.z, y: mouth.floorY + node.position.y,
@@ -1517,14 +1531,15 @@
     if (baked) return baked;
     const theme = THEMES[slot.theme];
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
-    const set = BL.dressing.set(), ground = [], rig = {};
+    // The banners are a set of their own, so a chat's copy can take them down (`dressMouth`).
+    const set = BL.dressing.set(), flags = BL.dressing.set(), ground = [], rig = {};
     // Floor props stay on the apron; banners stand on the raised rock shoulders behind the lamps.
-    const stand = (kind, lx, lz, turns = 0, variant = 0, lift = 0) => {
+    const stand = (kind, lx, lz, turns = 0, variant = 0, lift = 0, into = set) => {
       const x = m.x + cr * lx + sr * lz, z = m.z - sr * lx + cr * lz;
       if ((kind === "barrel" || kind === "bench") && island.overlapsStairs(x, z, 1.7)) return;
       const y = island.surfaceAt(x, z) - m.floorY;
       if (Math.abs(y) > 0.9 && kind !== "banner") return;
-      set.put(kind, lx, y + lift, lz, turns, variant, LOOSE_PIECES.has(kind));
+      into.put(kind, lx, y + lift, lz, turns, variant, LOOSE_PIECES.has(kind));
       // The coil and its gauge charge on a loop of their own (`coilCharge`).
       if (kind === "coil" || kind === "gauge") rig[kind] = [lx, y + lift, lz, turns];
       if (!lift) ground.push(lx, lz);
@@ -1537,7 +1552,7 @@
     }
     for (const [side, variant] of theme.banners || []) {
       checkCaveBanner(m, side);
-      stand("banner", side * CAVE_BANNER_X, CAVE_BANNER_Z, 0, variant);
+      stand("banner", side * CAVE_BANNER_X, CAVE_BANNER_Z, 0, variant, 0, flags);
     }
     const [lamp, variant, at] = theme.string;
     set.cable(-3.05, 3.42, CAVE_LIGHT_Z, 3.05, 3.42, CAVE_LIGHT_Z, 0.3, at || [0.1, 0.24, 0.38, 0.5, 0.62, 0.76, 0.9], lamp, variant);
@@ -1553,7 +1568,7 @@
       set.cable(ax, y, az, ax, y, bz, 0.15, lamps, lamp, theme.glass);
       set.cable(bx, y, az, bx, y, bz, 0.15, lamps, lamp, theme.glass);
     }
-    baked = { ...set.build(), ground, rig };
+    baked = { ...set.build(), ground, rig, banners: theme.banners && theme.banners.length ? flags.build() : null };
     byIsland.set(slot.id, baked);
     return baked;
   };
@@ -1752,7 +1767,16 @@
     addDressing(baked, group, m.x, m.floorY + 2.4, m.z, `${slot.id}:dressing`, false);
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry), g = baked.ground, lit = baked.lights;
     for (let i = 0; i < lit.length; i += 4) dressingLights.push(m.x + cr * lit[i] + sr * lit[i + 2], m.floorY + lit[i + 1], m.z - sr * lit[i] + cr * lit[i + 2], lit[i + 3]);
-    addPieceTargets(baked.picks, (lx, ly, lz, kind) => lz < 0.3 && kind !== "banner" ? null : { x: m.x + cr * lx + sr * lz, y: m.floorY + ly, z: m.z - sr * lx + cr * lz });
+    const toWorld = (lx, ly, lz, kind) => lz < 0.3 && kind !== "banner" ? null : { x: m.x + cr * lx + sr * lz, y: m.floorY + ly, z: m.z - sr * lx + cr * lz };
+    addPieceTargets(baked.picks, toWorld);
+    // The banners, which a chat's copy takes down with their lights and pick targets.
+    if (baked.banners) {
+      const from = group.children.length, lit = lamps.length;
+      addDressing(baked.banners, group, m.x, m.floorY + 2.4, m.z, `${slot.id}:banners`, false);
+      for (let i = from; i < group.children.length; i++) copyOffMap.push(group.children[i]);
+      for (let i = lit; i < lamps.length; i++) lamps[i].copyOff = true;
+      addPieceTargets(baked.banners.picks, toWorld, true);
+    }
     for (const piece of baked.loose) addLoosePiece(piece, m);
     if (baked.rig.coil) buildCoilCharge(group, baked.rig, m);
     if (slot.theme === "lab") placeChalkboard(m, group);
@@ -2278,6 +2302,8 @@
       const node = createNode({ geometry: BL.dressing.islet(i % 3, true), position: { x: p.x, y: SEA_Y - 2, z: p.z }, rotation: { x: 0, y: deg * 0.7, z: 0 }, sightHidden: true });
       addChild(root, node);
       placed.push(node);
+      // A chat's copy is Main Island alone: no other island, however far out.
+      copyOffMap.push(node);
     });
   };
   // Life over the sea: gulls wheeling round the island and sails out on the water. Keep these moving at
@@ -2292,6 +2318,8 @@
     for (const node of [gulls.node, shore.node, ...boats.nodes]) {
       addChild(root, node);
       placed.push(node);
+      // A chat's copy is Main Island alone: no gulls or sails, which belong to the island's own sea.
+      copyOffMap.push(node);
     }
     life = { gulls, shore, boats };
   };
@@ -2416,6 +2444,8 @@
       const node = createNode({ position: { x: 0, y: 1.5, z: 0.5 }, geometry: hubModels.mirrorPanel(), mirror: true, mirrorWalkThrough: true, mirrorReveal: 0 });
       addChild(group, node);
       mirrorCave = { slot, mouth: m, group, rim, node, sign: null };
+      // A chat's copy seals this mouth with stone where the mirror stood.
+      copyOffMap.push(node);
       addTarget(node, { kind: "cave", slot, priority: 1 });
       // Keep the room empty; this state only caches the shared action prompt.
       matrixControl = { promptPlayer: null, promptAction: null, promptJet: false, promptRecovering: false };
@@ -3103,7 +3133,7 @@
     poolCameraActive = !!architectCave?.active && (architectCave.cameras.observes("rainforest") || architectCave.cameras.observes("rainforest-under"));
     const radius = poolEffectsActive ? POOL_EFFECTS_FAR : POOL_EFFECTS_NEAR;
     const player = clankerPlay?.player || pilot?.player;
-    const active = !gameMode && !cloudPlaying() && !architectCave?.active && (nearPoolEffects(camera.position, radius) || nearPoolEffects(camera.target, radius)
+    const active = !gameMode && !cloudPlaying() && !copyOn && !architectCave?.active && (nearPoolEffects(camera.position, radius) || nearPoolEffects(camera.target, radius)
       || !!player && nearPoolEffects(player.root.position, radius));
     if (!waterWasActive && (active || poolCameraActive)) mempoolIsland.water.resume();
     if (active === poolEffectsActive) return;
@@ -3225,15 +3255,20 @@
     yield* BL.repoIslandModels.rockSteps.steps(slice);
     yield* pause(slice);
     const site = BL.repoIsland.create({ island, renderer, hooks: {
-      addTarget, removeTarget, addTotemSolid: node => totemSolids.add(node),
-      addTotemLight: (index) => addLamp({ glow: 0, flare: 0, visible: true }, { r: 0, g: 0, b: 0, radius: 0, glow: 0, hide: false }, 0, 0, 0, true, Infinity, `repo-totem:${index}`),
+      // Its pick targets hang off the scene graph, so a chat's copy hides each one itself (`copyOffMap`).
+      addTarget: (node, owner, opts) => { copyOffMap.push(node); addTarget(node, owner, opts); }, removeTarget, addTotemSolid: node => totemSolids.add(node),
+      addTotemLight: (index) => {
+        const lamp = addLamp({ glow: 0, flare: 0, visible: true }, { r: 0, g: 0, b: 0, radius: 0, glow: 0, hide: false }, 0, 0, 0, true, Infinity, `repo-totem:${index}`);
+        lamp.copyOff = true;
+        return lamp;
+      },
       updateTotemLight: (lamp, x, y, z, power, radius) => {
         const light = lamp.kind, always = power > 0;
         if (lamp.x !== x || lamp.y !== y || lamp.z !== z || lamp.always !== always || light.r !== power || light.radius !== radius) lampSelValid = false;
         lamp.x = x; lamp.y = y; lamp.z = z; lamp.always = always;
         light.r = power; light.g = 0.62 * power; light.b = 0.3 * power; light.radius = radius;
       },
-      visible: () => !document.hidden && !!repoIsland && !cloudPlaying() && renderer.kind === "webgl2",
+      visible: () => !document.hidden && !!repoIsland && !cloudPlaying() && !copyOn && renderer.kind === "webgl2",
       near: () => !!pilot?.player && (() => { const p = pilot.player.root.position, feet = p.y - pilot.player.baseY; return site.onIsland(p.x, feet, p.z) || site.onBridge(p.x, feet, p.z); })(),
       toast: (text) => hud.toast(text)
     } });
@@ -3772,7 +3807,7 @@
   const floatPose = (cave, feet, height, phase, time) => {
     const p = cave.root.position;
     if (cave.grabbedBy) return;
-    if (!mempoolIsland || !mempoolIsland.afloat(p.x, p.z, feet, height * OOGA_DRAUGHT)) {
+    if (!mempoolIsland || copyOn || !mempoolIsland.afloat(p.x, p.z, feet, height * OOGA_DRAUGHT)) {
       if (cave.poolSwimming) {
         cave.poolSwimming = false;
         cave.parts.armL.rotation.z = 0.12;
@@ -3792,7 +3827,7 @@
     parts.armL.rotation.x = parts.armR.rotation.x = -0.25 + c * 0.22;
     parts.legL.rotation.x = c * 0.3; parts.legR.rotation.x = -c * 0.3;
   };
-  const waterSupportAt = (x, z, y, rise, player) => mempoolIsland ? mempoolIsland.floatAt(x, z, y, rise, player ? player.bodyHeight * OOGA_DRAUGHT : CLOSE_VIEW.eyeHeight * OOGA_DRAUGHT) : -Infinity;
+  const waterSupportAt = (x, z, y, rise, player) => mempoolIsland && !copyOn ? mempoolIsland.floatAt(x, z, y, rise, player ? player.bodyHeight * OOGA_DRAUGHT : CLOSE_VIEW.eyeHeight * OOGA_DRAUGHT) : -Infinity;
   const rageThrown = actor => !!(actor?.leap?.thrown && actor.leap.rageThrown);
   const playerSupportAt = (x, z, y = 0, previousY = y, player = pilot?.player, ignoreClanker = false, passTraffic = false) => {
     passTraffic = passTraffic || rageThrown(player);
@@ -4973,7 +5008,8 @@
     return radius;
   };
   const mirrorActorSegmentClear = (x, y, z, toX, toY, toZ, height, actor, fixedRadius = 0) => {
-    if (actor && actor === pilot?.player && !clankerPlay.active) return true;
+    // A chat's copy takes the mirror down; the stone sealing its mouth stops walkers instead.
+    if (copyOn || actor && actor === pilot?.player && !clankerPlay.active) return true;
     if (!fixedRadius && !actor) return true;
     const m = mirrorCave.mouth, sr = matrixCave.sr, cr = matrixCave.cr;
     const bounds = BL.scene.boundsOf(mirrorCave.node.geometry), radius = fixedRadius || mirrorActorRadius(actor);
@@ -8304,7 +8340,7 @@
       }
     }
     if (lawn && lawn.version !== island.path.version) layLawn();
-    if (life && !architectCave?.active) { life.gulls.update(elapsed); life.shore.update(elapsed); life.boats.update(elapsed); }
+    if (life && !architectCave?.active && !copyOn) { life.gulls.update(elapsed); life.shore.update(elapsed); life.boats.update(elapsed); }
     now = elapsed;
     hour = clock.read();
     // A Cloud Hopper run flies under its level's own fixed sky, sampled once as it begins; the clock's hour still
@@ -8342,7 +8378,7 @@
     // Under the Mempool island's ground the storm is muffled and the daylight shut out: no shadow reaches that
     // island, so its tunnels would otherwise stand in full sun. The fires and the water light them instead.
     // By where the eye is, not what it looks at: a view from outside aimed into the rock is still outdoors.
-    const sheltered = !cloudPlaying() && mempoolIsland.coveredAt(camera.position.x, camera.position.y, camera.position.z) ? 1 : 0;
+    const sheltered = !cloudPlaying() && !copyOn && mempoolIsland.coveredAt(camera.position.x, camera.position.y, camera.position.z) ? 1 : 0;
     poolShade += clamp(sheltered - poolShade, -dt * 1.6, dt * 1.6);
     poolUnder += clamp((cutawayPool === 2 ? 1 : 0) - poolUnder, -dt * 1.6, dt * 1.6);
     // A storm level's haze takes in the sea too.
@@ -8375,12 +8411,12 @@
       rig.update(dt, rig.time);
     }
     // Merge Rock's geometry, riders and warm lights all follow this frame's turn before lamp selection and solid sync.
-    if (repoIsland && !cloudPlaying()) {
+    if (repoIsland && !cloudPlaying() && !copyOn) {
       if (repoIsland.turn()) carryRepoIsland();
       repoIsland.update(dt, elapsed, camera);
     }
     updateLamps(dt, elapsed, phase !== null);
-    if (jumbotron) {
+    if (jumbotron && !copyOn) {
       jumbotron.update(elapsed, renderer);
     }
     if (poolEffectsActive) updateChainSign(poolEffectsTime);
@@ -8400,13 +8436,13 @@
       if (clankerPlay.active) clankerPlay.readInput(dt);
       else pilot.readInput(dt);
     }
-    mirrorCave.ripples.update(dt, elapsed);
+    if (!copyOn) mirrorCave.ripples.update(dt, elapsed);
     updatePortalEffects(entropyLab.phase, dt);
     for (const veil of caveVeils) updatePortalEffects(veil.phase, dt);
     factoryWalk.warming = false;
     if (factoryMouth && !cloudPlaying()) factoryShield(dt, elapsed);
     if (arcadeMouth && !cloudPlaying()) arcadeMouth.entrance.update(dt, elapsed, pilot.player);
-    if (bifrostIsle && !cloudPlaying()) bifrostGate(dt, elapsed);
+    if (bifrostIsle && !cloudPlaying() && !copyOn) bifrostGate(dt, elapsed);
     if (bcaMouth) bcaVeil(dt, elapsed);
     if (factoryDeparting || bifrostDeparting) { npcGhosts.paint(dt); return; } // The Ooga through a shield and its camera hold through the director fade.
     if (gameMode) prepareClankerStrike();
@@ -8477,7 +8513,7 @@
     updateLabEquipment(dt);
     clankerMeshes.sync();
     if (gameMode) updateClankerEffects(dt);
-    if (timechainIsland) {
+    if (timechainIsland && !copyOn) {
       if (!gameMode) timechainIsland.site.turn((elapsed % TIMECHAIN_OUTER_PERIOD) * Math.PI * 2 / TIMECHAIN_OUTER_PERIOD);
       timechainIsland.show(dt);
       // The doorway's walks steer the Ooga before the crew moves it.
@@ -8567,7 +8603,7 @@
     else if (!cloudHopper?.fallView()) pilot.update(dt);
     bifrostWalk?.update(dt);
     // The doorway's views (the keypad's, the swoop into the eyes and back out) take over from the pilot's.
-    if (!cloudPlaying()) timechainIsland.gate.view(dt);
+    if (!cloudPlaying() && !copyOn) timechainIsland.gate.view(dt);
     if (factoryMouth && !cloudPlaying()) factoryWalk.eyes.view(dt);
     // Tess moves after the view is set, so a tour's glide has the last word on it.
     if (!cloudHopper?.active && !architectCave?.active && !architectCave?.arriving && !copyOn) islandGuide.update(dt, elapsed);
@@ -8576,9 +8612,9 @@
       ARCHITECT_OPTS.viewRoots = architectCave.viewRoots;
     }
     shareDrivenPose();
-    if (!architectCave?.active) timechainIsland.site.view(camera.position);
+    if (!architectCave?.active && !copyOn) timechainIsland.site.view(camera.position);
     const firstPerson = clankerPlay.active ? clankerPlay.firstPerson : pilot.closeMix > 0.8 || pilot.mode === "eye-level";
-    if (repoIsland && !cloudPlaying() && !architectCave?.active) repoIsland.afterCamera(camera, firstPerson);
+    if (repoIsland && !cloudPlaying() && !copyOn && !architectCave?.active) repoIsland.afterCamera(camera, firstPerson);
     updateCombatTotemHover();
     for (let i = 0; i < signDetails.length; i++) {
       const sign = signDetails[i], dx = camera.position.x - sign.x, dy = camera.position.y - sign.y, dz = camera.position.z - sign.z;
@@ -8608,9 +8644,9 @@
       factoryMouth.roofEffectsActive = effectsActiveAt(r.x, r.y, r.z, factoryMouth.roofEffectsActive, 24, 32);
       factoryMouth.roofWindow.update(dt, camera, RENDER_OPTS, factoryMouth.roofEffectsActive);
     }
-    if (bifrostIsle) updateBifrostWindow(dt);
+    if (bifrostIsle && !copyOn) updateBifrostWindow(dt);
     updateMatrixControl(dt, player);
-    mirrorCave.body.update(dt);
+    if (!copyOn) mirrorCave.body.update(dt);
     entropyLab.phase.body.update(dt);
     entropyLab.phase.body.time = entropyLab.phase.ripples.time;
     for (const veil of caveVeils) {
@@ -9198,7 +9234,7 @@
   // One solid mask spans both islands, the dais and fruit contact. A cheap extent check keeps the
   // Mempool grid out of the HUB's per-pixel rock texture pass.
   const cameraPoolNear = (x, z) => {
-    if (cloudPlaying()) return false;
+    if (cloudPlaying() || copyOn) return false;
     const dx = x - mempoolIsland.place.x, dz = z - mempoolIsland.place.z, reach = poolModels.SITE.reach + 1;
     return dx * dx + dz * dz < reach * reach;
   };
@@ -9207,7 +9243,7 @@
     || !island.clearAt(x, y, z, 1e-5, 2e-5) || !entranceSegmentClear(x, y, z, x, y, z, 1e-5);
   const cameraRockMaterialAt = (x, y, z) => cameraPlatformAt(x, y, z) ? altar.slab.geometry.faces[0].color
     : cameraPoolNear(x, z) ? mempoolIsland.rockMaterialAt(x, y, z) || island.rockMaterialAt(x, y, z) : island.rockMaterialAt(x, y, z);
-  const cameraCutRockAt = (x, y, z) => y <= RENDER_OPTS.cutawayMaxY && mempoolIsland.solidAt(x, y, z);
+  const cameraCutRockAt = (x, y, z) => !copyOn && y <= RENDER_OPTS.cutawayMaxY && mempoolIsland.solidAt(x, y, z);
   const bananaLightVisibleAt = (x, y, z, lx, ly, lz) => {
     const reach = RENDER_OPTS.shadowExtent * 3, toX = x + lx * reach, toY = y + ly * reach, toZ = z + lz * reach;
     return island.sightClearAt(x, y, z, toX, toY, toZ) && solids.segmentClear(x, y, z, toX, toY, toZ, 0, 1e-5)
@@ -11787,6 +11823,7 @@
     }).filter(Boolean);
     buildRim();
     cloudNodeStart = root.children.length;
+    const islandLamps = lamps.length;
     mempoolIsland = yield* buildMempoolIsland(slice);
     yield* pause(slice);
     timechainIsland = yield* buildTimechainIsland(slice);
@@ -11794,6 +11831,10 @@
     yield* pause(slice);
     repoIsland = yield* buildRepoIsland(slice);
     cloudRememberNodes(cloudNodeStart);
+    // A chat's copy keeps the main island alone: these islands and their bridges go, with their lamps but ₿IFRÖST's arch's,
+    // which stands on the main island over the north pass.
+    for (let i = cloudNodeStart; i < root.children.length; i++) copyOffMap.push(root.children[i]);
+    for (let i = islandLamps; i < lamps.length; i++) if (!archLamp || lamps[i].node !== archLamp.node) lamps[i].copyOff = true;
     const firePos = buildFire();
     yield* pause(slice);
     fire = lamps[lamps.length - 1];
@@ -11818,6 +11859,7 @@
       });
       addChild(root, jumbotron.node);
       placed.push(jumbotron.node);
+      copyOffMap.push(jumbotron.node);
       addProp("jumbotron", jumbotron.node, jx, jz, 3.8).pickRay = ray => jumbotron.pickRay(ray);
       hud.restoreBoards(jumbotronBoard);
       // Live stats land on the board and on the roster: fresh last-seen
@@ -11994,6 +12036,7 @@
       b.heimdall = BL.bifrostHeimdall.create({ parent: root, x: h.x, y: h.y, z: h.z, heading: h.heading, fx });
       placed.push(b.heimdall.root, b.heimdall.plinth);
       cloudOffMap.push(b.heimdall.root, b.heimdall.plinth);
+      copyOffMap.push(b.heimdall.root, b.heimdall.plinth);
       solids.add(b.heimdall.plinth);
       addProp("heimdall", b.heimdall.pick, h.x, h.z, 1.2).weaponType = "none";
     }
@@ -12008,7 +12051,7 @@
       || absorbCaveVeil(ax, ay, az, point, dt)
       || !!(factoryMouth && factoryMouth.phase.absorb(ax, ay, az, point, dt))
       || !!(bcaMouth && bcaMouth.phase.absorb(ax, ay, az, point, dt))
-      || !!(bifrostIsle && bifrostIsle.phase.absorb(ax, ay, az, point, dt))
+      || !!(bifrostIsle && !copyOn && bifrostIsle.phase.absorb(ax, ay, az, point, dt))
       || !!(workShot && source && shared.workSites[source.work.site]?.mirrorRoom
         && mirrorCave.ripples.absorb(ax, ay, az, point));
     shared.onProjectileMove = (ax, ay, az, bx, by, bz, dt) => mirrorCave.ripples.cross(ax, ay, az, bx, by, bz, dt);
@@ -12662,6 +12705,9 @@
       root, camera, input,
       debug: {
         setGameMode, delayGameRing, animationInterval,
+        // A chat's copy of the island switched on and off by itself, for a check or the scenery bake: no beam, no move
+        // and no Ooga needed (chat-copy.js's trip does the rest).
+        copyMode: (on) => copyMode(!!on),
         get gameMode() { return gameMode; },
         selectDebugGorilla,
         get timechainIsland() { return timechainIsland; },
@@ -12677,7 +12723,12 @@
         // cloud speaker's seat.
         copy: { get on() { return copyOn; }, barred: (fromX, fromZ, toX, toZ, y) => crossesSealedCave(fromX, fromZ, toX, toZ, y), get seals() { return copySealNodes.length; },
           get planes() { return copyPlanes.length; }, get benches() { return copyBenches.map((c) => ({ y: c.node.position.y, bottom: c.node.position.y + BL.scene.boundsOf(c.bench).min[1], bench: c.node.geometry === c.bench, radius: c.radius })); },
-          get treetop() { return cloudTreetop; }, cloudSpot: cloudSpotOf, mouths: () => CAMERA_OPENINGS.filter((e) => !e.blocked).map((e) => ({ id: e.id, x: e.mouth.x, z: e.mouth.z, floor: e.mouth.floorY, sr: e.sr, cr: e.cr })) },
+          get treetop() { return cloudTreetop; }, cloudSpot: cloudSpotOf,
+          // What the island view's scenery bake (scripts/island-scene.mjs) carries to Ooga Chat's 3D view: the lamps and
+          // fires it lights by the clock, the lawn, and the clouds as the copy deals them, with their clock and seats.
+          get lamps() { return lamps; }, get fires() { return fireRigs; }, get lawn() { return lawn && lawn.node; },
+          sky: () => ({ clouds, benches: copyBenches, epoch: CLOUD_EPOCH, crossings: CLOUD_CROSSINGS, swing: CLOUD_SWING, seats: thirdsOf }),
+          setClouds: (t) => setClouds(t), mouths: () => CAMERA_OPENINGS.filter((e) => !e.blocked).map((e) => ({ id: e.id, x: e.mouth.x, z: e.mouth.z, floor: e.mouth.floorY, sr: e.sr, cr: e.cr, headquarters: !!e.headquarters })) },
         get shown() {
           return pile.shown;
         },
@@ -12869,6 +12920,7 @@
     removeChild(root, cloudFinishFruit);
     cloudHopper = cloudIsland = cloudPile = cloudPileSolids = cloudFinishFruit = null;
     cloudOffMap.length = 0; cloudHidden.clear();
+    copyOffMap.length = 0;
     actorTransition.sourceRoot = actorTransition.sourceHead = null;
     factoryWalk.cave = null;
     resetRageThrowMap(false);
@@ -13143,7 +13195,7 @@
       if (cloudHopper?.active) return true;
       if (timechainIsland && timechainIsland.gate.busy) return true;
       if (factoryWalk.phase || factoryWalk.still > 0) return true;
-      if (pile.inMotion || fx.inMotion || poolEffectsActive && (weather.active || mempoolIsland.water.active) || mirrorCave.ripples.active || mirrorCave.body.active) return true;
+      if (pile.inMotion || fx.inMotion || poolEffectsActive && (weather.active || mempoolIsland.water.active) || !copyOn && (mirrorCave.ripples.active || mirrorCave.body.active)) return true;
       if (!entropyLab.phase.paused && (entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active)) return true;
       for (const veil of caveVeils) {
         const phase = veil.phase;
@@ -13219,7 +13271,8 @@
   hubScene.navigationReturn = () => pilot?.endLook();
   hubScene.navigationStatus = name => {
     if (!hubScene.navigationReady) return "Finish the current interaction first.";
-    if (copyOn && (name === "underground" || name === "basement" || name === "mempool")) return COPY_SEALED;
+    // A chat's copy keeps the main island alone, HQ and its basement open under it.
+    if (copyOn && (name === "mempool" || name === "repos" || name === "timechain" || name === "bifrost")) return COPY_SEALED;
     return clankerPlay?.active ? clankerPlay.travelRefusal() : "";
   };
   const MAP_ZONES = { pile: "outside", gate: "outside", lab: "lab", mirror: "mirror", factory: "factory.hall", arcade: "arcade.hall", bca: "bca", underground: "hq", basement: "hq", mempool: "rainforest", bifrost: "bifrost.chamber", timechain: "sphere", repos: "repos" };
@@ -13248,8 +13301,6 @@
     return false;
   };
   hubScene.beginCoaching = () => islandGuide.escape();
-  // The island the hub built, for the island view's Live view (island-view-live.js), which draws its ground again.
-  Object.defineProperty(hubScene, "liveIsland", { get: () => island || null });
   Object.defineProperty(hubScene, "coachingReady", { get: () => islandGuide?.coachingReady && !gameMode });
   Object.defineProperty(hubScene, "navigationReady", { get: () => !!islandGuide && !islandGuide.holding && !cloudHopper?.active && !factoryDeparting && !bifrostDeparting && !timechainIsland?.gate.busy });
   hubScene.controlsHelpHold = on => { clankerPlay?.cancelInput(); if (on) clankerPlay?.freeCursor(); cloudHopper?.controlsHelpHold(on); pilot.controls.reset(); pilot.setMenuOpen(on, false); };

@@ -1369,8 +1369,8 @@ export class Room extends DurableObject {
     if (rests.length) state.rs = rests;
     if (dances.length) state.ds = dances;
     this.broadcast(state);
-    // The chat's island view hears where its walkers stand (room-copy.js).
-    if (this.copy) copyRoom.walked(this);
+    // The chat's island view hears where its walkers stand and, when it changes, how they look (room-copy.js).
+    if (this.copy) { copyRoom.walked(this); copyRoom.looked(this); }
   }
 
   // A line from a player, named by the session's login and display name; over the rate its sender is told.

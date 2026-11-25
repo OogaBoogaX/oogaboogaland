@@ -9,17 +9,21 @@
 // `{ t: "call", on }` (`net.setCall`), so other pages mark this player as in a chat. Leaving it, the chat ending or
 // removing them (4404, 4403), signing out or the room's chats going away ends the call.
 // `open(entry)`, `leave(kind)`, `request(type, fields)` (its id, 0 while the socket isn't open), `hear(fn)` (the chat's
-// notices, request answers, reactions and the island view's `walk` frames), `subscribe(fn)` (anything changed), `list()`, `start(body)`, `preview(id)`, `identity()` (the visitor as
+// notices, request answers, reactions and the island view's `walk` and `looks` frames), `subscribe(fn)` (anything changed), `list()`, `start(body)`, `preview(id)`, `identity()` (the visitor as
 // the views know them), and `state` in Ooga Chat's shape for the shared views: `room` (the chat, with the server's
 // `you`), `voice` (the controller's state), `audience` (`status`, `list`, `version`). `media` is the controller, for the
-// panel's footer and tiles. No timer but the open chat socket's ping and reconnect; nothing per frame.
-// Go there from Ooga Chat (docs/ooga-chat-hosts.md): a page opened as `?chat=<id>&mic=<0|1>` (ooga-chat-hosts.js) takes
-// the address's two parameters out at once and keeps the wish in sessionStorage (`ooga-chat-arrive`, ARRIVE_MS), so a
-// sign-in on the way keeps it; once signed in and the room is live it opens that chat, listening. A link anyone could
-// post, so it never speaks by itself: for a visitor who may speak there it asks first (voice-handoff.js's card, "Speak
-// from here?"), and only Switch here, a press on this page, takes the account's voice from Ooga Chat (`join({ takeover
-// })`, inside the press), unmutes when the address said the microphone was open there (the card says so), and walks
-// the Ooga into the chat's island (chat-copy.js `goSoon`). Not now leaves the voice where it is and the visitor
+// panel's footer and tiles. No timer but the open chat socket's ping and reconnect, and one wait on a Go there ticket's
+// answer (REDEEM_MS); nothing per frame.
+// Go there from Ooga Chat (docs/ooga-chat-hosts.md): a page opened, in Ooga Chat's own tab, as
+// `?chat=<id>&mic=<0|1>#handoff=<ticket>` (ooga-chat-hosts.js) takes the address's parts out at once and keeps the wish
+// in sessionStorage (`ooga-chat-arrive`, ARRIVE_MS), so a sign-in on the way keeps it; once signed in and the room is
+// live it opens that chat, listening. With a ticket (the Audience's `handoff`, minted only by that account's own
+// speaking connection) it hands it back (`redeem`) and, the chat agreeing it is this account's, takes the voice from
+// Ooga Chat (`join({ takeover })`), opens the microphone when it was open there (the chat's word, not the address's)
+// and walks the Ooga into the chat's island (chat-copy.js `goSoon`), with no card. A link without a ticket, or one the
+// chat refuses, is a link anyone could post, so it never speaks by itself: for a visitor who may speak there it asks
+// first (voice-handoff.js's card, "Speak from here?"), and only Switch here, a press on this page, takes the voice
+// (inside the press), unmuting when the address said the microphone was open there (the card says so). Not now leaves the voice where it is and the visitor
 // listening. A host is still the host: roles belong to the account. A chat no longer listed says so; one the visitor may
 // only listen in is listened to. `arrival` says where it stands.
 // Under `?debug=1&chats=fixture` it runs on Ooga Chat's fixture adapter (ooga-chat-fixtures.js, a deferred group the
@@ -169,8 +173,8 @@
     if (msg.type === "you" || msg.type === "media") { m.heard(msg); return emit(); }
     // A reaction over a participant's circle (cloud-panel.js), the visitor's own included.
     if (msg.type === "reaction") { for (const fn of heard) fn(msg); return; }
-    // The island view's walkers (chat-hosts.js, island-view.js), heard while it asked for them.
-    if (msg.type === "walk") { for (const fn of heard) fn(msg); return; }
+    // The island view's walkers, how they look and who sits on the clouds (chat-hosts.js, island-view.js), heard while it asked for them.
+    if (msg.type === "walk" || msg.type === "looks" || msg.type === "clouds") { for (const fn of heard) fn(msg); return; }
     const result = roster.apply(msg);
     if (result === "gap") feed.resync(BL.chatHosts.rosterZone(chat.zone));
     if (result === "applied") {
@@ -227,10 +231,12 @@
     if (available() !== gate) { gate = available(); emit(); }
   });
   // --- Go there from Ooga Chat ---
-  // `arrival`: `{ id, mic, at, step }`, step "open" (find the chat and open it), "ask" (the card, until it is answered),
+  // `arrival`: `{ id, mic, ticket, at, step }`, step "open" (find the chat and open it), "ask" (the ticket handed back,
+  // else the card, until it is answered), "redeem" (waiting on the chat's word on the ticket),
   // "voice" (take the voice, after Switch here), "mic" (open the microphone as it was), "go" (walk into the chat's
   // island), then gone.
-  const ARRIVE_KEY = "ooga-chat-arrive", ARRIVE_MS = 5 * 60 * 1000, JOIN_TRIES = 3;
+  // REDEEM_MS: how long the chat's word on a ticket is waited for before the card asks instead.
+  const ARRIVE_KEY = "ooga-chat-arrive", ARRIVE_MS = 5 * 60 * 1000, JOIN_TRIES = 3, REDEEM_MS = 6000;
   let arrival = null, arriving = false, joinTries = 0, signInSaid = false, card = null;
   // The card, made the first time it is wanted, in voice-handoff.js's look with this arrival's words.
   const askVoice = () => {
@@ -250,19 +256,21 @@
     card.open();
   };
   {
-    const id = params.get("chat");
+    const id = params.get("chat"), hashed = /^#handoff=([A-Za-z0-9_-]{22})$/.exec(location.hash);
     if (id && /^[A-Za-z0-9_-]{16}$/.test(id)) {
-      arrival = { id, mic: params.get("mic") === "1", at: Date.now(), step: "open" };
+      arrival = { id, mic: params.get("mic") === "1", ticket: hashed ? hashed[1] : "", at: Date.now(), step: "open" };
       try { sessionStorage.setItem(ARRIVE_KEY, JSON.stringify(arrival)); } catch { /* kept for this page alone */ }
     } else {
       try {
         const kept = JSON.parse(sessionStorage.getItem(ARRIVE_KEY) || "null");
-        if (kept && /^[A-Za-z0-9_-]{16}$/.test(kept.id) && Number.isFinite(kept.at) && Date.now() - kept.at < ARRIVE_MS) arrival = { id: kept.id, mic: kept.mic === true, at: kept.at, step: "open" };
+        if (kept && /^[A-Za-z0-9_-]{16}$/.test(kept.id) && Number.isFinite(kept.at) && Date.now() - kept.at < ARRIVE_MS)
+          arrival = { id: kept.id, mic: kept.mic === true, ticket: typeof kept.ticket === "string" && /^[A-Za-z0-9_-]{22}$/.test(kept.ticket) ? kept.ticket : "", at: kept.at, step: "open" };
       } catch { /* none */ }
     }
-    if (params.has("chat") || params.has("mic")) {
+    if (params.has("chat") || params.has("mic") || location.hash.startsWith("#handoff=")) {
       const url = new URL(location.href);
       url.searchParams.delete("chat"); url.searchParams.delete("mic");
+      if (url.hash.startsWith("#handoff=")) url.hash = "";
       history.replaceState(history.state, "", url.pathname + url.search + url.hash);
     }
   }
@@ -304,8 +312,26 @@
       if (!you || v.busy || v.phase === "off" || v.phase === "connecting") return;
       // Not on the stage there: listening here is all there is.
       if (you.speak !== "eligible" && !you.elsewhere) return arrived();
+      // The ticket: the chat's word that this account sent itself here, so the voice comes straight over.
+      if (arrival.ticket) {
+        const asked = request("redeem", { ticket: arrival.ticket });
+        arrival.ticket = "";
+        if (asked) {
+          arrival.step = "redeem"; arrival.asked = asked; arrival.redeemAt = Date.now(); arrival.over = status;
+          // The one bounded wait: no answer in time (a socket that dropped took it, and the ticket is spent), the card.
+          setTimeout(arrive, REDEEM_MS + 50);
+          return;
+        }
+      }
       if (!card || !card.shown) askVoice();
       return;
+    }
+    // Waiting on the chat's word: a socket that dropped or reconnected meanwhile, or no answer in time, falls back to
+    // the card, since the ticket is spent either way.
+    if (arrival.step === "redeem") {
+      if (status === arrival.over && Date.now() - arrival.redeemAt < REDEEM_MS) return;
+      arrival.step = "ask"; arrival.asked = 0;
+      return arrive();
     }
     if (arrival.step === "voice") {
       if (!you) return;
@@ -330,6 +356,17 @@
       if (BL.chatCopy && room.zone === "main") BL.chatCopy.goSoon(id);
     }
   };
+  // The chat's word on the ticket: good, the voice comes over as it was there (the step after Switch here's); refused, the card.
+  heard.add((msg) => {
+    if (msg.type !== "result" || !arrival || arrival.step !== "redeem" || msg.requestId !== arrival.asked) return;
+    if (msg.ok) {
+      arrival.mic = msg.mic === true;
+      arrival.step = "voice";
+      joinTries = 1;
+      controller().join({ takeover: true });
+    } else arrival.step = "ask";
+    arrive();
+  });
   subs.add(arrive);
   net.subscribe(arrive);
   // deferred.js loads after this file: the fixture is fetched once the page's scripts have all run.

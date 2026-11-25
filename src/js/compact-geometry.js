@@ -163,6 +163,23 @@
     geometry.compactGeometry = data;
     return geometry;
   };
+  // A mesh made straight from packed columns (island-scene.js, the island view's baked scenery), never through face
+  // objects: `positions` (Float32Array), `offsets` (Uint32Array, faces + 1), `indices`, `colors` (Uint8Array, 3 a face)
+  // and `columns` ({ key, codes, values }, a face's code 0 for no value). Immutable as `pack`'s are; null when off.
+  const fromColumns = ({ positions, offsets, indices, colors, columns = [] }) => {
+    if (!enabled) return null;
+    const count = offsets.length - 1;
+    let maxCorners = 0;
+    for (let index = 0; index < count; index++) maxCorners = Math.max(maxCorners, offsets[index + 1] - offsets[index]);
+    let byteLength = positions.byteLength + offsets.byteLength + indices.byteLength + colors.byteLength + count;
+    for (const column of columns) byteLength += column.codes.byteLength;
+    const data = { version: 1, positions, offsets, indices, colors, flags: new Uint8Array(count), columns, colorExtras: new Map(), count, maxCorners, maxColor: 3, byteLength, legacy: new Map() };
+    data.faces = legacyFaces(data);
+    const geometry = { lines: [], compactGeometry: data };
+    Object.defineProperty(geometry, "verts", { value: positions, enumerable: true, writable: false, configurable: false });
+    Object.defineProperty(geometry, "faces", { value: data.faces, enumerable: true, writable: false, configurable: false });
+    return geometry;
+  };
   const NEGATIVE_ZERO = Object.freeze({});
-  BL.compactGeometry = { enabled, pack, storageOf, createCursor, readFace, copyFace };
+  BL.compactGeometry = { enabled, pack, fromColumns, storageOf, createCursor, readFace, copyFace };
 })();

@@ -1,9 +1,10 @@
 // What an Ooga wears besides its hat (equipment-wardrobe.js), put on one body: the visitor's driven Ooga or another
-// player's. Its character is built again with the worn pieces as data (models.js `templateFor`, keyed by what is worn;
-// the character's own hooks run as ever, and nobody else's), and each of the body's nodes takes the geometry of the
-// same node in that build, so its nodes, poses, gear, controls and companions keep their identities. A mask is a node
-// of its own on the head, as a hat is (character-equipment.js), whose hat is lifted off while the body changes and put
-// back on it. Unsupported pieces (a head of the character's own, a body it models itself) leave that part alone.
+// player's, here or in a chat's island view (island-view-live.js). Its character is built again with the worn pieces
+// as data (models.js `templateFor`, keyed by what is worn; the character's own hooks run as ever, and nobody else's),
+// and each of the body's nodes takes the geometry of the same node in that build, so its nodes, poses, gear, controls
+// and companions keep their identities. A mask is a node of its own on the head, as a hat is (character-equipment.js),
+// whose hat is lifted off while the body changes and put back on it. Unsupported pieces (a head of the character's
+// own, a body it models itself) leave that part alone.
 (() => {
   "use strict";
   const BL = window.BL, W = BL.equipmentWardrobe, { createNode, addChild, removeChild } = BL.scene;
@@ -220,7 +221,8 @@
     if (state.key !== r.key) {
       let target = state.base;
       if (r.key) {
-        const fresh = BL.contributors.traitsFor(cave.traits.name);
+        // The roster's, or the cast's where a page has no roster (Ooga Chat's island view).
+        const fresh = (BL.contributors || BL.characters).traitsFor(cave.traits.name);
         if (fresh.height !== state.base.traits.height || !!fresh.slim !== !!state.base.traits.slim) return false;
         target = BL.models.templateFor({ ...fresh, ...(r.body || null), wardrobe: r.traits, wardrobeKey: r.key, ...(r.axe === undefined ? null : { stoneAxe: r.axe }) });
       }

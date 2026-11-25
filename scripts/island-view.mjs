@@ -1,22 +1,21 @@
 // Bakes the island view's map (docs/ooga-chat-hosts.md, "The island view"): `node scripts/island-view.mjs`, after `npm run
 // build`. The built hub in the suite's Chrome, its Oogas, gorillas, Tess and clouds left out, seen straight down at
-// midday on a fixed day through an orthographic camera over Main Island and the lands round it (the zones a chat's copy
-// carries: the Mempool island, Merge Rock, the Timechain Sphere's islet and ₿IFRÖST's). It writes the picture at W x H
+// midday on a fixed day through an orthographic camera over Main Island alone, in a chat's copy mode (the hub's debug
+// `copyMode`), as a chat's copy carries it. It writes the picture at W x H
 // to src/ooga-chat/art/island-view-main.webp (Ooga Chat's lazy art, scripts/ooga-chat.mjs LAZY_ART) and the same bytes
 // into src/js/island-view-art.js (the island page's copy, a hosted page serving it as a file under art/,
 // scripts/distribution-modules.mjs PICTURE_MODULES), and the capture camera's world-to-picture matrix, with the light
 // and sea the hub showed, into src/js/island-view-data.js, so a face drawn on the picture lands where its Ooga stands
-// and the opt-in Live view (island-view-live.js) looks like the island at that hour. Run it again when the island's
-// look or the lands round it change.
+// and the 3D view (island-view-live.js) looks like the island at that hour. Run it again when the island's look changes.
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dispose, launch } from "../test/browser.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-// The picture's size (4:3, the strip's shape) and the ground it covers: a box round every land, metres across and
-// its middle, north (-z) up.
-const W = 512, H = 384, SPAN = 214, MIDDLE = { x: 12, z: 6 };
+// The picture's size (4:3, the strip's shape) and the ground it covers: Main Island with the sea round it, metres
+// across and its middle, north (-z) up.
+const W = 512, H = 384, SPAN = 112, MIDDLE = { x: 0, z: 0 };
 const page = `file://${join(root, "oogaboogaland.html")}?debug=1&nosim=1&net=0&pos=0&welcome=0&hour=12&time=1200&day=80&rain=0&solo=1&islandworld=0`;
 process.env.TZ = "UTC";
 const b = await launch({ w: W * 2, h: H * 2 + 240 });
@@ -34,6 +33,8 @@ try {
   await b.sleep(1500);
   shot = JSON.parse(await b.evaluate(`(() => {
     const hub = BL.scenes.hub, d = hub.debug, R = __ooga.renderer, M = BL.math.mat4, root = hub.root;
+    // A chat's copy of the island: Main Island alone.
+    d.copyMode(true);
     // Nothing that moves or speaks: the clouds (the island's own and the Mempool island's deck), Tess and any Ooga or gorilla (solo=1 with no character builds none).
     const hidden = [];
     const hide = (node) => { if (node && node.visible) { node.visible = false; hidden.push(node); } };
@@ -60,6 +61,7 @@ try {
     g.drawImage(canvas, 0, (ch - cut) / 2 * sx, cw * sx, cut * sx, 0, 0, ${W}, ${H});
     const url = out.toDataURL("image/webp", 0.82);
     for (const node of hidden) node.visible = true;
+    d.copyMode(false);
     d.weather.hold(false);
     // The picture's own matrix: the same view, its projection the picture's shape and span. Checked against the
     // renderer's projection of the canvas, cut as the picture was.

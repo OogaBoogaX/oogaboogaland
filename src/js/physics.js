@@ -734,7 +734,9 @@
       accumulator = Math.min(accumulator + dt, STEP * MAX_SUBSTEPS);
       let any = !!water;
       for (let i = 0; !any && i < count; i++) if (!ASLEEP[i]) any = true;
-      if (!any && !actors) { accumulator = 0; return; }
+      // Nothing to simulate: a body only just added or sent home still goes where it rests (`home` marks it), or its
+      // node stays at the origin, in the banana pile, until something wakes.
+      if (!any && !actors) { accumulator = 0; sync(); return; }
       while (accumulator >= STEP) { substep(STEP); accumulator -= STEP; }
       sync();
     };

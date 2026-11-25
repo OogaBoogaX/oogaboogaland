@@ -54,7 +54,7 @@
   const SIGNED_IN = { listener: "listener", contributor: "contributor", ineligible: "ineligible", unknown: "unknown", revoked: "revoked", expiring: "contributor", "signout-fails": "contributor" };
   const ROSTERS = ["mixed", "empty", "crowd", "reconnecting", "reauth", "full", "none"];
   const VOICES = ["ok", "denied", "blocked", "refused", "off", "elsewhere"];
-  const CHATS = ["off", "on"];
+  const CHATS = ["off", "on", "mine"];
   // Hosted chats' sample members, keyed as the server keys an account.
   const member = (n, login, role, extra = {}) => ({ id: `gh:${9000 + n}`, generation: 1, source: "app", role, login, display: login, muted: role === "speaker" ? false : undefined, ...extra });
   const person = (id, source, role, login, extra = {}) => ({ id: `fixture:${id}`, generation: 1, source, role, login, display: login, ...extra });
@@ -211,11 +211,11 @@
     const rooms = new Map();
     const room = (id, title, zone, ago, cast, roles = {}) => rooms.set(id, { id, title, zone, startedAt: now() - ago, cast, host: roles.host, cohosts: new Map((roles.cohosts || []).map((c) => [c, now() - 500000])),
       queue: new Map(roles.queue || []), invites: new Map(roles.invites || []), offers: new Map(), stage: new Set(), removed: new Set(), removedInfo: new Map(), cooldown: new Map(), ended: false, sample: true, feeds: new Set() });
-    if (offered === "on") {
+    if (offered === "on" || offered === "mine") {
       // Listening and speaking from both apps (`via`), each here or on the stage since a different moment (`since`).
       const ago = (s) => now() - s * 1000;
       room("fixtureChatOak01", "Sample Oak's chat", "main", 600000, [member(1, "sample-oak", "speaker", { via: "island", since: ago(590), walking: true }),
-        member(2, "sample-fern", "speaker", { via: "app", reconnecting: true, since: ago(400) }), member(3, "sample-reed", "speaker", { via: "island", muted: true, since: ago(300), walking: true }),
+        member(2, "sample-fern", "speaker", { via: "app", reconnecting: true, since: ago(400) }), member(3, "sample-reed", "speaker", { via: "island", muted: true, since: ago(300), walking: true, character: "timechainb" }),
         member(4, "sample-wren", "listener", { via: "island", since: ago(500) }), member(5, "sample-kite", "listener", { via: "app", since: ago(200) }),
         member(6, "sample-lark", "listener", { via: "app", since: ago(100) }), member(7, "sample-heron", "listener", { via: "island", since: ago(550) })],
       { host: "gh:9001", cohosts: ["gh:9002"], queue: [["gh:9004", now() - 30000], ["gh:9005", now() - 10000]], invites: [["gh:9006", now() + 60000]] });
@@ -223,6 +223,8 @@
         member(12, "sample-gull", "listener", { via: "app", since: ago(60) })], { host: "gh:9011" });
       // Its stage is open: a request there is approved the moment it is made.
       rooms.get("fixtureChatDune1").open = true;
+      // `mine`: the signed-in sample account hosts a chat already, as after a reload, so its row leads straight back.
+      if (offered === "mine") room("fixtureChatMine1", "sample-contributor's chat", "main", 300000, [member(21, "sample-pine", "listener", { via: "app", since: ago(200) })], { host: "gh:1" });
     }
     const level = (r, id) => id === r.host ? 2 : r.cohosts.has(id) ? 1 : 0;
     const invitedUntil = (r, id) => (r.invites.get(id) || 0) > now() ? r.invites.get(id) : 0;
@@ -271,7 +273,7 @@
     const asked = (name) => name && { ...ACCOUNTS[name], expiresAt };
     let account = asked(SIGNED_IN[state]), disposed = false;
     const bootstrap = async () => state === "unavailable" ? { ok: false, mode: "unavailable", reason: "fixture" }
-      : parseBootstrap(answer(state === "demo-payment" ? "demo" : state === "real-payment", state !== "provider-disabled", voice !== "off", offered === "on"), null, { fixture: true });
+      : parseBootstrap(answer(state === "demo-payment" ? "demo" : state === "real-payment", state !== "provider-disabled", voice !== "off", offered !== "off"), null, { fixture: true });
     const session = async () => disposed || !account ? null : parseSession(account, now());
     const signIn = (boot, provider) => {
       account = asked(provider === "x" ? "listener" : ["ineligible", "unknown", "revoked"].includes(state) ? state : "contributor");
@@ -292,8 +294,18 @@
       let zone = null, epoch = 0, revision = 0, people = [], step = 0, closed = false, requests = 0;
       let connection = `fixture-conn-${++connections}`, lease = 0, active = false, mic = "muted", mids = 0, activeAt = 0, offeredHere = false;
       // The island view (`view`): while this connection asks, the chat's walkers' places twice a second, as the copy
-      // relays them (audience.js `walk`), each walking a ring round the island's middle.
+      // relays them (audience.js `walk`), each walking a ring round the island's middle, and how they look as it starts
+      // (`looks`): the first in a hat, a shirt and glasses with the gun out, the second (a character with a pet) with its
+      // primary in hand, a jetpack on and its pet grown a size; and who sits on the clouds (`clouds`): every speaker not
+      // walking, a seat each in the cast's order, with the fixture's clock.
       let viewing = false, walkSeq = 0, chain = false;
+      const LOOKS = [{ e: { selection: { item: "rules-without-rulers-top-hat", version: "9ceae44a88cc91185ed244425aeb90ee564a503b36087aff09c01bc7a890d68d" }, size: 100,
+        wardrobe: { shirt: { item: "shirt-be0817bd97baa6cc", version: "be0817bd97baa6cc33b6ad9939e31e175e99de170de5783bc3fea9ccce6f42c4" },
+          glasses: { item: "glasses-bdc859d93a8e48e7", version: "bdc859d93a8e48e77d1f09fd9148b80de68f852b828dfd4641eae2f56d32ddbb" } } }, w: 2 },
+      { e: { selection: null, size: 100, wardrobe: { pet: { item: "custom", version: null, size: 130 } } }, w: 1, j: 1 }];
+      const cloudsFrame = () => ({ type: "clouds", at: now(), clouds: r.cast.filter((w) => !w.walking && w.role === "speaker")
+        .map((w, i) => ({ id: w.id, character: w.character || w.login, seat: `main-cloud-${i + 1}` })) });
+      const looksFrame = () => ({ type: "looks", looks: Object.fromEntries(r.cast.filter((w) => w.walking && w.role === "speaker").map((w, i) => [w.id, LOOKS[i % LOOKS.length]])) });
       const walkFrame = () => {
         if (!viewing || !r) { chain = false; return; }
         const p = [], t = now() / 1000;
@@ -650,10 +662,14 @@
             }
             // The island view asked for or let go: no answer, as the server gives none.
             if (type === "view") {
+              const began = !!r && fields.on === true && !viewing;
               viewing = !!r && fields.on === true;
+              if (began) { message(looksFrame()); if (r.zone === "main") message(cloudsFrame()); }
               if (viewing && !chain) { chain = true; walkFrame(); }
               return;
             }
+            // Go there's ticket: a sample one, for a speaker on the stage, as the server mints it.
+            if (type === "handoff") return message({ type: "result", requestId, ...(active ? { ok: true, ticket: "fixtureHandoffTicket00" } : { ok: false, error: { code: "not_speaking", retryable: false } }), you: you() });
             if (r && !["setRole", "setMic", "reaction", "hand"].includes(type)) return message({ type: "result", requestId, ...chatOp(type, fields), you: you() });
             if (type === "reaction" && me) {
               const at = now();

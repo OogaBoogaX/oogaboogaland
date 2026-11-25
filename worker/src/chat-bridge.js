@@ -21,6 +21,7 @@ import { capabilityOps } from "./chat-capability.js";
 import { contributorForEnv } from "./contributor-access.js";
 import { catalogFor } from "./character-catalog.js";
 import { handleCharacterPortrait, portraitsFor } from "./character-portraits.js";
+import { handleCharacterCatalog } from "./character-catalog-http.js";
 import { publicOps } from "./chat-public.js";
 import { displayOps } from "./chat-display.js";
 import { deleteChatOnlyPlayer, getPlayer } from "./db.js";
@@ -153,6 +154,12 @@ export const bridgeFetch = async (env, request) => {
   if (url.pathname.startsWith("/portraits/")) {
     if (request.headers.get("x-ooga-chat-environment") !== env.ENVIRONMENT) return new Response("Forbidden", { status: 403 });
     return handleCharacterPortrait(request, env, "/api/characters" + url.pathname);
+  }
+  // The published character catalog, public as the island serves it, for Ooga Chat's 3D view to dress the cast as the
+  // island does (docs/ooga-chat-hosts.md, "The 3D view").
+  if (url.pathname === "/catalog") {
+    if (request.headers.get("x-ooga-chat-environment") !== env.ENVIRONMENT) return new Response("Forbidden", { status: 403 });
+    return handleCharacterCatalog(new Request(`https://island.invalid/api/characters/catalog${url.search}`, { method: request.method }), env);
   }
   const media = url.pathname.startsWith("/media/") ? url.pathname.slice(7) : null;
   if (url.pathname === "/commons") return commonsFetch(env, request);

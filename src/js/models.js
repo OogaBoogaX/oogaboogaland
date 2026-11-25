@@ -957,6 +957,24 @@
   };
   // Resting club angles: x tilts the head forward, z rolls it; carry is the working hang.
   const CLUB_REST = { x: 0.95, z: 0 };
+  // The four-legged gait DSB Land's dogs walk with (`rescue-dogs.js` reads it from crew.js, which keeps it by name, and Ooga Chat's island view
+  // from here), shared with a companion built
+  // with legs (a character's `parts.dog` whose node lists them as `legs`: fore left, fore right, hind left, hind right,
+  // each hinged at its hip, and an optional `tail` at its root): the legs swing in diagonal pairs, `swing` radians at
+  // `pace` metres a second, a stride `stride` radians a metre, the body bobbing `bob`; aloft they stretch fore and aft
+  // (`flyFront`, `flyHind`), touching down they tuck a little (`landFront`, `landHind`). A companion whose Ooga rests
+  // in the hammock keeps off the bed: its spot is the ground close beside it that the scene names (`ctx.petLanding`
+  // with `lying`), and there it lies down, its legs out fore and aft (`lieFront`, `lieHind`) and its body down onto
+  // them, three quarters of its hips' height, eased at `settle` a second; it gets up as it moves or its Ooga does.
+  const QUAD_GAIT = Object.freeze({ swing: 0.65, pace: 1.4, stride: 11, bob: 0.018, flyFront: -1.05, flyHind: 1.1, landFront: -0.2, landHind: 0.2,
+    lieFront: -1.5, lieHind: 1.5, settle: 5 });
+  // Sets a legged companion's legs (`front` and `hind` their set angles, `swing` this stride's) and its tail (`wag` its
+  // yaw, `droop` its pitch).
+  const poseQuadruped = (node, front, hind, swing, wag, droop) => {
+    const legs = node.legs;
+    for (let n = 0; n < 4; n++) legs[n].rotation.x = (n < 2 ? front : hind) + (n === 0 || n === 3 ? swing : -swing);
+    if (node.tail) { node.tail.rotation.y = wag; node.tail.rotation.x = droop; }
+  };
   // ---- The refined body ----------------------------------------------------------------------------------------------
   // The modelled look (hero-body.js) is every Ooga's: "R", always. The voxel bodies it replaced can no longer be
   // shown: the switch that built them to compare the two is retired. Character files read this for what they build
@@ -2302,8 +2320,9 @@
         const worn = this.template.traits, key = traits.name + (worn.wardrobeKey ? "\0" + worn.wardrobeKey : "");
         let bare = bareHeads.get(key);
         if (!bare) {
-          // A fresh draw of the character's own hashes: the worn template's build has already spent its `rand`.
-          const fresh = BL.contributors.traitsFor(traits.name), body = buildCaveman({ ...(worn.wardrobeKey ? worn : fresh), rand: fresh.rand, equipmentBare: true });
+          // A fresh draw of the character's own hashes: the worn template's build has already spent its `rand`. The
+          // roster's, or the cast's where a page has no roster (Ooga Chat's island view).
+          const fresh = (BL.contributors || BL.characters).traitsFor(traits.name), body = buildCaveman({ ...(worn.wardrobeKey ? worn : fresh), rand: fresh.rand, equipmentBare: true });
           bare = { headOpen: body.headOpen, headClosed: body.headClosed, portraitHead: body.portraitHead };
           bareHeads.set(key, bare);
         }
@@ -2963,5 +2982,5 @@
     for (const geo of set) if (geo.foliageLods?.owner === geo) { set.add(geo.foliageLods.medium); set.add(geo.foliageLods.far); }
     return set;
   };
-  BL.models = { STYLE, GUN_BANANA_SCALE, BODY, characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, templateFor, templateNode: (node) => TEMPLATE_NODE.get(node) || null, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, die, dieRotationFor };
+  BL.models = { STYLE, GUN_BANANA_SCALE, BODY, characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, QUAD_GAIT, poseQuadruped, templateFor, templateNode: (node) => TEMPLATE_NODE.get(node) || null, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, die, dieRotationFor };
 })();
