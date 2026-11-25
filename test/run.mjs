@@ -44187,7 +44187,7 @@ const persistentSlotChecks = async BL => {
 // stylesheet puts each icon in a column of fixed width (lock, voice, distance as wide as "999 m", crosshair), so they
 // line up down the whole tab, in every group and on the visitor's own row.
 const playersColumnChecks = async () => {
-  const rowsOf = async () => {
+  const rowsOf = async (chatPeople = []) => {
     const ids = new Map(), handlers = {};
     let top = null;
     const make = (tag = "div") => {
@@ -44195,6 +44195,8 @@ const playersColumnChecks = async () => {
         get isConnected() { let p = this; while (p.parentNode) p = p.parentNode; return p === top; },
         get firstChild() { return this.children[0] || null; },
         addEventListener() {}, removeEventListener() {}, focus() {}, closest() { return null; },
+        get classList() { const names = () => this.className.split(" ").filter(Boolean); return { add: (c) => { if (!names().includes(c)) this.className = [...names(), c].join(" "); }, remove: (c) => { this.className = names().filter((x) => x !== c).join(" "); }, toggle: (c, on) => { if (on) this.classList.add(c); else this.classList.remove(c); } }; },
+        querySelector(sel) { const c = sel.slice(1), find = (n) => { for (const k of n.children || []) { if (k.className && k.className.split(" ").includes(c)) return k; const f = find(k); if (f) return f; } return null; }; return find(this); },
         setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }, removeAttribute(k) { delete this.attrs[k]; },
         append(...items) { for (const c of items) { if (typeof c === "string") { this.children.push({ data: c, parentNode: this }); continue; } if (c.parentNode) c.remove(); c.parentNode = this; this.children.push(c); } },
         insertBefore(c, ref) { if (c.parentNode) c.remove(); c.parentNode = this; const i = ref ? this.children.indexOf(ref) : -1; if (i < 0) this.children.push(c); else this.children.splice(i, 0, c); },
@@ -44214,7 +44216,7 @@ const playersColumnChecks = async () => {
     runInNewContext(await readFile(join(root, "src/js/voice-blend.js"), "utf8"), context);
     runInNewContext(await readFile(join(root, "src/js/native-icons.js"), "utf8"), context);
     Object.assign(window.BL, {
-      net: { state: { room: "live", me: { login: "me", display: "Me" }, selfId: 1, online: 3, zone: "outside", hostId: 0, self: { x: 0, y: 0, z: 0, zone: "outside" }, voiceLinks: false, linkApp: [], clouds: [], chatMembers: new Map() }, remotes,
+      net: { state: { room: "live", me: { login: "me", display: "Me" }, selfId: 1, online: 3, zone: "outside", hostId: 0, self: { x: 0, y: 0, z: 0, zone: "outside" }, voiceLinks: false, linkApp: [], clouds: [], chatMembers: new Map(), chatPeople }, remotes,
         voiceLink: () => "none", toggleVoiceLink() {}, subscribe() {}, subscribeRoster() {}, subscribeMoves() {}, subscribePresence() {}, subscribeReactions() {}, subscribeAudience() {}, subscribeClouds() {}, subscribeDuel() {} },
       hud: { voiceIcon: make("svg"), voiceWords: () => "In voice", toast() {} },
       voice: { stats: { enabled: true, muted: false, speaking: false, radius: 0 }, fades: false, RADIUS_MIN: 5, RADIUS_MAX: 60, VOLUME_MAX: 2, subscribe() {}, speaking: () => false, inEarshot: () => true, mutedLocally: () => false, mutedByDuel: () => false, duel() {}, setMuteDuels() {}, volumeOf: () => 1, setVolume() {}, setRadius() {} },
@@ -44226,9 +44228,17 @@ const playersColumnChecks = async () => {
     const walk = (n) => { if (n.tagName === "li") lis.push(n); for (const c of n.children || []) if (c.tagName) walk(c); };
     walk(list);
     const shape = (li) => li.children.map((c) => c.className).join(" ");
-    return { rows: lis.length, shapes: lis.map(shape) };
+    // Each row's name, the heading of its group and its presence dot.
+    const label = (li) => li.querySelector(".roster-label")?.textContent || "";
+    const where = lis.map((li) => [label(li), li.parentNode?.parentNode?.children[0]?.textContent || "", li.querySelector(".roster-presence")?.dataset.online || ""]);
+    return { rows: lis.length, shapes: lis.map(shape), where };
   };
   const cells = await rowsOf();
+  const inChats = await rowsOf([{ id: "gh:2", login: "bea", display: "Bea", speaking: false }, { id: "gh:9", login: "zed", display: "Zed", speaking: true }, { id: "x:5", login: "xo", display: "Xo", speaking: false }]);
+  const app = inChats.where.filter(([, group]) => group === "Ooga Chat");
+  record("Online Oogas lists everyone in hosted chats through Ooga Chat and not on the island under Ooga Chat with its purple dot, by name; one also on the island is listed once, as a player",
+    app.map(([name]) => name).sort().join() === "Xo,Zed" && app.every(([, , dot]) => dot === "cloud") && inChats.where.filter(([name]) => name === "Bea").length === 1,
+    JSON.stringify(inChats.where));
   const css = await readFile(join(root, "src/style.css"), "utf8");
   const ruleOf = (selector) => { const i = css.indexOf(`\n${selector} {`); return i < 0 ? "" : css.slice(i, css.indexOf("}", i)); };
   const tracks = (ruleOf(".players-rows").match(/grid-template-columns:\s*([^;]+);/) || [, ""])[1].trim().split(/\s+(?![^(]*\))/);

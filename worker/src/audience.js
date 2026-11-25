@@ -31,6 +31,7 @@ import "../../src/js/reaction-policy.js";
 import { CLEANUP_BACKLOG_MAX, createMediaBroker, MEDIA_BODY_MAX } from "./audience-media.js";
 import { inspectReporter } from "./inspect-report.js";
 import { createRoles, HOST_HOLD_MS, STAGE_HOLD_MS } from "./chat-roles.js";
+import { PEOPLE_MAX } from "./room-chat-members.js";
 // The one directory of live chats (chat-directory.js), named here so neither file imports the other.
 export const DIRECTORY_NAME = "chats";
 const NO_STANDING = Object.freeze({ rank: "", request: "", askedAt: 0, rankSince: 0 });
@@ -50,6 +51,13 @@ export const MEMBERS_GAP_MS = 2000;
 // A chat speaker's, host's or co-host's drop shorter than this shows nobody anything; longer, their tile shows them
 // reconnecting, in place, while their place is held (audience-model.js, quiet hold).
 export const QUIET_MS = 5 * 1000;
+// A chat connection that has sent nothing, not even a ping (which the runtime answers without waking the object), for
+// SILENT_MS is taken for gone, as its close would have said: a phone put in airplane mode sends no close, and the
+// runtime may take minutes to notice. While anyone holds the stage (a lease or a rank) the alarm wakes every SWEEP_MS
+// to look. Pages ping every 10 s; SILENT_MS allows for pages from before that still pinging every 30 s, and can come
+// down to 25 s once those are gone. A drop noticed later than LATE_MS after the connection was last heard counts from
+// then: a host's hold, a held place and the reconnecting mark run from the last ping, not from the moment it was seen.
+export const SILENT_MS = 45 * 1000, SWEEP_MS = 15 * 1000, LATE_MS = 20 * 1000;
 export const chatName = (id) => `chat:${id}`;
 // A chat's land: a zone it is held in (`main`, `dsb`), or `none`, Ooga Chat voice alone, with no copy, clouds or Go
 // there. A land-less chat's roster lives in the model's `main` zone, which is what its socket's frames name.
@@ -74,7 +82,7 @@ export const PENDING_MS = 30 * 1000;
 // How many of its own earlier connections a page may name in `setRole`'s `replaces`.
 export const REPLACES_MAX = 4;
 export const REAUTH_MS = 60 * 60 * 1000;
-export const CLOSE = { bad: 4400, auth: 4401, removed: 4403, ended: 4404, replaced: 4409, protocol: 4426, full: 4429, off: 4503 };
+export const CLOSE = { bad: 4400, auth: 4401, removed: 4403, ended: 4404, silent: 4408, replaced: 4409, protocol: 4426, full: 4429, off: 4503 };
 const MSG_HZ = 10, MSG_BURST = 20;
 const REPLIES_KEPT = 16;
 const CONTRIBUTIONS_MS = 10 * 60 * 1000;
@@ -129,6 +137,8 @@ export class Audience extends DurableObject {
     this.sockets = new Map();
     this.replies = new Map();
     this.buckets = new Map();
+    // When each connection last sent a frame (pings the runtime answers are read from it, `heardOf`); memory only.
+    this.heard = new Map();
     this.watching = new Set();
     this.island = { seq: 0, speakers: [], active: [], linked: [] };
     this.roomQueue = Promise.resolve();
@@ -527,6 +537,8 @@ export class Audience extends DurableObject {
     // Media cleanup retries even after every client has gone; a chat wakes for a lapsing invite or its held host.
     next = Math.min(next, this.media.nextCleanup());
     if (this.roles) next = Math.min(next, this.roles.nextAt(), this.model.quietUntil());
+    // Someone on the stage: look for a silent connection every SWEEP_MS (`sweepSilent`).
+    if (this.chat && this.roles && !this.roles.ended && this.stageHeld()) next = Math.min(next, Date.now() + SWEEP_MS);
     if (this.islandWords.size || this.members.gone || this.copyGone) next = Math.min(next, Date.now() + ISLAND_RETRY_MS);
     if (next === Infinity) return;
     const current = await this.ctx.storage.getAlarm();
@@ -535,6 +547,7 @@ export class Audience extends DurableObject {
 
   async alarm() {
     const now = Date.now();
+    this.sweepSilent(now);
     if (this.roles && !this.roles.ended) await this.rolesTick(now);
     if (this.model.expire(now).length) await this.saveQuiet();
     for (const [id, w] of [...this.islandWords]) await this.sendIsland(id, w);
@@ -581,7 +594,12 @@ export class Audience extends DurableObject {
     // A chat keeps a speaker's place on the stage a while unless they went back to listening themselves.
     const c = this.model.conns.get(connId);
     // Gone to another chat's stage (`moved`) is the speaker's own word too: their place here goes.
-    if (this.roles && lease && c) this.stageLeft(c.id, reason === "listener" || reason === "moved");
+    if (!this.roles || !lease || !c) return;
+    // The same account taking its own voice to another of its connections in this chat (`handoff`: Switch here, Go there
+    // from Ooga Chat): its place, and a co-host's rank, stay with it; the place is held as for a drop until the new
+    // lease, granted at once, takes it. Its island and directory words are the new lease's to say.
+    if (reason === "handoff") { if (this.roles.leaseEnded(c.id, false, Date.now()).changed) this.background(this.rolesChanged()); return; }
+    this.stageLeft(c.id, reason === "listener" || reason === "moved");
   }
 
   /** Ooga Chat speakers' publications changed: the Room's island players with an open outdoor grant hear them. */
@@ -602,28 +620,31 @@ export class Audience extends DurableObject {
     this.background(this.roomQueue);
   }
 
-  close(connId, code, reason) {
+  close(connId, code, reason, since = Date.now()) {
     const ws = this.sockets.get(connId);
     this.inspect.count(code === CLOSE.auth ? "closeAuth" : code === CLOSE.full ? "closeFull" : code === CLOSE.protocol ? "closeProtocol" : code === CLOSE.off ? "closeOff"
       // A connection its own page replaced is a socket that went, not a bad one.
-      : code === CLOSE.replaced ? "gone" : "closeBad");
+      : code === CLOSE.replaced ? "gone" : code === CLOSE.silent ? "silent" : "closeBad");
     // A page back from a dropped socket replacing its old one: what everyone sees stands while it speaks again.
-    this.drop(connId, code === CLOSE.replaced);
+    this.drop(connId, code === CLOSE.replaced || code === CLOSE.silent, since);
     if (ws) { try { ws.serializeAttachment(null); ws.close(code, reason); } catch { /* already closed */ } }
   }
 
-  /** A connection goes. `quiet`: it dropped rather than left, so a chat speaker's or manager's row stands a while. */
-  drop(connId, quiet = false) {
+  /**
+   * A connection goes. `quiet`: it dropped rather than left, so a chat speaker's or manager's row stands a while.
+   * `since`: when it went (its last frame, for a drop noticed late), which its holds count from.
+   */
+  drop(connId, quiet = false, since = Date.now()) {
     const was = this.model.conns.get(connId), R = this.roles;
     const hold = quiet && was && R && !R.ended && !R.isRemoved(was.id) && (was.lease && was.lease.state === "active" || !!R.rankOf(was.id));
     // Reconnecting for as long as their place is held: a minute on the stage, the host's role its own hold.
-    const now = Date.now(), c = this.model.disconnect(connId, hold ? { quietUntil: now + QUIET_MS, until: now + (R.host === was.id ? HOST_HOLD_MS : STAGE_HOLD_MS) } : null);
+    const now = since, c = this.model.disconnect(connId, hold ? { quietUntil: now + QUIET_MS, until: now + (R.host === was.id ? HOST_HOLD_MS : STAGE_HOLD_MS) } : null);
     if (hold) this.background(this.saveQuiet());
     if (c && this.roles) {
-      if (c.lease) this.stageLeft(c.id, false);
+      if (c.lease) this.stageLeft(c.id, false, now);
       if (!this.present(c.id)) {
         // Gone altogether: their request goes (hosts could not answer it), and a host's hold starts.
-        const cancelled = this.roles.cancel(c.id).changed, away = this.roles.presence(c.id, false, Date.now()).changed;
+        const cancelled = this.roles.cancel(c.id).changed, away = this.roles.presence(c.id, false, now).changed;
         // Gone from the chat, an open co-host offer frees its slot.
         const freed = this.roles.dropOffer(c.id).changed;
         if (freed) this.sendChatInfo();
@@ -631,6 +652,7 @@ export class Audience extends DurableObject {
       }
     }
     this.sockets.delete(connId);
+    this.heard.delete(connId);
     this.replies.delete(connId);
     this.buckets.delete(connId);
     // Every session of the connection goes, its publication with every subscription to it.
@@ -662,6 +684,7 @@ export class Audience extends DurableObject {
       return new Response(null, { status: 101, webSocket: client });
     }
     this.sockets.set(connId, server);
+    this.heard.set(connId, Date.now());
     this.save(connId);
     if (this.roles && this.roles.presence(id, true, Date.now()).changed) await this.rolesChanged();
     this.inspect.count(who.provider === "x" ? "admitX" : "admitGithub");
@@ -699,6 +722,7 @@ export class Audience extends DurableObject {
     const a = ws.deserializeAttachment();
     const c = a && a.conn && this.model.conns.get(a.conn.connId);
     if (!c || this.sockets.get(c.connId) !== ws) return;
+    this.heard.set(c.connId, Date.now());
     if (typeof message !== "string" || message.length > FRAME_MAX) { this.close(c.connId, CLOSE.bad, "unreadable"); return; }
     let msg;
     try { msg = JSON.parse(message); } catch { this.close(c.connId, CLOSE.bad, "unreadable"); return; }
@@ -821,7 +845,7 @@ export class Audience extends DurableObject {
       if (!takeover) { this.close(o.connId, CLOSE.replaced, "replaced"); continue; }
       const lease = this.model.endLease(o.connId);
       this.save(o.connId);
-      this.leaseEnded(o.connId, lease, "moved");
+      this.leaseEnded(o.connId, lease, "handoff");
       this.tellYou(o.connId, "moved");
     }
     // Leave is asked again after every wait above: an invite may have lapsed, or a host moved them, meanwhile.
@@ -843,7 +867,9 @@ export class Audience extends DurableObject {
     const connId = a && a.conn && a.conn.connId;
     if (!connId || this.sockets.get(connId) !== ws) return;
     this.inspect.count("gone");
-    this.drop(connId, true);
+    // Noticed late (a connection that went without a word): it went when it was last heard.
+    const now = Date.now(), heard = this.heardOf(connId);
+    this.drop(connId, true, now - heard > LATE_MS ? heard : now);
     await this.flush();
     // A host who left starts the hold, which only the alarm can end.
     await this.scheduleAlarm();
@@ -899,6 +925,32 @@ export class Audience extends DurableObject {
   }
 
   present(id) { const p = this.model.people.get(id); return !!p && p.conns.size > 0; }
+  /**
+   * When a connection was last heard: its last frame here, or the last ping the runtime answered for it, whichever is
+   * later. One with no word at all yet (a woken object's socket before its first ping) counts from the first look.
+   */
+  heardOf(connId) {
+    const ws = this.sockets.get(connId), pinged = ws && this.ctx.getWebSocketAutoResponseTimestamp ? this.ctx.getWebSocketAutoResponseTimestamp(ws) : null;
+    const at = Math.max(this.heard.get(connId) || 0, pinged ? pinged.getTime() : 0);
+    if (at) return at;
+    const now = Date.now();
+    this.heard.set(connId, now);
+    return now;
+  }
+  /** Whether anyone holds the stage in this chat: a lease, or a host's or co-host's rank. */
+  stageHeld() {
+    for (const c of this.model.conns.values()) if (c.lease || this.roles.rankOf(c.id)) return true;
+    return false;
+  }
+  /** A chat's connections silent past SILENT_MS go as if they had closed, counted from when they were last heard. */
+  sweepSilent(now) {
+    if (!this.chat) return;
+    for (const c of [...this.model.conns.values()]) {
+      const heard = this.heardOf(c.connId);
+      if (now - heard < SILENT_MS) continue;
+      this.close(c.connId, CLOSE.silent, "silent", heard);
+    }
+  }
   touchId(id) { if (this.chat && this.model.people.has(id)) this.model.touch(id, this.zoneOf()); }
   /** The model zone a chat's roster lives in (`rosterZone`). */
   zoneOf() { return rosterZone(this.chat.zone); }
@@ -910,10 +962,11 @@ export class Audience extends DurableObject {
   }
 
   /** A lease ended: the speaker's place on the stage goes, or is held, and their voice is free for another chat. */
-  stageLeft(id, voluntary) {
+  stageLeft(id, voluntary, at = Date.now()) {
     // Going back to listening on their own word: a quiet hold of their row ends with the place it stood for.
     if (voluntary) this.unquiet(id);
-    const ended = this.roles.leaseEnded(id, voluntary, Date.now());
+    // A place held for a drop counts from when it went (`at`, the last ping for a drop noticed late).
+    const ended = this.roles.leaseEnded(id, voluntary, at);
     if (ended.changed) this.background(this.rolesChanged());
     // A co-host who left the stage is a listener with the offer back (their slot kept): they and everyone hear so.
     if (ended.reinstated) this.cohostReinstated(id);
@@ -1041,14 +1094,20 @@ export class Audience extends DurableObject {
 
   /**
    * This chat for the island's Online Oogas, from everyone with a row here (a quiet hold's too): its title, how many
-   * speak and listen, and how many of them through Ooga Chat's app (`via`), whom the island's "N online" adds. No names.
+   * speak and listen, and who of them through Ooga Chat's app (`via`), whom the island's "N online" adds and its Online
+   * Oogas names in its Ooga Chat group (`people`: their logins and names, speakers first, at most PEOPLE_MAX).
    */
   summaryOf() {
-    const { speakers, listeners } = this.tally(), ids = [];
+    const { speakers, listeners } = this.tally(), ids = [], people = [];
     // Every account here through Ooga Chat's app, for the island's "N online" (each once there, players left out); as many
     // as the chat's own limits let in.
-    for (const r of this.model.zones[this.zoneOf()].rows.values()) if (r.via === "app") ids.push(r.id);
-    return { title: this.chat.title, speakers, listeners, ids };
+    for (const r of this.model.zones[this.zoneOf()].rows.values()) {
+      if (r.via !== "app") continue;
+      ids.push(r.id);
+      people.push({ id: r.id, login: r.login, display: r.display, speaking: !!(r.rank || r.role === "speaker") });
+    }
+    people.sort((a, b) => b.speaking - a.speaking);
+    return { title: this.chat.title, speakers, listeners, ids, people: people.slice(0, PEOPLE_MAX) };
   }
 
   /**
@@ -1077,7 +1136,7 @@ export class Audience extends DurableObject {
     const report = this.summaryOf(), sig = JSON.stringify(report), id = this.chat.id;
     if (sig === M.sent) { M.failed = false; return; }
     M.at = Date.now(); M.busy = true;
-    M.queue = M.queue.then(() => this.env.ROOM.getByName("island").chatMembers(id, report.title, report.speakers, report.listeners, report.ids))
+    M.queue = M.queue.then(() => this.env.ROOM.getByName("island").chatMembers(id, report.title, report.speakers, report.listeners, report.ids, report.people))
       .then(() => { M.sent = sig; M.failed = false; }, () => { M.failed = true; })
       .then(() => { M.busy = false; if (M.due) this.reportMembers(); });
     this.background(M.queue);
@@ -1088,7 +1147,7 @@ export class Audience extends DurableObject {
     const chat = this.members.gone;
     if (!chat || !this.env.ROOM) return;
     let told = false;
-    try { told = (await this.env.ROOM.getByName("island").chatMembers(chat, "", 0, 0, [])).ok === true; } catch { told = false; }
+    try { told = (await this.env.ROOM.getByName("island").chatMembers(chat, "", 0, 0, [], [])).ok === true; } catch { told = false; }
     if (!told || this.members.gone !== chat) return;
     this.members.gone = null;
     await this.ctx.storage.delete("membersGone");

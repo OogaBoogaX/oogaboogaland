@@ -59,6 +59,14 @@ export const appBuild = async (env) => {
   return value;
 };
 
+/** The island's origin (`ISLAND_ORIGIN`): an https origin with no path, or null. */
+export const islandOrigin = (env) => {
+  try {
+    const url = new URL(env.ISLAND_ORIGIN || "");
+    return url.protocol === "https:" && url.origin === env.ISLAND_ORIGIN ? url.origin : null;
+  } catch { return null; }
+};
+
 export const bootstrap = async (env) => {
   const features = effective(env, await bridgeHello(env));
   const login = {};
@@ -73,6 +81,8 @@ export const bootstrap = async (env) => {
     protocols: features.chats ? { ...PROTOCOLS, audience: [...PROTOCOLS.audience, 2] } : PROTOCOLS,
     features: { github: features.github, x: features.x, voice: features.listen, feed: features.feed, speak: features.speak, commons: features.commons, cloud: features.cloud, chats: features.chats },
     paths,
+    // The island the chats belong to, for a chat's Go there: an https origin, or none.
+    ...(features.chats && islandOrigin(env) ? { island: islandOrigin(env) } : {}),
   };
 };
 

@@ -8,9 +8,9 @@
 // fields), hear(fn) }`; `joinVoice()` its Join Voice, called inside Start speaking's press; `faceOf(character)` a
 // portrait's address; `startZone()` the zone Start a chat chooses first; `toast(text)` the page's own announced toast,
 // if it has one; `shown()` whether the panel can be seen now; `rowFace(row)` a preview tile's portrait; `speakNow`
-// whether Request to speak reads Speak now on an open stage; `goThere`, the island's alone (chat-copy.js), `{ state(room),
-// press(), subscribe(fn) }`: the footer's Go there (Go back while on the chat's island), `state` its `{ label, words,
-// disabled, title }` or null for none; `islandView`, `{ picture, loadLive(), island(), storageKey }`, the island view's
+// whether Request to speak reads Speak now on an open stage; `goThere`, `{ state(room), press(), subscribe(fn) }`: Go
+// there on the island view (the island's: its Ooga onto the chat's island, Go back while there, chat-copy.js; Ooga
+// Chat's: the chat opened on the island, ooga-chat-hosts.js), `state` its `{ label, words, disabled, title }` or null for none; `islandView`, `{ picture, loadLive(), island(), storageKey }`, the island view's
 // map picture, how the page brings Live view's code, the island it built already (the island page's) and where the
 // viewer's Live view choice is kept (island-view.js). `update(state)` takes the page's state in Ooga Chat's
 // shape: `session.identity` (`provider`, `display`, `login`, `participant`), `room` (the chat chosen, with its
@@ -39,10 +39,11 @@
 //   participant (`actionsFor`);
 // - one polite live region (`.hc-chat-notice`, or the page's toast) for every notice and refused request, in words
 //   (`noticeText`), a burst of requests joined into one line at most every ASKED_MS, nothing said twice.
-// - the island view (island-view.js) in `.hc-room-strip` over the roster, shown only while one of the chat's speakers
-//   walks its copy of the zone (a row's `walking`): the chat is asked for their places (`{ type: "view", on: true }`) only
-//   while it shows, the panel is shown and the page is visible, and told `on: false` as that ends; a new connection asks
-//   again. Its `walk` frames come through `chats.hear`.
+// - the island view (island-view.js) in `.hc-room-strip` over the roster, in every Main Island chat: the island standing
+//   still, and each speaker walking the chat's copy of it (a row's `walking`) where they stand, with Go there over it.
+//   The chat is asked for walkers' places (`{ type: "view", on: true }`) only while someone walks, the panel is shown
+//   and the page is visible, and told `on: false` as that ends; a new connection asks again. Its `walk` frames come
+//   through `chats.hear`.
 // Pop-ups (a tile's menu, the queue, a confirmation) are one wood-framed box, a sheet at the screen's foot under 400px;
 // the look is chat-hosts.css. The pure parts (`parseList`, `actionsFor`, `noticeText`, `joinNames`) need no document.
 (() => {
@@ -153,6 +154,7 @@
     uncohost: () => "You're no longer a co-host",
     host: () => n.id === me ? "You're the host now" : `${nameOf(n.id)} is the host now`,
     removed: () => "A host removed you from this chat",
+    island: () => "Your chat moved to Ooga Booga Land",
     ended: () => "The chat ended"
   })[n.kind]?.() || "";
   const REFUSED = { cooldown: (s) => `You can ask again in ${s || 60} s`, rate_limited: (s) => s ? `Wait ${s} s, then try again` : "Wait a moment, then try again",
@@ -478,12 +480,13 @@
       paint();
     }, { signal });
     leave.addEventListener("click", () => goOut(leave), { signal });
-    // Go there: the speaker's own Ooga onto the chat's island and back (the island's page alone).
+    // Go there, on the island view: on the island's page the speaker's own Ooga onto the chat's island and back; in Ooga
+    // Chat the chat opened on the island, voice and all.
     const goTo = button("foot-button hc-go", "Go there");
     goTo.hidden = true;
     if (goThere) goTo.addEventListener("click", (e) => { if (e.detail) goTo.blur(); goThere.press(); }, { signal });
     const offGo = goThere ? goThere.subscribe(() => paint()) : () => {};
-    foot.join.after(goTo, ask, end, leave);
+    foot.join.after(ask, end, leave);
 
     // --- pop-ups: a tile's menu, the queue, a confirmation ---
     const pop = make("div", "hc-pop");
@@ -759,9 +762,11 @@
     let viewSent = null;
     function syncView() {
       if (!state) return;
-      const walkers = !!isle && !!room && people.some((p) => p.walking), want = walkers && shown() && !document.hidden;
-      set(strip, "hidden", !walkers);
-      if (isle) isle.update({ rows: room ? people : [], talking: state.voice.talking || [], speaking: !!state.voice.speaking, self: me, active: want });
+      // Every Main Island chat shows its island, standing still until someone walks it; only walkers' places are asked for.
+      const place = !!isle && !!room && room.zone === "main", seen = place && shown() && !document.hidden;
+      const want = seen && people.some((p) => p.walking);
+      set(strip, "hidden", !place);
+      if (isle) isle.update({ place, rows: room ? people : [], talking: state.voice.talking || [], speaking: !!state.voice.speaking, self: me, active: seen });
       if (!room || state.audience.status !== "live") { viewSent = null; return; }
       if (viewSent === want || viewSent === null && !want) return;
       if (chats.request("view", { on: want })) viewSent = want;
@@ -779,7 +784,7 @@
     // The strip over the roster: the island view, while someone walks the chat's island.
     const strip = make("div", "hc-room-strip");
     strip.hidden = true;
-    if (isle) strip.append(isle.node);
+    if (isle) { strip.append(isle.node); isle.stage.append(goTo); }
     space.parts.list.before(strip);
     node.append(starter.node, preview);
     space.parts.footRow.before(invite, offer);

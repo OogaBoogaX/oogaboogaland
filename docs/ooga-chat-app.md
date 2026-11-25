@@ -153,6 +153,9 @@ this address (#662, #663); the path is a proposal for the owner to confirm.
   fixture adapter alone may answer `"demo"`, which production rejects, so an outage never becomes a simulated payment.
 - `paths` are same-origin absolute paths (no `//host`, no scheme, no `..`). The page never holds a secret, token or
   SFU credential; OAuth runs entirely on the server, reached by a top-level navigation to the login path.
+- `island`, only with `features.chats`: the island's https origin (the edge's `ISLAND_ORIGIN`, nothing else in it),
+  which a Main Island chat's Go there opens ([ooga-chat-hosts.md](ooga-chat-hosts.md), The island view). The one
+  address the page names off its own origin; anything not a bare https origin is dropped and Go there stays off.
 - `build`, if it names a deployment other than the page's own (`<meta name="ooga-chat-build">`), adds "A newer Ooga
   Chat is out" with Reload.
 

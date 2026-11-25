@@ -1780,6 +1780,7 @@ body[data-active-scene="block"] .mode-hud {
 .call-mark { display: inline-flex; }
 /* The island's emoji bar is its room's, so a hosted chat's panel (cloud-panel.js `data-space`) offers none. */
 #cloud-panel[data-space] #cloud-reactions { display: none; }
+#cloud-panel:not([data-space="on"]) #cloud-chat-reactions { display: none; }
 .call-mark[hidden] { display: none; }
 .call-mark svg { width: 12px; height: 12px; shape-rendering: crispEdges; }
 .players-link svg { width: 11px; height: 11px; shape-rendering: crispEdges; }

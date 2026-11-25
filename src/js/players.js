@@ -99,6 +99,15 @@
     listenerRows.set(key, row);
     return row;
   };
+  // A listener row's mark: gray for Main Island's listeners, Ooga Chat's purple for someone in a hosted chat through the
+  // app (`state.chatPeople`), whose name is not grayed: they are online, in Ooga Chat.
+  const markListener = (row, app, speaking = false) => {
+    const dot = row.li.querySelector(".roster-presence"), kind = app ? "cloud" : "listener";
+    const words = !app ? "Listening in Ooga Chat" : speaking ? "Speaking in Ooga Chat" : "In Ooga Chat";
+    if (dot.dataset.online !== kind) dot.dataset.online = kind;
+    if (dot.title !== words) { dot.title = words; dot.setAttribute("aria-label", words); }
+    row.li.classList.toggle("players-listener", !app);
+  };
   // In Ooga Chat: each live hosted chat (net.js `state.chatMembers`, the room's word), a group of its own after every
   // zone's: one button a chat, its title (wrapping, never cut short) and its counts under it ("3 speaking · 12 listening",
   // a count of nobody left out), "You're in this chat" on the one the visitor is in; busiest first, then by title. A press
@@ -415,6 +424,7 @@
     if (listening) for (const l of listening) {
       const row = listenerRow(l.id);
       row.name = l.display; row.zone = "outside"; row.group = Z.groupOf("outside"); row.seen = pass; row.account = 0;
+      markListener(row, false);
       order.push(row);
     }
     // Linked partners in Ooga Chat (`net.state.linkApp`), who can hear this visitor wherever they stand: each listed with
@@ -425,6 +435,18 @@
       const row = listenerRow(key);
       if (row.seen !== pass) { row.name = q.display; row.zone = "ooga-chat"; row.group = "ooga-chat"; row.seen = pass; order.push(row); }
       row.account = q.id;
+    }
+    // Everyone in hosted chats through Ooga Chat and not on the island (the room's `chat-people`), under Ooga Chat with
+    // its purple dot: the names behind the "N online" the chats add. Anyone listed already (a player, a linked partner,
+    // a speaker on a cloud) is listed once.
+    for (const q of s.chatPeople) {
+      const account = q.id.startsWith("gh:") ? Number(q.id.slice(3)) : 0;
+      if (account && (account === s.selfId || net.remotes.has(account)) || cloudRows.has(q.id)) continue;
+      const row = listenerRow(q.id);
+      if (row.seen === pass) continue;
+      row.name = q.display; row.zone = "ooga-chat"; row.group = "ooga-chat"; row.seen = pass; row.account = 0;
+      markListener(row, true, q.speaking);
+      order.push(row);
     }
     for (const [id, row] of listenerRows) if (row.seen !== pass) { row.li.remove(); listenerRows.delete(id); }
     Z.arrange(order, selfRow.group);

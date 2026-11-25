@@ -40,6 +40,7 @@ release (#669).
 |---|---|---|
 | Edge Worker | `ooga-chat-staging` | `ooga-chat-production` |
 | Origin (`SITE_ORIGIN`) | `https://ooga-chat-staging.wickedsmartbitcoin.workers.dev` | `https://ooga.chat` (custom domain; no workers.dev copy) |
+| Island (`ISLAND_ORIGIN`, the bootstrap's `island`, for a chat's Go there) | `https://oogaboogaland-staging.wickedsmartbitcoin.workers.dev` | `https://oogabooga.land` |
 | Config | `wrangler.ooga-chat.staging.jsonc` | `wrangler.ooga-chat.production.jsonc` |
 | D1 | `ooga-chat-staging` (`109e1799-…`, ENAM) | `ooga-chat-production` (`c4a02871-…`, ENAM) |
 | Bridge (`OBL`) | `oogaboogaland-staging#ChatBridge` | `oogaboogaland-production#ChatBridge` |
@@ -720,6 +721,7 @@ Names only; values live in Workers secrets and the owner's password manager (`wo
 |---|---|---|---|
 | `ENVIRONMENT` | var | edge and island | `staging` or `production`; must match across the bridge |
 | `SITE_ORIGIN` | var | edge | the app's origin, for redirects, cookies, callbacks and the Origin check |
+| `ISLAND_ORIGIN` | var | edge | the island's https origin, which a Main Island chat's Go there opens (the bootstrap's `island`); unset, Go there stays off |
 | `FEATURES` | var | edge | the edge's flags, above |
 | `OOGA_CHAT_FEATURES` | var | island | the bridge's flags, above |
 | `GITHUB_CLIENT_ID` | var | edge | Ooga Chat's own GitHub OAuth App in this environment (not the island's) |
