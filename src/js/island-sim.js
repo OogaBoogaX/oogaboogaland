@@ -496,7 +496,8 @@
 
     return {
       setCast, setActivity, place, setPile, setBananas, step, motion,
-      get t() { return t; }, get version() { return version; }, get stir() { return stir; }, get oogas() { return oogas; }, get ring() { return ring; },
+      // `clock` is `t` and the time owed it short of a step, which runs on between steps, as a page draws by it.
+      get t() { return t; }, get clock() { return t + owed; }, get version() { return version; }, get stir() { return stir; }, get oogas() { return oogas; }, get ring() { return ring; },
       get fan() { return fanCount; }, get platform() { return platform; }, byName: (name) => byName.get(name) || null
     };
   };

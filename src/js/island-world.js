@@ -138,7 +138,8 @@
         if (sim.t !== before) { sim.motion(frame, 0); take(frame, sim.t * 1000); }
       }
       if (!live) return;
-      const at = sim ? sim.t * 1000 - LOCAL_DELAY_MS : link.serverNow() - DELAY_MS;
+      // The local world steps 20 times a second; drawn by `t` alone, every Ooga would stand still for frames and then jump.
+      const at = sim ? sim.clock * 1000 - LOCAL_DELAY_MS : link.serverNow() - DELAY_MS;
       if (Number.isNaN(timeline.sample(at, shown))) return;
       let followed = 0;
       for (let i = 0; i < n; i++) {

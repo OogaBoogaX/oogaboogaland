@@ -47919,7 +47919,7 @@ const lecturePlayerChecks = async () => {
 // read as a page's crew reads them (roster-panel.js `stateAt`, contributors.js `hasRecentActivity`).
 const islandWorldProof = async () => {
   const context = { window: { BL: {} }, crypto: globalThis.crypto };
-  for (const file of ["math.js", "npc-paths.js", "roster-panel.js", "island-layout.js", "island-sim.js", "game-wire.js"])
+  for (const file of ["math.js", "npc-paths.js", "roster-panel.js", "island-layout.js", "island-sim.js", "game-wire.js", "game-timeline.js", "island-world.js"])
     runInNewContext(await readFile(join(root, "src/js", file), "utf8"), context);
   const BLx = context.window.BL, S = BLx.islandSim, L = BLx.islandLayout, ACT = S.ACT;
   const cast = Array.from({ length: 40 }, (_, i) => ({ name: `ooga${i}` }));
@@ -47968,7 +47968,30 @@ const islandWorldProof = async () => {
   const [w, c, z] = placed.oogas, worker = w.visible && w.p.x === 7 && w.p.z === 3 && w.heading === 1;
   const seated = c.p.x === seat[0] + 0.1 && c.p.z === seat[1] && c.table === 0 && c.spot === 0 && c.act === ACT.SIT;
   placed.setActivity("ooga2", "working", 0b0101); placed.step(S.STEP);
+  // Regression: signed out, the page's own world stepped 20 times a second and was drawn by its step clock alone, so
+  // at 60 fps every walking Ooga stood still two frames in three and jumped on the third (island-world.js). A walk's own
+  // end may hold it a frame or two.
+  const walkers = cast.slice(0, 6).map((c, i) => ({ traits: { name: c.name }, contributor: c.name, state: "working", bedTravel: { mode: null },
+    root: { visible: true, position: { x: 7 + i, y: 0, z: 3 }, rotation: { y: 0 } } }));
+  const localWorld = BLx.islandWorld.create({
+    crew: { list: walkers, workSites: L.sites, siteActive: (cave, site) => site === L.sites[0] || site === L.sites[2], refreshStates() {}, refreshRosterRow() {} },
+    contributors: { stateFor: () => "working" }, net: { state: { me: null }, subscribe: () => () => {} }
+  });
+  const last = walkers.map(() => null);
+  let walkFrames = 0, stillFrames = 0;
+  for (let frame = 0; frame < 60 * 20; frame++) {
+    localWorld.update(1 / 60);
+    walkers.forEach((cave, i) => {
+      const f = cave.follow, was = last[i];
+      if (f && was && f.act === ACT.WALK && was.act === ACT.WALK && frame > 60) {
+        walkFrames++;
+        if (f.x === was.x && f.z === was.z) stillFrames++;
+      }
+      last[i] = f ? { x: f.x, z: f.z, act: f.act } : null;
+    });
+  }
   return {
+    localSmooth: localWorld.stats.mode === "local" && walkFrames > 600 && stillFrames * 50 < walkFrames,
     startsPlaced: worker, startsSeated: seated, startsOnce: !z.start && Math.hypot(z.p.x - 7, z.p.z + 3) > 0.5,
     deterministic: rows(a) === rows(b) && rows(a) !== rows(world(6)),
     pileTable: L.pile.length > 4 && L.pile.every(([count, radius]) => { const p = S.create(); p.setBananas(count); return Math.abs(p.platform - radius) < 1e-9; }),
@@ -48043,7 +48066,7 @@ const unitChecks = async () => {
   record("passive work legs: the authored fixed planner circles the real pile ring, follows one spoke out to the target, never crosses the pile, and replans rather than reuse a graph lane; a walker between spoke samples, or a goal between them, is never sent back to a sample behind it or past the goal; a passive return leg keeps its reserved pile slot on the planned path while an ordinary one keeps the direct pile approach; clanking to chilling from mid-outbound or mid-return walks back along the cave route to the pile slot, then to the chill spot, on terrain and ignoring objects; a passive gorilla's walk to its Ooga's pile slot goes straight over the pile while its work travel to a cave walks straight from another cave or the meadow, even when its origin is reset mid-walk, on terrain, still handing wall steps to the climber",
     Object.values(fixedRoutine).every(Boolean), JSON.stringify(fixedRoutine));
   const islandWorld = await islandWorldProof();
-  record("island world: one seed, one world; workers go round their active caves in turn, shoot from a place in the cave's fan and eat back at the reload fan, chillers idle on spots of their own clear of the pile's ring, sleepers and the away are not shown, its pile from a banana count is the hub's, its windows and caves read as a page's crew reads them, and a world started beside a placed crew takes each Ooga up where it stands, once",
+  record("island world: one seed, one world; workers go round their active caves in turn, shoot from a place in the cave's fan and eat back at the reload fan, chillers idle on spots of their own clear of the pile's ring, sleepers and the away are not shown, its pile from a banana count is the hub's, its windows and caves read as a page's crew reads them, a world started beside a placed crew takes each Ooga up where it stands, once, and a signed-out page's own world moves every walking Ooga on every frame",
     Object.values(islandWorld).every(Boolean), JSON.stringify(islandWorld));
   const passiveWeapons = await passiveWeaponTargetProof();
   record("passive weapon targets: a shot passes through a passive NPC to the body behind it, hover and carry picks still find the NPC, and a non-passive body takes the hit",
