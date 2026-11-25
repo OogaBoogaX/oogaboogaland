@@ -129,7 +129,7 @@ jobs:
           if [ -n "$open" ]; then
             gh pr edit "$open" --body-file "$RUNNER_TEMP/body.md"
           else
-            gh pr create --base rock --head "$branch" --title "Equipment: publish new wardrobe pieces" --body-file "$RUNNER_TEMP/body.md"
+            gh pr create --base rock --head "$branch" --title "[Batch] Equipment: publish new wardrobe pieces" --body-file "$RUNNER_TEMP/body.md"
           fi
         env:
           GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
