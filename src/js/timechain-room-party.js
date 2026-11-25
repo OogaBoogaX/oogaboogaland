@@ -150,21 +150,9 @@
   // the glass, floors and balustrades' panes, is the renderer's reflective glass (`glassOpacity`, as DSB Land's water
   // is): clear face on, paler and catching the light toward a glancing view, as real glass does.
   const SHEEN = { GLOSS: 0.5, LIFT: 0.001, STEPS: 96 };
-  // A glossy reflector over a floor's glass from r0 to r1 out and between bearings b0 and b1 (radians), its node to be
-  // laid face up (turned -90 degrees about x, so its y runs along the room's -z).
-  const sheen = (r0, r1, b0, b1) => {
-    const n = Math.max(4, Math.ceil(SHEEN.STEPS * (b1 - b0) / TAU)), verts = [], faces = [];
-    for (let i = 0; i <= n; i++) {
-      const b = b0 + (b1 - b0) * i / n, sx = Math.sin(b), cz = Math.cos(b);
-      verts.push(r0 * sx, -r0 * cz, 0, r1 * sx, -r1 * cz, 0);
-    }
-    for (let i = 0; i < n; i++) {
-      const a = 2 * i, q = [a, a + 1, a + 3, a + 2];
-      const area = (verts[3 * q[1]] - verts[3 * q[0]]) * (verts[3 * q[2] + 1] - verts[3 * q[0] + 1]) - (verts[3 * q[1] + 1] - verts[3 * q[0] + 1]) * (verts[3 * q[2]] - verts[3 * q[0]]);
-      faces.push({ i: area > 0 ? q : q.reverse(), color: [0, 0, 0], emissive: 0 });
-    }
-    return { verts, faces, lines: [], castShadow: false, reflector: true, gloss: SHEEN.GLOSS };
-  };
+  // A glossy reflector over a floor's glass from r0 to r1 out and between bearings b0 and b1 (radians): the room kit's
+  // `glossSheet`, its node to be laid face up.
+  const sheen = (r0, r1, b0, b1) => RM.helpers.glossSheet(r0, r1, b0, b1, SHEEN.GLOSS, SHEEN.STEPS);
   // The rows the line arrays and the lasers hang in, every bracket's arm in a row, the speakers' and the lasers'
   // alike, at one height (`armY`), so each row's rigging runs level round the room and its hangs and projectors hang
   // from that line. The first hangs RIG_DROP under the balcony; the second as far under the ring as the first looks

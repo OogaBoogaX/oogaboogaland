@@ -154,6 +154,23 @@
     }
     return merge(...parts);
   };
+  // A glass floor's sheen: a glossy reflector (as the Lightning Jet Hangar's runway is: the renderer adds the room's
+  // reflection over what is drawn there, `gloss` of it, with no face of its own) from r0 to r1 out and between
+  // bearings b0 and b1 (radians), in `steps` facets a full turn, its node to be laid face up (turned -90 degrees about
+  // x, so its y runs along the room's -z). WebGL's alone: the interior hides it on Canvas 2D.
+  const glossSheet = (r0, r1, b0, b1, gloss, steps = 96) => {
+    const n = Math.max(4, Math.ceil(steps * (b1 - b0) / TAU)), verts = [], faces = [];
+    for (let i = 0; i <= n; i++) {
+      const b = b0 + (b1 - b0) * i / n, sx = Math.sin(b), cz = Math.cos(b);
+      verts.push(r0 * sx, -r0 * cz, 0, r1 * sx, -r1 * cz, 0);
+    }
+    for (let i = 0; i < n; i++) {
+      const a = 2 * i, q = [a, a + 1, a + 3, a + 2];
+      const area = (verts[3 * q[1]] - verts[3 * q[0]]) * (verts[3 * q[2] + 1] - verts[3 * q[0] + 1]) - (verts[3 * q[1] + 1] - verts[3 * q[0] + 1]) * (verts[3 * q[2]] - verts[3 * q[0]]);
+      faces.push({ i: area > 0 ? q : q.reverse(), color: [0, 0, 0], emissive: 0 });
+    }
+    return { verts, faces, lines: [], castShadow: false, reflector: true, gloss };
+  };
   // A canvas picture `w` by `h`, flat and facing +z about its own middle (planar mapping).
   const flatPicture = (canvas, w, h, emissive = 0.9) => {
     const geo = { verts: [-w / 2, -h / 2, 0, w / 2, -h / 2, 0, w / 2, h / 2, 0, -w / 2, h / 2, 0], faces: [{ i: [0, 1, 2, 3], color: [255, 255, 255], emissive }], lines: [], castShadow: false };
@@ -242,8 +259,9 @@
       // A raked hall's colours: its terraces (alternating), their amber nosings and the doorway's landing.
       rakeColors: (o) => { if (o.terrace) into.terrace = o.terrace; if (o.nosing) into.nosing = o.nosing; if (o.landing) into.landing = o.landing; },
       floorColor: (c) => { into.floorColor = c; },
-      // An unpainted floor drawn as glass this opaque (over a kind's own under-floor), as the glass cases are.
-      floorGlass: (opacity) => { into.floorGlass = opacity; }
+      // An unpainted floor drawn as glass this opaque (over a kind's own under-floor), as the glass cases are, paling
+      // toward a glancing view `grazing` as much as glass does (the renderer's `glassGrazing`, less under a sheen).
+      floorGlass: (opacity, grazing = 1) => { into.floorGlass = opacity; into.floorGrazing = grazing; }
     };
     return K;
   };
@@ -440,7 +458,7 @@
     if (canvas) {
       const F = floorMap(L, into.floorSize ? into.floorSize.scale : 0);
       geo.imageSurface = { canvas, version: 1, rect: [-F.rf, -F.rf, 2 * F.rf, 2 * F.rf], tessellated: true };
-    } else if (into.floorGlass) { geo.glassOpacity = into.floorGlass; noShadow(geo); }
+    } else if (into.floorGlass) { geo.glassOpacity = into.floorGlass; geo.glassGrazing = into.floorGrazing; noShadow(geo); }
     return geo;
   });
   // A raked hall's floor: the terraces stepping down round the focus, each with an amber nosing, the landing at the
@@ -808,6 +826,6 @@
   BL.timechainRoomModels = {
     build, plan, prepareSteps, geometries, picture, liveGeometry, flatPicture, sphere: sphereParts, domeMap, floorMap, paintKit, KINDS, COLORS: C, MARK_BIAS, EXIT_HEADER, withScope,
     doorway, doorBulbs, bulbsOf, solo,
-    helpers: { face, quad, blank, clip, own, perRoom, owned, cylinder, ballGeo, slabGeo, sectorGeo, litWord, UP, DOWN }
+    helpers: { face, quad, blank, clip, own, perRoom, owned, cylinder, ballGeo, slabGeo, sectorGeo, glossSheet, litWord, UP, DOWN }
   };
 })();
