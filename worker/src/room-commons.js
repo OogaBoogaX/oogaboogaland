@@ -31,7 +31,7 @@ export const REAUTH_MS = 60 * 60 * 1000;
 export const SILENT_MS = 75000;
 // `chat-online` is how many are in hosted chats through Ooga Chat and not on the island, the one number every "N online"
 // adds (room-chat-members.js), so a member's counts agree with the island's.
-const RELAYED = new Set(["join", "leave", "body", "zone", "vstate", "hand", "chat", "clouds", "chat-online"]);
+const RELAYED = new Set(["join", "leave", "body", "zone", "vstate", "hand", "chat", "clouds", "chat-online", "chat-people"]);
 const CLOSE = { stale: 4000, bad: 4400, auth: 4401, full: 4429 };
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 
@@ -109,7 +109,7 @@ export const commonsRoom = {
       you: { id: m.id, login: m.login, display: m.display }, players: [...room.players.values()].map(presenceOf),
       duels: [...room.duels.values()].map((d) => ({ id: d.id, a: d.a, b: d.b })),
       ...(typeof room.linkViewOf === "function" ? { links: room.linkViewOf(m.id) } : {}),
-      ...(Number.isSafeInteger(chatMembersRoom.welcome(room).chatOnline) ? { chatOnline: chatMembersRoom.welcome(room).chatOnline, chatMine: chatMembersRoom.counted(room, m.id) } : {}),
+      ...(Number.isSafeInteger(chatMembersRoom.welcome(room).chatOnline) ? { chatOnline: chatMembersRoom.welcome(room).chatOnline, chatMine: chatMembersRoom.counted(room, m.id), chatPeople: chatMembersRoom.people(room) } : {}),
       features: [globalThis.BL.chatPolicy.FEATURE, COMMONS_FEATURE] });
     room.send(server, { t: "chat-history", messages: room.chat.list() });
     audienceRoom.welcome(room, m);

@@ -1,16 +1,19 @@
 // The island view (docs/ooga-chat-hosts.md, "The island view"), Ooga Chat's and the island's alike: the strip at the top
-// of a chat (chat-hosts.js's `.hc-room-strip`) while one of its speakers walks the chat's copy of Main Island. By default
+// of a Main Island chat (chat-hosts.js's `.hc-room-strip`), the island standing still while nobody walks the chat's copy
+// of it and each speaker who does shown where they stand. By default
 // a drawn map: the baked overhead picture of the island (scripts/island-view.mjs, its matrix island-view-data.js) with
 // each walking speaker's Ooga face where they stand, eased between the chat's `walk` frames (at most two a second), a
 // ring pulsing round it while they talk. An opt-in Live view, off until chosen and remembered in this browser
 // (`storageKey`), draws the island with the game's own renderer (island-view-live.js, which the page loads only then,
 // `loadLive`) from a fixed far camera, the faces over the speakers' heads. Reads nothing at load but window.BL.
-// `create({ picture, faceOf(row), loadLive(), island(), storageKey })` returns `{ node, update({ rows, talking,
-// speaking, self, active }), walk(msg), dispose() }`: `rows` the chat's roster rows (the walkers are those with
-// `walking`), `talking` the ids heard speaking and `speaking` the visitor's own meter, `self` the visitor's id, `active`
-// whether the strip can be seen now (the panel shown, the page visible). It draws only while it shows and is active, a
-// frame at a time; the faces' pictures are made once a row, so a frame allocates nothing. `parseWalk(msg, walks, now)`
-// and `project(view, x, y, z, out)` are pure.
+// `create({ picture, faceOf(row), loadLive(), island(), storageKey })` returns `{ node, stage, update({ place, rows,
+// talking, speaking, self, active }), walk(msg), dispose() }`: `place` whether the chat has an island to show (a Main
+// Island chat), `rows` the chat's roster rows (the walkers are those with `walking`), `talking` the ids heard speaking and
+// `speaking` the visitor's own meter, `self` the visitor's id, `active` whether the strip can be seen now (the panel
+// shown, the page visible); `stage` takes a page's own controls over the picture (chat-hosts.js's Go there). It draws
+// only while it shows and is active: a frame at a time while someone walks, once (and again on a change of size or
+// picture) while nobody does. The faces' pictures are made once a row, so a frame allocates nothing.
+// `parseWalk(msg, walks, now)` and `project(view, x, y, z, out)` are pure.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -119,7 +122,7 @@
       }
       bg.filter = "none";
     };
-    image.addEventListener("load", () => { backFor = ""; paintBack(); });
+    image.addEventListener("load", () => { backFor = ""; paintBack(); if (shown && active) draw(); });
     // A face a walker, made when their row first comes (or their picture changes): the picture and its initial.
     const faces = new Map();
     // A walker with no picture of their own shows the native Ooga face, as the roster's tiles do.
@@ -140,7 +143,7 @@
       f.initial = (row.display || row.login || "?").slice(0, 1).toUpperCase();
       return f;
     };
-    let rows = [], shown = false, active = false, raf = 0, live = null, liveWant = false, liveState = "off", liveAt = 0, width = 0, height = 0, dpr = 1;
+    let rows = [], walking = 0, shown = false, active = false, raf = 0, live = null, liveWant = false, liveState = "off", liveAt = 0, width = 0, height = 0, dpr = 1;
     try { liveWant = localStorage.getItem(storageKey) === "1"; } catch { /* Storage may be unavailable. */ }
     // The canvas follows the strip's size, read only when the strip changes size or shows (never in a frame, where
     // reading it would allocate).
@@ -165,7 +168,7 @@
       const showLive = liveState === "on";
       if (showLive) {
         // The renderer draws a few times a second at most; the faces over it every frame.
-        if (now - liveAt >= 166) {
+        if (now - liveAt >= 166 || !walking) {
           liveAt = now;
           for (let i = 0; i < MAX; i++) {
             if (state.ids[i] === null) { live.place(i, 0, 0, 0, 0, false); continue; }
@@ -220,7 +223,8 @@
         }
         g.restore();
       }
-      raf = requestAnimationFrame(frame);
+      // Nobody walking: the picture stands still, drawn again only when something changes it.
+      raf = state.count || walking ? requestAnimationFrame(frame) : 0;
     };
     const draw = () => { if (!raf) raf = requestAnimationFrame(frame); };
     const stop = () => { if (raf) cancelAnimationFrame(raf); raf = 0; };
@@ -270,15 +274,16 @@
       toggle.setAttribute("aria-pressed", String(liveWant));
       stage.dataset.live = liveState;
       const names = rows.filter((row) => row.walking).map((row) => row.display || row.login);
-      const where = names.length === 1 ? `${names[0]} is walking the chat's island` : `${names.length} speakers are walking the chat's island`;
-      map.setAttribute("aria-label", `Map of the chat's island: ${names.join(", ")}`);
+      const where = !names.length ? "Nobody is on the chat's island right now" : names.length === 1 ? `${names[0]} is walking the chat's island` : `${names.length} speakers are walking the chat's island`;
+      map.setAttribute("aria-label", names.length ? `Map of the chat's island: ${names.join(", ")}` : "Map of the chat's island");
       const text = liveWant && liveState === "loading" ? "Live view loading…" : liveWant && liveState === "failed" ? "Live view couldn't start here; showing the map" : where;
       if (note.textContent !== text) note.textContent = text;
     };
     const update = (next) => {
       rows = next.rows;
       const walkers = rows.filter((row) => row.walking);
-      const show = walkers.length > 0;
+      const show = !!next.place;
+      walking = walkers.length;
       for (const row of walkers) {
         const f = faceFor(row);
         f.talking = row.id === next.self ? !!next.speaking : next.talking.includes(row.id);
@@ -289,16 +294,17 @@
       shown = show;
       active = !!next.active;
       paint();
-      if (!shown && was) {
-        endLive();
-        // A chat's next walk starts afresh: its first frame places every walker where they stand.
+      if (!shown && was) endLive();
+      // Nobody walking (or the strip gone): the next walk starts afresh, its first frame placing every walker where they
+      // stand, and no face is left behind from the last.
+      if ((!shown || !walking) && state.count) {
         state.seq = state.at = state.count = 0;
         for (let i = 0; i < MAX; i++) state.ids[i] = null;
         state.index.clear();
       }
       if (shown && active) { resize(); if (liveWant) startLive(); draw(); } else stop();
     };
-    const walk = (msg) => parseWalk(msg, state, performance.now());
+    const walk = (msg) => { const took = parseWalk(msg, state, performance.now()); if (took && shown && active) draw(); return took; };
     // Where each walker's face stands on the strip now, in CSS pixels (the checks', made on call).
     const placed = () => {
       const now = performance.now(), out = [];
@@ -311,7 +317,7 @@
       }
       return out;
     };
-    const self = { node, update, walk, placed, dispose() { shown = active = false; stop(); endLive(); sizes?.disconnect(); faces.clear(); node.remove(); open.delete(self); },
+    const self = { node, stage, update, walk, placed, dispose() { shown = active = false; stop(); endLive(); sizes?.disconnect(); faces.clear(); node.remove(); open.delete(self); },
       get live() { return liveState; }, get walks() { return state; }, get drawing() { return !!raf; } };
     open.add(self);
     return self;

@@ -9,17 +9,26 @@
 // `{ t: "call", on }` (`net.setCall`), so other pages mark this player as in a chat. Leaving it, the chat ending or
 // removing them (4404, 4403), signing out or the room's chats going away ends the call.
 // `open(entry)`, `leave(kind)`, `request(type, fields)` (its id, 0 while the socket isn't open), `hear(fn)` (the chat's
-// notices, request answers and the island view's `walk` frames), `subscribe(fn)` (anything changed), `list()`, `start(body)`, `preview(id)`, `identity()` (the visitor as
+// notices, request answers, reactions and the island view's `walk` frames), `subscribe(fn)` (anything changed), `list()`, `start(body)`, `preview(id)`, `identity()` (the visitor as
 // the views know them), and `state` in Ooga Chat's shape for the shared views: `room` (the chat, with the server's
 // `you`), `voice` (the controller's state), `audience` (`status`, `list`, `version`). `media` is the controller, for the
 // panel's footer and tiles. No timer but the open chat socket's ping and reconnect; nothing per frame.
+// Go there from Ooga Chat (docs/ooga-chat-hosts.md): a page opened as `?chat=<id>&mic=<0|1>` (ooga-chat-hosts.js) takes
+// the address's two parameters out at once and keeps the wish in sessionStorage (`ooga-chat-arrive`, ARRIVE_MS), so a
+// sign-in on the way keeps it; once signed in and the room is live it opens that chat, listening. A link anyone could
+// post, so it never speaks by itself: for a visitor who may speak there it asks first (voice-handoff.js's card, "Speak
+// from here?"), and only Switch here, a press on this page, takes the account's voice from Ooga Chat (`join({ takeover
+// })`, inside the press), unmutes when the address said the microphone was open there (the card says so), and walks
+// the Ooga into the chat's island (chat-copy.js `goSoon`). Not now leaves the voice where it is and the visitor
+// listening. A host is still the host: roles belong to the account. A chat no longer listed says so; one the visitor may
+// only listen in is listened to. `arrival` says where it stands.
 // Under `?debug=1&chats=fixture` it runs on Ooga Chat's fixture adapter (ooga-chat-fixtures.js, a deferred group the
 // page fetches then): sample chats, a contributor's account and fake WebRTC, nothing sent anywhere, for review.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const net = BL.net, voice = BL.voice;
-  const PATH = "/api/chats", TIMEOUT_MS = 8000, MEDIA_TIMEOUT_MS = 12000, PING_MS = 30000, BACKOFF_MS = [1000, 30000], FULL_WAIT_MS = 30000, FRAME_MAX = 1 << 20;
+  const PATH = "/api/chats", TIMEOUT_MS = 8000, MEDIA_TIMEOUT_MS = 12000, PING_MS = 10000, BACKOFF_MS = [1000, 30000], FULL_WAIT_MS = 30000, FRAME_MAX = 1 << 20;
   const params = new URLSearchParams(location.search);
   const fixture = params.get("debug") === "1" && params.get("chats") === "fixture";
   const subs = new Set(), heard = new Set();
@@ -50,8 +59,9 @@
       const error = r.data?.error && typeof r.data.error.code === "string" ? r.data.error : { code: r.status ? `http_${r.status}` : "unreachable", retryable: !r.status || r.status >= 500 };
       throw Object.assign(new Error(error.code), { code: error.code, retryable: !!error.retryable, status: r.status });
     } }),
-    // The chat's socket: joined with protocol 2, pinged as the Audience expects, backed off on a drop, and never opened
-    // again once removed (4403) or ended (4404).
+    // The chat's socket: joined with protocol 2, pinged every PING_MS (the Audience takes one silent for 45 s for gone,
+    // audience.js `SILENT_MS`) and once more as the page is shown again, backed off on a drop, and never opened again
+    // once removed (4403) or ended (4404).
     audience: (boot, { message, status: told }, chat) => {
       let socket = null, tries = 0, timer = 0, ping = 0, requests = 0, closed = false;
       const send = (data) => !!socket && socket.readyState === 1 && (socket.send(JSON.stringify(data)), true);
@@ -86,6 +96,9 @@
           later(Math.min(BACKOFF_MS[1], BACKOFF_MS[0] * 2 ** Math.min(tries - 1, 5)) * (0.75 + Math.random() * 0.5));
         });
       };
+      // Shown again: a ping at once, since a hidden page's timers may have slowed.
+      const shown = () => { if (!document.hidden && socket && socket.readyState === 1) socket.send("ping"); };
+      document.addEventListener("visibilitychange", shown);
       return {
         zone() { if (!socket && !timer) open(); },
         resync: (zone) => send({ type: "resync", zone }),
@@ -93,6 +106,7 @@
         wake() { if (socket && socket.readyState === 1) socket.send("ping"); },
         dispose() {
           closed = true;
+          document.removeEventListener("visibilitychange", shown);
           clearTimeout(timer);
           clearInterval(ping);
           if (socket) try { socket.close(1000); } catch { /* already closed */ }
@@ -153,7 +167,8 @@
     // Who its hosts removed, for a host or co-host's Allow back (chat-hosts.js).
     if (msg.type === "removed") { for (const fn of heard) fn(msg); return emit(); }
     if (msg.type === "you" || msg.type === "media") { m.heard(msg); return emit(); }
-    if (msg.type === "reaction") return;
+    // A reaction over a participant's circle (cloud-panel.js), the visitor's own included.
+    if (msg.type === "reaction") { for (const fn of heard) fn(msg); return; }
     // The island view's walkers (chat-hosts.js, island-view.js), heard while it asked for them.
     if (msg.type === "walk") { for (const fn of heard) fn(msg); return; }
     const result = roster.apply(msg);
@@ -211,6 +226,112 @@
     account = me;
     if (available() !== gate) { gate = available(); emit(); }
   });
+  // --- Go there from Ooga Chat ---
+  // `arrival`: `{ id, mic, at, step }`, step "open" (find the chat and open it), "ask" (the card, until it is answered),
+  // "voice" (take the voice, after Switch here), "mic" (open the microphone as it was), "go" (walk into the chat's
+  // island), then gone.
+  const ARRIVE_KEY = "ooga-chat-arrive", ARRIVE_MS = 5 * 60 * 1000, JOIN_TRIES = 3;
+  let arrival = null, arriving = false, joinTries = 0, signInSaid = false, card = null;
+  // The card, made the first time it is wanted, in voice-handoff.js's look with this arrival's words.
+  const askVoice = () => {
+    if (!card) {
+      card = BL.voiceHandoff.build({ onSwitch: () => {
+        if (!arrival || arrival.step !== "ask" || !room || room.id !== arrival.id) return;
+        arrival.step = "voice";
+        joinTries = 1;
+        // Inside the press: the gesture a microphone needs.
+        controller().join({ takeover: !!(room.you && room.you.elsewhere) });
+      }, onDismiss: () => arrived() });
+      document.body.append(card.node);
+    }
+    card.node.querySelector(".voice-handoff-title").textContent = "Speak from here?";
+    card.node.querySelector(".voice-handoff-body").textContent = `Your voice in ${room.title} is in Ooga Chat. Switch it here and walk your Ooga onto the chat's island?`
+      + (arrival.mic ? " Your microphone will be on, as it was there." : " You'll stay muted.") + " Ooga Chat stops speaking.";
+    card.open();
+  };
+  {
+    const id = params.get("chat");
+    if (id && /^[A-Za-z0-9_-]{16}$/.test(id)) {
+      arrival = { id, mic: params.get("mic") === "1", at: Date.now(), step: "open" };
+      try { sessionStorage.setItem(ARRIVE_KEY, JSON.stringify(arrival)); } catch { /* kept for this page alone */ }
+    } else {
+      try {
+        const kept = JSON.parse(sessionStorage.getItem(ARRIVE_KEY) || "null");
+        if (kept && /^[A-Za-z0-9_-]{16}$/.test(kept.id) && Number.isFinite(kept.at) && Date.now() - kept.at < ARRIVE_MS) arrival = { id: kept.id, mic: kept.mic === true, at: kept.at, step: "open" };
+      } catch { /* none */ }
+    }
+    if (params.has("chat") || params.has("mic")) {
+      const url = new URL(location.href);
+      url.searchParams.delete("chat"); url.searchParams.delete("mic");
+      history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+    }
+  }
+  const arrived = (words = "") => {
+    arrival = null;
+    card?.close();
+    try { sessionStorage.removeItem(ARRIVE_KEY); } catch { /* none kept */ }
+    if (words && BL.hud) BL.hud.toast(words);
+  };
+  const arrive = () => {
+    if (!arrival || arriving || fixture) return;
+    if (Date.now() - arrival.at >= ARRIVE_MS) return arrived();
+    const s = net.state;
+    if (!s.me) {
+      if (s.backend && s.room === "off" && !signInSaid) { signInSaid = true; BL.hud?.toast("Sign in to bring your chat here"); }
+      return;
+    }
+    if (!available()) return;
+    if (arrival.step === "open") {
+      if (room && room.id === arrival.id) { arrival.step = "ask"; return arrive(); }
+      arriving = true;
+      list().then((answer) => {
+        arriving = false;
+        if (!arrival || arrival.step !== "open") return;
+        const entry = (BL.chatHosts.parseList(answer.chats) || []).find((c) => c.id === arrival.id);
+        if (!answer.chats) return arrived("The chat couldn't be reached from here");
+        if (!entry) return arrived("That chat has ended");
+        open(entry);
+        if (BL.cloudPanel) BL.cloudPanel.preview(entry.id);
+        arrival.step = "ask";
+        arrive();
+      });
+      return;
+    }
+    if (!room || room.id !== arrival.id) return arrived();
+    const m = controller(), v = m.state, you = room.you;
+    if (arrival.step === "ask") {
+      // Until the chat's voice is connected here, Switch here could not start.
+      if (!you || v.busy || v.phase === "off" || v.phase === "connecting") return;
+      // Not on the stage there: listening here is all there is.
+      if (you.speak !== "eligible" && !you.elsewhere) return arrived();
+      if (!card || !card.shown) askVoice();
+      return;
+    }
+    if (arrival.step === "voice") {
+      if (!you) return;
+      if (v.role === "speaker" && !v.busy) { arrival.step = "mic"; return arrive(); }
+      if (v.busy || v.phase === "off" || v.phase === "connecting") return;
+      // A join that could not start (the press's first try is counted already) is tried again a few times.
+      if (you.speak !== "eligible" && !you.elsewhere) return arrived();
+      if (++joinTries > JOIN_TRIES) return arrived(v.notice || "");
+      m.join({ takeover: !!you.elsewhere });
+      return;
+    }
+    if (arrival.step === "mic") {
+      if (v.busy) return;
+      // The step moves on first: unmuting tells every subscriber, this one included, at once.
+      arrival.step = "go";
+      if (arrival.mic && v.role === "speaker" && v.muted) m.mute();
+      if (!arrival || arrival.step !== "go") return;
+    }
+    if (arrival.step === "go") {
+      const id = arrival.id;
+      arrived();
+      if (BL.chatCopy && room.zone === "main") BL.chatCopy.goSoon(id);
+    }
+  };
+  subs.add(arrive);
+  net.subscribe(arrive);
   // deferred.js loads after this file: the fixture is fetched once the page's scripts have all run.
   if (fixture) addEventListener("DOMContentLoaded", () => fixtureAdapter().catch(() => {}), { once: true });
   BL.chatCall = {
@@ -227,6 +348,7 @@
       }
       return { room, voice: media ? media.state : BL.oogaChatMedia.IDLE, audience: { status, list: shown.list, version: listed } };
     },
-    get stats() { return { open: !!room, status, rows: roster.size, resumeVoice, version, fixture }; }
+    get arrival() { return arrival ? { ...arrival } : null; },
+    get stats() { return { open: !!room, status, rows: roster.size, resumeVoice, version, fixture, arrival: arrival ? arrival.step : "" }; }
   };
 })();

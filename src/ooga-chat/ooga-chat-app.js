@@ -373,7 +373,9 @@
         } },
       contributors: () => adapter.contributors(),
       reactions: { bars, onPop(fn) { pops.add(fn); return () => pops.delete(fn); } },
-      chats: { call: (name, ...a) => adapter[name](state.boot, ...a), open: enterRoom, leave: () => leaveRoom(),
+      // The island a chat's Go there opens (the bootstrap's `island`), or null.
+      island: () => state.mode === "live" && state.boot ? state.boot.island || null : null,
+      chats: { call: (name, ...a) => adapter[name](state.boot, ...a), open: enterRoom, leave: (kind = null) => leaveRoom(kind),
         request: (type, fields) => feed && state.room ? feed.request(type, fields) : 0, hear(fn) { heardChat.add(fn); return () => heardChat.delete(fn); } } };
     shell = BL.oogaChatShell.create({ root, ctx, selected: back ? "chat" : remembered, onSelect(id) {
       try { localStorage.setItem(tabKey, id); } catch { /* Storage may be unavailable. */ }

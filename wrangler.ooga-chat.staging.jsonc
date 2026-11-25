@@ -27,6 +27,8 @@
     "ENVIRONMENT": "staging",
     // Redirects, cookies, OAuth callbacks and the Origin check all use this origin.
     "SITE_ORIGIN": "https://ooga-chat-staging.wickedsmartbitcoin.workers.dev",
+    // The island this edge's chats belong to: a chat's Go there opens it there (the bootstrap's `island`).
+    "ISLAND_ORIGIN": "https://oogaboogaland-staging.wickedsmartbitcoin.workers.dev",
     // Comma-separated: github, x, listen, speak, feed, commons, cloud. Empty: the app browses its public panels only.
     // A flag counts only when what it needs is configured too (worker/chat/src/config.js `effective`). Turned on in the
     // release runbook's order (docs/ooga-chat-operations.md): GitHub sign-in first, before anything else.

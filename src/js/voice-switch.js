@@ -26,7 +26,8 @@
       if (v.yielded !== yielded) { yielded = v.yielded; found = true; asked = false; }
       const elsewhere = s.room === "live" && s.voiceElsewhere && !v.enabled && !v.joining && !v.reconnecting;
       if (!elsewhere) card.close();
-      else if (found && !asked) { asked = true; card.open(); }
+      // A chat brought over from Ooga Chat asks its own question (chat-call.js), never this one beside it.
+      else if (found && !asked) { asked = true; if (!BL.chatCall?.arrival) card.open(); }
     };
     const offNet = net.subscribe(sync), offVoice = voice.subscribe(sync);
     sync();

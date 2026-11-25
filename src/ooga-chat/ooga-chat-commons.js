@@ -5,12 +5,15 @@
 // here; false while the Commons is read-only from Ooga Chat), `epoch`, `unicode` (the room takes extended text),
 // `players` (a Map by id of `{ id, login, display, zone, voice, muted, hand, handTone, handEmoji }`, presence without a
 // position, as the Room shows it), `lines` (the last CHAT_KEEP, by id) and `links`, the account's voice links as the
-// island keeps them (`wants`, its own asks, and `linked`, those asked back; null from a Room that sends none).
+// island keeps them (`wants`, its own asks, and `linked`, those asked back; null from a Room that sends none), and
+// `chatPeople`, who is in hosted chats through Ooga Chat and not on the island (the welcome's `chatPeople`, the room's
+// `chat-people`: frozen `{ id, login, display, speaking }` each, at most PEOPLE_MAX).
 // `subscribe(fn)` hears `fn("welcome" | "players" | "links")`, `fn("lines", list, joined)` and `fn("receipt", receipt)`; `reset()` forgets everything on
 // a sign-out or another account. Anything malformed is dropped as the island's own page drops it.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
+  const PEOPLE_MAX = 200, PEOPLE_ID = /^(gh|x):[1-9][0-9]{0,19}$/, NO_PEOPLE = Object.freeze([]);
   const KEEP = 100, LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
   const id = (value) => Number.isSafeInteger(value) && value > 0;
   const clientId = (value) => typeof value === "string" && /^[\w-]{1,64}$/.test(value);
@@ -28,7 +31,18 @@
   const linksOf = (raw) => raw && Array.isArray(raw.wants) && Array.isArray(raw.linked)
     ? { wants: new Set(raw.wants.filter(id).slice(0, 64)), linked: new Set(raw.linked.filter(id).slice(0, 64)) } : null;
   const create = () => {
-    const state = { you: null, send: false, epoch: 0, unicode: false, players: new Map(), lines: [], links: null, chatOnline: 0, chatMine: false };
+    const state = { you: null, send: false, epoch: 0, unicode: false, players: new Map(), lines: [], links: null, chatOnline: 0, chatMine: false, chatPeople: NO_PEOPLE };
+    // Who is in hosted chats through the app, by name; true when the list changed.
+    const readPeople = (list) => {
+      const next = [];
+      for (const p of Array.isArray(list) ? list.slice(0, PEOPLE_MAX) : []) {
+        if (!p || typeof p.id !== "string" || !PEOPLE_ID.test(p.id) || typeof p.login !== "string" || !/^[\w.-]{1,39}$/.test(p.login)) continue;
+        next.push(Object.freeze({ id: p.id, login: p.login, display: words(p.display, 50) && p.display.trim() ? p.display.trim() : p.login, speaking: p.speaking === true }));
+      }
+      if (JSON.stringify(next) === JSON.stringify(state.chatPeople)) return false;
+      state.chatPeople = next.length ? Object.freeze(next) : NO_PEOPLE;
+      return true;
+    };
     // The island's one number in hosted chats through Ooga Chat and not on the island (its welcome's `chatOnline`, its
     // `chat-online`), which every "N online" adds, as the island's do, and whether the member's own account is among it
     // (`chatMine`: another of their pages in a chat), so it is counted once.
@@ -56,12 +70,15 @@
         state.links = linksOf(frame.links);
         state.chatOnline = chatCount(frame.chatOnline);
         state.chatMine = frame.chatMine === true;
+        readPeople(frame.chatPeople);
         state.players.clear();
         for (const raw of frame.players.slice(0, 256)) {
           const p = playerOf(raw);
           if (p) state.players.set(p.id, p);
         }
         emit("welcome");
+      } else if (frame.t === "chat-people") {
+        if (state.you && readPeople(frame.people)) emit("players");
       } else if (frame.t === "chat-online") {
         if (!state.you) return;
         const n = chatCount(frame.n), mine = frame.mine === true;
@@ -113,7 +130,7 @@
       }
     };
     const reset = () => {
-      state.you = null; state.send = false; state.epoch = 0; state.unicode = false; state.links = null; state.chatOnline = 0; state.chatMine = false;
+      state.you = null; state.send = false; state.epoch = 0; state.unicode = false; state.links = null; state.chatOnline = 0; state.chatMine = false; state.chatPeople = NO_PEOPLE;
       state.players.clear();
       state.lines.length = 0;
       emit("welcome");

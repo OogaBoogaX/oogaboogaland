@@ -18,6 +18,9 @@
   // sooner, QUICK_PROBE_MS, since the page is awake and a speaker is waiting; a socket still opening on the old network
   // after OPENING_MS is opened afresh.
   const SILENT_MS = 75000, PROBE_MS = 4000, QUICK_PROBE_MS = 2500, OPENING_MS = 4000;
+  // The audience socket's heartbeat: a chat's server takes a connection silent for 45 s for gone (a phone in airplane
+  // mode sends no close), so it pings well inside that (worker/src/audience.js `SILENT_MS`).
+  const AUDIENCE_PING_MS = 10000;
   // The Commons' fixed address (docs/ooga-chat-backend.md) and its heartbeat: the island's Room answers "ping" with
   // "pong" without waking, and closes a member silent past 90 s.
   const COMMONS_PATH = "/api/chat/commons", PING_MS = 30000;
@@ -128,7 +131,7 @@
             if (own.readyState !== 1) return;
             if (Date.now() - heardAt > SILENT_MS) check(own);
             else own.send("ping");
-          }, PING_MS);
+          }, AUDIENCE_PING_MS);
         });
         own.addEventListener("message", (event) => {
           if (own !== socket || typeof event.data !== "string") return;

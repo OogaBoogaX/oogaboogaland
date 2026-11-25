@@ -26,6 +26,8 @@
   "vars": {
     "ENVIRONMENT": "production",
     "SITE_ORIGIN": "https://ooga.chat",
+    // The island this edge's chats belong to: a chat's Go there opens it there (the bootstrap's `island`).
+    "ISLAND_ORIGIN": "https://oogabooga.land",
     // Comma-separated: github, x, listen, speak, feed, commons, cloud. Turned on in stages by the release runbook.
     // Production: GitHub sign-in, listening and speaking (speakers on the island's clouds), Feed the Oogas and The Commons.
     "FEATURES": "github,listen,speak,feed,commons,chats",

@@ -458,12 +458,12 @@
       raised.setAttribute("aria-label", hand && BL.reactionPolicy.HANDS.includes(hand) ? "Hand raised" : `Pinned emoji ${hand}`);
       const voice = make("button", "roster-voice", BL.nativeIcons.voice());
       voice.type = "button";
-      if (r.listener) {
-        presence.dataset.online = "listener";
-        presence.setAttribute("aria-label", "Listening in Ooga Chat");
-        presence.title = "Listening in Ooga Chat";
-        const li = make("li", "players-listener", dots, make("span", "players-name", label));
-        return li;
+      if (r.listener || r.app) {
+        const words = r.app ? r.speaking ? "Speaking in Ooga Chat" : "In Ooga Chat" : "Listening in Ooga Chat";
+        presence.dataset.online = r.app ? "cloud" : "listener";
+        presence.setAttribute("aria-label", words);
+        presence.title = words;
+        return make("li", r.app ? "" : "players-listener", dots, make("span", "players-name", label));
       }
       const participant = r.cloud ? r.audience : playerVoice(p);
       const control = r.self ? null : volumeControl(ctx), toggle = r.self ? null : button("roster-name players-name-toggle", "");
@@ -506,6 +506,13 @@
           p: { login: a.login, display: a.display, hand: !!a.hand, handEmoji: a.hand, voice: true, muted: a.muted } });
       }
       if (you && !speaking && !model.state.players.has(you.id)) rows.push({ id: you.id, name: you.display, group: APP, self: true, p: { ...you, hand: false, voice: false, muted: false } });
+      // Everyone else in hosted chats through Ooga Chat and not on the island (the room's `chat-people`), under Ooga Chat
+      // with its purple dot, as the island's Online Oogas lists them; anyone listed already is listed once.
+      for (const q of model.state.chatPeople) {
+        const account = q.id.startsWith("gh:") ? Number(q.id.slice(3)) : 0;
+        if (q.id === me || account && (model.state.players.has(account) || you && account === you.id) || cloud.some((a) => a.id === q.id)) continue;
+        rows.push({ id: -Number(q.id.slice(q.id.indexOf(":") + 1)), name: q.display, group: APP, app: true, speaking: q.speaking, p: { login: q.login, display: q.display } });
+      }
       // Main Island's listeners in Ooga Chat, but the member and anyone also on the island, who are listed once.
       for (const a of appListeners(model, audience)) {
         rows.push({ id: -Number(a.id.slice(a.id.indexOf(":") + 1)), name: a.display, group: BL.zoneMap.groupOf("outside"), listener: true,
