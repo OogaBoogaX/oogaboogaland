@@ -102,7 +102,16 @@ voice: nothing said on it is heard in OC, and nothing said in a chat is heard on
 ## The host leaving
 
 The host role is held 2 minutes after the host's last connection to the chat goes, for a reconnect. After that the
-longest-serving co-host becomes host; with no co-host, the chat ends. The host may hand over to a co-host or End chat
+longest-serving co-host becomes host; with no co-host, the chat ends.
+
+A connection can go without a word: a phone put in airplane mode sends no close, and the runtime may take minutes to
+notice. So every page pings its chat's socket every 10 s (and once more as it is shown again), and while anyone holds
+the stage (a lease or a rank) the chat's alarm wakes every 15 s and takes a connection silent for 45 s, not even a ping,
+for gone (`audience.js` `SILENT_MS`, `SWEEP_MS`, `sweepSilent`; closed 4408). A drop noticed late, by the sweep or by the
+runtime, counts from when the connection was last heard (`LATE_MS`): the reconnecting mark, a speaker's held place and
+the host's two minutes run from the last ping, not from the moment it was seen, so a host who drops silently is handed
+over about two minutes after they went quiet. The 45 s allows for pages from before the 10 s ping, still pinging every
+30 s; it can come down to 25 s once those are gone. While nobody holds the stage the alarm does not wake for this. The host may hand over to a co-host or End chat
 at any time. When a chat ends, everyone in it sees **The chat ended**, its voice closes, and it leaves the list.
 
 ## Where each control lives
@@ -137,26 +146,34 @@ The same holds across devices: a chat tells the island room when a GitHub accoun
 (`chatVoice`, kept in the room's storage as `chatVoices`). The room ends that account's island voice (`voice-moved`,
 whose toast says Ooga Chat took it), marks its Ooga in a call on every page, and tells its island page its voice is
 elsewhere (`voice-elsewhere`, unless that page is itself in the chat), whose Switch here takes it back: island voice
-going live while a chat holds the stage ends the lease there (`yieldVoice`), so one account has one voice either way. In the second PR the list also offers **Go
-there**, which takes the visitor's Ooga into the chat's copy of its zone.
+going live while a chat holds the stage ends the lease there (`yieldVoice`), so one account has one voice either way. A Main Island chat's island view carries **Go
+there** for a speaker: on the island it takes the visitor's Ooga into the chat's copy of its zone; in Ooga Chat it opens
+the same chat on the island (below). In a chat the island's panel has the chat's own emoji bar
+(`#cloud-chat-reactions`, reaction-bar.js over the chat's socket, as Ooga Chat's footer has it), in place of the room's.
 
 **Who the island sees in chats.** Each chat tells the island room its title and counts as they change (the Room's RPC
-`chatMembers(chat, title, speakers, listeners, ids)`, from `reportMembers` in `audience.js`, `summaryOf`): how many of
+`chatMembers(chat, title, speakers, listeners, ids, people)`, from `reportMembers` in `audience.js`, `summaryOf`): how many of
 its rows, a quiet hold's included, speak (its host and co-hosts always, on the stage or not, as its preview and the
 Chats list count them; `tally`) and how many listen, and which accounts are there through Ooga Chat's app by id
-(`ids`, every one the chat's limits let in: a row whose connections are none of them the island page's own `ob_` principal, `via` "app"), never
-a name. A report goes at most every 2 s a chat, one in flight, a one-shot timer sending a burst's last change and nothing
+(`ids`, every one the chat's limits let in: a row whose connections are none of them the island page's own `ob_` principal, `via` "app"),
+and by name (`people`: `{ id, login, display, speaking }`, speakers first, at most `PEOPLE_MAX`, 200), so Online Oogas
+can list them (the maintainer's ask, 2026-11-25, in place of the earlier rule that no page gets a name). A report goes at most every 2 s a chat, one in flight, a one-shot timer sending a burst's last change and nothing
 while the counts are what the room was told; a report that fails goes again with the next change. As the chat ends it
 sends zeros, kept in its storage (`membersGone`) and sent again from its alarm until the room takes them. The room
-(`room-chat-members.js`) keeps each chat's title, counts and app ids, and nothing else, in memory and in storage (`chatMembers`,
+(`room-chat-members.js`) keeps each chat's title, counts, app ids and their names, and nothing else, in memory and in storage (`chatMembers`,
 so a hibernation wake keeps them; an entry stored with names by an earlier version keeps only its counts), replaces
 them on each report and drops the chat when nobody is in it, and at the sweep it already runs while players are
 connected drops any chat the directory no longer lists, adding no timer. Pages hear it only where the welcome lists
 `chat-summary-v1` (on with the `chats` switch, beside `call-v1`): the welcome carries every chat's (`chatSummaries`)
 and each change goes to every page as `{ t: "chat-summary", chat, title, speakers, listeners }`, all zero when it
-ends; no page ever gets an id. The room also works out one number, how many are in chats through the app and not on the
+ends. The room also works out one number, how many are in chats through the app and not on the
 island, each account once however many chats it is in, again whenever a chat reports or a player joins or leaves, and
-sends it when it moves (`{ t: "chat-online", n }`, the welcome's `chatOnline`; relayed to an Ooga Chat member with `mine`, the welcome's `chatMine`, whether its own account is among the number, never anyone's id). The page (`net.js` `state.chatMembers`,
+sends it when it moves (`{ t: "chat-online", n }`, the welcome's `chatOnline`; relayed to an Ooga Chat member with `mine`, the welcome's `chatMine`, whether its own account is among the number), and the names behind it: every account in
+chats through the app and not on the island, each once, speaking if it speaks in any chat, by name, at most 200
+(`{ t: "chat-people", people: [{ id, login, display, speaking }] }`, the welcome's `chatPeople`, relayed to Ooga Chat's
+members too), sent when the list changes. Online Oogas on the island (`players.js`) and in Ooga Chat
+(`ooga-chat-panels.js`) list each under **Ooga Chat** with Ooga Chat's purple dot, after the visitor's own row there;
+anyone listed already (a player, a linked partner, a speaker on a cloud) is listed once. The page (`net.js` `state.chatMembers`,
 chat id to a frozen `{ title, speakers, listeners }`, and `state.chatOnline`, emptied with the socket) lists in In Ooga Chat one button a chat (`players.js`): its title, whole and wrapping, and its counts under
 it ("3 speaking · 12 listening", a count of nobody left out: "1 speaking" while nobody listens; a chat always has its
 host as a speaker), "You're in
@@ -367,9 +384,9 @@ Agreed 2026-11-23:
   with no character) sits there as a default Ooga hashed from their handle, under a name no login can have (as
   `kortik/factory` is), so it never borrows a real contributor's look; their ring is purple as every cloud speaker's is.
 
-**The island view** (agreed 2026-11-22, built in the second PR): at the top of a chat, for every OC speaker and listener
-tuned into it, a zoomed-out view of the chat's copy of its zone, shown only while at least one of the chat's speakers
-is walking the copy with their Ooga. By default a drawn map: a baked overhead picture of the zone with each such
+**The island view** (agreed 2026-11-22, built in the second PR; shown always since 2026-11-25): at the top of every Main
+Island chat, for every OC speaker and listener tuned into it, a zoomed-out view of the chat's copy of its zone: the
+island standing still while nobody walks it, and each speaker walking the copy with their Ooga where they stand. By default a drawn map: a baked overhead picture of the zone with each such
 speaker's Ooga face where they stand, pulsing while they talk, from positions the chat relays a couple of times a second.
 Speakers alone are drawn, never listeners. An opt-in **Live view**, off by default and remembered per viewer, is a camera feed as
 the Observatory's screens are (`observatory-cameras.js`): a fixed camera far out over the copy, its feed rendered into a
@@ -380,8 +397,25 @@ uploads video. The first PR leaves room for it at the top of the chat panel.
 
 As built (`src/js/island-view.js`, drawn by the shared views, chat-hosts.js, in `.hc-room-strip` in both apps):
 
-- **Asking for places.** A chat member's socket asks with `{ type: "view", on: true }` only while the strip shows (a row
-  with `walking`), the panel is shown and the page is visible, and says `on: false` as any of that ends; a new connection
+- **The strip** shows in every Main Island chat (none in a Voice only or DSB Land chat, which have no picture yet). While
+  nobody walks the chat's island it is the island standing still, drawn once and again only when its size or picture
+  changes, with "Nobody is on the chat's island right now" under it. In a short panel (the island's sheet) it gives way
+  first, down to a 96px stage, so a row of the roster, the emoji bar and the footer stay in sight.
+- **Go there**, in the stage's lower left corner, for a speaker (`goThere`): on the island the Ooga onto the chat's island
+  and back (chat-copy.js); in Ooga Chat, for a GitHub account, the same chat opened on the island in a new tab
+  (`ooga-chat-hosts.js`; the bootstrap's `island`, the edge's `ISLAND_ORIGIN`): `/?chat=<id>&mic=<0|1>`. The island page
+  (`chat-call.js`) takes the two parameters out of the address at once, keeps the wish in sessionStorage
+  (`ooga-chat-arrive`, five minutes) through a sign-in and opens the chat, listening. Anyone could post such a link, so it
+  never speaks by itself: a visitor who may speak there is asked first (voice-handoff.js's card, "Speak from here?",
+  saying whether the microphone will be on), and only Switch here, a press on the island page, takes the account's voice
+  from Ooga Chat with `join({ takeover })` (inside the press, the gesture a microphone needs), unmutes when the address
+  said it was open there, and walks the Ooga in once nothing stands in the way (chat-copy.js `goSoon`). Not now leaves
+  the voice in Ooga Chat and the visitor listening. The Audience takes that move as a `handoff`: the account's place on
+  the stage, and a co-host's rank, stay with it. Ooga Chat keeps speaking until the island has the voice, so nothing is
+  lost while the island loads, then steps out of the chat ("Your chat moved to Ooga Booga Land") so the two never both
+  play it. The host is still the host: roles belong to the account.
+- **Asking for places.** A chat member's socket asks with `{ type: "view", on: true }` only while someone walks (a row
+  with `walking`), the strip shows, the panel is shown and the page is visible, and says `on: false` as any of that ends; a new connection
   asks again. Only then does the Audience send `{ type: "walk", seq, p: [id, x, y, z, yaw, …] }` (at most twice a second,
   `walk-v1`), which reaches the views through the page's `hear` (ooga-chat-app.js, chat-call.js). A frame is read whole
   or not at all (`parseWalk`); each walker is eased from where it was shown over the time between frames, and one missing

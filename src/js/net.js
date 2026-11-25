@@ -281,6 +281,21 @@
   const chatMembersChanged = () => {
     for (const fn of chatMemberSubscribers) fn(state.chatMembers);
   };
+  // Who is in chats through Ooga Chat and not on the island (`state.chatPeople`, the room's `chat-people` and its
+  // welcome's `chatPeople`): frozen `{ id, login, display, speaking }` each, at most PEOPLE_MAX, checked here. True when
+  // the list changed.
+  const PEOPLE_MAX = 200, PEOPLE_ID = /^(gh|x):[1-9][0-9]{0,19}$/, PEOPLE_LOGIN = /^[\w.-]{1,39}$/;
+  const NO_PEOPLE = Object.freeze([]);
+  const readChatPeople = (list) => {
+    const next = [];
+    for (const p of Array.isArray(list) ? list.slice(0, PEOPLE_MAX) : []) {
+      if (!p || typeof p.id !== "string" || !PEOPLE_ID.test(p.id) || typeof p.login !== "string" || !PEOPLE_LOGIN.test(p.login)) continue;
+      next.push(Object.freeze({ id: p.id, login: p.login, display: chatText(p.display, 50) || p.login, speaking: p.speaking === true }));
+    }
+    if (JSON.stringify(next) === JSON.stringify(state.chatPeople)) return false;
+    state.chatPeople = next.length ? Object.freeze(next) : NO_PEOPLE;
+    return true;
+  };
   const remotes = new Map();
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
 // stopped it ("replaced", "full").
@@ -289,7 +304,7 @@
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, hostEpoch: 0, props: false, npcVersion: 0, catalogRequired: false, catalogMatch: false, catalog: null, doorway: false, pokerVoice: null,
     self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0, reactions: false, customHand: false, hand: false, handTone: 0, handEmoji: "",
-    voiceLinks: false, linkWants: new Set(), linked: new Set(), linkApp: Object.freeze([]), outdoorVoice: false, duel: false, placed: 0, audience: false, chats: false, call: false, clouds: NO_CLOUDS, chatMembers: new Map(), chatOnline: 0,
+    voiceLinks: false, linkWants: new Set(), linked: new Set(), linkApp: Object.freeze([]), outdoorVoice: false, duel: false, placed: 0, audience: false, chats: false, call: false, clouds: NO_CLOUDS, chatMembers: new Map(), chatOnline: 0, chatPeople: Object.freeze([]),
     travel: false, copy: null, target: null, copyLeft: 0, copyReason: "", away: new Map(),
     // Voice on another device (voice-handoff.js): `voiceElsewhere` while the account speaks from Ooga Chat somewhere
     // else, as the room's welcome and its `voice-elsewhere` say; `voiceMoved` counts the times Ooga Chat took this
@@ -467,7 +482,7 @@
     if (room !== "live") state.chatUnicode = state.privateChat = state.audience = state.chats = state.travel = false;
     if (room !== "live") { state.voiceLinks = false; state.linkWants.clear(); state.linked.clear(); state.linkApp = linkApp(null); peersHeard = []; gensHeard = null; }
     if (room !== "live") state.outdoorVoice = false;
-    if (room !== "live") { chatMembersOn = false; if (state.chatMembers.size || state.chatOnline) { state.chatMembers.clear(); state.chatOnline = 0; chatMembersChanged(); } }
+    if (room !== "live") { chatMembersOn = false; if (state.chatMembers.size || state.chatOnline || state.chatPeople.length) { state.chatMembers.clear(); state.chatOnline = 0; state.chatPeople = NO_PEOPLE; chatMembersChanged(); } }
     if (lost) privateHeard({ op: "lost" });
     if (lost) outdoorHeard({ op: "lost" });
     if (room !== "live") { hockeyTables.fill(null); hockeyEmit({ k: "lost" }); state.hockey = false; }
@@ -777,6 +792,7 @@
       state.chatMembers.clear();
       if (chatMembersOn && Array.isArray(msg.chatSummaries)) for (const m of msg.chatSummaries.slice(0, CHATS_KEPT)) readChatMembers(m);
       state.chatOnline = chatMembersOn ? chatCount(msg.chatOnline) : 0;
+      readChatPeople(chatMembersOn ? msg.chatPeople : null);
       chatMembersChanged();
       // A room that keeps the chalkboard sends it next (chalk-board); an older one leaves the page its own board.
       if (state.chalk && !(Array.isArray(msg.features) && msg.features.includes(BL.chalkBoard.FEATURE))) { state.chalk = null; chalkEmit("board"); }
@@ -917,6 +933,8 @@
       if (chatMembersOn && readChatMembers(msg)) chatMembersChanged();
     } else if (msg.t === "chat-online") {
       if (chatMembersOn && chatCount(msg.n) !== state.chatOnline) { state.chatOnline = chatCount(msg.n); chatMembersChanged(); }
+    } else if (msg.t === "chat-people") {
+      if (chatMembersOn && readChatPeople(msg.people)) chatMembersChanged();
     } else if (msg.t === "clouds") {
       if (msg.v === 1 && Array.isArray(msg.clouds)) setClouds(cloudList(msg.clouds));
     } else if (msg.t === "away") {

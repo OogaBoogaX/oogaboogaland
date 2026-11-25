@@ -187,7 +187,7 @@ function audienceCard(row) {
     ["media", "sfu " + (md.sfu || "—") + " · cleanup " + (md.cleanup || "—")], ["island panels watching", st.panels || 0],
     ["admitted", num(r.admitGithub, 2) + "/s GitHub · " + num(r.admitX, 2) + "/s X"],
     ["refused", num(r.refuseFull, 2) + "/s full · " + num(r.refuseIdentity, 2) + "/s too many tabs · " + num(r.refusePrincipal, 2) + "/s bad principal"],
-    ["closed", num(r.closeAuth, 2) + "/s auth · " + num(r.closeBad, 2) + "/s bad · " + num(r.closeProtocol, 2) + "/s protocol · " + num(r.closeOff, 2) + "/s switched off · " + num(r.gone, 2) + "/s by clients"],
+    ["closed", num(r.closeAuth, 2) + "/s auth · " + num(r.closeBad, 2) + "/s bad · " + num(r.closeProtocol, 2) + "/s protocol · " + num(r.closeOff, 2) + "/s switched off · " + num(r.gone, 2) + "/s by clients · " + num(r.silent, 2) + "/s silent"],
     ["speakers", num(r.speakerGranted, 2) + "/s granted · " + num(r.speakerRefused, 2) + "/s refused"],
     ["reactions", num(r.reactions, 2) + "/s · " + num(r.reactionsLimited, 2) + "/s over the limit"],
     ["resyncs", num(r.resync, 2) + "/s"], ["reports lost", row.failed || 0]]);

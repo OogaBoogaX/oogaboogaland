@@ -132,6 +132,15 @@ test("the bootstrap is the app's contract: version 1, its protocols, flags, same
   assert.equal(lost.paths.audience, undefined);
 });
 
+test("the bootstrap's island: a bare https origin, only with chats on, for a chat's Go there", async () => {
+  const { islandOrigin } = await import("../chat/src/config.js");
+  assert.equal(islandOrigin({ ISLAND_ORIGIN: "https://oogabooga.land" }), "https://oogabooga.land");
+  for (const bad of ["http://oogabooga.land", "https://oogabooga.land/", "https://oogabooga.land/x", "javascript:alert(1)", "", undefined])
+    assert.equal(islandOrigin({ ISLAND_ORIGIN: bad }), null, String(bad));
+  const off = await (await get(edge({ ISLAND_ORIGIN: "https://oogabooga.land" }), "/api/bootstrap")).json();
+  assert.equal(off.island, undefined, "chats off: no island");
+});
+
 test("health says what is off without naming anyone; version names the deployment", async () => {
   const audience = (sfu) => ({ getByName: () => ({ readiness: async () => ({ sfu, cleanup: "ok" }) }) });
   const withMedia = (sfu) => edge({ OBL: bound(island({ OOGA_CHAT_FEATURES: "bridge,outdoor,cloud,commons", AUDIENCE: audience(sfu) })) });

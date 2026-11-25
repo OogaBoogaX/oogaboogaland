@@ -40,7 +40,9 @@
     const features = { github: !!login.github, x: !!login.x, voice: raw.features?.voice === true, speak: raw.features?.speak === true, feed, commons: raw.features?.commons === true, chats: !!chats };
     // A newer deployment's build is worth a reload; an absent or matching one is not.
     const newer = typeof raw.build === "string" && raw.build.length <= 64 && build && raw.build !== build ? raw.build : null;
-    return { ok: true, mode: "live", features, paths: { login, session, logout, audience, chats }, protocols, newer };
+    // The island a chat's Go there opens (an https origin, never a path), only with chats.
+    const island = chats && typeof raw.island === "string" && /^https:\/\/[a-z0-9.-]{1,253}$/i.test(raw.island) ? raw.island : null;
+    return { ok: true, mode: "live", features, paths: { login, session, logout, audience, chats }, island, protocols, newer };
   };
   // The signed-in account as the session address reports it (identity protocol 1, docs/ooga-chat-app.md); anything else
   // is signed out. `principal` is the server's opaque identity: equality, deduplication and every per-person state key
