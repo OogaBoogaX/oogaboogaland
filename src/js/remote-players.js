@@ -32,7 +32,7 @@
 // A hosted chat's copy (chat-copy.js, net.js `travel`): a player who goes to one beams out of the island in its green
 // glyph stream (sleep-beam.js), its body kept for the beam after the room lets it go (`leave` with `reason: "travel"`),
 // and one coming back beams in (a `join` with `travel`); while away its Ooga's NPC is a ghost (`net.state.away`), as a
-// cloud speaker's is. In a copy nobody's in-a-chat mark is drawn: everyone there is in the chat.
+// cloud speaker's is. A player in a hosted chat's voice carries no mark of it.
 // One pool per scene visit: `create` in enter, `dispose` in leave, before the crew's.
 (() => {
   "use strict";
@@ -104,9 +104,6 @@
   const SPEAKER = [0, 3, 2, 3, 2, 2, 1, 5, 3, 1, 1, 7];
   const WAVES = [5, 3, 1, 3, 7, 2, 1, 5];
   const CROSS = [5, 3, 1, 1, 7, 3, 1, 1, 6, 4, 1, 1, 5, 5, 1, 1, 7, 5, 1, 1];
-  // A player in a hosted chat's voice (net.js `call`, call-v1): a small purple cloud where the speaker would stand, since
-  // their island voice is paused; the visitor's own, three times the size, beside the top of their own head.
-  const CALL = [3, 0, 3, 1, 1, 1, 6, 1, 0, 2, 8, 1, 0, 3, 9, 1, 1, 4, 7, 1];
   const runs = (ctx, cells, x, y, k = 1) => {
     for (let i = 0; i < cells.length; i += 4) ctx.fillRect(x + cells[i] * k, y + cells[i + 1] * k, cells[i + 2] * k, cells[i + 3] * k);
   };
@@ -860,22 +857,15 @@
         lifted = speaker;
         if (lifted) lifted.speechLift = HAND_ROOM;
       }
-      const ownCall = !!(net.state && net.state.call && !net.state.copy);
-      if (!bodies.size && selfReactT <= 0 && !ownHand && !ownCall) return;
+      if (!bodies.size && selfReactT <= 0 && !ownHand) return;
       ctx.save();
-      if (selfReactT > 0 || ownHand || ownCall) {
+      if (selfReactT > 0 || ownHand) {
         const rig = own && (own.parts ? own : own.gorilla);
         headMinX = Infinity; headMaxX = -Infinity; headTop = Infinity;
         if (rig && rig.parts && rig.parts.head && rig.root.visible) projectHead(rig.parts.head, project);
         if (headTop !== Infinity) {
           const x = Math.round((headMinX + headMaxX) / 2), y = Math.round(headTop);
-          if (selfReactT > 0 || ownHand) drawReaction(ctx, x, y, selfReact, selfReactT, ownHand);
-          if (ownCall) {
-            ctx.fillStyle = NAME_STROKE;
-            runs(ctx, CALL, x + 11, y - 25, 3);
-            ctx.fillStyle = CLOUD_DOT;
-            runs(ctx, CALL, x + 10, y - 27, 3);
-          }
+          drawReaction(ctx, x, y, selfReact, selfReactT, ownHand);
         }
       }
       if (!nameFont) {
@@ -959,11 +949,8 @@
           ctx.fillStyle = rec.ko ? BAR_KO : BAR_FILL;
           ctx.fillRect(left, top, Math.round(BAR_W * Math.max(0, Math.min(100, rec.hp)) / 100), BAR_H);
         }
-        if (!entry.cloud && rec.call && !(net.state && net.state.copy)) {
-          ctx.fillStyle = CLOUD_DOT;
-          runs(ctx, CALL, Math.round(textX + entry.labelW + ICON_GAP), Math.round(lineMid - 2.5));
-          continue;
-        }
+        // A player in a hosted chat's voice (net.js `call`) has their island voice paused: no mark.
+        if (!entry.cloud && rec.call && !(net.state && net.state.copy)) continue;
         // A cloud speaker is always in voice; the room says only whether their microphone is muted.
         if (!entry.cloud && !rec.voice) continue;
         const muted = entry.cloud ? rec.mic === "muted" : rec.muted;

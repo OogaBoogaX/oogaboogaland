@@ -8,7 +8,8 @@
 // it takes only COPY_MESSAGES, a zone only inside the chat's own (OUTDOOR_ZONES). Who walks it is the chat's word
 // (audience.js): `copyMember("gh:<id>")` before each admission, `walking(ids)` on each arrival and each departure for
 // good, and `copyCheck(ids)` from the sweep; the chat calls the copy's `copyRevoke`, `copyEnd` and `copyClouds` (room.js),
-// and hears the walkers' places for the island view (`walk(seq, ids, p)`), at most every WALK_MS while poses change.
+// and hears the walkers' places for the island view (`walk(seq, ids, p)`), at most every WALK_MS while poses change, and
+// how each looks (`looks(seq, looks)`), only when that changes.
 //
 // The island's side of a trip: a page about to leave for a copy says `{ t: "travel" }` and closes. Its leave says
 // `reason: "travel"` with the Ooga it drove, and its seat is kept (`away`, stored) so it can always come back: until its
@@ -24,8 +25,9 @@ export const COPY_FEATURE = "copy-v1";
 export const COPY_PREFIX = "chat:";
 // What a copy's page may say; everything else is ignored, never a kick.
 export const COPY_MESSAGES = Object.freeze(new Set(["pose", "body", "zone", "hub", "visible", "call", "react", "hand", "back", "mute"]));
-// The island view's relay: one call at most every WALK_MS, one in flight.
-export const WALK_MS = 500;
+// The island view's relay: one call at most every WALK_MS (or as often as the chat's fastest viewer asks, down to
+// WALK_MS_MIN, `walk`'s answer `ms`), one in flight.
+export const WALK_MS = 500, WALK_MS_MIN = 160;
 // How long the island keeps a traveller's seat with no word from the chat or the traveller.
 export const AWAY_MS = 2 * 60 * 60 * 1000;
 const CHAT = /^[A-Za-z0-9_-]{1,64}$/;
@@ -40,7 +42,7 @@ export const copyRoom = {
   of(name) {
     const chat = typeof name === "string" && name.startsWith(COPY_PREFIX) ? name.slice(COPY_PREFIX.length) : "";
     return CHAT.test(chat) ? { chat, zone: null, title: null, clouds: null, cloudsRev: 0, walkSig: null, walkSeq: 0, walkAt: 0, walkDirty: false, walkBusy: false,
-      walkTimer: 0, walkIds: [], walkP: [], ending: false } : null;
+      walkTimer: 0, walkIds: [], walkP: [], lookSig: null, lookSeq: 0, lookBusy: false, lookDirty: false, ending: false } : null;
   },
 
   /** The island's switch for copies (chat-bridge-protocol.js `copies`, which needs `chats`). */
@@ -94,6 +96,41 @@ export const copyRoom = {
     room.background(call.then((answer) => {
       if (!answer || answer.ok !== true) throw new Error("not taken");
     }).catch(() => { if (room.copy.walkSig === sig) room.copy.walkSig = null; }));
+    copyRoom.looked(room);
+  },
+
+  // The island view's looks (audience.js `looks`): each walker as other players see them, their saved equipment (its
+  // hat and wardrobe, the appearance equipment-room.js relays and never its owner's other fields) and what they have
+  // out (`w`, crew.js `weaponFlags`' hand alone: 1 the primary, 2 the gun; `j`, `jetFlags`' worn bit). Sent only when
+  // one changes (a snapshot, an equipment save, an arrival or departure), one call in flight; a call not taken is sent
+  // again at the next change or sweep.
+  looked(room) {
+    const c = room.copy;
+    if (c.ending || !room.env || !room.env.AUDIENCE) return;
+    let sig = "";
+    for (const p of room.players.values()) sig += `${p.id}:${p.w & 3}:${p.j & 1}:${p.equipment ? p.equipment.revision : -1},`;
+    if (sig === c.lookSig) return;
+    if (c.lookBusy) { c.lookDirty = true; return; }
+    c.lookSig = sig;
+    c.lookBusy = true;
+    c.lookSeq = Math.max(Date.now(), c.lookSeq + 1);
+    const looks = {};
+    for (const p of room.players.values()) looks[self(p.id)] = copyRoom.lookOf(p);
+    let call;
+    try { call = Promise.resolve(copyRoom.chatOf(room).looks(c.lookSeq, looks)); } catch (error) { call = Promise.reject(error); }
+    room.background(call.then((answer) => {
+      if (!answer || answer.ok !== true) throw new Error("not taken");
+    }).catch(() => { if (c.lookSig === sig) c.lookSig = null; }).then(() => {
+      c.lookBusy = false;
+      if (c.lookDirty) { c.lookDirty = false; copyRoom.looked(room); }
+    }));
+  },
+  lookOf: (p) => {
+    const e = p.equipment, look = {};
+    if (e && (e.selection || e.wardrobe || e.size !== 100)) look.e = { selection: e.selection || null, size: e.size, wardrobe: e.wardrobe || null };
+    if (p.w & 3) look.w = p.w & 3;
+    if (p.j & 1) look.j = 1;
+    return look;
   },
 
   // The island view (audience.js `walk`): after a snapshot, the walkers' places, at most every WALK_MS with one call in
@@ -105,9 +142,9 @@ export const copyRoom = {
   sendWalk(room) {
     const c = room.copy;
     if (!c.walkDirty || c.walkBusy || c.walkTimer || c.ending || !room.env || !room.env.AUDIENCE) return;
-    const now = Date.now(), since = now - c.walkAt;
-    if (since < WALK_MS) {
-      c.walkTimer = setTimeout(() => { c.walkTimer = 0; copyRoom.sendWalk(room); }, WALK_MS - since);
+    const now = Date.now(), since = now - c.walkAt, every = c.walkMs || WALK_MS;
+    if (since < every) {
+      c.walkTimer = setTimeout(() => { c.walkTimer = 0; copyRoom.sendWalk(room); }, every - since);
       return;
     }
     c.walkDirty = false;
@@ -120,7 +157,10 @@ export const copyRoom = {
     for (const q of room.players.values()) { ids.push(q.id); p.push(q.x, q.y, q.z, q.yaw); }
     let call;
     try { call = Promise.resolve(copyRoom.chatOf(room).walk(c.walkSeq, ids, p)); } catch (error) { call = Promise.reject(error); }
-    room.background(call.catch(() => {}).then(() => { c.walkBusy = false; copyRoom.sendWalk(room); }));
+    room.background(call.then((answer) => {
+      // The chat's fastest viewer sets how often to report, within WALK_MS_MIN and WALK_MS.
+      if (answer && Number.isFinite(answer.ms)) c.walkMs = Math.max(WALK_MS_MIN, Math.min(WALK_MS, answer.ms));
+    }, () => {}).then(() => { c.walkBusy = false; copyRoom.sendWalk(room); }));
   },
   stopWalk(room) {
     if (room.copy.walkTimer) { clearTimeout(room.copy.walkTimer); room.copy.walkTimer = 0; }
@@ -131,6 +171,7 @@ export const copyRoom = {
   // may no longer walk (a lapsed stage hold sets no alarm there) sent home.
   async sweep(room) {
     copyRoom.walking(room);
+    copyRoom.looked(room);
     if (!room.players.size || room.copy.ending || !room.env || !room.env.AUDIENCE) return;
     let gone;
     try { gone = await copyRoom.chatOf(room).copyCheck([...room.players.keys()].map(self)); } catch { return; }

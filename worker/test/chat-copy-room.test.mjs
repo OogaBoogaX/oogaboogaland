@@ -21,7 +21,7 @@ const CHAT = "AbCdEfGhIjKlMnOp";
 
 // The chat's object as the copy reaches it (audience.js): who may walk, what it heard, and calls to anything else.
 const chatStub = ({ speakers = new Set([1, 2, 3]), ended = false, clouds = [] } = {}) => {
-  const heard = { member: [], walking: [], check: [], walk: [], singleton: 0 };
+  const heard = { member: [], walking: [], check: [], walk: [], looks: [], singleton: 0 };
   const chat = {
     copyMember: async (id) => {
       heard.member.push(id);
@@ -31,6 +31,7 @@ const chatStub = ({ speakers = new Set([1, 2, 3]), ended = false, clouds = [] } 
     walking: async (ids) => { heard.walking.push([...ids]); return { ok: true }; },
     copyCheck: async (ids) => { heard.check.push([...ids]); return ids.filter((id) => !speakers.has(Number(id.slice(3)))); },
     walk: (seq, ids, p) => { heard.walk.push({ seq, ids: [...ids], p: [...p] }); return heard.walkAnswer ? heard.walkAnswer() : Promise.resolve({ ok: true }); },
+    looks: (seq, looks) => { heard.looks.push({ seq, looks: structuredClone(looks) }); return heard.looksAnswer ? heard.looksAnswer() : Promise.resolve({ ok: true }); },
   };
   const AUDIENCE = { getByName: (name) => {
     if (name === `chat:${CHAT}`) return chat;
@@ -283,6 +284,44 @@ test("a copy relays its walkers' places to the chat: one call in flight, at most
   await flush();
   assert.equal(chat.heard.walk.length, 2, "nothing moved: nothing sent");
   assert.equal(r.copy.walkTimer, 0, "and no timer left");
+});
+
+test("a copy tells the chat how its walkers look: only on a change, one call in flight, a call not taken sent again, and only their looks", async () => {
+  const chat = chatStub();
+  const h = host(`chat:${CHAT}`, { AUDIENCE: chat.AUDIENCE, OOGA_CHAT_FEATURES: ALL }), r = h.room();
+  const a = await h.join(r, 1);
+  await flush();
+  assert.deepEqual(chat.heard.looks.map((c) => c.looks), [{ "gh:1": {} }], "an arrival: its walker, wearing nothing out");
+  say(r, a, { t: "body", name: "player1" });
+  say(r, a, { t: "pose", x: 1, y: 2, z: 3, yaw: 0, w: 2 | 4 | 9 << 3, j: 1 | 2 << 1 });
+  r.snapshot();
+  await flush();
+  assert.deepEqual(chat.heard.looks.at(-1).looks, { "gh:1": { w: 2, j: 1 } }, "the hand and the jetpack, never the rounds, the aim or the flame");
+  const count = chat.heard.looks.length;
+  say(r, a, { t: "pose", x: 2, y: 2, z: 3, yaw: 0, w: 2 | 7 << 3, j: 1 });
+  r.snapshot();
+  await flush();
+  assert.equal(chat.heard.looks.length, count, "a walk with nothing changed in hand says nothing");
+  let answer;
+  chat.heard.looksAnswer = () => new Promise((resolve) => { answer = resolve; });
+  say(r, a, { t: "pose", x: 3, y: 2, z: 3, yaw: 0, w: 1 });
+  r.snapshot();
+  say(r, a, { t: "pose", x: 4, y: 2, z: 3, yaw: 0, w: 0 });
+  r.snapshot();
+  assert.equal(chat.heard.looks.length, count + 1, "one call in flight");
+  chat.heard.looksAnswer = null;
+  answer({ ok: false });
+  await flush();
+  await flush();
+  assert.deepEqual(chat.heard.looks.at(-1).looks, { "gh:1": {} }, "the change made meanwhile goes once the call is answered");
+  assert.ok(chat.heard.looks.at(-1).seq > chat.heard.looks.at(-2).seq);
+  await h.join(r, 2);
+  await flush();
+  assert.deepEqual(Object.keys(chat.heard.looks.at(-1).looks), ["gh:1", "gh:2"], "a second walker");
+  say(r, a, { t: "leave" });
+  await r.webSocketClose(a, 1000, "bye");
+  await flush();
+  assert.deepEqual(Object.keys(chat.heard.looks.at(-1).looks), ["gh:2"], "a departure for good: its look goes");
 });
 
 test("the island keeps a traveller's seat: its leave says so, its return beams in, and the chat or time lets the seat go", async () => {

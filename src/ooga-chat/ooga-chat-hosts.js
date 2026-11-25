@@ -33,12 +33,18 @@
   const create = (ctx, { node, head, space }) => {
     const c = ctx.chats, chats = { list: () => c.call("chats"), start: (body) => c.call("startChat", body), preview: (id) => c.call("chatPreview", id),
       open: c.open, leave: c.leave, request: c.request, hear: c.hear };
-    // The island view's map is the app's own lazy picture; its Live view the `live` chunk, fetched only when turned on.
-    const islandView = { picture: "art/island-view-main.webp", loadLive: () => BL.oogaChatChunks.load("live"), storageKey: ctx.storageKey("island-live") };
-    // Go there: the chat on the island. `handing` is the chat sent there, until the island has its voice (once its
-    // visitor presses Switch here) or HAND_MS passes, as long as the island keeps the wish; GOING_MS of it reads Going….
+    // The island view's map is the app's own lazy picture; its 3D view the `live` chunk (and the island's published
+    // character catalog, ooga-chat-catalog.js, before any Ooga is built), fetched only for a viewer it is
+    // offered to: for now a signed-in GitHub contributor (the server's word, `gates`); other GitHub accounts and X get
+    // the map, and the Audience holds their walk rate to the map's.
+    const islandView = { picture: "art/island-view-main.webp", loadLive: () => Promise.resolve(BL.oogaChatChunks.load("live")).then(() => BL.oogaChatCatalog.apply()), scenery: BL.oogaChatScenery || "art", fullscreen: true,
+      liveAllowed: () => !!last && last.mode === "live" && BL.oogaChatAuth.gates(last, Date.now()).contributor };
+    // Go there: the chat on the island, in this same tab. A speaker on the stage asks the chat for a one-time ticket
+    // (`handoff`, TICKET_MS at most) and the island's page, given it in the address's fragment, takes the voice and the
+    // microphone as they were straight over with no card (chat-call.js); without one (not on the stage, or no answer)
+    // the island listens and asks first. `handing` is the chat being sent there while the page goes.
     let last = null, handing = null;
-    const SPEAKING = ["eligible", "pending", "active"], HAND_MS = 5 * 60 * 1000, GOING_MS = 8000;
+    const SPEAKING = ["eligible", "pending", "active"], HAND_MS = 5 * 60 * 1000, GOING_MS = 8000, TICKET_MS = 2500;
     const goThere = {
       state(room) {
         const v = last && last.voice;
@@ -54,10 +60,20 @@
         url.searchParams.set("chat", room.id);
         url.searchParams.set("mic", last.voice.role === "speaker" && !last.voice.muted ? "1" : "0");
         handing = { id: room.id, at: Date.now() };
-        // Inside the press, so the browser lets it open; the island has no hold on this page.
-        window.open(url.href, "_blank", "noopener");
         view.update(last);
-        setTimeout(() => { if (last) view.update(last); }, GOING_MS + 50);
+        // The ticket in the fragment, which no server or log sees; the island takes it out of the address at once.
+        let done = false, off = null, timer = 0;
+        const go = (ticket) => {
+          if (done) return;
+          done = true;
+          off?.(); clearTimeout(timer);
+          if (ticket) url.hash = `handoff=${ticket}`;
+          location.assign(url.href);
+        };
+        const asked = last.voice.role === "speaker" ? c.request("handoff", {}) : 0;
+        if (!asked) return go("");
+        off = c.hear((msg) => { if (msg.type === "result" && msg.requestId === asked) go(msg.ok && typeof msg.ticket === "string" ? msg.ticket : ""); });
+        timer = setTimeout(() => go(""), TICKET_MS);
       },
       subscribe: () => () => {}
     };

@@ -341,3 +341,8 @@ body {
 /* With hosted chats on and no chat joined, the other tabs' emoji bars stand down: reactions belong to a chat
    (ooga-chat-panels.js `outOfChat`). */
 .oc-panel[data-chat="none"] > .panel-foot > .reactions { display: none; }
+
+/* The island view full screen (island-view.js, chat-hosts.css `.iv-full-host`): the app's column at the right edge,
+   the view filling the rest; on a screen taller than it is wide, under the view. */
+html.iv-full .oc { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 42vw); max-width: none; height: 100dvh; min-height: 0; margin: 0; }
+@media (max-aspect-ratio: 1 / 1) { html.iv-full .oc { top: 55dvh; left: 0; width: auto; height: 45dvh; } }

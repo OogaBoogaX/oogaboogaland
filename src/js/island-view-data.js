@@ -5,6 +5,6 @@
   "use strict";
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
-  BL.islandViewData = Object.freeze({ main: Object.freeze({ w: 512, h: 384, matrix: Object.freeze([2.79903811,0,0,0,0,0,-0.880873757,0,0,-3.73205081,0,0,-33.5884573,22.3923048,-35.2349503,299.497077]),
-    light: Object.freeze({"clear":[0.36,0.58,0.88],"horizon":[0.66,0.82,0.97],"zenith":[0.18,0.44,0.9],"sky":[0.44,0.52,0.68],"ground":[0.3,0.27,0.21],"sun":[0.74,0.64,0.5],"direct":[0.74,0.64,0.5],"light":{"x":0,"y":0.9378933444107768,"z":0.3469237301050018},"sunDirection":{"x":0,"y":0.9378933444107768,"z":0.3469237301050018},"directStrength":1,"directionalLightStrength":1,"sunStrength":1,"ambientFloor":0.24,"diffuseFloor":0,"shadowStrength":1,"shadowFloor":0.3,"shadowBias":0.0014,"day":1,"twilight":0,"sea":-70,"bloomStrength":0.5,"sunAltitude":69.7007,"sunAzimuth":180,"time":6.9455}) }) });
+  BL.islandViewData = Object.freeze({ main: Object.freeze({ w: 512, h: 384, matrix: Object.freeze([2.79903811,0,0,0,0,0,-0.461018041,0,0,-3.73205081,0,0,0,0,-18.4407216,156.746134]),
+    light: Object.freeze({"clear":[0.36,0.58,0.88],"horizon":[0.66,0.82,0.97],"zenith":[0.18,0.44,0.9],"sky":[0.44,0.52,0.68],"ground":[0.3,0.27,0.21],"sun":[0.74,0.64,0.5],"direct":[0.74,0.64,0.5],"light":{"x":0,"y":0.9378933444107768,"z":0.3469237301050018},"sunDirection":{"x":0,"y":0.9378933444107768,"z":0.3469237301050018},"directStrength":1,"directionalLightStrength":1,"sunStrength":1,"ambientFloor":0.24,"diffuseFloor":0,"shadowStrength":1,"shadowFloor":0.3,"shadowBias":0.0014,"day":1,"twilight":0,"sea":-70,"bloomStrength":0.5,"sunAltitude":69.7007,"sunAzimuth":180,"time":6.3857}) }) });
 })();

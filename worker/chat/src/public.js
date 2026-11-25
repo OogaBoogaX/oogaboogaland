@@ -126,6 +126,21 @@ export const handlePublic = async (request, env, url, deps) => {
     try { return await env.OBL.fetch(new Request(`https://island.invalid/portraits/${match[1]}/${match[2]}.png`, { method: request.method, headers })); }
     catch { return refusal("unavailable", 503, { retryable: true, retryAfter: 15 }); }
   }
+  // The island's published character catalog, passed through as it serves it (its own size bound, no-store and checks),
+  // for the 3D view to dress the cast as the island does; a compatibility query only refuses, as on the island.
+  if (url.pathname === "/api/chat/public/characters/catalog") {
+    if (!["GET", "HEAD"].includes(request.method)) return refusal("method_not_allowed", 405);
+    const baseline = url.searchParams.get("baseline"), engine = url.searchParams.get("engine");
+    if (baseline !== null && !/^[a-f0-9]{40}$/.test(baseline) || engine !== null && !/^[a-z0-9-]{1,64}$/.test(engine)) return refusal("malformed", 400);
+    if (!(await allowed(env.CHAT_PUBLIC_LIMITER, clientIp(request)))) return refusal("rate_limited", 429, { retryable: true, retryAfter: 60 });
+    if (!env.OBL || typeof env.OBL.fetch !== "function") return refusal("unavailable", 503, { retryable: true, retryAfter: 15 });
+    const query = new URLSearchParams();
+    if (baseline !== null) query.set("baseline", baseline);
+    if (engine !== null) query.set("engine", engine);
+    const search = query.size ? `?${query}` : "";
+    try { return await env.OBL.fetch(new Request(`https://island.invalid/catalog${search}`, { method: request.method, headers: { "x-ooga-chat-environment": env.ENVIRONMENT } })); }
+    catch { return refusal("unavailable", 503, { retryable: true, retryAfter: 15 }); }
+  }
   if (url.pathname !== "/api/chat/public/contributors") return refusal("not_found", 404);
   if (request.method !== "GET" && request.method !== "HEAD") return refusal("method_not_allowed", 405);
   if (!(await allowed(env.CHAT_PUBLIC_LIMITER, clientIp(request)))) return refusal("rate_limited", 429, { retryable: true, retryAfter: 60 });

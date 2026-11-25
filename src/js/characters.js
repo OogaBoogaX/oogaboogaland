@@ -69,5 +69,38 @@
   };
   // The one in-game name for a handle or login; unknown names pass through.
   const displayOf = (name) => { const c = get(name); return (c && (c.display || c.handle)) || String(name); };
-  BL.characters = { add, get, ownedBy, all, displayOf, displayOfLogin, applyCatalog };
+  // An Ooga's traits, hashed from its name over the look its character file gives: the island's roster (contributors.js)
+  // and Ooga Chat's 3D view build every Ooga from these. `display` is the name to show where its file gives none.
+  const SKINS = ["#c98a5b", "#a9744c", "#8a5a3a", "#d9a06b", "#b58057"];
+  const HAIRS = ["#2b1b10", "#4a2c14", "#151312", "#5c4425", "#7a2e12"];
+  const FURS = ["#d98a2e", "#cc7f28", "#c98936", "#e09a40", "#c27a24", "#d4913a"];
+  // A character's look overrides the hashed skin, hair and fur and carries its
+  // flags into the traits; its dress hooks go to models.buildCaveman.
+  const traitsFor = (name, display = "") => {
+    const { fnv1a, mulberry32 } = BL.math, character = get(name);
+    const look = character?.look || {};
+    const slim = look.build === "slim";
+    const rand = mulberry32(fnv1a(name));
+    const skin = SKINS[Math.floor(rand() * SKINS.length)];
+    // Either build's hashed hair is one of the same browns.
+    const hashedHair = HAIRS[Math.floor(rand() * HAIRS.length)];
+    const traits = {
+      ...look,
+      name,
+      display: character?.display || display || name,
+      slim,
+      skin: look.skin || skin,
+      hair: look.hair || hashedHair,
+      fur: look.fur || FURS[Math.floor(rand() * FURS.length)],
+      height: 0.92 + rand() * 0.24,
+      belly: (0.9 + rand() * 0.35) * (slim ? 0.8 : 1),
+      rand: mulberry32(fnv1a(name + "/body")),
+      dress: character?.dress
+    };
+    // An explicit stature replaces the hashed one after every draw, so the
+    // other hashed traits keep their sequence.
+    if (look.height) traits.height = look.height;
+    return traits;
+  };
+  BL.characters = { add, get, ownedBy, all, displayOf, displayOfLogin, applyCatalog, traitsFor };
 })();

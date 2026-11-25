@@ -196,23 +196,8 @@
   // (`flyCompanion`'s gain), and turns up beside it once `far` behind or held up `held` seconds with no way on.
   const COMPANION_FOLLOW = Object.freeze({ back: 0.95, run: 6.9, ease: 2.6, accel: 6, turn: 7, stuck: 0.4, behind: 2.5, moved: 3, side: 1.2, up: 0.4, far: 30, held: 1.5 });
   const wrapAngle = (a) => a - Math.round(a / TAU) * TAU;
-  // The four-legged gait DSB Land's dogs walk with (`rescue-dogs.js` reads it from here), shared with a companion built
-  // with legs (a character's `parts.dog` whose node lists them as `legs`: fore left, fore right, hind left, hind right,
-  // each hinged at its hip, and an optional `tail` at its root): the legs swing in diagonal pairs, `swing` radians at
-  // `pace` metres a second, a stride `stride` radians a metre, the body bobbing `bob`; aloft they stretch fore and aft
-  // (`flyFront`, `flyHind`), touching down they tuck a little (`landFront`, `landHind`). A companion whose Ooga rests
-  // in the hammock keeps off the bed: its spot is the ground close beside it that the scene names (`ctx.petLanding`
-  // with `lying`), and there it lies down, its legs out fore and aft (`lieFront`, `lieHind`) and its body down onto
-  // them, three quarters of its hips' height, eased at `settle` a second; it gets up as it moves or its Ooga does.
-  const QUAD_GAIT = Object.freeze({ swing: 0.65, pace: 1.4, stride: 11, bob: 0.018, flyFront: -1.05, flyHind: 1.1, landFront: -0.2, landHind: 0.2,
-    lieFront: -1.5, lieHind: 1.5, settle: 5 });
-  // Sets a legged companion's legs (`front` and `hind` their set angles, `swing` this stride's) and its tail (`wag` its
-  // yaw, `droop` its pitch).
-  const poseQuadruped = (node, front, hind, swing, wag, droop) => {
-    const legs = node.legs;
-    for (let n = 0; n < 4; n++) legs[n].rotation.x = (n < 2 ? front : hind) + (n === 0 || n === 3 ? swing : -swing);
-    if (node.tail) { node.tail.rotation.y = wag; node.tail.rotation.x = droop; }
-  };
+  // The four-legged gait and its pose (models.js, where Ooga Chat's island view reads them too), kept here by name.
+  const { QUAD_GAIT, poseQuadruped } = models;
   // Shared dog flight steering, extracted from rescue-dogs.js. Both the authored
   // companion and DSB's adopted dog use this exact clearance/floor/speed path.
   // State and callbacks are retained by the caller; no per-frame objects are made.
