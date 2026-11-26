@@ -258,7 +258,7 @@ test("health: a driven Ooga's health is clamped to 0-100 and needs its knocked-o
 // Contract: spectators keep floor visibility while hearing only the table they selected.
 test("Ember Den voice separates ten tables and the walking floor without changing zones", async () => {
   const { voicePeers } = await import("../src/protocol.js");
-  const player = (id, pokerVoice) => ({ id, pokerVoice, zone: "ember-den", body: `fixture-${id}`, voice: { sub: "receive", track: "mic" } });
+  const player = (id, pokerVoice) => ({ id, pokerVoice, zone: "emberden", body: `fixture-${id}`, voice: { sub: "receive", track: "mic" } });
   const players = [player(1, 0), player(2, 0), player(3, 1), player(4, null), player(5, null), player(6, 9)];
   const peers = voicePeers(players);
   assert.deepEqual(peers.get(1), [2]);
@@ -267,7 +267,7 @@ test("Ember Den voice separates ten tables and the walking floor without changin
   assert.deepEqual(peers.get(6), []);
   players[2].pokerVoice = 0;
   assert.deepEqual(voicePeers(players).get(3), [1, 2]);
-  assert.ok(players.every(p => p.zone === "ember-den"));
+  assert.ok(players.every(p => p.zone === "emberden"));
   for (const table of [null, 0, 9]) assert.deepEqual(parseClientMessage(JSON.stringify({ t: "poker-voice", table })), { t: "poker-voice", table });
   for (const table of [-1, 10, 0.5, "0", undefined]) assert.equal(parseClientMessage(JSON.stringify({ t: "poker-voice", table })), null);
 });

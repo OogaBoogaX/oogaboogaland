@@ -1047,7 +1047,7 @@ export class Room extends DurableObject {
       this.broadcast({ t: "blend", id: p.id, to, k }, p.ws);
       if (replan) this.updateVoice();
     } else if (msg.t === "poker-voice") {
-      if (p.zone !== "ember-den" || msg.table === p.pokerVoice) return;
+      if (BLEND.group(p.zone) !== "emberden" || msg.table === p.pokerVoice) return;
       p.pokerVoice = msg.table;
       p.sent = null;
       // Also closes the receiver's tracks for players at the table it left.
