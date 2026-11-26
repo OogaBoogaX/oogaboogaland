@@ -2,7 +2,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { clamp, damp, mat4, quat } = BL.math;
-  const { boundsOf, updateWorld } = BL.scene;
+  const { boundsOf, updateWorld, hideFromCamera } = BL.scene;
   const { create: createControls } = BL.controls;
   const { ACTION: PAD, state: pad } = BL.gamepad, padActions = pad.actions;
   const BASE_FOV = 48 * Math.PI / 180;
@@ -33,6 +33,8 @@
   const RIGHT_DOUBLE_TIME = 350, RIGHT_TAP_TRAVEL = 8;
   // The live pilot's turn toward a point (see `turnToward`), for the live players tab, which outlives every scene.
   let turnActive = null;
+  // The settle of every pilot not yet disposed for good, which `BL.pilot.settle` runs before each draw.
+  const livePilots = [];
   // A lying head may look toward either shoulder, the wall behind it or the
   // feet, but never back through its pillow or the ground beneath its face.
   const LYING_YAW_LIMIT = 80 * Math.PI / 180, LYING_PITCH_LIMIT = 70 * Math.PI / 180;
@@ -77,14 +79,11 @@
     const rotation = quat.create(), endpointRotation = quat.create();
     const forward = new Float64Array(3), top = new Float64Array(3);
     let active = false, elapsed = 0, nativePosition = false, duration = CAMERA_HANDOFF_TIME;
-    let sourceHead = null, sourceRoot = null, sourceHeadHidden = false;
+    let sourceHead = null, sourceRoot = null;
     const restoreHead = () => {
-      if (sourceHead) sourceHead.cameraHidden = sourceHeadHidden;
+      if (sourceHead) hideFromCamera(sourceHead, raw, false);
       sourceHead = sourceRoot = null;
     };
-    // A rapid return can make the retained outgoing head the new controller's
-    // head. Hand its original flag back before that controller records it.
-    const takeHead = (head) => { if (sourceHead === head) restoreHead(); };
     const overlapsHead = (node, margin) => {
       if (!node.visible) return false;
       if (node.geometry) {
@@ -116,14 +115,12 @@
       out.orthoMix = camera.orthoMix || 0; out.orthoHeight = camera.orthoHeight || 0;
       return out;
     };
-    const capture = (out, head = null, hidden = false, root = null) => {
+    const capture = (out, head = null, root = null) => {
       checkHead();
       capturePose(out);
-      // Rapid retargeting carries the still-overlapping original head across
-      // release, without ever replacing its original visibility flag.
+      // Rapid retargeting carries the still-overlapping original head across release.
       out.sourceHead = sourceHead || head;
       out.sourceRoot = sourceHead ? sourceRoot : root;
-      out.sourceHeadHidden = sourceHead ? sourceHeadHidden : hidden;
       return out;
     };
     const write = (pose) => {
@@ -149,11 +146,11 @@
       poseRotation(rotation, shown);
       elapsed = 0; active = true;
       write(shown);
-      // If the incoming controller already hides this same head, it owns its
-      // restoration. Otherwise retain only the outgoing overlapping head.
-      if (source.sourceHead && !source.sourceHead.cameraHidden) {
-        sourceHead = source.sourceHead; sourceRoot = source.sourceRoot; sourceHeadHidden = source.sourceHeadHidden;
-        sourceHead.cameraHidden = true;
+      // Keep the outgoing head hidden while the blend's eye still overlaps it; an incoming controller hiding the
+      // same head holds it too, and it shows once neither does.
+      if (source.sourceHead) {
+        sourceHead = source.sourceHead; sourceRoot = source.sourceRoot;
+        hideFromCamera(sourceHead, raw, true);
         checkHead();
       }
       return true;
@@ -195,7 +192,7 @@
       return true;
     };
     const cancel = () => { active = false; restoreHead(); };
-    return { capture, begin, restore, apply, cancel, takeHead, get active() { return active; } };
+    return { capture, begin, restore, apply, cancel, check: checkHead, get active() { return active; } };
   };
   // The visitor's own control, carried from one scene's pilot to the next (#421): which Ooga, the view, combat, the look
   // as an angle from the Ooga's heading, the pitch, zoom and overhead height, the shoulder side and the weapon in hand
@@ -252,7 +249,7 @@
     const view = presets[ctx.landing];
     const orbit = { ...view, tYaw: view.yaw, tPitch: view.pitch, tDist: view.dist, tx: view.target.x, ty: view.target.y, tz: view.target.z };
     let panStrafe = 0, panForward = 0, panClimb = 0, panYaw = view.yaw;
-    let closeWanted = false, shoulderView = false, closeMix = 0, closeVelocity = 0, closeRate = CLOSE_RATE, distanceVelocity = 0, closeExitScale = 1, closeCave = null, hiddenHead = null, hiddenHeadCameraHidden = false, viewPitch = orbit.pitch;
+    let closeWanted = false, shoulderView = false, closeMix = 0, closeVelocity = 0, closeRate = CLOSE_RATE, distanceVelocity = 0, closeExitScale = 1, closeCave = null, hiddenHead = null, viewPitch = orbit.pitch;
     let groundView = 0, groundTarget = 0, groundX = 0, groundZ = 0, groundZone = 0, groundValid = false, groundLift = 0, groundEasing = false;
     let sleepingView = false, trailingPitchChosen = false;
     let restOrbitCave = null, restOrbitYaw = 0, restOrbitPitch = 0;
@@ -264,6 +261,8 @@
     let releaseMix = 0, closeCameraActive = false;
     let headOrbit = false, exitAngleHold = false, exitBodyX = 0, exitBodyY = 0, exitBodyZ = 0;
     const headOrbitOffset = { x: 0, y: 0, z: 0 };
+    // Who hides the driven Ooga's head (BL.scene.hideFromCamera), apart from the handoff's and a doorway's own holds.
+    const headOwner = {};
     const headInverse = mat4.create(), headPartMatrix = mat4.create(), headEye = new Float64Array(3), headNear = new Float64Array(3), headBounds = new Float64Array(6);
     const rollingForward = new Float64Array(3), rollingUp = new Float64Array(3), rollingRight = new Float64Array(3), rollingBaseForward = new Float64Array(3);
     const entryPosition = { x: 0, y: 0, z: 0 };
@@ -531,7 +530,7 @@
       out.height = overhead ? overheadHeight : cave ? camera.position.y - cave.root.position.y + cave.baseY : orbit.dist;
       out.side = shoulderSideTarget < 0 ? -1 : 1;
       out.focused = softAimFocused || document.pointerLockElement === canvas;
-      return handoff.capture(out, hiddenHead ? hiddenHead.parts.head : null, hiddenHeadCameraHidden, hiddenHead ? hiddenHead.root : null);
+      return handoff.capture(out, hiddenHead ? hiddenHead.parts.head : null, hiddenHead ? hiddenHead.root : null);
     };
     const assistedView = () => birdsEye() || overheadExit > 0 && aimAtCursor;
     const carryCursor = BL.cursor.create({ canvas, requestLock: () => lockAim(), unlock: () => unlockAim() });
@@ -1694,16 +1693,14 @@
     };
     const restoreHead = () => {
       if (!hiddenHead) return;
-      hiddenHead.parts.head.cameraHidden = hiddenHeadCameraHidden;
+      hideFromCamera(hiddenHead.parts.head, headOwner, false);
       hiddenHead = null;
     };
     const hideHead = (cave) => {
       if (hiddenHead === cave) return;
       restoreHead();
-      handoff.takeHead(cave.parts.head);
       hiddenHead = cave;
-      hiddenHeadCameraHidden = cave.parts.head.cameraHidden;
-      cave.parts.head.cameraHidden = true;
+      hideFromCamera(cave.parts.head, headOwner, true);
     };
     const includeHeadPart = (node) => {
       if (!node.visible) return;
@@ -1728,17 +1725,10 @@
     // neither can touch the head from 6 m out. Judged fresh each frame from
     // the placed camera; a hidden head never skips, so it always restores.
     const HEAD_HIDE_RANGE = 6;
-    const syncHeadVisibility = (cave) => {
-      if (solvingHandoff) return;
-      if (!cave) { restoreHead(); return; }
-      if (!hiddenHead) {
-        const dx = camera.position.x - cave.root.position.x, dy = camera.position.y - cave.root.position.y, dz = camera.position.z - cave.root.position.z;
-        if (dx * dx + dy * dy + dz * dz > HEAD_HIDE_RANGE * HEAD_HIDE_RANGE) return;
-      }
-      // The near plane can expose interior faces before the eye enters.
-      // Include the whole head subtree so hats and masks cannot flash either.
-      updateWorld(cave.root, cave.root.parent ? cave.root.parent.world : undefined);
-      const head = cave.parts.head;
+    // Whether the camera's eye or near plane touches a head (the whole subtree under it, so hats and masks
+    // count): the one test for hiding a driven body's head, the pilot's Ooga's and a driven gorilla's.
+    const headInView = (root, head) => {
+      updateWorld(root, root.parent ? root.parent.world : undefined);
       mat4.invert(headInverse, head.world);
       headBounds[0] = headBounds[1] = headBounds[2] = Infinity;
       headBounds[3] = headBounds[4] = headBounds[5] = -Infinity;
@@ -1746,7 +1736,7 @@
       mat4.transformPoint(headEye, headInverse, camera.position.x, camera.position.y, camera.position.z);
       if (headEye[0] >= headBounds[0] && headEye[0] <= headBounds[3]
         && headEye[1] >= headBounds[1] && headEye[1] <= headBounds[4]
-        && headEye[2] >= headBounds[2] && headEye[2] <= headBounds[5]) { hideHead(cave); return; }
+        && headEye[2] >= headBounds[2] && headEye[2] <= headBounds[5]) return true;
       let fx = camera.target.x - camera.position.x, fy = camera.target.y - camera.position.y, fz = camera.target.z - camera.position.z;
       const length = Math.hypot(fx, fy, fz);
       fx /= length; fy /= length; fz /= length;
@@ -1761,10 +1751,35 @@
         const m = headInverse;
         const extent = Math.abs(m[axis] * rx + m[axis + 4] * ry + m[axis + 8] * rz) * halfW
           + Math.abs(m[axis] * vx + m[axis + 4] * vy + m[axis + 8] * vz) * halfH;
-        if (headNear[axis] + extent < headBounds[axis] || headNear[axis] - extent > headBounds[axis + 3]) { restoreHead(); return; }
+        if (headNear[axis] + extent < headBounds[axis] || headNear[axis] - extent > headBounds[axis + 3]) return false;
       }
-      hideHead(cave);
+      return true;
     };
+    // Past this the test is provably idle (see HEAD_HIDE_RANGE); a hidden head is always judged, so it always shows again.
+    const headInRange = (root) => {
+      const dx = camera.position.x - root.position.x, dy = camera.position.y - root.position.y, dz = camera.position.z - root.position.z;
+      return dx * dx + dy * dy + dz * dz <= HEAD_HIDE_RANGE * HEAD_HIDE_RANGE;
+    };
+    const syncHeadVisibility = (cave) => {
+      if (solvingHandoff) return;
+      if (!cave) { restoreHead(); return; }
+      if (!hiddenHead && !headInRange(cave.root)) return;
+      if (headInView(cave.root, cave.parts.head)) hideHead(cave); else restoreHead();
+    };
+    // Judges every head from the camera exactly as it will be drawn: the director calls it (through `BL.pilot.settle`)
+    // after the scene and everything else that moves the view this frame, so a view laid over the pilot's (a booth,
+    // a tour, a doorway's walk, a shake) can never draw a head the pilot hid from its own eye, or hide one it can see.
+    const settlers = [];
+    const settle = (shown) => {
+      if (disposed || shown !== camera) return;
+      handoff.check();
+      syncHeadVisibility(player());
+      for (let i = 0; i < settlers.length; i++) settlers[i]();
+    };
+    const onSettle = (fn) => { settlers.push(fn); };
+    // For another body this pilot's camera shows from its eyes (a driven gorilla): true while its head should be hidden.
+    const judgeHead = (root, head, hidden) => (hidden || headInRange(root)) && headInView(root, head);
+    livePilots.push(settle);
     const faceWith = (cave) => {
       closeCave = cave;
       entryPosition.x = camera.position.x; entryPosition.y = camera.position.y; entryPosition.z = camera.position.z;
@@ -3879,7 +3894,7 @@
       hud.setMagazine(0, 0, 0, false);
       if (hud.setMode) hud.setMode(null, false, "detached", false);
       controls.dispose();
-      if (!keep) crew = fx = input = null;
+      if (!keep) { crew = fx = input = null; const i = livePilots.indexOf(settle); if (i >= 0) livePilots.splice(i, 1); }
     };
     const suspend = () => { release(true); setActive(false); dispose(true); };
     const resume = () => {
@@ -4059,7 +4074,7 @@
       get shoulderEntryMix() { return aimMix; },
       // The view being kept: "first-person", "shoulder", "birds-eye", "orbit", or "detached" with nobody driven.
       get view() { return viewMode(); },
-      bind, setActive, setButtonsHeld, refreshCombat, viewState, adopt, readInput, update, syncHeadVisibility, turnToward, goPreset, look, endLook, get looking() { return looking(); }, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, tiltView, framePoint, releaseFrame, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, suspend, resume, dispose, get player() {
+      bind, setActive, setButtonsHeld, refreshCombat, viewState, adopt, readInput, update, syncHeadVisibility, onSettle, judgeHead, turnToward, goPreset, look, endLook, get looking() { return looking(); }, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, tiltView, framePoint, releaseFrame, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, suspend, resume, dispose, get player() {
       return player();
     }, get assistedTarget() {
       if (birdsEye() && assistedTargetActive) return assistedTargetHit;
@@ -4089,5 +4104,7 @@
     } };
   };
   BL.pilot = { get carried() { return carried; }, create, WALK, combatEntryView, BIRDS_EYE_FIXTURE,
-    turnToward: (x, y, z) => turnActive ? turnActive(x, y, z) : false };
+    turnToward: (x, y, z) => turnActive ? turnActive(x, y, z) : false,
+    // The director's last word before each draw: every live pilot judges the heads its camera shows (`settle`).
+    settle: (camera) => { for (let i = 0; i < livePilots.length; i++) livePilots[i](camera); } };
 })();

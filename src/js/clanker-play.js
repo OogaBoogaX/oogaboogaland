@@ -36,7 +36,8 @@
     let handoffBefore = false, holdingFollow = false, pinnedFollow = false, viewChanged = false, moving = false;
     let acquisitionHold = false;
     let shoulderPointActive = false;
-    let shoulderSide = SHOULDER_SIDE, peek = 0, orbitPitch = 0.42, overheadHeight = 14, headHidden = null, savedHeadHidden = false;
+    let shoulderSide = SHOULDER_SIDE, peek = 0, orbitPitch = 0.42, overheadHeight = 14, headHidden = null;
+    const headOwner = {};
     let overheadEntry = false;
     let targetWait = 0, rightAt = -Infinity, rightDownAt = -Infinity, rightTravel = 0;
     let combatTooltipEntry = null, combatTooltipText = "", combatTooltipNoDot = false;
@@ -45,7 +46,7 @@
     // Keep the selected mode as intent while asleep; it becomes usable on wake.
     const isCombat = () => !!player && combat && !clankers.sleeping(player);
     const restoreHead = () => {
-      if (headHidden) headHidden.cameraHidden = savedHeadHidden;
+      if (headHidden) BL.scene.hideFromCamera(headHidden, headOwner, false);
       headHidden = null;
     };
     const setCombatTooltip = (entry) => {
@@ -281,7 +282,7 @@
       out.height = camera.position.y - player.root.position.y;
       out.eyeX = camera.position.x; out.eyeY = camera.position.y; out.eyeZ = camera.position.z;
       out.fov = camera.fov; out.side = Math.sign(shoulderSide); out.focused = focused;
-      return cameraHandoff.capture(out, headHidden, savedHeadHidden, player.root);
+      return cameraHandoff.capture(out, headHidden, player.root);
     };
     const release = () => {
       if (!player) return false;
@@ -843,28 +844,30 @@
       clankers.control(command);
       jumpTap = false;
     };
-    const finishView = (dt) => {
-      cameraHandoff.apply(dt);
-      const first = view === "first-person";
-      if (first && orbit.dist < 0.65 && !headHidden) {
-        // The incoming head stays visible while a handoff approaches it.
-        const head = player.gorilla.parts.head, bounds = BL.scene.boundsOf(head.geometry);
+    // The gorilla's head is judged from its own view here and again from the camera as it is drawn (the pilot's
+    // `settle`, after anything else has moved the view): hidden while the eye or near plane touches it, or in its own first person while the eye is
+    // within its reach, and shown the moment neither holds, wherever the view went.
+    const settleHead = () => {
+      if (!player) { restoreHead(); return; }
+      const head = player.gorilla.parts.head;
+      if (headHidden && headHidden !== head) restoreHead();
+      let hide = pilot.judgeHead(player.root, head, !!headHidden);
+      if (!hide && view === "first-person" && orbit.dist < 0.65) {
+        const bounds = BL.scene.boundsOf(head.geometry);
         BL.scene.updateWorld(player.root, player.root.parent.world);
         const m = head.world;
         mat4.transformPoint(eye, m, bounds.center[0], bounds.center[1], bounds.center[2]);
         const scale = Math.max(Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10]));
-        if (!cameraHandoff.active || Math.hypot(camera.position.x - eye[0], camera.position.y - eye[1], camera.position.z - eye[2]) <= bounds.radius * scale + camera.near) {
-          cameraHandoff.takeHead(head);
-          headHidden = head; savedHeadHidden = headHidden.cameraHidden; headHidden.cameraHidden = true;
-        }
-      } else if (!first && headHidden) {
-        // Keep the head out of the near plane until the exit dolly clears it.
-        BL.scene.updateWorld(player.root, player.root.parent.world);
-        const bounds = BL.scene.boundsOf(headHidden.geometry), m = headHidden.world;
-        mat4.transformPoint(eye, m, bounds.center[0], bounds.center[1], bounds.center[2]);
-        const scale = Math.max(Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10]));
-        if (Math.hypot(camera.position.x - eye[0], camera.position.y - eye[1], camera.position.z - eye[2]) > bounds.radius * scale + camera.near) restoreHead();
+        hide = Math.hypot(camera.position.x - eye[0], camera.position.y - eye[1], camera.position.z - eye[2]) <= bounds.radius * scale + camera.near;
       }
+      if (!hide) restoreHead();
+      else if (!headHidden) { headHidden = head; BL.scene.hideFromCamera(head, headOwner, true); }
+    };
+    // It lives as long as the pilot whose camera it shares, and does nothing while no gorilla is driven.
+    pilot.onSettle(settleHead);
+    const finishView = (dt) => {
+      cameraHandoff.apply(dt);
+      settleHead();
       updateReticle(dt);
       hud.setGorilla(player, view, isCombat(), clankers.combatEnabled);
       showAct();

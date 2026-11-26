@@ -83,8 +83,8 @@
       return e;
     };
     const hideHead = (cave, on) => {
-      if (on && !state.head) { state.head = { node: cave.parts.head, was: cave.parts.head.cameraHidden }; cave.parts.head.cameraHidden = true; }
-      else if (!on && state.head) { state.head.node.cameraHidden = state.head.was; state.head = null; }
+      if (on && !state.head) { state.head = cave.parts.head; BL.scene.hideFromCamera(state.head, state, true); }
+      else if (!on && state.head) { BL.scene.hideFromCamera(state.head, state, false); state.head = null; }
     };
     const lens = (name) => { readPose(state.from); state.fromFov = camera.fov; state.lens = name; state.glide = REDUCED.matches ? 1 : 0; };
     // Lets the Ooga go: the controls back, and the view gliding out from the eyes to the visitor's own.

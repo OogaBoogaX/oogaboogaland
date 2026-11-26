@@ -143,8 +143,8 @@
       return e;
     };
     const hideHead = (cave, on) => {
-      if (on && !g.hidden) { g.hidden = { head: cave.parts.head, was: cave.parts.head.cameraHidden }; cave.parts.head.cameraHidden = true; }
-      else if (!on && g.hidden) { g.hidden.head.cameraHidden = g.hidden.was; g.hidden = null; }
+      if (on && !g.hidden) { g.hidden = cave.parts.head; BL.scene.hideFromCamera(g.hidden, g, true); }
+      else if (!on && g.hidden) { BL.scene.hideFromCamera(g.hidden, g, false); g.hidden = null; }
     };
 
     // Walks the Ooga as a held stick would, at a stroll.
