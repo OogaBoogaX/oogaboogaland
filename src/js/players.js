@@ -162,7 +162,7 @@
     mark.append(hand, react);
     toggle.append(label); name.append(toggle); dots.append(presence, host);
     marks.className = "roster-marks";
-    voice.className = "roster-voice"; voice.type = "button"; voice.hidden = true; voice.setAttribute("aria-describedby", id); voice.append(BL.hud.voiceIcon.cloneNode(true));
+    voice.className = "roster-voice"; voice.type = "button"; voice.hidden = true; voice.setAttribute("aria-describedby", id); voice.append(BL.nativeIcons.voice());
     // A voice link, offered where the room keeps them; never on the visitor's own row.
     link.className = "players-link"; link.type = "button"; link.hidden = true; link.append(linkIcon.cloneNode(true));
     // In a hosted chat's voice (call-v1): the island voice paused, so a cloud where the voice mark would be.
@@ -671,6 +671,17 @@
   net.subscribeClouds(render);
   BL.voice.subscribe(paintMarks);
   BL.voice.subscribe(paintHearing);
+  // A speaking mark fills with its voice's level on each meter read (voice.js `subscribeLevels`; style.css `--lv`).
+  const fillMark = (row, level) => {
+    const v = Math.round(level * 20) / 20;
+    if (row.lv !== v) { row.lv = v; row.voice.style.setProperty("--lv", String(v)); }
+  };
+  BL.voice.subscribeLevels(() => {
+    if (!showing || stale) return;
+    fillMark(selfRow, V.ownLevel());
+    for (const row of rows.values()) fillMark(row, V.level(row.id));
+    for (const row of cloudRows.values()) fillMark(row, row.cloud.startsWith("gh:") ? V.level(Number(row.cloud.slice(3))) : 0);
+  });
   // The scene the visitor is in names its doors (`fn(from, step, out, nearX, nearZ)`, true with `out` written), or null.
   const setDoors = (fn) => {
     doors = fn;

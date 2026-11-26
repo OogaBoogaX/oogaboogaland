@@ -54,7 +54,7 @@
   // monospace (--mono) at NAME_SIZE bold with NAME_SPACING, a NAME_LINE line in a box padded NAME_PAD_X by NAME_PAD_Y
   // whose bottom stands NAME_BOTTOM over the head's top, centred across the head; the DOT_D online dot DOT_GAP left of
   // the name, both centred on its line; the health bar under the name (HEALTH_ROW more box, as the tooltip's row); the
-  // 9-pixel speaker ICON_GAP right of the name. A chat bubble stands over the box as over an NPC's tooltip (SPEECH_GAP).
+  // microphone (MIC) ICON_GAP right of the name. A chat bubble stands over the box as over an NPC's tooltip (SPEECH_GAP).
   const NAME_SIZE = 13, NAME_LINE = NAME_SIZE * 1.3, NAME_SPACING = "0.39px", NAME_PAD_X = 5, NAME_PAD_Y = 3, NAME_BOTTOM = 2;
   const DOT_D = 8, DOT_GAP = 6, SPEECH_GAP = 6, EDGE = 8;
   // With health the tooltip grows a second grid row: the row gap, then the 4-pixel bar with -2 and +1 margins.
@@ -100,13 +100,8 @@
   const PICK_MARGIN = 0.035;
   // An unused pick slot: no geometry, so the picker passes it over before reading anything else.
   const IDLE_PICK = { geometry: null, visible: false }, IDLE_OWNER = { kind: "none", weaponType: "none" };
-  // x, y, w, h runs on the speaker's 9x9 grid, as the roster's voice mark draws it.
-  const SPEAKER = [0, 3, 2, 3, 2, 2, 1, 5, 3, 1, 1, 7];
-  const WAVES = [5, 3, 1, 3, 7, 2, 1, 5];
-  const CROSS = [5, 3, 1, 1, 7, 3, 1, 1, 6, 4, 1, 1, 5, 5, 1, 1, 7, 5, 1, 1];
-  const runs = (ctx, cells, x, y, k = 1) => {
-    for (let i = 0; i < cells.length; i += 4) ctx.fillRect(x + cells[i] * k, y + cells[i + 1] * k, cells[i + 2] * k, cells[i + 3] * k);
-  };
+  // The voice mark's size on a nameplate: the roster's microphone, its square in CSS pixels.
+  const MIC = 12;
 
   // The zones the hub itself reports, which share its coordinates: the main world (voice-blend.js), and the cave
   // entrances' own names, still sent by a page loaded before they became the island's (`cave-<id>` for a mouth with no
@@ -957,12 +952,11 @@
         // A cloud speaker is always in voice; the room says only whether their microphone is muted.
         if (!entry.cloud && !rec.voice) continue;
         const muted = entry.cloud ? rec.mic === "muted" : rec.muted;
-        const ix = Math.round(textX + entry.labelW + ICON_GAP), iy = Math.round(lineMid - 4.5);
-        // Speaking as the page hears it, a cloud speaker's voice keyed by their account (the number in their `gh:` id).
-        const voiceId = entry.cloud ? cloudVoice(rec.id) : rec.id;
-        ctx.fillStyle = muted ? ICON_MUTED : voiceId && BL.voice.speaking(voiceId) ? ICON_SPEAKING : ICON_IDLE;
-        runs(ctx, SPEAKER, ix, iy);
-        runs(ctx, muted ? CROSS : WAVES, ix, iy);
+        // Speaking as the page hears it, a cloud speaker's voice keyed by their account (the number in their `gh:` id): the
+        // roster's microphone (native-icons.js `drawMic`), filled with their voice's level while they talk.
+        const voiceId = entry.cloud ? cloudVoice(rec.id) : rec.id, talking = !muted && !!voiceId && BL.voice.speaking(voiceId);
+        BL.nativeIcons.drawMic(ctx, Math.round(textX + entry.labelW + ICON_GAP), Math.round(lineMid - MIC / 2), MIC,
+          muted ? ICON_MUTED : talking ? ICON_SPEAKING : ICON_IDLE, muted, talking ? BL.voice.level(voiceId) : 0, NAME_STROKE);
       }
       ctx.restore();
     };

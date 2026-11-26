@@ -16,7 +16,7 @@
 // changed and moves a tile only when the order moved. Portraits are drawn once a character a page. No timers, no
 // frame work.
 // The emoji bar (reactions.js `mount`, the same state as the other bars; the hand an active speaker's alone) sits
-// under the roster, the footer under it: the visitor's name, Mute or Unmute (always there), Join or Leave Voice and
+// under the roster, the footer under it: the visitor's name, Mute or Unmute (always there), Join or Leave voice and
 // Sign out, all through the island's own voice session (voice.js), never a second one.
 // Under `?debug=1&audience=fixture` the panel shows a generated roster of named samples for review, sending
 // nothing. Exports available, dispose, listeners, inChats, preview (below), online, stats.
@@ -149,14 +149,19 @@
   const support = voice.support();
   const reason = !support.secure ? "Voice needs a secure page" : !support.webrtc ? "This browser has no WebRTC" : !support.mic ? "This browser has no microphone" : "";
   let footerState = null;
+  // The name's dot says where the visitor is online, the same in every panel: on the island, green, in a chat or not, as
+  // every account row has it (hud.js); Ooga Chat's app draws its own purple.
+  const islandDot = () => {
+    const dot = net.state.me && net.state.room === "live" ? "island" : "";
+    if (footName.dataset.source !== dot) footName.dataset.source = dot;
+  };
   const paintFooter = () => {
     if (chatsOn()) return paintChat();
-    const me = net.state.me, self = model.self();
+    const me = net.state.me;
     set(footName, "textContent", me ? me.display || me.login : "");
-    const dot = self && self.role === "speaker" && self.source === "chat" ? "chat" : "";
-    if (footName.dataset.source !== dot) footName.dataset.source = dot;
+    islandDot();
     footerState = A.footer(model.you, voice.stats, reason);
-    set(mute, "textContent", footerState.mute.text);
+    BL.nativeIcons.label(mute, footerState.mute.text);
     set(mute, "disabled", footerState.mute.disabled);
     attr(mute, "aria-pressed", String(footerState.mute.pressed));
     if (mute.dataset.mic !== footerState.mute.mic) mute.dataset.mic = footerState.mute.mic;
@@ -249,7 +254,7 @@
     if (footerState.voice.action === "leave") voice.leave();
     else if (!footerState.voice.disabled) voice.toggle();
   });
-  logout.addEventListener("click", () => net.logout());
+  logout.addEventListener("click", () => signOutFrom(logout, () => net.logout()));
   BL.reactions.mount($("cloud-reactions"), { handAllowed: () => model.canHand() });
 
   // --- hosted chats ---
@@ -277,7 +282,7 @@
         goThere: { state: (room) => BL.chatCopy.button(room), press: () => BL.chatCopy.toggle(), subscribe: BL.chatCopy.subscribe },
         // The island view: the page's own copy of the map, Live view on the renderer the page has, over the island the hub built.
         // The island view: the page's own copy of the map. The island page is the island already, so it keeps the flat view.
-        islandView: { picture: BL.islandViewArt.main } });
+        islandView: { picture: BL.islandViewArt.main }, pageVoice: true, mute: () => calls.media.mute() });
       else {
         hosts?.dispose(); hosts = null;
         delete panel.dataset.space;
@@ -297,24 +302,77 @@
     set(statusText, "textContent", words);
     set(status, "hidden", !words);
     set(retry, "hidden", true);
-    // The footer: the chat's voice, as Ooga Chat's footer works it (ooga-chat-views.js `cloudFoot`).
-    set(footName, "textContent", me ? me.display : "");
-    const speaker = v.role === "speaker", source = speaker ? "chat" : "";
-    if (footName.dataset.source !== source) footName.dataset.source = source;
-    set(mute, "disabled", !speaker || v.busy);
-    set(mute, "textContent", speaker && !v.muted ? "Mute" : "Unmute");
-    attr(mute, "aria-pressed", String(speaker && v.muted));
-    const look = speaker && !mute.disabled ? v.muted ? "muted" : "live" : "";
-    if (mute.dataset.mic !== look) mute.dataset.mic = look;
-    set(voiceButton, "textContent", speaker ? "Leave Voice" : v.phase === "leaving" ? "Leaving…" : v.busy ? "Joining…" : "Join Voice");
-    set(voiceButton, "disabled", !speaker && (v.busy || room?.you?.speak !== "eligible"));
-    set(voiceButton, "title", "");
     set(logout, "hidden", !net.state.me);
-    if (!showing) { if (chatDrawn !== s.audience.version) tiles.prune((id) => s.audience.list.some((p) => p.id === id)); return; }
+    // Before a chat is chosen the footer is the island's own voice, as every other tab's account row has it (hud.js).
+    if (!room) islandFoot();
+    else chatFoot(s, me);
+    if (!room || !showing) { if (room && chatDrawn !== s.audience.version) tiles.prune((id) => s.audience.list.some((p) => p.id === id)); return; }
     if (chatDrawn !== s.audience.version) { chatDrawn = s.audience.version; tiles.draw(s.audience.list, chatDescribe); }
     else tiles.repaint(chatDescribe);
   };
+  // The island's voice, as hud.js `showAccount` paints the account rows: the microphone first, off until in voice, then
+  // Join voice or Leave voice, both only while signed in with the room live.
+  const islandFoot = () => {
+    const me = net.state.me, vs = voice.stats, live = !!me && net.state.room === "live";
+    set(footName, "textContent", me ? me.display || me.login : "");
+    islandDot();
+    const inVoice = vs.enabled || vs.returning || vs.reconnecting, micOn = inVoice && !reason, asMic = micOn && !vs.reconnecting;
+    footerState = { mute: footerState?.mute, voice: { action: inVoice ? "leave" : "join", disabled: !inVoice && !!reason } };
+    set(mute, "hidden", !live);
+    set(mute, "disabled", !micOn);
+    BL.nativeIcons.label(mute, micOn && vs.reconnecting ? "Reconnecting voice" : asMic && !vs.muted ? "Mute" : "Unmute");
+    attr(mute, "aria-pressed", String(asMic && vs.muted));
+    const look = asMic ? vs.muted ? "muted" : "live" : "";
+    if (mute.dataset.mic !== look) mute.dataset.mic = look;
+    set(voiceButton, "hidden", !live);
+    set(voiceButton, "textContent", inVoice ? "Leave voice" : reason || (vs.joining ? "Joining…" : "Join voice"));
+    set(voiceButton, "disabled", footerState.voice.disabled);
+    set(voiceButton, "title", "");
+  };
+  // In a chat: the chat's voice, as Ooga Chat's footer works it (ooga-chat-views.js `cloudFoot`).
+  const chatFoot = (s, me) => {
+    const v = s.voice, room = s.room;
+    set(footName, "textContent", me ? me.display : "");
+    const speaker = v.role === "speaker";
+    islandDot();
+    set(mute, "disabled", !speaker || v.busy);
+    BL.nativeIcons.label(mute, speaker && !v.muted ? "Mute" : "Unmute");
+    attr(mute, "aria-pressed", String(speaker && v.muted));
+    const look = speaker && !mute.disabled ? v.muted ? "muted" : "live" : "";
+    if (mute.dataset.mic !== look) mute.dataset.mic = look;
+    set(voiceButton, "textContent", speaker ? "Leave voice" : v.phase === "leaving" ? "Leaving…" : v.busy ? "Joining…" : "Join voice");
+    set(voiceButton, "disabled", !speaker && (v.busy || room?.you?.speak !== "eligible"));
+    set(voiceButton, "title", "");
+  };
   subs.push(calls.subscribe(paintChat));
+  // A host signing out is asked first, in the panel pressed from; the banner's Sign out, in no panel, asks in this one.
+  const signOutFrom = (at, go) => {
+    if (!hosts || !calls.room) return go();
+    if (!at.closest(".panel")) { BL.sheet?.selectTab?.("cloud"); at = logout; }
+    hosts.signOutFrom(at, go);
+  };
+  // Every tab's footer follows the chat too: in one it is the chat's (hud.js `showAccount`).
+  let footChat = null;
+  subs.push(calls.subscribe(() => {
+    const s = calls.state, key = s.room ? `${s.room.id}|${s.room.you?.rank}|${s.room.you?.speak}|${s.voice.role}|${s.voice.busy}|${s.voice.muted}|${!!s.voice.elsewhere}` : "";
+    if (key === footChat) return;
+    footChat = key;
+    if (BL.hud) BL.hud.showAccount(net.state);
+  }));
+  // The speakers' marks fill with their voices' levels on each meter read: the chat's voice in a chat, the island's
+  // otherwise (keyed by account, as `describe` keys speaking), the visitor's own from their microphone.
+  const chatLevel = (id) => id === myId() ? calls.media.ownLevel() : calls.media.level(id);
+  const islandLevel = (id) => {
+    const row = model.rows.get(id);
+    if (!row) return 0;
+    return row.self ? voice.ownLevel() : id.startsWith("gh:") ? voice.level(Number(id.slice(3))) : 0;
+  };
+  const showLevels = () => { if (showing) tiles.levels(inChat() ? chatLevel : islandLevel); };
+  subs.push(voice.subscribeLevels(showLevels));
+  // The chat's controller is made with the first chat (chat-call.js `controller`) and kept, so it is heard from then on.
+  let unchatLevels = null;
+  subs.push(calls.subscribe(() => { if (!unchatLevels && calls.room) unchatLevels = calls.media.subscribeLevels(showLevels); }));
+  subs.push(() => unchatLevels?.());
   // The chat's emoji bar: its connection is the chat's socket, in the shape reaction-bar.js takes.
   const chatBarHost = $("cloud-chat-reactions");
   const linkSubs = new Set();
@@ -481,6 +539,11 @@
     listeners,
     inChats,
     preview,
+    // End chat and Leave chat from another tab's footer (hud.js `showAccount`): the chat's own confirmation, in that tab.
+    endChat: (at) => hosts?.endFrom(at),
+    leaveChat: (at) => hosts?.leaveFrom(at),
+    // Sign out from any footer: a chat's host is asked first (chat-hosts.js `signOutFrom`).
+    signOutFrom: (at, go) => signOutFrom(at, go),
     // Who is online, as every "N online" on the island says it: the room's players, Main Island's listeners and everyone
     // in a hosted chat through Ooga Chat's app.
     online: (state = net.state) => (state.online || 0) + (state.room === "live" ? listeners().length + inChats() : 0),

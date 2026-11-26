@@ -62,7 +62,7 @@ test("approving is an invite; a granted lease puts them on the stage, and once l
   assert.equal(r.mayLease(L, 1000 + STAGE_HOLD_MS), true, "remembered after the hold, too");
   r.granted(L, 5000);
   r.leaseEnded(L, true, 6000);
-  assert.equal(r.mayLease(L, 6000), true, "leaving on their own word: Join Voice brings them back with no approval");
+  assert.equal(r.mayLease(L, 6000), true, "leaving on their own word: Join voice brings them back with no approval");
   assert.equal(r.ask(L, 6000).code, "already_allowed");
   assert.equal(r.invite(H, L, 6000).code, "already_allowed");
   assert.equal(r.demote(H, L).ok, true);
@@ -111,7 +111,7 @@ test("removed: every role and request goes, and they stay out until the chat end
   assert.equal(r.rankOf(C), "");
 });
 
-test("the host's hold: two minutes to come back, then the longest-serving co-host (a connected one first), else the end", () => {
+test("the host's hold: a minute to come back, then the longest-serving co-host (a connected one first), else the end", () => {
   const r = createRoles({ host: H, now: 0 });
   assert.equal(r.nextAt(), HOST_HOLD_MS, "the host must connect within the hold");
   r.presence(H, true, 10);

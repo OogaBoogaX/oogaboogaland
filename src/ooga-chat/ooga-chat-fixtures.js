@@ -15,7 +15,7 @@
 // new feed), `full` and `none` (no audience address). Accounts and participants are named samples with no picture,
 // never real people.
 // `?voice=` picks how voice answers (`VOICES`, #654), through a fake broker (`media`) and fake WebRTC (`rtc`): no
-// microphone is ever opened and nothing is heard. `ok` (the default) pulls each speaker of the zone, and Join Voice gets
+// microphone is ever opened and nothing is heard. `ok` (the default) pulls each speaker of the zone, and Join voice gets
 // a lease, publishes and becomes a muted speaker; `denied` refuses the microphone; `blocked` holds playback until a
 // gesture, as a browser's autoplay rule does; `refused` refuses the lease (the zone's speakers are full); `off` is a
 // deployment that doesn't let anyone speak; `elsewhere` finds the account's voice on the island, on another device, until

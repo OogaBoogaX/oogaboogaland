@@ -29,7 +29,7 @@
     stale: "This page is older than Ooga Chat's service."
   };
   const OFFLINE = "You're offline. Ooga Chat reconnects when you're back.";
-  // Join Voice while not speaking (ooga-chat-media.js's state): its words while joining or leaving, whether it can be
+  // Join voice while not speaking (ooga-chat-media.js's state): its words while joining or leaving, whether it can be
   // pressed, and why not, or what the last attempt said (a blocked microphone, a full zone).
   const joining = (state, allowed, media) => {
     const voice = state.voice, why = !state.device.online ? OFFLINE : allowed.why || (media.available ? voice.notice : media.why || "Voice opens here soon.");
@@ -367,6 +367,8 @@
     };
     let menu = null;
     const tiles = BL.audienceTiles.create(list, { mic: (id) => pressMic(ctx, id, id === self), menu: (...a) => menu?.(...a) });
+    // The speakers' marks fill with their voices' levels on each meter read (ooga-chat-media.js `subscribeLevels`).
+    const offLevels = ctx.media.subscribeLevels(() => tiles.levels((id) => id === self ? ctx.media.ownLevel() : ctx.media.level(id)));
     const render = () => {
       frame = 0;
       tiles.draw(people, describe);
@@ -424,6 +426,7 @@
       listeners.abort();
       cancelAnimationFrame(frame);
       offPop();
+      offLevels();
       tiles.dispose();
       volumeButtons.clear();
       foot.dispose();
@@ -431,8 +434,8 @@
     return { nodes: [heard, list, volumeBox, footRow], update, focus, dispose, parts: { list, footRow, foot: foot.parts }, setMenu(fn) { menu = fn; } };
   };
   // The Ooga Chat panel's footer, the island's: the visitor's name (Ooga Chat's purple dot while signed in), the
-  // fixed-width microphone, always first and off for a listener, Join Voice for a listener the server allows to speak
-  // (Leave Voice for a speaker), and Sign out. A disabled button says why on itself. The voice state is the seam's
+  // fixed-width microphone, always first and off for a listener, Join voice for a listener the server allows to speak
+  // (Leave voice for a speaker), and Sign out. A disabled button says why on itself. The voice state is the seam's
   // (`state.voice`); nothing here opens a microphone.
   // A microphone button's colour (style.css `data-mic`): green on Mute while the microphone is live, red on an enabled
   // Unmute, none while it is disabled or not a microphone button.
@@ -443,7 +446,7 @@
   const cloudFoot = ({ actions, media }) => {
     const listeners = new AbortController(), { signal } = listeners;
     const name = make("span", "cloud-foot-name");
-    const mute = button("foot-button cloud-mute", "Unmute"), join = button("foot-button cloud-voice", "Join Voice"), out = button("link", "Sign out");
+    const mute = button("foot-button cloud-mute", "Unmute"), join = button("foot-button cloud-voice", "Join voice"), out = button("link", "Sign out");
     const muteWhy = explain(mute), joinWhy = explain(join);
     mute.setAttribute("aria-pressed", "false");
     mute.addEventListener("click", (event) => {
@@ -455,9 +458,11 @@
       if (join.dataset.voice === "speaker") actions.leaveVoice();
       else actions.joinVoice();
     }, { signal });
-    out.addEventListener("click", () => actions.signOut(), { signal });
-    const footActions = make("span", "cloud-foot-actions", mute, join, out);
-    const node = make("div", "cloud-foot", name, footActions, muteWhy, joinWhy);
+    out.addEventListener("click", () => actions.signOutFrom ? actions.signOutFrom(out, actions.signOut) : actions.signOut(), { signal });
+    // The voice buttons, then the name with Sign out beside it on a line of its own under them, in a chat too, as the
+    // island's footer has it.
+    const footActions = make("span", "cloud-foot-actions", mute, join);
+    const node = make("div", "cloud-foot", footActions, muteWhy, joinWhy, make("span", "cloud-foot-who", name, out));
     const update = (state) => {
       set(out, "textContent", state.busy === "signout" ? "Signing out…" : "Sign out");
       set(out, "disabled", !!state.busy);
@@ -468,13 +473,13 @@
       const source = "chat";
       if (name.dataset.source !== source) name.dataset.source = source;
       set(mute, "disabled", !speaker || !!state.busy || state.voice.busy);
-      set(mute, "textContent", speaker && !state.voice.muted ? "Mute" : "Unmute");
+      BL.nativeIcons.label(mute, speaker && !state.voice.muted ? "Mute" : "Unmute");
       attr(mute, "aria-pressed", String(speaker && state.voice.muted));
       micLook(mute, !mute.disabled && speaker, state.voice.muted);
       set(muteWhy, "textContent", speaker ? "" : "Join voice first to unmute.");
       const going = joining(state, allowed, media);
       join.dataset.voice = speaker ? "speaker" : "listener";
-      set(join, "textContent", speaker ? "Leave Voice" : going.words || "Join Voice");
+      set(join, "textContent", speaker ? "Leave voice" : going.words || "Join voice");
       set(join, "disabled", speaker ? !!state.busy : going.disabled);
       const why = speaker ? "" : going.why;
       set(joinWhy, "textContent", why);

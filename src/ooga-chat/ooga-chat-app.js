@@ -35,7 +35,7 @@
     box.hidden = false;
   };
   // The voice seam until the controller is made (and if it can't be): a muted listener that captures nothing.
-  let media = { available: false, why: "", state: BL.oogaChatMedia.IDLE, heard() {}, status() {}, release() {}, join() {}, leave() {}, mute() {}, muteLocal() {}, mutedLocally: () => false, setVolume() {}, volumeOf: () => 1, VOLUME_MAX: 1, duel() {}, setMuteDuels() {}, mutedByDuel: () => false, identify() {}, zone() {}, stop() {}, retry() {}, remember() {}, dispose() {} };
+  let media = { available: false, why: "", state: BL.oogaChatMedia.IDLE, heard() {}, status() {}, release() {}, join() {}, leave() {}, mute() {}, level: () => 0, ownLevel: () => 0, subscribeLevels: () => () => {}, muteLocal() {}, mutedLocally: () => false, setVolume() {}, volumeOf: () => 1, VOLUME_MAX: 1, duel() {}, setMuteDuels() {}, mutedByDuel: () => false, identify() {}, zone() {}, stop() {}, retry() {}, remember() {}, dispose() {} };
   // `relisten` is the feed's 4401 restart timer; pagehide clears it, so it lives out here with what pagehide disposes.
   // `donating` ends the donation socket, opened once the service says its feed is live; `feeding` is Feed the Oogas,
   // the island's own donation popup, made the first time it opens; `member` is the Commons socket.
@@ -46,6 +46,15 @@
     const back = parseReturn(location.search);
     if (back) history.replaceState(history.state, "", `${location.pathname}${withoutReturn(location.search)}${location.hash}`);
     const query = new URLSearchParams(location.search);
+    // A shared chat's address (`?chat=<id>`, chat-hosts.js Share) leaves the address at once and is kept in this tab
+    // through a sign-in; the hosts chunk opens that chat's preview once it is up (ooga-chat-hosts.js `OPEN_KEY`).
+    const shared = query.get("chat");
+    if (shared !== null) {
+      if (/^[\w-]{16}$/.test(shared)) try { sessionStorage.setItem("ooga-chat-open", JSON.stringify({ id: shared, at: Date.now() })); } catch { /* not kept */ }
+      const rest = new URLSearchParams(location.search);
+      rest.delete("chat");
+      history.replaceState(history.state, "", `${location.pathname}${rest.size ? `?${rest}` : ""}${location.hash}`);
+    }
     adapter = fixture ? BL.oogaChatFixtures.create({ state: query.get("state") || undefined, roster: query.get("roster") || undefined, voice: query.get("voice") || undefined })
       : BL.oogaChatHttp.create();
     // Voice (ooga-chat-media.js): it calls the adapter's media broker under the feed's own connection, asks the feed for a

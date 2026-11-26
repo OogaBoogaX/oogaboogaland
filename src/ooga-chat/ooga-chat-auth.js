@@ -1,7 +1,7 @@
 // Ooga Chat's account lifecycle (#652, docs/ooga-chat-app.md): one controller over the adapter's session. `auth` is
 // checking, signed-out, listener (an X account, or a GitHub account the server does not report eligible), unknown
 // (contributions could not be checked, or the server's stale window passed), eligible, signing-out or error (the
-// session could not be checked). Every sign-in lands as a listener: nothing here opens a microphone, and Join Voice is
+// session could not be checked). Every sign-in lands as a listener: nothing here opens a microphone, and Join voice is
 // only ever offered where `gates` says the server allowed it. The server decides again at every privileged step.
 // The voice seam is `media`: `{ available, release(reason) }`. The controller calls `release` before anything else
 // whenever the account stops being the one that may speak: signing out (before the logout request), another principal,
@@ -30,7 +30,7 @@
     signout: { kind: "signout", text: "Signed out here, but the server didn't confirm. Your session ends on its own when it expires.", action: "Try again" },
     held: { kind: "signout", text: "Signed out here, but the server still has you signed in.", action: "Sign out again" }
   };
-  // Why Join Voice is off, said on the button itself rather than in another row.
+  // Why Join voice is off, said on the button itself rather than in another row.
   const WHY = {
     x: "X accounts listen. Speaking is for Team Ooga Booga contributors signed in with GitHub.",
     listener: "Speaking is for Team Ooga Booga contributors. This GitHub account isn't one.",
@@ -50,7 +50,7 @@
     const state = eligibilityAt(session, now);
     return state === "eligible" || state === "unknown" ? state : "listener";
   };
-  // What the account may do now. `contributor` shows Online Oogas and The Commons; `joinVoice` offers Join Voice;
+  // What the account may do now. `contributor` shows Online Oogas and The Commons; `joinVoice` offers Join voice;
   // `why` says why not. Both come only from the parsed server session, never from saved or displayed values.
   const gates = (state, now) => {
     const { session, auth } = state;
@@ -67,10 +67,10 @@
   const create = ({ adapter, media, now = () => Date.now(), timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) }, onChange = () => {} }) => {
     let boot = null, timer = null, lastCheck = -Infinity, ticket = 0, disposed = false;
     let state = { auth: "checking", session: null, notice: null, busy: false }, open = false;
-    // Every change passes here: capture is released before anyone hears of the new state. `open` is whether Join Voice
+    // Every change passes here: capture is released before anyone hears of the new state. `open` is whether Join voice
     // was allowed when last said, so a window that passed between two changes still counts as a loss. A loss that is
     // only this page not knowing for a moment (a stale window, a check that failed or is under way, the server not yet
-    // sure) closes Join Voice but leaves a lease already held: the server ends it when the standing really is lost
+    // sure) closes Join voice but leaves a lease already held: the server ends it when the standing really is lost
     // (eligibility, revocation, sign-out, the session's end), and the speaker is not dropped every quarter hour.
     // The server not sure either (its own answer `unknown`, which also reads `speak` false) is the same not knowing.
     const lost = (is, why) => {

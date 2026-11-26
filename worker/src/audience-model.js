@@ -282,7 +282,7 @@ export const createAudience = ({ epoch = Date.now(), limits = DEFAULT_LIMITS, re
     return { ok: true, changed: true, unheld };
   };
 
-  /** Back to listening (Leave Voice, a lost microphone, an expiry, a revocation): the lease, hand and mic go. */
+  /** Back to listening (Leave voice, a lost microphone, an expiry, a revocation): the lease, hand and mic go. */
   const endLease = (connId, generation = null) => {
     const c = conns.get(connId);
     if (!c || !c.lease || generation !== null && c.lease.generation !== generation) return null;

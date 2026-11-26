@@ -252,7 +252,7 @@ test("a quiet Listen view refreshes cached faces and stops its polling while hid
   });
   const render = () => { for (const [id, fn] of [...frames]) { frames.delete(id); fn(); } };
   const noop = () => {};
-  BL.signGlyphs = { letter: noop }; BL.oogaChatAuth = { gates: () => ({ joinVoice: false }) };
+  BL.signGlyphs = { letter: noop }; BL.oogaChatAuth = { gates: () => ({ joinVoice: false }) }; BL.nativeIcons = { label: (el, text) => { el.textContent = text; } };
   BL.audienceTiles = { create: () => {
     let people = [];
     const paint = (describe) => { for (const person of people) { const tile = {}; describe(person, tile); drawn.set(person.id, tile); } };
@@ -265,7 +265,7 @@ test("a quiet Listen view refreshes cached faces and stops its polling while hid
     session: { identity: { principal: "listener", participant: "gh:1", display: "Listener", login: "listener" } },
     audience: { version: 1, status: "live", list: [{ id: "gh:2", display: "Alice", role: "speaker", source: "world", character: "Alice", muted: false }] }
   };
-  const view = BL.oogaChatViews.chat({ actions: {}, media: { state: voice, available: true, VOLUME_MAX: 2, mutedLocally: () => false, mutedByDuel: () => false },
+  const view = BL.oogaChatViews.chat({ actions: {}, media: { state: voice, available: true, VOLUME_MAX: 2, mutedLocally: () => false, mutedByDuel: () => false, level: () => 0, ownLevel: () => 0, subscribeLevels: () => () => {} },
     reactions: { bars: { mount: noop, refresh: noop }, onPop: () => noop } });
   const panel = new Element("section"); document.body.append(panel); panel.append(view.node);
   view.update(state); await drain(); render();

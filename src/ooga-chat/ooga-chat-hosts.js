@@ -38,6 +38,7 @@
     // offered to: for now a signed-in GitHub contributor (the server's word, `gates`); other GitHub accounts and X get
     // the map, and the Audience holds their walk rate to the map's.
     const islandView = { picture: "art/island-view-main.webp", loadLive: () => Promise.resolve(BL.oogaChatChunks.load("live")).then(() => BL.oogaChatCatalog.apply()), scenery: BL.oogaChatScenery || "art", fullscreen: true,
+      level: (id, self) => self ? ctx.media.ownLevel() : ctx.media.level(id),
       liveAllowed: () => !!last && last.mode === "live" && BL.oogaChatAuth.gates(last, Date.now()).contributor };
     // Go there: the chat on the island, in this same tab. A speaker on the stage asks the chat for a one-time ticket
     // (`handoff`, TICKET_MS at most) and the island's page, given it in the address's fragment, takes the voice and the
@@ -51,7 +52,7 @@
         if (!v || room.zone !== "main" || !(v.role === "speaker" || v.busy || SPEAKING.includes(room.you?.speak))) return null;
         if (handing && handing.id === room.id && Date.now() - handing.at < GOING_MS) return { label: "Going…", words: "Opening this chat on the island", disabled: true, title: "Opening on Ooga Booga Land…" };
         const why = !ctx.island() ? "The island can't be reached from here" : last.session?.identity.provider !== "github" ? "Going to the island needs a GitHub account" : "";
-        return { label: "Go there", words: "Open this chat on the island", disabled: !!why, title: why || "Take your voice and your Ooga to this chat's island on Ooga Booga Land" };
+        return { label: BL.chatHosts.joinWords(room.zone), words: "Open this chat on the island", disabled: !!why, title: why || "Take your voice and your Ooga to this chat's island on Ooga Booga Land" };
       },
       press() {
         const room = last && last.room, island = ctx.island();
@@ -77,16 +78,37 @@
       },
       subscribe: () => () => {}
     };
-    const view = BL.chatHosts.create({ node, head, space, chats, joinVoice: () => ctx.actions.joinVoice(), faceOf, islandView, goThere });
+    const view = BL.chatHosts.create({ node, head, space, chats, joinVoice: () => ctx.actions.joinVoice(), mute: () => ctx.actions.mute(), faceOf, islandView, goThere });
+    // The list tabs' footers end or leave the chat as the Ooga Chat tab's does (ooga-chat-panels.js `accountRow`).
+    ctx.actions.endChat = (at) => view.endFrom(at);
+    ctx.actions.leaveChat = (at) => view.leaveFrom(at);
+    // Every Sign out asks a chat's host first (chat-hosts.js `signOutFrom`).
+    ctx.actions.signOutFrom = (at, go) => view.signOutFrom(at, go);
+    // A shared chat's address (ooga-chat-app.js keeps its id in this tab): once signed in and in no chat, that chat's
+    // preview opens from the live list, where the visitor chooses to join; one no longer listed is let go. Kept an hour.
+    const OPEN_KEY = "ooga-chat-open", OPEN_MS = 60 * 60 * 1000;
+    let opening = false;
+    const openShared = (state) => {
+      if (opening || state.mode !== "live" || !state.session || state.room) return;
+      let kept = null;
+      try { kept = JSON.parse(sessionStorage.getItem(OPEN_KEY) || "null"); sessionStorage.removeItem(OPEN_KEY); } catch { return; }
+      if (!kept || typeof kept.id !== "string" || !(Date.now() - kept.at < OPEN_MS)) return;
+      opening = true;
+      chats.list().then(({ chats: raw }) => {
+        const entry = (BL.chatHosts.parseList(raw) || []).find((e) => e.id === kept.id);
+        if (entry && last && !last.room) view.preview(entry);
+      }, () => {}).finally(() => { opening = false; });
+    };
     const update = (state) => {
       last = state;
+      openShared(state);
       // The island took the voice of the chat sent there: this page steps out of it, saying where it went.
       if (handing && state.room && state.room.id === handing.id && state.voice.elsewhere) { handing = null; c.leave("island"); return; }
       if (handing && (!state.room || state.room.id !== handing.id || Date.now() - handing.at >= HAND_MS)) handing = null;
       view.update(state);
     };
     const off = BL.oogaChatPortraits.onChange(() => { faces.clear(); view.redraw(); });
-    return { update, dispose() { off(); view.dispose(); } };
+    return { update, dispose() { off(); delete ctx.actions.endChat; delete ctx.actions.leaveChat; delete ctx.actions.signOutFrom; view.dispose(); } };
   };
   const call = (ask, json, boot, init, query = "") => ask(boot.paths.chats + query, { ...init, headers: { "content-type": "application/json", accept: "application/json" } }, undefined, json)
     .then(({ response, data }) => response.ok ? data : data?.error || {}, () => ({}));

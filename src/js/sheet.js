@@ -617,5 +617,7 @@
     firstVisit = false;
     return opened;
   };
-  BL.sheet = { create, visible, tabFor, setBadge, note, unnote, watchViews, attending, welcome };
+  // Opens a tab on the live sheet (cloud-panel.js asks a chat's host there before the banner's Sign out).
+  const selectTab = (name) => { if (live) live.selectTab(name); };
+  BL.sheet = { create, visible, tabFor, setBadge, note, unnote, watchViews, attending, welcome, selectTab };
 })();

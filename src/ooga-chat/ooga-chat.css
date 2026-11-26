@@ -182,6 +182,12 @@ body {
 
 /* In the account row, the sign-in button spans the panel as it does on the sign-in screen. */
 .account > .oc-account-signin { flex: 1 1 100%; }
+/* In a hosted chat the account row is the chat's own footer (ooga-chat-panels.js `accountRow`), laid out as the Ooga Chat
+   tab's is (chat-hosts.css): on a narrow screen one row of buttons sharing its width. */
+@media (max-width: 479px) {
+  .oc-panel .account[data-chat="true"] > .account-actions { display: flex; flex: 1 1 100%; flex-wrap: nowrap; gap: 8px; }
+  .oc-panel .account[data-chat="true"] .foot-button { flex: 1 1 0; min-width: 0; padding: 0 6px; letter-spacing: 0.04em; }
+}
 /* Signed in, the visitor is online here, in Ooga Chat: their name's dot is its purple, whether or not The Commons is up. */
 .oc-panel .account .account-name::before {
   content: "";
@@ -351,7 +357,7 @@ body {
    with no gap. */
 .oc .oc-panel { gap: 6px; padding: 6px 8px; }
 .oc .oc-panel > .panel-foot { gap: 6px 12px; }
-.oc .oc-panel > .panel-foot > .reactions { margin-top: 0; }
+.oc .oc-panel > .panel-foot > .reactions { margin: 0; }
 .oc .oc-panel.oc-panel > :is(.hc-room-strip, .cloud-roster) { margin-right: -8px; margin-left: -8px; border-right-width: 0; border-left-width: 0; border-radius: 0; }
 .oc .oc-panel > .hc-room-strip { margin-bottom: -6px; }
 .oc .oc-panel > .hc-notice-host { margin-top: -6px; }
@@ -367,22 +373,47 @@ body {
    (ooga-chat-panels.js `outOfChat`). */
 .oc-panel[data-chat="none"] > .panel-foot > .reactions { display: none; }
 
+/* The chat's dark bar and its Requests drop-down (chat-hosts.css) run out to this panel's own padding and gap. */
+.oc .oc-chat[data-space="on"] { --hc-pad-top: 6px; --hc-pad-x: 8px; --hc-gap: 6px; }
+
 /* The island view full screen (island-view.js, chat-hosts.css `.iv-full-host`): the app's column at the right edge,
    the view filling the rest; on a screen taller than it is wide, under the view. */
 html.iv-full .oc { position: fixed; z-index: 41; top: 0; right: 0; bottom: 0; width: var(--iv-side, min(420px, 42vw)); max-width: none; height: 100dvh; min-height: 0; margin: 0; }
 @media (max-aspect-ratio: 1 / 1) { html.iv-full .oc { top: var(--iv-split, 55dvh); left: 0; width: auto; height: calc(100dvh - var(--iv-split, 55dvh)); } }
 /* Full screen keeps the chat alone in that column, with no tabs over it. */
 html.iv-full .oc-tabs, html.iv-full .oc-fixture-note, html.iv-full .oc-device { display: none !important; }
-/* In a chat, full screen floats its title line over the view's top left corner (Back and the chat's title, and a host's
-   Requests) where it stood before the view was expanded, with no plate, only a shadow under its words, the land's tag
-   and the fold button left out, so the chat's panel starts at its roster right under the view. The view's own controls
-   and notices make room under it. */
+/* In a chat, full screen gives its title line a solid bar of its own across the view's top (Back, the chat's title over
+   its counts, a host's Requests and Share), safe from the status bar, the land's tag and the fold button left out; the
+   view starts under it and the chat's panel at its roster right under the view. A host's Requests panel drops from the
+   bar over the top of the view, never pushing the roster. */
 html.iv-full .oc-chat[data-space="on"] > .panel-title {
-  position: fixed; top: calc(12px + var(--safe-top)); left: calc(8px + var(--safe-left)); max-width: calc(100vw - 80px);
-  margin: 0; padding: 0; border: 0; background: none; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.6);
+  position: fixed; z-index: 44; top: 0; left: 0; right: 0; box-sizing: border-box; display: flex; align-items: center; gap: 6px;
+  height: calc(var(--iv-bar) + var(--safe-top)); max-width: none; margin: 0; padding: var(--safe-top) calc(8px + var(--safe-right)) 0 calc(4px + var(--safe-left));
+  border: 0; border-bottom: 1px solid rgba(243, 239, 228, 0.08); border-radius: 0; background: #0c0b0a; text-shadow: none;
 }
 html.iv-full .oc-chat[data-space="on"] > .panel-title > :is(.panel-chip:not(.hc-requests), .iv-fold) { display: none; }
-@media (min-aspect-ratio: 1 / 1) { html.iv-full .oc-chat[data-space="on"] > .panel-title { max-width: calc(100vw - var(--iv-side, min(420px, 42vw)) - 80px); } }
+html.iv-full .oc-chat[data-space="on"] .hc-dock:not(:empty) {
+  position: fixed; z-index: 43; margin: 0; top: calc(var(--iv-bar) + var(--safe-top)); left: 0; right: 0; max-height: calc(var(--iv-split, 55dvh) - var(--iv-bar) - var(--safe-top));
+  padding: 0 var(--safe-right) 0 var(--safe-left); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+html.iv-full .oc-chat[data-space="on"] .hc-dock > .hc-pop.hc-docked { margin: 0; border-width: 0 0 3px; border-radius: 0; }
+@media (min-aspect-ratio: 1 / 1) {
+  html.iv-full .oc-chat[data-space="on"] > .panel-title, html.iv-full .oc-chat[data-space="on"] .hc-dock:not(:empty) { right: var(--iv-side, min(420px, 42vw)); }
+  html.iv-full .oc-chat[data-space="on"] .hc-dock:not(:empty) { max-height: calc(100dvh - var(--iv-bar) - var(--safe-top)); }
+}
+/* The view under the bar, beside or over the chat's column. */
+html.iv-full { --iv-bar: 52px; }
+html.iv-full:has(.oc-chat[data-space="on"]) .iv-full-host { top: calc(var(--iv-bar) + var(--safe-top)); }
+@media (max-aspect-ratio: 1 / 1) { html.iv-full:has(.oc-chat[data-space="on"]) .iv-full-host { height: calc(var(--iv-split, 55dvh) - var(--iv-bar) - var(--safe-top)); } }
+/* Full screen's own button inside the view's corner, the same square as Share in the bar over it, their right edges lined up. */
+html.iv-full .iv-full-button {
+  top: 8px; right: calc(8px + var(--safe-right)); width: 32px; height: 32px; border-radius: 6px;
+  background: rgba(36, 32, 28, 0.72); box-shadow: inset 0 0 0 1px rgba(243, 239, 228, 0.12); color: rgba(243, 239, 228, 0.9);
+}
+html.iv-full .iv-full-button svg { width: 17px; height: 17px; }
+/* The land's tag beside it, the same height. */
+html.iv-full .iv-land-tag { top: 8px; height: 32px; padding: 0 10px; border-radius: 6px; font-size: 11px; }
+html.iv-full .iv-full-button:not([hidden]) ~ .iv-land-tag { right: calc(8px + 32px + 6px + var(--safe-right)); }
 /* No margin between the view and the chat's panel, beside it or under it: the page's inset, the frame's edges, the
    panel's top padding and the gaps its empty rows leave go, and the roster of faces runs the panel's whole width from
    its top, square, so the two meet edge to edge and stand as tall as each other side by side. */
@@ -393,5 +424,7 @@ html.iv-full .oc .oc-panel[data-space="on"] { gap: 0; padding: 0 8px 6px; }
 html.iv-full .oc .oc-panel[data-space="on"] > .hc-notice-host { margin-top: 0; }
 html.iv-full .oc .oc-panel[data-space="on"] > .cloud-roster { margin: 0 -8px; border-width: 0 0 2px; border-radius: 0; }
 html.iv-full .oc .oc-panel[data-space="on"] > .cloud-roster ~ :not(.hc-start, .hc-preview, .hc-pop) { margin-top: 6px; }
-html.iv-full .iv-reset { top: calc(54px + var(--safe-top)); }
-html.iv-full .iv-stage > .hc-chat-notice { top: calc(54px + var(--safe-top)); }
+.oc .oc-panel[data-space="on"] > .hc-alone { margin: -6px -8px 0; }
+html.iv-full .oc .oc-panel[data-space="on"] > .cloud-roster + .hc-alone { margin: 0 -8px; }
+html.iv-full .iv-reset { top: 8px; }
+html.iv-full .iv-stage > .hc-chat-notice { top: 8px; }
