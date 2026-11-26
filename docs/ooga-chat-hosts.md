@@ -369,8 +369,9 @@ Agreed 2026-11-23:
 
 - **What a copy carries:** the main island's open air as it is (scenery, the banana pile, the clouds), HQ and its
   basement down its open ramps, and the chat's members' Oogas, nothing else: no NPC crew or gorillas, every other cave
-  mouth and door sealed in stone (the OBL cave's mirror, the signs over the sealed mouths, every cave's banners, the
-  Oogatron, the islets at sea and the gulls and sails taken down),
+  mouth and door sealed in stone (the OBL cave's mirror, the signs over the sealed mouths, everything outside the caves
+  (banners, lanterns, lamp strings, the lab's dice and chalkboard and the like), ₿IFRÖST's arch, the plaza's library (the hill it was cut into standing whole
+  again: scene-hub.js `libraryPlugNode`), the Oogatron, the islets at sea and the gulls and sails taken down),
   no games, and none of the other islands or their bridges (the Mempool island, Merge Rock, the Timechain Sphere's islet,
   ₿IFRÖST's islet), so a walker off a bridgehead falls to the water and comes back beside the pile.
 - **Who goes:** speakers alone (the host, co-hosts and invited speakers) who are signed into the island with an Ooga.
@@ -392,8 +393,9 @@ Agreed 2026-11-23:
 - **The live island view** uses the game's own renderer and models, loaded only when someone turns Live view on.
 - **Ooga Chat's first-load limit** may rise to 256 KB gzipped.
 - **Cloud seats:** today's three-seat bench on 11 of the 18 clouds (33 seats for the 32 speakers), all on the high
-  track so none flies under the meadow, filled a bench at a time so a small chat looks like today's island; a cloud
-  with nobody on it shows no bench.
+  track so none flies under the meadow, filled a bench at a time so a small chat looks like today's island, each bench's
+  middle seat first and then its sides, each side seat centred in its own third of the bench; a cloud with nobody on it
+  shows no bench.
 - **Clouds:** every speaker not walking the copy sits on a cloud in it, a seat each, 32 seats: Ooga Chat's, and the
   island's whose Ooga is still on the main land. A speaker with no Ooga of their own (an X account, or a GitHub account
   with no character) sits there as a default Ooga hashed from their handle, under a name no login can have (as
@@ -477,7 +479,10 @@ As built (`src/js/island-view.js`, drawn by the shared views, chat-hosts.js, in 
   already.
 - **The map.** `scripts/island-view.mjs` (after `npm run build`) bakes it in the suite's Chrome: the built hub at midday
   on day 80 in a chat's copy mode (Main Island alone), its Oogas, gorillas, Tess and clouds left out, straight down
-  through an orthographic camera, 512 x 384. It writes `src/ooga-chat/art/island-view-main.webp` (Ooga Chat's lazy art),
+  through an orthographic camera: the inner 512 x 384 frames 96 metres across (the island about four fifths of its
+  height), and round it the picture carries 448 more pixels of the same sea each side and 128 above and below (1408 x
+  640, `pad`), so a strip of any usual shape shows the ocean itself out to its edges rather than its edges blurred. It
+  writes `src/ooga-chat/art/island-view-main.webp` (Ooga Chat's lazy art),
   the same bytes as `src/js/island-view-art.js` (the island page's copy, served as a file under `art/` on a hosted page,
   `PICTURE_MODULES`), and `src/js/island-view-data.js`, the capture camera's world-to-picture matrix (checked against the
   renderer's own projection) and the hub's light at that hour. Faces are the roster's (`rowFace`), else the native Ooga
@@ -511,12 +516,18 @@ As built (`src/js/island-view.js`, drawn by the shared views, chat-hosts.js, in 
   (`OPT_IN`, never prefetched). It does not pose a weapon as the island's crew does (no slung weapons, aiming, recoil
   or reloads), walk the pet at its heel or fly it, or light the jetpack's flame; a walker's gait is its own simple swing
   (the crew's `poseGait` needs crew.js), a seated speaker is not dressed (the chat's `looks` are the walkers'), and the
-  banana pile stands as baked (Ooga Chat does not follow the pile's level, and pile.js needs the island's terrain). The faces stand over their heads on the
-  2D canvas above it, and the map shows while it loads (or stays if it can't). A drag turns the island, a two-finger, right or Shift drag pans it, the wheel or a pinch zooms, held to the
+  banana pile stands as baked (Ooga Chat does not follow the pile's level, and pile.js needs the island's terrain). Over each speaker's head, on the
+  2D canvas above it, stands their name as the island draws other players' (remote-players.js `drawNames`): bold mono
+  with a dark edge, a dot before it (green walking the chat's island, purple on a cloud) and the voice mark after it
+  (red muted, green speaking), a plate that would cover another moved above it. The plates follow the view's size, full
+  size from a view of about 600 by 600 pixels up and down to half that on the smallest strip, the dot and the voice mark
+  with the name; the flat map keeps their faces. While it loads the stage stays black with a turning ring in its middle (`data-wait`): nothing of
+  the map or a bare canvas shows first; the map shows only where the 3D view can't load. A drag turns the island, a two-finger, right or Shift drag pans it, the wheel or a pinch zooms, held to the
   island and above the sea, and Reset view puts it back. `scripts/island-scene.mjs` (after `npm run build`) bakes the
   scenery from the built hub in copy mode: every node still drawn but pictures, glass, clipped and projected surfaces,
-  lines, birds, boats, characters, a fire's flame (kept as where it burns) and anything buried (HQ, its basement, the
-  caves' insides), sorted into layers (`base`: the ground, the pile and the paths, their 25,000-odd tiles baked as one
+  lines, birds, boats, characters, a fire's flame (kept as where it burns) and the faces of a once-used model buried
+  in rock (HQ, its basement, the caves' insides: a face is left out only where rock stands both over and under the air
+  beside it, so the island's underside and outer walls stay whole), sorted into layers (`base`: the ground, the pile and the paths, their 25,000-odd tiles baked as one
   road mesh already cut to their outline as the renderer cuts each tile, full tiles merged along their rows; `sky`: the
   copy's clouds plain and benched, each bench's seats and the glow under each, and the deal, with no places; `props`;
   `grass`, the lawn's 300 tufts; `trees` and `trees-medium`, the trees whole and at their medium detail; `details`, what
@@ -538,7 +549,17 @@ As built (`src/js/island-view.js`, drawn by the shared views, chat-hosts.js, in 
   chosen for (never prefetched and never in the service worker's shell, `OPT_IN`).
 - **Full screen** (Ooga Chat): a button on the view lays it over the page in a layer of its own with the app's column
   beside it (under it on a screen taller than it is wide), in the browser's own full screen where there is one; the
-  button again, or Escape, puts it back in the strip.
+  button again, or Escape, puts it back in the strip. The view runs to the screen's edges with no border, and the chat's
+  panel meets it with no gap: as tall as it side by side, its roster of faces across the panel's whole width from the
+  seam. The app's tabs are hidden, and the chat's title line (Back and the title, a host's Requests) floats over the
+  view's top left corner with no plate, where it stood before, the land's tag and the fold button left out. The seam is
+  the split: unmarked until a pointer is over it (the resize cursor and a thin purple line along it) or it has the
+  keyboard's focus, it is dragged, or moved a twentieth at a time with the arrows, to give the view more or less of the
+  screen (`--iv-split`, `--iv-side`; localStorage `ooga-island-view-split`).
+- **The view's controls** (Reset view, Full screen) are translucent over the island, Full screen a 24px square tight
+  round its icon at every width and in full screen; the fold button in the chat's
+  title is a borderless chip with a background of its own. At every width, in both apps, the chat's panel runs the view
+  and the roster out to its edges, square and meeting with no gap.
 - `?chats=on` (Ooga Chat's fixture) and `?debug=1&chats=fixture` (the island's) mark two of Sample Oak's chat's
   speakers as walking and send their places twice a second while the view asks, and how they look as it starts: Sample
   Oak in a top hat, a shirt and glasses with the gun out, Sample Reed as a character with a pet (a lion cub, grown a

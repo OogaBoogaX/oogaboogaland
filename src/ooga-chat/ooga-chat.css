@@ -346,19 +346,20 @@ body {
   .oc-tab-face { padding: 6px 11px 4px; }
   .oc-slab { padding: 14px 16px; }
 }
-/* On a phone the app runs edge to edge: no page margin or side borders, the panel's own padding at 8px, its rows
-   6px apart, and in a chat the island view and the roster of faces out to the screen's sides, square, meeting with no
-   gap; the emoji bar and the footer keep the panel's 8px. */
+/* At every width the panels keep tight: their own padding at 6px over and under and 8px at the sides, their rows 6px apart, the emoji bar and the footer
+   at the panel's 8px, and in a chat the island view and the roster of faces out to the panel's sides, square, meeting
+   with no gap. */
+.oc .oc-panel { gap: 6px; padding: 6px 8px; }
+.oc .oc-panel > .panel-foot { gap: 6px 12px; }
+.oc .oc-panel > .panel-foot > .reactions { margin-top: 0; }
+.oc .oc-panel.oc-panel > :is(.hc-room-strip, .cloud-roster) { margin-right: -8px; margin-left: -8px; border-right-width: 0; border-left-width: 0; border-radius: 0; }
+.oc .oc-panel > .hc-room-strip { margin-bottom: -6px; }
+.oc .oc-panel > .hc-notice-host { margin-top: -6px; }
+.oc .oc-panel > .hc-room-strip .iv-stage { border-right-width: 0; border-left-width: 0; border-radius: 0; }
+/* On a phone the app also runs edge to edge: no page margin or side borders. */
 @media (max-width: 480px) {
   .oc { padding: calc(4px + var(--safe-top)) var(--safe-right) var(--safe-bottom) var(--safe-left); }
   .oc > .oc-frame { border-right-width: 0; border-left-width: 0; border-radius: 0; box-shadow: none; }
-  .oc .oc-panel { gap: 6px; padding: 8px 8px 6px; }
-  .oc .oc-panel > .panel-foot { gap: 6px 12px; }
-  .oc .oc-panel > .panel-foot > .reactions { margin-top: 0; }
-  .oc .oc-panel > :is(.hc-room-strip, .cloud-roster) { margin-right: -8px; margin-left: -8px; border-right-width: 0; border-left-width: 0; border-radius: 0; }
-  .oc .oc-panel > .hc-room-strip { margin-bottom: -6px; }
-  .oc .oc-panel > .hc-notice-host { margin-top: -6px; }
-  .oc .oc-panel > .hc-room-strip .iv-stage { border-right-width: 0; border-left-width: 0; border-radius: 0; }
   .oc-fixture-note { margin: 8px 8px 0; }
   .oc-device { margin: 6px 8px 0; }
 }
@@ -368,5 +369,29 @@ body {
 
 /* The island view full screen (island-view.js, chat-hosts.css `.iv-full-host`): the app's column at the right edge,
    the view filling the rest; on a screen taller than it is wide, under the view. */
-html.iv-full .oc { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 42vw); max-width: none; height: 100dvh; min-height: 0; margin: 0; }
-@media (max-aspect-ratio: 1 / 1) { html.iv-full .oc { top: 55dvh; left: 0; width: auto; height: 45dvh; } }
+html.iv-full .oc { position: fixed; z-index: 41; top: 0; right: 0; bottom: 0; width: var(--iv-side, min(420px, 42vw)); max-width: none; height: 100dvh; min-height: 0; margin: 0; }
+@media (max-aspect-ratio: 1 / 1) { html.iv-full .oc { top: var(--iv-split, 55dvh); left: 0; width: auto; height: calc(100dvh - var(--iv-split, 55dvh)); } }
+/* Full screen keeps the chat alone in that column, with no tabs over it. */
+html.iv-full .oc-tabs, html.iv-full .oc-fixture-note, html.iv-full .oc-device { display: none !important; }
+/* In a chat, full screen floats its title line over the view's top left corner (Back and the chat's title, and a host's
+   Requests) where it stood before the view was expanded, with no plate, only a shadow under its words, the land's tag
+   and the fold button left out, so the chat's panel starts at its roster right under the view. The view's own controls
+   and notices make room under it. */
+html.iv-full .oc-chat[data-space="on"] > .panel-title {
+  position: fixed; top: calc(12px + var(--safe-top)); left: calc(8px + var(--safe-left)); max-width: calc(100vw - 80px);
+  margin: 0; padding: 0; border: 0; background: none; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.6);
+}
+html.iv-full .oc-chat[data-space="on"] > .panel-title > :is(.panel-chip:not(.hc-requests), .iv-fold) { display: none; }
+@media (min-aspect-ratio: 1 / 1) { html.iv-full .oc-chat[data-space="on"] > .panel-title { max-width: calc(100vw - var(--iv-side, min(420px, 42vw)) - 80px); } }
+/* No margin between the view and the chat's panel, beside it or under it: the page's inset, the frame's edges, the
+   panel's top padding and the gaps its empty rows leave go, and the roster of faces runs the panel's whole width from
+   its top, square, so the two meet edge to edge and stand as tall as each other side by side. */
+html.iv-full .oc { padding: var(--safe-top) var(--safe-right) var(--safe-bottom) 0; }
+@media (max-aspect-ratio: 1 / 1) { html.iv-full .oc { padding: 0 var(--safe-right) var(--safe-bottom) var(--safe-left); } }
+html.iv-full .oc > .oc-frame { border-width: 0; border-radius: 0; box-shadow: none; }
+html.iv-full .oc .oc-panel[data-space="on"] { gap: 0; padding: 0 8px 6px; }
+html.iv-full .oc .oc-panel[data-space="on"] > .hc-notice-host { margin-top: 0; }
+html.iv-full .oc .oc-panel[data-space="on"] > .cloud-roster { margin: 0 -8px; border-width: 0 0 2px; border-radius: 0; }
+html.iv-full .oc .oc-panel[data-space="on"] > .cloud-roster ~ :not(.hc-start, .hc-preview, .hc-pop) { margin-top: 6px; }
+html.iv-full .iv-reset { top: calc(54px + var(--safe-top)); }
+html.iv-full .iv-stage > .hc-chat-notice { top: calc(54px + var(--safe-top)); }
