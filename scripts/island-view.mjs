@@ -14,11 +14,13 @@ import { dispose, launch } from "../test/browser.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 // The picture's size (4:3, the strip's shape) and the ground it covers: Main Island with the sea round it, metres
-// across and its middle, north (-z) up.
-const W = 512, H = 384, SPAN = 112, MIDDLE = { x: 0, z: 0 };
+// across and its middle, north (-z) up. Round it the picture carries `PAD` more pixels of the same sea at the same
+// scale each side (left and right, top and bottom), so a strip wider or taller than 4:3 shows the ocean itself out to
+// its edges (island-view.js); the matrix is the inner 4:3's, as before.
+const W = 512, H = 384, SPAN = 96, MIDDLE = { x: 0, z: 0 }, PAD = [448, 128], TW = W + PAD[0] * 2, TH = H + PAD[1] * 2;
 const page = `file://${join(root, "oogaboogaland.html")}?debug=1&nosim=1&net=0&pos=0&welcome=0&hour=12&time=1200&day=80&rain=0&solo=1&islandworld=0`;
 process.env.TZ = "UTC";
-const b = await launch({ w: W * 2, h: H * 2 + 240 });
+const b = await launch({ w: TW * 2, h: TH * 2 + 240 });
 let shot;
 try {
   await b.open(page);
@@ -45,9 +47,9 @@ try {
     for (const cave of __ooga.crew.list) hide(cave.root);
     for (const entry of __ooga.clankers.list) hide(entry.root);
     // Drawn across the canvas's whole width, then cut to the picture's shape from its middle.
-    const cw = R.size.width, ch = R.size.height, aspect = ${W} / ${H}, span = ${SPAN}, cut = cw / aspect;
+    const cw = R.size.width, ch = R.size.height, aspect = ${W} / ${H}, span = ${SPAN}, outer = span * ${TW} / ${W}, cut = cw * ${TH} / ${TW};
     if (ch < cut) throw new Error("island-view: the window is too short for the picture");
-    const camera = BL.scene.createCamera({ fov: 30, near: 20, far: 700, orthoMix: 1, orthoHeight: span * ch / cw });
+    const camera = BL.scene.createCamera({ fov: 30, near: 20, far: 700, orthoMix: 1, orthoHeight: outer * ch / cw });
     camera.position = { x: ${MIDDLE.x}, y: 320, z: ${MIDDLE.z} };
     camera.target = { x: ${MIDDLE.x}, y: 0, z: ${MIDDLE.z} };
     camera.up = { x: 0, y: 0, z: -1 };
@@ -55,10 +57,10 @@ try {
     BL.scene.updateWorld(root);
     R.render(root, camera, opts);
     const canvas = document.getElementById("scene"), out = document.createElement("canvas"), sx = canvas.width / cw;
-    out.width = ${W}; out.height = ${H};
+    out.width = ${TW}; out.height = ${TH};
     const g = out.getContext("2d");
     g.imageSmoothingQuality = "high";
-    g.drawImage(canvas, 0, (ch - cut) / 2 * sx, cw * sx, cut * sx, 0, 0, ${W}, ${H});
+    g.drawImage(canvas, 0, (ch - cut) / 2 * sx, cw * sx, cut * sx, 0, 0, ${TW}, ${TH});
     const url = out.toDataURL("image/webp", 0.82);
     for (const node of hidden) node.visible = true;
     d.copyMode(false);
@@ -74,7 +76,7 @@ try {
     let worst = 0;
     for (const [x, y, z] of [[0, 0, 0], [40, 5, -30], [-60, 2, 50], [70, 6, 20]]) {
       const p = R.project(x, y, z, {}), q = at(x, y, z);
-      worst = Math.max(worst, p ? Math.hypot(p.x * ${W} / cw - q[0], (p.y - (ch - cut) / 2) * ${W} / cw - q[1]) : Infinity);
+      worst = Math.max(worst, p ? Math.hypot(p.x * ${TW} / cw - ${PAD[0]} - q[0], (p.y - (ch - cut) / 2) * ${TW} / cw - ${PAD[1]} - q[1]) : Infinity);
     }
     const o = hub.renderOpts, pick = (v) => Array.isArray(v) || ArrayBuffer.isView(v) ? Array.from(v, (n) => Math.round(n * 1e4) / 1e4) : typeof v === "number" ? Math.round(v * 1e4) / 1e4 : v;
     const light = {};
@@ -96,11 +98,11 @@ writeFileSync(join(root, "src", "js", "island-view-art.js"), `${header("The isla
   BL.islandViewArt = { main: "data:image/webp;base64,${bytes.toString("base64")}" };
 })();
 `);
-writeFileSync(join(root, "src", "js", "island-view-data.js"), `${header("The island view's map (island-view.js): the picture's size, the capture camera's world-to-picture matrix (column-major, as the renderer's) and the hub's light and sea at that hour,\n// which the opt-in Live view draws under (island-view-live.js).")}(() => {
+writeFileSync(join(root, "src", "js", "island-view-data.js"), `${header("The island view's map (island-view.js): the picture's size, the capture camera's world-to-picture matrix (column-major, as the renderer's) and the hub's light and sea at that hour,\n// which the opt-in Live view draws under (island-view-live.js); `w` and `h` are the inner 4:3 the matrix maps\n// to, the picture `pad` pixels of sea larger each side.")}(() => {
   "use strict";
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
-  BL.islandViewData = Object.freeze({ main: Object.freeze({ w: ${W}, h: ${H}, matrix: Object.freeze(${JSON.stringify(shot.matrix)}),
+  BL.islandViewData = Object.freeze({ main: Object.freeze({ w: ${W}, h: ${H}, pad: Object.freeze(${JSON.stringify(PAD)}), matrix: Object.freeze(${JSON.stringify(shot.matrix)}),
     light: Object.freeze(${JSON.stringify(shot.light)}) }) });
 })();
 `);

@@ -18309,7 +18309,8 @@ const oogaChatAppChecks = async () => {
       Object.values(hostedOk).every((w) => Object.values(w).every(Boolean)), JSON.stringify({ hostedOk, hostedRuns }));
 
     // The island view (island-view.js; docs/ooga-chat-hosts.md, "The island view"), at 1024 and 390: Sample Oak's chat
-    // has two speakers walking its island, each face ringed in green over its walker; the chat's places come only while
+    // has two speakers walking its island, each marked in green over its walker (a face ringed on the map, a nameplate's
+    // dot in 3D); the chat's places come only while
     // the strip can be seen (another tab stops them, coming back starts them again); leaving the chat takes the strip
     // away. One view, chosen by the device: at 1024 (WebGL2, memory to spare) the 3D view over the baked scenery comes by
     // itself, a wheel zooms it, Reset view puts it back, and Full screen lays it over the page with the app's column
@@ -30418,11 +30419,12 @@ const hostedIslandView = (phone) => ({ name: phone ? "hosted chats island view p
   const left = await until((s) => !s.shown && !s.room);
   await b.sleep(300);
   // A view closed while it shows and draws stops drawing for good.
-  await b.evaluate(`window.__ivLone = BL.islandView.create({ picture: "", faceOf: () => "" });
+  // With the island's own picture, as the page gives it: a view with nothing to show yet only waits (`waiting`).
+  await b.evaluate(`window.__ivLone = BL.islandView.create({ picture: BL.islandViewArt.main, faceOf: () => "" });
     document.body.append(__ivLone.node);
     __ivLone.walk({ type: "walk", seq: 1, p: ["gh:1", 1, 2, 3, 0] });
     __ivLone.update({ place: true, rows: [{ id: "gh:1", display: "A", login: "a", walking: true }], talking: [], speaking: false, self: null, active: true })`);
-  await b.sleep(200);
+  for (let t = 0; t < 3000 && !await b.evaluate(`__ivLone.drawing`); t += 100) await b.sleep(100);
   const drewAlone = await b.evaluate(`__ivLone.drawing`);
   await b.evaluate(`__ivLone.dispose()`);
   await b.sleep(300);

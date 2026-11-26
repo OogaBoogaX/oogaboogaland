@@ -4,8 +4,9 @@
 // page by the device (`capable`), never toggled: the flat bird's-eye picture (scripts/island-view.mjs, its matrix
 // island-view-data.js) with each walker's Ooga face, or where the page offers it (`loadLive`, Ooga Chat's) to a viewer
 // it allows (`liveAllowed`: Ooga Chat's, a GitHub contributor; asked again on every update) and the device can carry it (WebGL2, enough memory and cores, no data saver or connection it reports as slow), the 3D view (island-view-live.js) over the
-// baked scenery at the tier the viewer's connection allows (island-scene.js), the picture showing while it loads and
-// staying if it can't, the speakers not walking it sitting on the copy's clouds (`clouds`). In 3D the viewer turns the
+// baked scenery at the tier the viewer's connection allows (island-scene.js), dark with a loading ring while it loads
+// and the picture if it can't, the speakers not walking it sitting on the copy's clouds (`clouds`), and over each
+// speaker's head their name as the island shows other players' (a green dot walking, a purple one on a cloud). In 3D the viewer turns the
 // island with a drag, pans with a two-finger drag, a right or Shift drag, zooms with the wheel or a pinch, and Reset
 // view puts it back. It draws only while shown and active: the map when something changed (a walker, the size), the 3D
 // view as its tier's `tick` says too (every frame on the full tier, its sky, clouds, wind and fires alive), each at the
@@ -27,6 +28,13 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const MAX = 32, FACE = 26, RING = "#22c55e", PULSE_HZ = 2.2;
+  // The 3D view's nameplates, as the island draws other players' (remote-players.js `drawNames`): the name in bold mono
+  // with a dark edge, the dot before it (green walking the chat's island, purple on a cloud) and the voice mark after it.
+  const NAME_SIZE = 13, NAME_LINE = NAME_SIZE * 1.3, NAME_SPACING = "0.39px", NAME_PAD_X = 5, NAME_PAD_Y = 3, NAME_BOTTOM = 2;
+  const DOT_D = 8, DOT_GAP = 6, ICON_GAP = 4, PLATE_EDGE = 4, CLOUD_DOT = "#b18aff", PLATE_REF = 600, PLATE_MIN = 0.5;
+  const NAME_STROKE = "rgba(20, 14, 8, 0.85)", NAME_FILL = "#f3efe4", ICON_IDLE = "#a6a6a2", ICON_SPEAKING = "#22c55e", ICON_MUTED = "#e5533d";
+  // x, y, w, h runs on the voice mark's 9x9 grid, as the roster's draws it.
+  const SPEAKER = [0, 3, 2, 3, 2, 2, 1, 5, 3, 1, 1, 7], WAVES = [5, 3, 1, 3, 7, 2, 1, 5], CROSS = [5, 3, 1, 1, 7, 3, 1, 1, 6, 4, 1, 1, 5, 5, 1, 1, 7, 5, 1, 1];
   // Where a world point falls on the picture: `view` is island-view-data.js's (`w`, `h`, `matrix`), `out` gets `x`, `y`.
   const project = (view, x, y, z, out) => {
     const m = view.matrix, w = m[3] * x + m[7] * y + m[11] * z + m[15];
@@ -128,6 +136,8 @@
   const foldedSaved = () => { try { return localStorage.getItem(FOLD_KEY) === "1"; } catch { return false; } };
   const create = ({ picture, faceOf, loadLive = null, liveAllowed = () => true, scenery = "art", fullscreen = false, onFold = null }) => {
     const view = BL.islandViewData.main, state = walks();
+    // The picture's sea past the inner 4:3 the matrix maps to, each side (scripts/island-view.mjs `PAD`).
+    const PAD_X = view.pad ? view.pad[0] : 0, PAD_Y = view.pad ? view.pad[1] : 0;
     const node = document.createElement("div"), stage = document.createElement("div"), map = document.createElement("canvas");
     const reset = document.createElement("button"), full = document.createElement("button"), note = document.createElement("p");
     node.className = "iv";
@@ -166,8 +176,8 @@
     const image = new Image();
     image.decoding = "async";
     let pictureAsked = false;
-    // Beside the picture where the strip's shape differs from it: the picture's own sea edges spread out and blurred,
-    // so the sea runs on to the strip's ends. Made once a size.
+    // Past the picture where the strip is wider or taller still than its sea reaches: the picture's own sea edges
+    // spread out and blurred, so the sea runs on to the strip's ends. Made once a size.
     const back = document.createElement("canvas"), bg = back.getContext("2d"), EDGE = 16;
     let backFor = "";
     const paintBack = () => {
@@ -176,21 +186,96 @@
       if (key === backFor) return;
       backFor = key;
       back.width = map.width; back.height = map.height;
-      const k = Math.min(back.width / view.w, back.height / view.h), w = view.w * k, h = view.h * k, x = (back.width - w) / 2, y = (back.height - h) / 2;
+      // The whole picture, its sea round the inner 4:3 included, where the frame draws it; only past its edges, on a
+      // strip wider or taller still, its edges stretched and blurred.
+      const pw = view.w + PAD_X * 2, ph = view.h + PAD_Y * 2, k = Math.min(back.width / view.w, back.height / view.h);
+      const w = pw * k, h = ph * k, x = (back.width - view.w * k) / 2 - PAD_X * k, y = (back.height - view.h * k) / 2 - PAD_Y * k;
       bg.filter = "blur(10px)";
       if (x > 0) {
-        bg.drawImage(image, 0, 0, EDGE, view.h, -20, y, x + 40, h);
-        bg.drawImage(image, view.w - EDGE, 0, EDGE, view.h, x + w - 20, y, x + 40, h);
+        bg.drawImage(image, 0, 0, EDGE, ph, -20, y, x + 40, h);
+        bg.drawImage(image, pw - EDGE, 0, EDGE, ph, x + w - 20, y, x + 40, h);
       }
       if (y > 0) {
-        bg.drawImage(image, 0, 0, view.w, EDGE, x, -20, w, y + 40);
-        bg.drawImage(image, 0, view.h - EDGE, view.w, EDGE, x, y + h - 20, w, y + 40);
+        bg.drawImage(image, 0, 0, pw, EDGE, x, -20, w, y + 40);
+        bg.drawImage(image, 0, ph - EDGE, pw, EDGE, x, y + h - 20, w, y + 40);
       }
       bg.filter = "none";
     };
-    image.addEventListener("load", () => { backFor = ""; paintBack(); changed(); });
+    image.addEventListener("load", () => { backFor = ""; paintBack(); paint(); changed(); });
     // A face a walker, made when their row first comes (or their picture changes): the picture and its initial.
     const faces = new Map();
+    // A nameplate a speaker for the 3D view (`{ text, w, talking, muted }`, `w` measured once a name).
+    const plates = new Map();
+    let plateFont = "", plateBase = 0, plateN = 0;
+    // The boxes laid out this frame (left, top, right, bottom), so a plate over another moves above it, or under it at
+    // the top edge, as remote-players.js `stack` lays the island's.
+    const platesAt = new Float64Array((MAX * 2) * 4);
+    const stackPlate = (left, top, boxW, boxH) => {
+      for (let again = true, tries = 0, down = false; again && tries < 8; tries++) {
+        again = false;
+        for (let i = 0; i < plateN; i++) {
+          const o = i * 4;
+          if (!(left < platesAt[o + 2] && left + boxW > platesAt[o] && top < platesAt[o + 3] && top + boxH > platesAt[o + 1])) continue;
+          if (!down && platesAt[o + 1] - boxH - 2 < PLATE_EDGE) down = true;
+          top = Math.round(down ? platesAt[o + 3] + 2 : platesAt[o + 1] - boxH - 2);
+          again = true;
+        }
+      }
+      top = Math.max(PLATE_EDGE, Math.min(Math.max(PLATE_EDGE, height - boxH - PLATE_EDGE), top));
+      if (plateN < MAX * 2) { const o = plateN++ * 4; platesAt[o] = left; platesAt[o + 1] = top; platesAt[o + 2] = left + boxW; platesAt[o + 3] = top + boxH; }
+      return top;
+    };
+    const runs = (cells, x, y, k) => { for (let i = 0; i < cells.length; i += 4) g.fillRect(x + cells[i] * k, y + cells[i + 1] * k, cells[i + 2] * k, cells[i + 3] * k); };
+    // The plates' size follows the view's (`PLATE_REF`, the square root of its area at which they stand full size, never
+    // larger), down to half that on the smallest strip: the name, its dot, the gaps and the voice mark all alike.
+    // `plateK` is that share, in steps of a twentieth so the font is made again only when it moves.
+    let plateK = 0, mono = "", fontAt = "", spacingAt = "";
+    // One plate standing on a head's top (x its middle, `top` its highest point, CSS pixels), kept inside the canvas.
+    const drawPlate = (p, x, top, dot) => {
+      // A name is measured once, at full size (measureText allocates), and drawn at the view's share of it.
+      if (p.w < 0) {
+        g.font = plateFont; g.letterSpacing = NAME_SPACING;
+        p.w = g.measureText(p.text).width;
+        g.font = fontAt; g.letterSpacing = spacingAt;
+      }
+      const k = plateK, w = p.w * k, padX = NAME_PAD_X * k, padY = NAME_PAD_Y * k, line = NAME_LINE * k, dotD = DOT_D * k;
+      const boxW = Math.round(padX * 2 + dotD + DOT_GAP * k + w), boxH = Math.round(padY * 2 + line);
+      const left = Math.round(Math.max(PLATE_EDGE, Math.min(width - boxW - PLATE_EDGE, x - boxW / 2)));
+      const row = stackPlate(left, Math.round(Math.max(PLATE_EDGE, top - NAME_BOTTOM * k - boxH)), boxW, boxH) + padY, mid = row + line / 2;
+      const textX = left + padX + dotD + DOT_GAP * k;
+      g.strokeStyle = NAME_STROKE; g.fillStyle = NAME_FILL; g.lineWidth = 3 * k;
+      g.strokeText(p.text, textX, row + plateBase * k);
+      g.fillText(p.text, textX, row + plateBase * k);
+      p.dotX = left + padX + dotD / 2; p.dotY = mid;
+      g.beginPath(); g.arc(p.dotX, mid, dotD / 2, 0, Math.PI * 2);
+      g.lineWidth = 1.5 * k; g.stroke(); g.fillStyle = dot; g.fill();
+      const ix = textX + w + ICON_GAP * k, iy = mid - 4.5 * k;
+      g.fillStyle = p.muted ? ICON_MUTED : p.talking ? ICON_SPEAKING : ICON_IDLE;
+      runs(SPEAKER, ix, iy, k);
+      runs(p.muted ? CROSS : WAVES, ix, iy, k);
+    };
+    const drawPlates = () => {
+      if (!mono) {
+        mono = getComputedStyle(document.documentElement).getPropertyValue("--mono").trim() || "ui-monospace, monospace";
+        plateFont = `bold ${NAME_SIZE}px ${mono}`;
+        g.font = plateFont;
+        const m = g.measureText("Mg");
+        plateBase = (NAME_LINE - m.fontBoundingBoxAscent - m.fontBoundingBoxDescent) / 2 + m.fontBoundingBoxAscent;
+      }
+      const k = Math.round(Math.max(PLATE_MIN, Math.min(1, Math.sqrt(width * height) / PLATE_REF)) * 20) / 20;
+      if (k !== plateK) { plateK = k; fontAt = `bold ${NAME_SIZE * k}px ${mono}`; spacingAt = `${Math.round(39 * k) / 100}px`; }
+      plateN = 0;
+      g.font = fontAt; g.letterSpacing = spacingAt; g.textAlign = "left"; g.textBaseline = "alphabetic"; g.lineJoin = "round";
+      for (let i = 0; i < live.perches; i++) {
+        const id = live.perchHead(i, P), p = id && plates.get(id);
+        if (p) drawPlate(p, P.x, P.y, CLOUD_DOT);
+      }
+      for (let i = 0; i < MAX; i++) {
+        const id = state.ids[i], p = id !== null && plates.get(id);
+        if (p && live.walkerHead(i, P)) drawPlate(p, P.x, P.y, RING);
+      }
+      g.letterSpacing = "0px";
+    };
     // Each walker's Ooga for the 3D view: the character the chat names for them, else their login (hashed, as the island does).
     const names = new Map();
     // And how each looks, as the chat last said (`looks`): an entry a walker, kept whole until the next frame.
@@ -239,9 +324,13 @@
     let fit = 1, offX = 0, offY = 0, fontR = 0, font = "";
     // One frame: the 3D view (or the picture), then each walker's face, eased to where it is. Drawn again while a walker
     // moves, the camera is turned or the size changed; at most once every `interval`, the frame's own cost eased in.
+    // Until there is something to show (the 3D view this device takes, or else the map's picture), the stage stands
+    // dark with a loading ring (chat-hosts.css `[data-wait]`) and nothing is drawn: never the map flashing up first.
+    const waiting = () => !live && mode !== "failed" && (mode === "loading" || wants3d() || !(image.complete && image.naturalWidth));
     const frame = (now) => {
       raf = 0;
       if (!shown || !active) return;
+      if (waiting()) { g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, width, height); dirty = false; return; }
       const moving = state.count > 0, lively = !!live && live.tick < 1000;
       if (!dirty && !moving && !lively && !(live && live.moved)) return;
       const interval = Math.min(FRAME_MAX, Math.max(FRAME_MIN, cost * 1.5, lively ? live.tick : 0));
@@ -263,23 +352,19 @@
         offX = (width - view.w * fit) / 2; offY = (height - view.h * fit) / 2;
         paintBack();
         if (backFor) g.drawImage(back, 0, 0, width, height);
-        if (image.complete && image.naturalWidth) g.drawImage(image, offX, offY, view.w * fit, view.h * fit);
+        if (image.complete && image.naturalWidth) g.drawImage(image, offX - PAD_X * fit, offY - PAD_Y * fit, (view.w + PAD_X * 2) * fit, (view.h + PAD_Y * 2) * fit);
       }
       const r = Math.max(9, Math.min(FACE, width / 22)) / 2, beat = 0.5 + 0.5 * Math.sin(now / 1000 * Math.PI * 2 * PULSE_HZ);
-      for (let i = 0; i < MAX; i++) {
+      // Over the 3D view each speaker's name stands over their Ooga's head; the map carries their faces.
+      if (live) drawPlates();
+      else for (let i = 0; i < MAX; i++) {
         const id = state.ids[i];
         if (id === null) continue;
         const f = faces.get(id);
         if (!f) continue;
         placeOf(state, i, now, NOW);
-        let x, y;
-        if (live) {
-          if (!live.project(NOW.x, NOW.y + 2.1, NOW.z, P)) continue;
-          x = P.x; y = P.y - r;
-        } else {
-          project(view, NOW.x, NOW.y, NOW.z, P);
-          x = offX + P.x * fit; y = offY + P.y * fit;
-        }
+        project(view, NOW.x, NOW.y, NOW.z, P);
+        const x = offX + P.x * fit, y = offY + P.y * fit;
         if (f.talking) {
           g.globalAlpha = 0.25 + 0.5 * beat;
           g.fillStyle = RING;
@@ -393,6 +478,49 @@
     reset.addEventListener("click", (e) => { if (e.detail) reset.blur(); live?.reset(); reset.hidden = true; changed(); });
     // --- full screen: the view over the page, the chat's panel beside it ---
     let isFull = false, marker = null, host = null, browserFull = false;
+    // Full screen's split (`--iv-split`, the view's share of a tall screen's height; `--iv-side`, the panel's width
+    // beside it on a wide one), dragged by the handle on the line between them (a layer of its own over both, so it
+    // stands on that line rather than inside the view) and kept for this browser
+    // (localStorage `ooga-island-view-split`).
+    const SPLIT_KEY = "ooga-island-view-split", tall = () => innerHeight > innerWidth;
+    let split = { tall: 0.55, wide: 0 };
+    try { const kept = JSON.parse(localStorage.getItem(SPLIT_KEY) || "null"); if (kept && typeof kept === "object") split = { tall: Number.isFinite(kept.tall) ? kept.tall : 0.55, wide: Number.isFinite(kept.wide) ? kept.wide : 0 }; } catch { /* the default */ }
+    const applySplit = () => {
+      const doc = document.documentElement.style;
+      doc.setProperty("--iv-split", `${Math.round(split.tall * 1000) / 10}dvh`);
+      // Held to the window as it is now, whatever size it was dragged on (and on every resize, being CSS's to work out).
+      if (split.wide) doc.setProperty("--iv-side", `clamp(280px, ${Math.round(split.wide)}px, 70vw)`); else doc.removeProperty("--iv-side");
+    };
+    const handle = document.createElement("div");
+    handle.className = "iv-split";
+    handle.setAttribute("role", "separator");
+    handle.setAttribute("aria-label", "Drag to resize the island view");
+    handle.tabIndex = 0;
+    let dragging = false;
+    const dragTo = (x, y) => {
+      if (tall()) split.tall = Math.max(0.25, Math.min(0.85, y / innerHeight));
+      else split.wide = Math.max(280, Math.min(innerWidth * 0.7, innerWidth - x));
+      applySplit();
+    };
+    handle.addEventListener("pointerdown", (e) => { dragging = true; handle.dataset.drag = ""; handle.setPointerCapture(e.pointerId); e.preventDefault(); });
+    handle.addEventListener("pointermove", (e) => { if (dragging) dragTo(e.clientX, e.clientY); });
+    const drop = () => {
+      if (!dragging) return;
+      dragging = false;
+      delete handle.dataset.drag;
+      try { localStorage.setItem(SPLIT_KEY, JSON.stringify(split)); } catch { /* kept for this page */ }
+    };
+    handle.addEventListener("pointerup", drop);
+    handle.addEventListener("pointercancel", drop);
+    // From the keyboard: the arrows move the split a twentieth at a time.
+    handle.addEventListener("keydown", (e) => {
+      const k = e.key, step = tall() ? innerHeight / 20 : innerWidth / 20;
+      if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(k)) return;
+      e.preventDefault();
+      if (tall()) dragTo(0, split.tall * innerHeight + (k === "ArrowUp" || k === "ArrowLeft" ? -step : step));
+      else dragTo(innerWidth - (split.wide ? Math.max(280, Math.min(innerWidth * 0.7, split.wide)) : Math.min(420, innerWidth * 0.42)) + (k === "ArrowLeft" || k === "ArrowUp" ? -step : step), 0);
+      try { localStorage.setItem(SPLIT_KEY, JSON.stringify(split)); } catch { /* kept for this page */ }
+    });
     const setFull = (on) => {
       if (on === isFull || !fullscreen) return;
       isFull = on;
@@ -404,12 +532,17 @@
         host.className = "iv-full-host";
         document.body.append(host);
         host.append(node);
+        document.body.append(handle);
+        applySplit();
         doc.classList.add("iv-full");
         if (doc.requestFullscreen && !document.fullscreenElement) doc.requestFullscreen().then(() => { browserFull = true; }, () => {});
       } else {
         doc.classList.remove("iv-full");
         if (marker) { marker.replaceWith(node); marker = null; }
         host?.remove(); host = null;
+        handle.remove();
+        dragging = false;
+        delete handle.dataset.drag;
         if (browserFull && document.fullscreenElement) document.exitFullscreen().catch(() => {});
         browserFull = false;
       }
@@ -439,6 +572,7 @@
       if (fold.title !== fwords) { fold.title = fwords; fold.setAttribute("aria-label", fwords); }
       fold.setAttribute("aria-pressed", String(!folded));
       stage.dataset.live = mode === "3d" ? "on" : mode;
+      if (waiting()) stage.dataset.wait = ""; else delete stage.dataset.wait;
       const words = isFull ? "Exit full screen" : "Full screen";
       if (full.title !== words) { full.title = words; full.setAttribute("aria-label", words); }
       mark.setAttribute("d", isFull ? FULL_OUT : FULL_IN);
@@ -463,6 +597,17 @@
         const f = faceFor(row);
         f.talking = row.id === next.self ? !!next.speaking : next.talking.includes(row.id);
       }
+      for (const row of rows) {
+        if (row.role !== "speaker") continue;
+        const text = row.display || row.login || "";
+        let p = plates.get(row.id);
+        if (!p) plates.set(row.id, p = { text: "", w: -1, talking: false, muted: false, seen: 0, dotX: NaN, dotY: NaN });
+        if (p.text !== text) { p.text = text; p.w = -1; }
+        p.talking = row.id === next.self ? !!next.speaking : next.talking.includes(row.id);
+        p.muted = !!row.muted;
+        p.seen = rows;
+      }
+      for (const [id, p] of plates) if (p.seen !== rows) plates.delete(id);
       if (faces.size > walkers.length) for (const id of faces.keys()) if (!walkers.some((row) => row.id === id)) { faces.delete(id); names.delete(id); }
       if (show && !pictureAsked) { pictureAsked = true; image.src = picture; }
       const was = shown;
@@ -505,13 +650,15 @@
       changed();
       return true;
     };
-    // Where each walker's face stands on the strip now, in CSS pixels (the checks', made on call).
+    // Where each walker's face stands on the strip now (in 3D, their nameplate's dot), in CSS pixels (the checks', made
+    // on call).
     const placed = () => {
       const now = performance.now(), out = [];
       for (let i = 0; i < MAX; i++) {
         if (state.ids[i] === null) continue;
         placeOf(state, i, now, NOW);
-        if (live) { if (live.project(NOW.x, NOW.y + 2.1, NOW.z, P)) out.push({ id: state.ids[i], x: P.x, y: P.y, world: { ...NOW } }); continue; }
+        // Over the 3D view, where the walker's nameplate put its dot when last drawn.
+        if (live) { const p = plates.get(state.ids[i]); if (p && p.dotX === p.dotX) out.push({ id: state.ids[i], x: p.dotX, y: p.dotY, world: { ...NOW } }); continue; }
         project(view, NOW.x, NOW.y, NOW.z, P);
         out.push({ id: state.ids[i], x: offX + P.x * fit, y: offY + P.y * fit, world: { ...NOW } });
       }
@@ -519,7 +666,7 @@
     };
     const self = { node, stage, fold, update, walk, looks, clouds, placed, get folded() { return folded; }, get perched() { return perched; },
       dispose() {
-        setFull(false); shown = active = false; stop(); endLive(); sizes?.disconnect(); faces.clear();
+        setFull(false); shown = active = false; stop(); endLive(); sizes?.disconnect(); faces.clear(); plates.clear();
         document.removeEventListener("fullscreenchange", onFullChange); document.removeEventListener("keydown", onKey);
         node.remove(); open.delete(self);
       },

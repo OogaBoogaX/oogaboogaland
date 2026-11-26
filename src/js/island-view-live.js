@@ -23,7 +23,7 @@
 // every few seconds on base (`tick`), and whenever something changed. Ooga Chat fetches this, the renderer's code and
 // the scenery only for a device the island view chooses 3D for. `prepare(dir, tier)` resolves to the scenery (`{ tier,
 // layers, mbps }`), fetched once a page; `create(canvas, { scenery, data, quality, tier })` returns `{ place(i, x, y, z,
-// yaw, on, name, look), seat(list), offset, render(), project(x, y, z, out), resize(), orbit(dx, dy), pan(dx, dy),
+// yaw, on, name, look), seat(list), offset, render(), project(x, y, z, out), walkerHead(i, out), perchHead(i, out), perches, resize(), orbit(dx, dy), pan(dx, dy),
 // zoom(k), reset(), setQuality(q), pin(clock), tick, moved, dispose() }`. `cloudPlan(baked)` and `cloudAt(plan, i, t,
 // out)` are pure (the bake checks them against the hub's own placing).
 (() => {
@@ -166,6 +166,35 @@
     const AT = { x: 0, y: 0, z: 0, yaw: 0 };
     // The speakers on the clouds (`seat`): an Ooga a seat, built the first time a name comes to it.
     const perches = [];
+    // A head's place on the canvas: over the top of every visible mesh of it, centred between the outermost corners of
+    // their boxes, as projected with the frame last drawn (remote-players.js lays the island's nameplates the same way).
+    const HEAD_AT = { x: 0, y: 0, depth: 0 };
+    let headMinX = 0, headMaxX = 0, headTop = 0;
+    const headCorners = (node) => {
+      if (!node.visible) return;
+      if (node.geometry) {
+        const b = BL.scene.boundsOf(node.geometry), m = node.world;
+        for (let i = 0; i < 8; i++) {
+          const x = i & 1 ? b.max[0] : b.min[0], y = i & 2 ? b.max[1] : b.min[1], z = i & 4 ? b.max[2] : b.min[2];
+          if (!renderer.project(m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14], HEAD_AT)) continue;
+          if (HEAD_AT.x < headMinX) headMinX = HEAD_AT.x;
+          if (HEAD_AT.x > headMaxX) headMaxX = HEAD_AT.x;
+          if (HEAD_AT.y < headTop) headTop = HEAD_AT.y;
+        }
+      }
+      for (let i = 0; i < node.children.length; i++) headCorners(node.children[i]);
+    };
+    // `seen`: false too for a head wholly out of the view, so a bench panned away leaves no names stacked at the edge
+    // (remote-players.js skips a cloud speaker's the same way; a walker's keeps to the edge).
+    const headOf = (cave, out, seen = false) => {
+      if (!cave || !cave.root.visible || !cave.parts.head) return false;
+      headMinX = Infinity; headMaxX = -Infinity; headTop = Infinity;
+      headCorners(cave.parts.head);
+      if (headTop === Infinity) return false;
+      if (seen && (headMaxX < 0 || headMinX > renderer.size.width || headTop > renderer.size.height)) return false;
+      out.x = (headMinX + headMaxX) / 2; out.y = headTop;
+      return true;
+    };
     for (let i = 0; i < SEATS; i++) perches.push({ id: "", name: "", cave: null, seat: -1 });
     // A slot a walker: their Ooga, built the first time a name comes to it (another name builds anew), its hip from the
     // build, and its walk's phase from the ground it has covered.
@@ -422,6 +451,12 @@
         return renderer.render(root, camera, opts);
       },
       project: (x, y, z, out) => renderer.project(x, y, z, out),
+      // Where a walker's head (place `i`) stands on the canvas as last drawn, the middle across and the top, in CSS
+      // pixels, written into `out`: false when it isn't shown or is out of the view.
+      walkerHead: (i, out) => headOf(slots[i] && slots[i].cave, out),
+      // The same for the speaker on cloud perch `i`: their id, or "" for an empty perch or one out of the view.
+      perchHead(i, out) { const p = perches[i]; return p && p.cave && headOf(p.cave, out, true) ? p.id : ""; },
+      perches: SEATS,
       resize() { renderer.resize(); self.moved = true; },
       // A drag: round the island and up or down (radians).
       orbit(dx, dy) {

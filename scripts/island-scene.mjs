@@ -76,9 +76,18 @@ try {
     let taken = 0, left = 0, deep = 0;
     // Underground, out of any view from above (HQ, its basement and the caves' insides): more than DEEP metres under the
     // island's ground on every side. A cliff's wall, open to the air on one side, stays. A model used once (the ground)
-    // loses its buried faces; any other is dropped where it stands buried.
-    const DEEP = 3, isl = d.island;
+    // loses only its enclosed faces: buried, and facing air with rock both over and under it (a room's walls, floor and
+    // ceiling), never the island's keel and underside, whose air runs on down to the sea; any other model is dropped where
+    // it stands buried.
+    const DEEP = 3, isl = d.island, REACH = 60, STEP = 0.5;
     const buried = (x, y, z) => isl.onLand(x, z) && [[0, 0], [1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5]].every(([dx, dz]) => isl.heightAt(x + dx, z + dz) > y + DEEP);
+    const rockAlong = (x, y, z, dy) => { for (let t = STEP; t <= REACH; t += STEP) if (isl.solidAt(x, y + dy * t, z)) return true; return false; };
+    // A face's air side: a little off its middle along its normal, whichever way is not rock (null: rock or air both ways).
+    const airOf = (cx, cy, cz, nx, ny, nz) => {
+      const a = !isl.solidAt(cx + nx * 0.25, cy + ny * 0.25, cz + nz * 0.25), b = !isl.solidAt(cx - nx * 0.25, cy - ny * 0.25, cz - nz * 0.25);
+      return a && !b ? [cx + nx * 0.25, cy + ny * 0.25, cz + nz * 0.25] : b && !a ? [cx - nx * 0.25, cy - ny * 0.25, cz - nz * 0.25] : null;
+    };
+    const enclosed = (p) => !!p && rockAlong(p[0], p[1], p[2], 1) && rockAlong(p[0], p[1], p[2], -1);
     const count = (g) => g.compactGeometry ? g.compactGeometry.count : g.faces ? g.faces.length : 0;
     // How many places each geometry stands in, for the buried faces' rule.
     const uses = new Map();
@@ -97,8 +106,16 @@ try {
         if (k < 3 || k > 255) continue;
         if (once && m) {
           let cx = 0, cy = 0, cz = 0;
-          for (let j = 0; j < k; j++) { const i = face.i[j], x = v[i * 3], y = v[i * 3 + 1], z = v[i * 3 + 2]; cx += m[0] * x + m[4] * y + m[8] * z + m[12]; cy += m[1] * x + m[5] * y + m[9] * z + m[13]; cz += m[2] * x + m[6] * y + m[10] * z + m[14]; }
-          if (buried(cx / k, cy / k, cz / k)) { deep++; continue; }
+          const W = [];
+          for (let j = 0; j < k; j++) { const i = face.i[j], x = v[i * 3], y = v[i * 3 + 1], z = v[i * 3 + 2]; const wx = m[0] * x + m[4] * y + m[8] * z + m[12], wy = m[1] * x + m[5] * y + m[9] * z + m[13], wz = m[2] * x + m[6] * y + m[10] * z + m[14]; W.push(wx, wy, wz); cx += wx; cy += wy; cz += wz; }
+          cx /= k; cy /= k; cz /= k;
+          if (buried(cx, cy, cz)) {
+            const ux = W[3] - W[0], uy = W[4] - W[1], uz = W[5] - W[2], vx = W[6] - W[0], vy = W[7] - W[1], vz = W[8] - W[2];
+            let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+            const len = Math.hypot(nx, ny, nz) || 1;
+            nx /= len; ny /= len; nz /= len;
+            if (enclosed(airOf(cx, cy, cz, nx, ny, nz))) { deep++; continue; }
+          }
         }
         out.corners.push(k);
         for (let j = 0; j < k; j++) {
