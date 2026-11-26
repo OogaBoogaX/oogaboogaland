@@ -106,7 +106,7 @@ Signed in, a room is shared with everyone who picks the same number (you see and
 
 Playing is free everywhere on the island; the only payments are ones you choose to make, a donation to feed the Oogas or a song request on DSB Land's radio. **Ooga Arcade** (3 o'clock) has a cabinet for each of Cloud Hopper, Ooga Drop, Ooga Orbit and Ooga Mine, carnival machines (Thro-ball, Hoop Shot, Coconut Toss, the Claw Machine, Air Hockey, Pool, Darts, Pinball and the Beast Ride) and eight retro cabinets on the mezzanine. Its games pay out tickets, which you spend at the prize counter or on the jackpot wheel.
 
-- **The Ember Den:** walk through its window in ₿IFRÖST, beside DSB Land's, straight into a room of ten poker tables, nine seats each, suited gorilla dealers and five cave themes. Local practice plus an experimental encrypted-deck multiplayer service (`npm run poker:serve`), private dealing and downloadable hand verification. Free play chips, no payments or rake. See [status](docs/banana-poker.md) and [protocol and service instructions](docs/poker-protocol.md).
+- **The Ember Den:** walk through its window in ₿IFRÖST, beside DSB Land's, straight into a room of ten poker tables, nine seats each, suited gorilla dealers and a crowd in evening dress, computer opponents at every table and a lounge playlist (credits in [CREDITS.md](CREDITS.md)). Local practice plus an experimental encrypted-deck multiplayer service (`npm run poker:serve`), private dealing and downloadable hand verification. Free play chips, no payments or rake. See [status](docs/banana-poker.md) and [protocol and service instructions](docs/poker-protocol.md).
 - **Cloud Hopper:** the front-left cabinet launches the Ooga onto a cloud above the arcade, then rides up to one of four courses. Race down to the banana pile; exiting returns to the arcade cabinet.
 - **Ooga Rally:** temporarily out of order. Its open cabinet stands left of Invaders across the mezzanine fire bowl, with a Clanker repairing it; game code and saved scores are retained. When available: three laps on one of three tracks against fourteen rivals drawn from the roster, fresh each time you come back to the garage. **W** go, **S** brake, **A D** steer, hold **Space** to drift and release to boost, **E** throws your item. Win gold in the Cup to open Mirror.
 - **Ooga Drop:** jump from the plane, fly through eight hoops (**W S** pitch, **A D** roll, **Q E** turn), **Space** pulls the chute, land on the pile.
@@ -172,6 +172,8 @@ npm run build
 
 Writes `oogaboogaland.html`, one self-contained page with the content policy pinned to its hashes. CI commits it back after each merge to `rock`. The old GitHub Pages address, https://oogaboogax.github.io/oogaboogaland/, now redirects to https://oogabooga.land/.
 
+For a smaller offline download, `npm run build:offline` also writes `untracked/offline/oogaboogaland-core.html` and `untracked/offline/lounge.roompack`. The core runs on its own. To visit the lounge behind the casino bookcase, choose the matching pack at the door once per session. The regular `oogaboogaland.html` includes the same artwork and needs no pack.
+
 Two Cloudflare Workers serve the same site with GitHub sign-in, the shared island and voice: https://oogaboogaland-staging.wickedsmartbitcoin.workers.dev and https://oogabooga.land (production) deploy through GitHub Actions, staging on every merge to `rock` and production by hand; `docs/cloudflare-setup.md` covers the setup and local development with `wrangler dev`, and `docs/auth-and-presence.md` the sign-in flow.
 
 ### Deploying to Cloudflare
@@ -231,6 +233,8 @@ DSB Land additionally contacts public Bitcoin feeds and radio/media services; pa
 ## License
 
 Public domain under [The Ooga Booga License](LICENSE), a caveman-speak dedication with the meaning of The Unlicense.
+
+Third-party music and code keep their own licences: see [CREDITS.md](CREDITS.md).
 
 ## Contributing
 

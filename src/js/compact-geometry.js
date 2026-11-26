@@ -98,19 +98,20 @@
       deleteProperty: () => { throw new TypeError("Compact geometry is immutable"); }
     });
   };
+  const indexType = max => max <= 0xff ? Uint8Array : max <= 0xffff ? Uint16Array : Uint32Array;
   const pack = (geometry, { immutable = false, renderOnly = false, precision = 32 } = {}) => {
     if (!enabled || storageOf(geometry)) return geometry;
     if (!immutable || !renderOnly) throw new TypeError("Compact geometry requires immutable render-only ownership");
     if (precision !== 32 && precision !== 64) throw new TypeError("Compact geometry needs 32-bit or 64-bit positions");
     const faces = geometry.faces, verts = geometry.verts, count = faces.length;
     if (!count) return geometry;
-    const offsets = new Uint32Array(count + 1), colors = new Uint8Array(count * 3), flags = new Uint8Array(count);
+    const colors = new Uint8Array(count * 3), flags = new Uint8Array(count);
     const columns = [], byKey = new Map(), colorExtras = new Map();
     let corners = 0, maxCorners = 0, maxColor = 3;
     for (let index = 0; index < count; index++) {
       const face = faces[index];
       if (Object.getPrototypeOf(face) !== Object.prototype) throw new TypeError("Compact geometry needs plain face records");
-      offsets[index] = corners; corners += face.i.length; maxCorners = Math.max(maxCorners, face.i.length);
+      corners += face.i.length; maxCorners = Math.max(maxCorners, face.i.length);
       maxColor = Math.max(maxColor, face.color.length);
       let bytes = face.color.length === 3;
       for (let k = 0; k < face.color.length; k++) {
@@ -134,16 +135,21 @@
         column.codes[index] = code;
       }
     }
-    offsets[count] = corners;
-    const indices = new Uint32Array(corners);
+    // Vertex IDs and offsets have independent ranges. The terminal offset is
+    // the corner count itself, including when it lands exactly on a width boundary.
+    const Offsets = indexType(corners), Indices = indexType(verts.length / 3 - 1);
+    const offsets = new Offsets(count + 1), indices = new Indices(corners);
+    let start = 0;
     for (let index = 0; index < count; index++) {
       const ids = faces[index].i;
+      offsets[index] = start;
       for (let k = 0; k < ids.length; k++) {
         const vertex = ids[k];
         if (!Number.isInteger(vertex) || vertex < 0 || vertex * 3 + 2 >= verts.length) throw new RangeError("Compact geometry has an invalid vertex index");
-        indices[offsets[index] + k] = vertex;
+        indices[start++] = vertex;
       }
     }
+    offsets[count] = start;
     let byteLength = offsets.byteLength + indices.byteLength + colors.byteLength + flags.byteLength;
     for (const column of columns) {
       const Type = column.values.length < 256 ? Uint8Array : column.values.length < 65536 ? Uint16Array : Uint32Array;

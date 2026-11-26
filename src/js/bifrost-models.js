@@ -48,7 +48,7 @@
   };
   // The windows, left to right as the tunnel looks in, at their bearings round the wall. Only an open world carries a
   // label, a `tint` (the colour its frame's rim and light glow in, the colour of that world) and a `stand`-in; a world
-  // whose looks change gives all of them through `look`. `instant` crosses without the fade, as that world's own way
+  // whose looks come from a file loaded after this one gives all of them through `look`. `instant` crosses without the fade, as that world's own way
   // back does.
   const WINDOWS = [
     { id: "west", kind: "mirror" },
@@ -612,13 +612,12 @@
     const rgb = hue < 1 ? [c, x, 0] : hue < 2 ? [x, c, 0] : hue < 3 ? [0, c, x] : hue < 4 ? [0, x, c] : hue < 5 ? [x, 0, c] : [c, 0, x];
     return "#" + rgb.map((v) => Math.round((v + m) * 255).toString(16).padStart(2, "0")).join("");
   };
-  // The poker room dresses itself in the cave theme its visitor last chose there, and so does its window: the theme's
+  // The poker room's window wears the room's preset (poker-themes.js, loaded after this file, so read when asked): its
   // felt, lifted to glow, is the window's colour, and the room's floor, felt, walls, ceiling and lamps are its stand-in.
-  // The picture is the room in that theme, so it is keyed by the theme too.
   const pokerLook = () => {
-    const theme = BL.pokerThemes.get(BL.pokerThemes.load()), ui = theme.ui, key = `poker:${theme.id}`;
+    const theme = BL.pokerThemes.club, ui = theme.ui, key = "poker";
     return {
-      key, theme, tint: glowing(ui.feltLight),
+      key, tint: glowing(ui.feltLight),
       stand: { key, bands: [[0, 0.2, theme.runner, 0.35], [0.2, 0.3, ui.feltLight, 0.6], [0.3, 0.78, theme.stone[1], 0.3], [0.78, 1, ui.deep, 0.5]], dots: [ui.bright, ui.accent], dotY: [0.42, 0.3] }
     };
   };

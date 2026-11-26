@@ -1240,14 +1240,40 @@
 
   // Carved headline type: the island's own blocky sign glyphs, cut proud of a slab's face.
   const CARVE_Z = 0.16;
-  const carve = (text, { cell = 0.14, color = GOLD, emissive = 0.55 } = {}) => {
-    const glyphs = BL.hubModels.SIGN_GLYPHS, geos = [];
+  // A solid lettering outline in unit cells. Keying the corners here lets Canvas transform
+  // each point once even where two sides of a stroke meet. Winding comes from the voxel mesher.
+  const letterSurfaces = BL.models.scopedMap();
+  const letterSurface = glyph => {
+    if (letterSurfaces.has(glyph)) return letterSurfaces.get(glyph);
+    const verts = [], faces = [], corners = new Map();
+    const each = visit => glyph.forEach((row, y) => {
+      for (let x = 0; x < row.length; x++) if (row[x] === "1") visit(x, -y, 0, 0);
+    });
+    BL.models.voxelFaces(each, (x, y, z) => z === 0 && glyph[-y]?.[x] === "1", points => {
+      faces.push(points.map(([x, y, z]) => {
+        const key = (x * (glyph.length + 1) + y + glyph.length - 1) * 2 + z;
+        if (!corners.has(key)) { corners.set(key, verts.length / 3); verts.push(x, y, z); }
+        return corners.get(key);
+      }));
+    });
+    const shape = { verts, faces };
+    letterSurfaces.set(glyph, shape); return shape;
+  };
+  const carve = (text, { cell = 0.14, color = GOLD, emissive = 0.55, joined = false } = {}) => {
+    const glyphs = BL.hubModels.SIGN_GLYPHS, geos = [], solid = joined ? BL.models.geometry() : null;
+    const rgb = joined ? hexToRgb(color) : null;
     let cursor = 0;
     for (const ch of String(text).toUpperCase()) {
       if (ch === " ") { cursor += 2.4; continue; }
       const glyph = glyphs[ch];
       if (!glyph) { cursor += 4; continue; }
       const sx = 3 / glyph[0].length;
+      if (solid) {
+        const shape = letterSurface(glyph), v = shape.verts, start = solid.verts.length / 3;
+        for (let j = 0; j < v.length; j += 3) solid.verts.push((cursor + v[j] * sx - .5) * cell, (v[j + 1] - .5) * cell, CARVE_Z + (v[j + 2] - .5) * .08);
+        for (const face of shape.faces) solid.faces.push({ i: face.map(j => j + start), color: rgb, emissive });
+        cursor += 4; continue;
+      }
       for (let row = 0; row < glyph.length; row++) {
         for (let col = 0; col < glyph[row].length; col++) {
           if (glyph[row][col] !== "1") continue;
@@ -1256,7 +1282,7 @@
       }
       cursor += 4;
     }
-    return { geometry: geos.length ? merge(...geos) : null, width: cursor * cell };
+    return { geometry: solid?.faces.length ? solid : geos.length ? merge(...geos) : null, width: cursor * cell };
   };
   // How wide a carving comes out, in cells, so a caller can pick the cell that fills its slab and no
   // reading can ever run off the stone however many digits the chain hands it.
