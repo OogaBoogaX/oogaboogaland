@@ -3613,6 +3613,10 @@
     const nearReload = (cave = player) => {
       if (ctx.reloadPolicy) return !!cave && ctx.reloadPolicy.near(cave);
       if (!cave || !cave.weapon.secondaryOwned || !cave.root.visible || cave.health.stunned || cave.state === "sleeping" || cave.camp.burning || cave.camp.rolling || cave.bedTravel.mode || seatBlocksWeapons(cave)) return false;
+      // An Ooga the island's world reloads (island-world.js) stands where the world put it: the server's world sizes its
+      // pile from its own reading, which this page's pile need not match, and from a fan that page thinks too far out
+      // the reload never played.
+      if (cave.follow && cave.followAct === FOLLOW_RELOAD) return true;
       const p = cave.root.position, feet = p.y - cave.baseY, reach = reloadRadius() + cave.bodyRadius;
       return p.x * p.x + p.z * p.z <= reach * reach && feet <= reloadHeight + 1.2 && feet + cave.bodyHeight >= reloadHeight - 0.2;
     };
