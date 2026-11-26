@@ -78,7 +78,7 @@ anything is handed on, and the bridge never reads a browser header at all.
 | Operation | Needs | Answers |
 |---|---|---|
 | `hello` | nothing | `{ version, environment, features, voice }`: what the bridge can do now, with no binding, secret or account id |
-| `capability` | `bridge`; a GitHub principal | `{ state, character, reason, policy, checkedAt }` from the island's contributor policy (`chat-capability.js`): `eligible` (a bundled owner, or an unbundled contributor Oogatron vouches for), `ineligible` (a verified snapshot said no, the island banned the account, or `identity-collision`: another GitHub id holds that login on the island, by its own `players_identity_insert` rule) or `unknown` (the island's D1 or the snapshot could not be read). An X principal is refused (`capability_required`) |
+| `capability` | `bridge`; a GitHub principal | `{ state, character, reason, policy, checkedAt, display }` (`display` the island's own name for the account, `players.display`, or null) from the island's contributor policy (`chat-capability.js`): `eligible` (a bundled owner, or an unbundled contributor Oogatron vouches for), `ineligible` (a verified snapshot said no, the island banned the account, or `identity-collision`: another GitHub id holds that login on the island, by its own `players_identity_insert` rule) or `unknown` (the island's D1 or the snapshot could not be read). An X principal is refused (`capability_required`) |
 | `cast` | nothing (public browsing stays up under the kill switch) | `{ rows, revision, count }`: the registered Oogas from the island's build (`chat-public.js`), each `{ handle, github, display, joinedAt, lastCommitAt }`, sorted by join then handle, `revision` the hash of exactly those rows |
 | `revoke` | nothing (cleanup works while admissions are off) | `{ revoked }`: the Audience closes every socket of that principal with 4401 (`logout`, `logout-all`, `deleted`), or for `eligibility` ends its lease and its right to ask again while it keeps listening; `deleted` also removes the island player row a Commons name made for an account that never signed in there |
 | socket `/audience` (`ChatBridge.fetch`) | `bridge`, the `AUDIENCE` binding | the audience socket (#665, below), handed to the Audience object with the edge's assertion as `x-audience-principal`, and only the WebSocket headers |
@@ -133,7 +133,7 @@ The app's own contract (`docs/ooga-chat-app.md`) is the source of truth for shap
 | `GET /api/chat/audience`, upgraded | the audience socket (#665, below), from the app's own page with a session |
 | `POST /api/chat/media/<op>` | media signalling (#666, below), from the app's own page with a session; `publish/*` needs `speak` and GitHub |
 | `GET /api/chat/commons`, upgraded | The Commons and Online Oogas (#670, below), from the app's own page, for an eligible GitHub contributor |
-| `POST /api/chat/commons/name` | `{ display }` → `{ display }`: the member's name, saved as their island display name through the bridge's `display`, from the app's own page, for an eligible GitHub contributor while the Commons is on: 401 no session, 403 not eligible now, 429 too many saves (`CHAT_AUTH_LIMITER`), 400 a name the island refuses, 503 off or unanswered. The app then joins the Commons again, so the Room's welcome and every later line carry the new name |
+| `POST /api/chat/commons/name` | `{ display }` → `{ display }`: the member's name, saved as their island display name through the bridge's `display` and kept as the account's chosen name here (`chosen_display`), from the app's own page, for an eligible GitHub contributor while the Commons is on: 401 no session, 403 not eligible now, 429 too many saves (`CHAT_AUTH_LIMITER`), 400 a name the island refuses, 503 off or unanswered. The app then joins the Commons again, so the Room's welcome and every later line carry the new name |
 | any other `/api/*`, `/auth/*`, `/donations/*` | a JSON 404 (`{ error: { code: "not_found" } }`), never the app's HTML |
 
 Every other path is served from the staged app. Only `/api/*`, `/auth/*` and `/donations/*` run the Worker
@@ -151,7 +151,11 @@ Chat's is separate code, cookies, OAuth apps and database.
 **Accounts.** A principal is one provider identity, `(provider, provider_user_id)` unique, with an opaque public id
 (`pr_` and 22 base64url characters) that everything per person keys on. Provider ids are text at every boundary (an X
 id outgrows a safe integer). Login, display name and picture are display data refreshed at each fresh sign-in: a rename
-keeps the principal. GitHub and X are never linked, however their names, emails or pictures match, and an X account is
+keeps the principal. A name the account chose (`chosen_display`, migration `0003_chosen_display.sql`) is kept apart and
+shown before the provider's everywhere the edge names the account (`displayOf`: `/api/chat/me`, the audience, the chats it
+starts, the consent page); a sign-in never touches it. It is the account's island name, set by the Commons name field
+(`POST /api/chat/commons/name`) and taken from each `capability` answer, so a rename on the island reaches Ooga Chat at
+the next one. GitHub and X are never linked, however their names, emails or pictures match, and an X account is
 always a listener. Email is never read.
 
 **A sign-in.** `/auth/<provider>` stores a single-use state (its SHA-256) in D1 with its provider, a ten-minute expiry,

@@ -1,6 +1,7 @@
 // Ooga Chat's accounts and sessions (#663), in its own D1 (worker/chat/migrations/0001_identity.sql). One principal per
 // provider identity, never linked across providers; its login, display name and picture are display data, refreshed at
-// each fresh sign-in and never an account key. A session is a random token in a host-only cookie (`__Host-` on https),
+// each fresh sign-in and never an account key. A name the account chose (`chosen_display`, 0003_chosen_display.sql) is
+// kept apart from the provider's and shown before it (`displayOf`); a sign-in never touches it. A session is a random token in a host-only cookie (`__Host-` on https),
 // kept in D1 by its SHA-256, touched at most every TOUCH_MS so reading it is not a write per request. Signing out,
 // signing out everywhere and deleting the account work whatever the account's speaking eligibility.
 
@@ -28,6 +29,18 @@ const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u202a-\u202
 export const cleanDisplay = (text, fallback) => {
   const clean = typeof text === "string" ? text.replace(UNSAFE, "").replace(/\s+/g, " ").trim().slice(0, DISPLAY_MAX).trim() : "";
   return clean || fallback;
+};
+
+/** The name to show for a principal: the one it chose (Ooga Chat's Commons name, or the island's own for that GitHub
+ * account), else the provider's display name, else its login. A sign-in refreshes only the provider's. */
+export const displayOf = (principal) => principal.chosen_display || principal.display || principal.login;
+
+/** Keep the name a principal chose (cleaned as any display is); written only when it changed. */
+export const chooseDisplay = async (db, principalId, display) => {
+  const clean = cleanDisplay(display, "");
+  if (!clean) return null;
+  await db.prepare("UPDATE principals SET chosen_display = ?2 WHERE id = ?1 AND chosen_display IS NOT ?2").bind(principalId, clean).run();
+  return clean;
 };
 
 /** The picture's key: changes whenever its address does, so a cached face is never stale or another's. */

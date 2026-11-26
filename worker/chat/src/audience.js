@@ -11,7 +11,7 @@ import { bridgeHello } from "./bridge.js";
 import { capabilityFor } from "./capability.js";
 import { effective } from "./config.js";
 import { allowed, fromSite, refusal } from "./http.js";
-import { avatarPath, readSession } from "./session.js";
+import { avatarPath, displayOf, readSession } from "./session.js";
 import { chatParam } from "./chats.js";
 
 const SOCKET_HEADERS = ["upgrade", "connection", "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions"];
@@ -35,7 +35,7 @@ export const assertionFor = async (env, found, deps) => {
   if (p.provider === "github") { try { capability = await capabilityFor(env, p, { waitUntil: deps.waitUntil }); } catch { capability = null; } }
   return {
     v: BRIDGE_VERSION, env: env.ENVIRONMENT,
-    principal: { id: p.id, provider: p.provider, providerUserId: p.provider_user_id, login: p.login, display: p.display || p.login, avatar: avatarPath(p) },
+    principal: { id: p.id, provider: p.provider, providerUserId: p.provider_user_id, login: p.login, display: displayOf(p), avatar: avatarPath(p) },
     eligible: !!capability && capability.state === "eligible" && capability.fresh,
     character: capability && capability.state === "eligible" ? capability.character : null,
     sessionExpiresAt: found.session.expiresAt,

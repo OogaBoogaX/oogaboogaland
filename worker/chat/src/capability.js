@@ -7,7 +7,7 @@
 // logout everywhere and deletion.
 
 import { bridgeCall } from "./bridge.js";
-import { assertion } from "./session.js";
+import { assertion, chooseDisplay } from "./session.js";
 
 export const REFRESH_MS = 5 * 60 * 1000;
 export const STALE_MS = 15 * 60 * 1000;
@@ -46,6 +46,14 @@ export const capabilityFor = async (env, principal, { force = false, now = Date.
     `INSERT INTO capabilities (principal_id, state, character, policy, checked_at) VALUES (?1, ?2, ?3, ?4, ?5)
      ON CONFLICT (principal_id) DO UPDATE SET state = ?2, character = ?3, policy = ?4, checked_at = ?5`,
   ).bind(principal.id, state, character, policy, now).run();
+  // The island's own name for the account, where it has one (an older island sends none): this account's chosen name
+  // here too (session.js `displayOf`), so a rename on the island reaches Ooga Chat at the next answer.
+  // Also on the principal the caller holds, so the answer it builds now (`/api/chat/me`, an audience socket's assertion)
+  // carries it. A best-effort write: one that fails is asked again at the next answer, and never keeps a revocation from
+  // ending live speaking below.
+  if (typeof answer.display === "string" && answer.display) {
+    try { const chosen = await chooseDisplay(env.DB, principal.id, answer.display); if (chosen) principal.chosen_display = chosen; } catch { /* next answer */ }
+  }
   if (wasEligible && state !== "eligible") {
     const ending = revokeLive(env, principal, "eligibility");
     if (waitUntil) waitUntil(ending); else await ending;

@@ -139,12 +139,12 @@
       set({ session: next, auth: status(next, now()), notice }, "start");
       schedule();
     };
-    // Checks the session again. A timer or a retry always asks; a return to the page or the network at most every
-    // RECHECK_MIN_MS. A passing stale window downgrades before the answer comes, and a lost session reads as expired.
+    // Checks the session again. A timer, a retry or a saved name (`rename`, whose footer shows it at once) always asks; a
+    // return to the page or the network at most every RECHECK_MIN_MS. A passing stale window downgrades before the answer comes, and a lost session reads as expired.
     const check = async (why = "check") => {
       if (disposed || !boot || state.busy || state.auth === "checking") return;
       const at = now();
-      if (why !== "timer" && why !== "retry" && at - lastCheck < RECHECK_MIN_MS) return;
+      if (why !== "timer" && why !== "retry" && why !== "rename" && at - lastCheck < RECHECK_MIN_MS) return;
       lastCheck = at;
       const mine = ++ticket;
       if (state.session) set({ auth: status(state.session, at) }, "stale");
