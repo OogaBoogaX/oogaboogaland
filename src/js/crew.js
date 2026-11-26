@@ -422,7 +422,10 @@
         // it could not take has kept it from its spot by the bed.
         down: 0, drop: node.legs ? 0.75 * node.legs[0].position.y * node.scale.y : 0, wait: 0,
         // Where its Ooga stood last frame, for the lead in flight and the drift in a fall, and how long it has been held up.
-        ownX: NaN, ownY: NaN, ownZ: NaN, lag: 0 };
+        ownX: NaN, ownY: NaN, ownZ: NaN, lag: 0,
+        // A spot a scene holds it at in place of its trailing one (`hold`: x, z and the way it faces, as the Ember Den's
+        // portrait booth sets it, null to let go), and the hold it last answered, so a new one or a let-go snaps it there.
+        hold: null, held: null };
       pet.floorAt = (x, z, y) => groundAt(x, z, y, y, cave);
       pet.clear = (ax, az, bx, bz, y) => (ctx.flyable || walkable)(ax, az, bx, bz, y, PET_HEIGHT, cave);
     };
@@ -512,6 +515,9 @@
       // A legged companion keeps off the bed its Ooga is in: its spot is the ground beside the bed.
       const beside = node.legs && !pet.ride && ctx.petLanding && (resting || seat?.kind === "hammock") ? ctx.petLanding(r.position.x, r.position.z, true) : null;
       if (beside) { tx = beside.x; tz = beside.z; }
+      const hold = pet.hold, face = hold ? hold.yaw : h, rehold = hold !== pet.held;
+      pet.held = hold;
+      if (hold) { tx = hold.x; tz = hold.z; }
       const feet = r.position.y - cave.baseY;
       const equipped = !!cave.jet, powered = equipped && !cave.jetRecovering && cave.jetFuel > 0 && (cave.jet.thrust || cave.jet.power > 0);
       const ownerFloor = groundAt(r.position.x, r.position.z, feet, feet, cave);
@@ -572,8 +578,8 @@
       const dx = tx - pet.x, dz = tz - pet.z, d = Math.hypot(dx, dz);
       let moving = false;
       pet.lag = 0;
-      if (!pet.warm || d > PET_SNAP || relocated) {
-        if (!placePet(cave, tx, tz, feet, h)) { node.visible = false; return; }
+      if (!pet.warm || d > PET_SNAP || relocated || rehold) {
+        if (!placePet(cave, tx, tz, feet, face)) { node.visible = false; return; }
         pet.speed = pet.stuck = 0;
       } else if (dt > 0) {
         // Easing into a speed that falls as it nears its spot, and turning toward it as it goes.
@@ -591,15 +597,15 @@
           } else {
             // Stopped by a wall a while with its Ooga well away, it turns up beside it.
             pet.speed = 0;
-            if ((pet.stuck += dt) > F.stuck && Math.hypot(r.position.x - pet.x, r.position.z - pet.z) > F.behind && placePet(cave, tx, tz, feet, h)) pet.stuck = 0;
+            if ((pet.stuck += dt) > F.stuck && Math.hypot(r.position.x - pet.x, r.position.z - pet.z) > F.behind && placePet(cave, tx, tz, feet, face)) pet.stuck = 0;
           }
         }
-        // At its spot and still, it turns the way its Ooga faces.
-        if (d < 0.25 && pet.speed < 0.2) pet.heading += wrapAngle(h - pet.heading) * Math.min(1, dt * 3);
+        // At its spot and still, it turns the way its Ooga faces (or the way a held spot says).
+        if (d < 0.25 && pet.speed < 0.2) pet.heading += wrapAngle(face - pet.heading) * Math.min(1, dt * 3);
       }
       // Kept from its spot by the bed (up on the cloth, a step too high to come down), it turns up there.
       pet.wait = beside && !moving && d > PET_ARRIVE ? pet.wait + Math.max(0, dt) : 0;
-      if (pet.wait > 0.6 && placePet(cave, tx, tz, feet, h)) pet.wait = 0;
+      if (pet.wait > 0.6 && placePet(cave, tx, tz, feet, face)) pet.wait = 0;
       node.position.x = pet.x; node.position.z = pet.z;
       node.rotation.y = pet.heading;
       if (node.legs) {
