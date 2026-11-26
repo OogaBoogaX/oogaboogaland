@@ -271,6 +271,26 @@ test("the Audience: the island's word ends a chat lease, reaches clients, and is
   assert.deepEqual(h.storage.get("world").seq, 6);
 });
 
+test("the Audience: a rename reaches every client as a delta, and its sockets keep it through hibernation", async () => {
+  const h = host();
+  const audience = await h.make();
+  const { ws: amy } = await open(audience, principal(1));
+  const { ws: bea } = await open(audience, principal(2));
+  await say(audience, amy, { type: "join", zone: "main" });
+  await say(audience, bea, { type: "join", zone: "main" });
+  const rev = audience.model.zones.main.rev;
+  assert.equal((await audience.renamed("gh:1", "Amy Bold")).renamed, 1);
+  const delta = last(bea, "delta");
+  assert.deepEqual({ base: delta.base, ids: delta.upsert.map((p) => [p.id, p.display]) }, { base: rev, ids: [["gh:1", "Amy Bold"]] });
+  assert.equal(last(amy, "delta").upsert[0].display, "Amy Bold", "the account's own page too");
+  // The same name again, an unknown identity or a bad name changes nothing.
+  assert.equal((await audience.renamed("gh:1", "Amy Bold")).renamed, 0);
+  assert.equal((await audience.renamed("gh:9", "Nobody")).renamed, 0);
+  assert.equal((await audience.renamed("gh:1", "")).renamed, 0);
+  const woken = await h.make();
+  assert.equal(woken.model.zones.main.rows.get("gh:1").display, "Amy Bold", "a hibernation wake keeps it");
+});
+
 test("the Audience: a hibernation wake restores the same roster at the same revision and sends nothing", async () => {
   const h = host();
   const first = await h.make();

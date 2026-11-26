@@ -317,7 +317,10 @@
   };
   const router = routerMod.create(scenes, window.BL.routes, go);
   // Any chunk found gone, a prefetch's or a picture's included, means every later one is too.
-  window.BL.deferred.onStale(() => window.BL.hud.offerReload());
+  window.BL.deferred.onStale(() => window.BL.hud.offerUpdate());
+  // A newer version may be live once the tab is shown again, the network is back or the room's socket returns (every
+  // deploy drops it): the page asks then (deferred.js `check`), never on a timer.
+  const checkVersion = () => { if (!document.hidden) window.BL.deferred.check(); };
   window.BL.donationPopup.onClose(() => router.dismissPlace("hub", "donate"));
   // The logo is the site's home link: from any scene it goes back to the island, as a website's logo goes home.
   document.querySelector(".home-link").addEventListener("click", (e) => {
@@ -550,7 +553,7 @@
   const landing = (t) => t.redirect ? { next: scenes[t.redirect.scene], place: t.redirect.place ?? null } : { next: t.next, place: t.place };
   // A chunk a deploy removed can never load: the HUD's reload offer replaces "try again" (see deferred.js).
   const abandon = () => {
-    if (window.BL.deferred.stale) window.BL.hud.offerReload();
+    if (window.BL.deferred.stale) window.BL.hud.offerUpdate();
     else window.BL.hud.toast("That place could not be opened · try again");
     router.abandon();
   };
@@ -867,6 +870,7 @@
     // A hidden tab holds no sockets; the chain's REST polls already skip themselves while hidden.
     mempool.setHidden(document.hidden);
     chain.setHidden(document.hidden);
+    checkVersion();
     if (document.hidden) {
       window.cancelAnimationFrame(raf);
       raf = 0;
@@ -881,6 +885,7 @@
   window.addEventListener("keyup", clearRightShift);
   window.addEventListener("blur", clearRightShift);
   document.addEventListener("visibilitychange", onVisibility);
+  window.addEventListener("online", checkVersion);
   if (params.has("nosim")) donations.config.simulate = false;
   // The live feeds stay off under nosim (the suite) and mempool=0 / oogatron=0 / chain=0;
   // checks drive the hub's weather through emit and apply, and the jumbotron through refreshData.
@@ -922,6 +927,13 @@
     scopeRoom = state.room;
     scopeMe = me;
     window.BL.outdoorScope.reset();
+  });
+  let roomLive = false, roomBack = false;
+  const unsubscribeVersion = net.subscribe((state) => {
+    const live = state.room === "live";
+    if (live && !roomLive && roomBack) checkVersion();
+    roomBack ||= live;
+    roomLive = live;
   });
   // Ooga Chat's outdoor voice bridge (outdoor-voice.js): the scope's transport, after the reset above so a reconnect's
   // new epoch is the one it asks for. Without the room's feature it keeps the page out of every public audience.
@@ -1238,6 +1250,7 @@
     window.BL.oogatronLive.dispose();
     unsubscribeAccount();
     unsubscribeScope();
+    unsubscribeVersion();
     outdoorBridge.dispose();
     voiceHandoff.dispose();
     unsubscribeVoice();
@@ -1259,6 +1272,7 @@
     document.removeEventListener("sheetchange", holdSheets);
     document.removeEventListener("pointerdown", focusWorld, true);
     document.removeEventListener("visibilitychange", onVisibility);
+    window.removeEventListener("online", checkVersion);
     positionDebug.removeEventListener("click", copyPositionDebug);
     try {
       if (active) active.leave(true);

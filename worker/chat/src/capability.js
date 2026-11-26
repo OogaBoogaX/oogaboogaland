@@ -10,6 +10,9 @@ import { bridgeCall } from "./bridge.js";
 import { assertion, chooseDisplay } from "./session.js";
 
 export const REFRESH_MS = 5 * 60 * 1000;
+// A page that heard its own account renamed live asks sooner (`soon`), so its name here follows the island's within
+// moments; never more than once each REFRESH_SOON_MS, so it costs the bridge little.
+export const REFRESH_SOON_MS = 10 * 1000;
 export const STALE_MS = 15 * 60 * 1000;
 export const STATES = ["eligible", "ineligible", "revoked", "unknown"];
 
@@ -26,10 +29,10 @@ export const revokeLive = async (env, principal, reason) => {
  * `{ state, character, policy, checkedAt, fresh }` for a principal. `state` past its stale window is `unknown`.
  * `force` asks the island whatever the age of the last answer (a privileged operation about to be granted).
  */
-export const capabilityFor = async (env, principal, { force = false, now = Date.now(), waitUntil = null } = {}) => {
+export const capabilityFor = async (env, principal, { force = false, soon = false, now = Date.now(), waitUntil = null } = {}) => {
   if (principal.provider !== "github") return { state: "ineligible", character: null, policy: "", checkedAt: now, fresh: true };
   const row = await env.DB.prepare("SELECT state, character, policy, checked_at FROM capabilities WHERE principal_id = ?1").bind(principal.id).first();
-  if (row && !force && now - row.checked_at < REFRESH_MS) return fromRow(row, now);
+  if (row && !force && now - row.checked_at < (soon ? REFRESH_SOON_MS : REFRESH_MS)) return fromRow(row, now);
   const reply = await bridgeCall(env, "capability", {}, assertion(principal));
   const answer = reply.ok && reply.result && STATES.includes(reply.result.state) ? reply.result : null;
   if (!answer || answer.state === "unknown") {

@@ -72,6 +72,35 @@
     $("message-stack").append(box);
     box.classList.add("show");
   };
+  // A newer version live (deferred.js `stale`): besides the reload above, a line at the foot of every side-panel tab, as
+  // Ooga Chat's own (its device line), which moves with its panel between the sheet's windows. Its × hides every copy
+  // until the page reloads; the reload above stays.
+  let updateOffered = false;
+  const offerUpdate = () => {
+    offerReload();
+    if (updateOffered) return;
+    updateOffered = true;
+    const lines = [];
+    // By id, wherever each panel stands: a tab dragged into a window of its own lives beside #sheet, not in it.
+    for (const panel of document.querySelectorAll("#bananas-panel, #roster-panel, #players-panel, #chat-panel, #cloud-panel")) {
+      const line = document.createElement("p"), words = document.createElement("span"), take = document.createElement("button"), hide = document.createElement("button");
+      line.className = "reload-line";
+      line.setAttribute("role", "status");
+      words.textContent = "A newer Ooga Booga Land is ready.";
+      take.type = hide.type = "button";
+      take.className = "link";
+      take.textContent = "Reload";
+      take.addEventListener("click", () => location.reload(), { once: true });
+      hide.className = "reload-line-close";
+      hide.textContent = "×";
+      hide.title = "Hide this until the page reloads";
+      hide.setAttribute("aria-label", hide.title);
+      hide.addEventListener("click", () => { for (const el of lines) el.remove(); }, { once: true });
+      line.append(words, take, hide);
+      lines.push(line);
+      panel.append(line);
+    }
+  };
   const BOARD_STATE_KEY = "oogaboogaland.oogatron.windows.v1";
   const MAX_FLOATING_BOARDS = 12;
   const readBoardState = () => {
@@ -205,7 +234,7 @@
     signal = signal || lifetime.signal;
     // The Bananas panel's markup (banana-panel.js, shared with the Ooga Chat app): built and lettered on the first visit,
     // then kept for the page life, before the panel's actions are gathered.
-    if (!$("bananas-panel").firstChild) for (const sign of BL.bananaPanel.build($("bananas-panel"), { ids: true }).querySelectorAll("[data-sign]")) letterSign(sign);
+    if (!$("bananas-panel").querySelector(".banana-slab")) for (const sign of BL.bananaPanel.build($("bananas-panel"), { ids: true }).querySelectorAll("[data-sign]")) letterSign(sign);
     // So too the title, Sorted by and list of Contributing Oogas (roster-panel.js), before the sheet's bells join the titles.
     if (!$("roster-panel").querySelector("[data-roster]")) for (const sign of BL.rosterPanel.build($("roster-panel"), { ids: true }).querySelectorAll("[data-sign]:not([aria-label])")) letterSign(sign);
     const el = {
@@ -2338,5 +2367,5 @@
     const clear = () => { for (const r of pool) r.li.remove(); pool.length = 0; };
     return { set, clear };
   };
-  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, faceScores, signLettering, showAccount, openRecipe: showRecipe, showMic, showVoices, showLevels, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor, voiceWords };
+  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, faceScores, signLettering, showAccount, openRecipe: showRecipe, showMic, showVoices, showLevels, setDonationStats, donationValueText, toast, offerReload, offerUpdate, holdRow, leaveTo, STATE_LABELS, statusFor, voiceWords };
 })();

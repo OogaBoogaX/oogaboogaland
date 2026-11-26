@@ -62,9 +62,11 @@
       }
     };
     // Signed out (401 or no session address) is null; any other failure throws for the app's recoverable error.
-    const session = async (boot) => {
+    // `refresh`: the account was renamed live elsewhere, so the server asks the island for its name again (`?refresh=name`).
+    const session = async (boot, { refresh = false } = {}) => {
       if (!boot.paths.session) return null;
-      const response = await ask(boot.paths.session, { headers: { accept: "application/json" } });
+      const path = refresh ? `${boot.paths.session}${boot.paths.session.includes("?") ? "&" : "?"}refresh=name` : boot.paths.session;
+      const response = await ask(path, { headers: { accept: "application/json" } });
       if (response.status === 401) return null;
       if (!response.ok) throw new Error(`session ${response.status}`);
       return parseSession(await json(response));

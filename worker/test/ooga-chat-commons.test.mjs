@@ -161,6 +161,24 @@ test("a voice link shows and holds in both apps: a member sees its account's lin
   assert.deepEqual(links(app).wants, []);
 });
 
+test("a rename reaches every live connection: the account's records and members take it, everyone hears `renamed`", async () => {
+  const h = await harness();
+  const isle = await h.player(1, "amy");
+  const { ws: app } = await h.member(1, "amy");
+  const { ws: other } = await h.member(3, "cyd");
+  assert.equal(h.room.renamed(1, "Amy Bold").renamed, 1);
+  assert.equal(h.room.players.get(1).display, "Amy Bold", "the island player's record");
+  for (const ws of [isle, app, other]) assert.equal(JSON.stringify(ws.sent.filter((m) => m.t === "renamed")), JSON.stringify([{ t: "renamed", id: 1, display: "Amy Bold" }]));
+  // The member's own lines from now on carry the new name.
+  await h.send(app, { t: "chat", text: "hi", clientId: "r1" });
+  assert.equal(lines(other).at(-1).name, "Amy Bold");
+  // Nothing invalid gets through, and an account nobody shows changes nothing but is still told.
+  assert.equal(h.room.renamed(1, "").renamed, 0);
+  assert.equal(h.room.renamed("x", "Amy").renamed, 0);
+  assert.equal(h.room.renamed(9, "Nobody").renamed, 0);
+  assert.equal(other.sent.filter((m) => m.t === "renamed").length, 2);
+});
+
 test("access ends: signing out or losing eligibility closes the account's members; the sweep's deadline closes them too", async () => {
   const h = await harness();
   const { ws: one } = await h.member(2, "bea");
@@ -322,6 +340,18 @@ test("the bridge's `display`: an eligible contributor's Commons name becomes the
   await db.prepare("UPDATE players SET banned_at = 1 WHERE id = 1").run();
   await assert.rejects(run({ display: "Amy Again" }), refused("capability_required"));
   assert.equal((await getPlayer(db, 1)).display, "Amy", "a banned account's name stays as it was");
+  // Saved, it is announced live: the island's Room, Ooga Chat's audience and every live hosted chat (renames.js).
+  await db.prepare("UPDATE players SET banned_at = NULL WHERE id = 1").run();
+  const told = [];
+  const announced = { ...env, ROOM: { getByName: (name) => ({ renamed: async (id, d) => { told.push([`room ${name}`, id, d]); } }) },
+    AUDIENCE: { getByName: (name) => ({ renamed: async (id, d) => { told.push([name, id, d]); } }) },
+    CHATS: { getByName: () => ({ ids: async () => ["c1"] }) } };
+  await run({ display: "Amy Live" }, principal(1, "amy"), announced);
+  assert.deepEqual(told.sort(), [["audience", "gh:1", "Amy Live"], ["chat:c1", "gh:1", "Amy Live"], ["room chat:c1", 1, "Amy Live"], ["room island", 1, "Amy Live"]],
+    "the island's Room, each live chat's copy of the island, the public audience and each live chat");
+  // One that can't be reached leaves the save standing.
+  const broken = { ...announced, ROOM: { getByName: () => ({ renamed: async () => { throw new Error("away"); } }) } };
+  assert.deepEqual(await run({ display: "Amy Again" }, principal(1, "amy"), broken), { display: "Amy Again" });
 });
 
 test("a player row a Commons name made goes with the Ooga Chat account, while it never signed in on the island", async () => {

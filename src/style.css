@@ -2934,6 +2934,18 @@ body[data-active-scene="block"] .mode-hud {
   pointer-events: auto;
 }
 
+/* A newer version's line at the foot of every side-panel tab (hud.js `offerUpdate`), as Ooga Chat's device line: in
+   the panel's flow under everything else in it, at its foot where the panel has room to spare, so it never covers a
+   control, and its × at the line's end. */
+.reload-line { order: 1; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: auto 0 0; color: rgba(243, 239, 228, 0.78); font-size: 12px; }
+.reload-line-close {
+  margin-left: auto; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: none;
+  color: rgba(243, 239, 228, 0.6); font: inherit; font-size: 18px; line-height: 1; cursor: pointer;
+}
+.reload-line-close:hover { background: rgba(243, 239, 228, 0.1); color: var(--paper); }
+.reload-line-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+@media (pointer: coarse) { .reload-line-close { width: 40px; height: 40px; } }
+
 .toast.show,
 .hint.show {
   opacity: 1;

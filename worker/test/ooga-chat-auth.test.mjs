@@ -10,7 +10,7 @@ const { capabilityOps, githubAccount, POLICY } = await import("../src/chat-capab
 const { makeEnvelope } = await import("../src/chat-bridge-protocol.js");
 const { route } = await import("../chat/src/index.js");
 const { forgetHello } = await import("../chat/src/bridge.js");
-const { REFRESH_MS, STALE_MS, capabilityFor } = await import("../chat/src/capability.js");
+const { REFRESH_MS, REFRESH_SOON_MS, STALE_MS, capabilityFor } = await import("../chat/src/capability.js");
 const { avatarUrl } = await import("../chat/src/providers.js");
 const { cleanDisplay, purgeExpired } = await import("../chat/src/session.js");
 
@@ -406,6 +406,14 @@ test("a name the account chose: the island's own name for it, kept across sign-i
   s.env.DB.prepare = prepare;
   assert.equal(answer.state, "eligible", "a failed name write leaves the answer standing");
   assert.equal(held.chosen_display, "Wicked Smart", "and the name it had");
+  // A page that heard its account renamed live asks sooner (`soon`, `/api/chat/me?refresh=name`): a fresh answer within a
+  // few seconds stands, an older one is asked again and brings the island's name.
+  const p3 = await s.env.DB.prepare("SELECT * FROM principals").first(), t3 = await s.env.DB.prepare("SELECT checked_at FROM capabilities").first("checked_at");
+  names[583231] = "Soon Named";
+  await capabilityFor(s.env, p3, { soon: true, now: t3 + REFRESH_SOON_MS - 1 });
+  assert.notEqual(p3.chosen_display, "Soon Named", "an answer still fresh stands");
+  await capabilityFor(s.env, p3, { soon: true, now: t3 + REFRESH_SOON_MS });
+  assert.equal(p3.chosen_display, "Soon Named", "an older one is asked again");
 });
 
 test("expired sessions and abandoned sign-ins are purged daily", async () => {
