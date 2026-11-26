@@ -30,7 +30,7 @@ const VENUE_ZONES = { "dsb-studio": "dsb-studio", "maxis-club": "dsb-maxis", "wi
 // serves them. A travel window not here fails the build.
 const WINDOW_PLACES = {
   dsb: { land: "dsb", zones: ["dsb-outside", "dsb-transit"] },
-  poker: { land: "ember", zones: ["ember-den"], blurb: "A poker room of ten tables by the fire, reached through ₿IFRÖST.",
+  poker: { land: "ember", zones: ["emberden", "ember-den"], path: "emberden", blurb: "A poker room of ten tables by the fire, reached through ₿IFRÖST.",
     objects: [{ cls: "Service", name: "poker service", note: "its tables run on a service of their own, not a Durable Object" }] },
   keep: { land: "keep", zones: ["byzantine-keep", "byzantine-keep.halls"], frames: ["keep-yard", "keep-halls"], blurb: "Valhodl: islands in a dark sea under a night sky, reached through ₿IFRÖST: Portal Island, a rowboat over to Castle Island and its keep, the Shipyard, the Armory & Forge and CBDC.",
     objects: [{ cls: "GameHost", prefix: "keep:" }] }
@@ -74,6 +74,8 @@ export const buildTree = (BL = load()) => {
     return entry;
   };
   const at = (path) => ({ href: `/${path}`, blurb: route(path).description });
+  // A place with a blurb of its own keeps it and takes only its route's address.
+  const href = (path) => ({ href: `/${route(path).path}` });
   const slot = (id) => {
     const s = caves.slots.find((c) => c.id === id);
     if (!s) throw new Error(`World Map: no cave slot ${id}`);
@@ -95,11 +97,13 @@ export const buildTree = (BL = load()) => {
       const venues = dsbInteriors.definitions.map((d) => {
         const zone = VENUE_ZONES[d.id];
         if (!zone) throw new Error(`World Map: DSB Land's venue "${d.id}" has no zone here`);
-        return node(`dsb-${d.id}`, d.label || d.building, { kind: "room", land: "dsb", via: "door", zones: [zone], blurb: zoneMap.heading(zone).replace(/^DSB · /, "In DSB Land: ") });
+        const entry = routes.list.find((r) => r.scene === "dsb" && r.place === d.id);
+        if (!entry) throw new Error(`World Map: DSB Land's venue "${d.id}" has no route`);
+        return node(`dsb-${d.id}`, d.label || d.building, { kind: "room", land: "dsb", via: "door", zones: [zone], ...href(entry.path), blurb: zoneMap.heading(zone).replace(/^DSB · /, "In DSB Land: ") });
       });
       return node("dsb", w.name, { ...fields, ...at("dsb"), open: true, tint: w.tint, children: venues });
     }
-    return node(w.id, w.name, fields);
+    return node(w.id, w.name, place.path ? { ...fields, ...href(place.path) } : fields);
   });
   const directory = caveDirectory.registry.entries.filter((e) => e.status === "open")
     .map((e) => node(`site-${e.id}`, e.name, { kind: "external", land: "external", via: "link", href: e.url, external: true, blurb: e.description }));
@@ -121,12 +125,12 @@ export const buildTree = (BL = load()) => {
     children: [
       node("bifrost-arch", "North pass arch", { land: "bifrost", via: "north pass", where: "12 o'clock", open: true,
         blurb: `₿IFRÖST's arch, standing where ${caves.gate.name.toLowerCase()} was, over the north pass.`,
-        children: [node("bifrost", zoneMap.landOf("bifrost"), { land: "bifrost", via: "crystal bridge", zones: ["bifrost"], open: true,
+        children: [node("bifrost", zoneMap.landOf("bifrost"), { land: "bifrost", via: "crystal bridge", zones: ["bifrost"], ...href("bifrost-isle"), open: true,
           blurb: "A gateway islet past the arch, its chamber's field at the end of the bridge.",
           children: [node("bifrost-chamber", zoneMap.landOf("bifrost.chamber"), { land: "bifrost", via: "arch field", zones: ["bifrost.chamber"], ...at("bifrost"), open: true,
             blurb: "A round hall of stone and bronze with a ring of windows onto other worlds, and mirrors for the worlds still to come.",
             children: [...windows, ...directory] })] })] }),
-      node("mirror", "The Observatory", { via: "walk through the mirror", where: clock(mirror.clock), zones: ["mirror"], blurb: "A circular chamber with live camera screens on black walls around a central chair. Walk through its return mirror to reach the island." }),
+      node("mirror", "The Observatory", { via: "walk through the mirror", where: clock(mirror.clock), zones: ["mirror"], ...href("observatory"), blurb: "A circular chamber with live camera screens on black walls around a central chair. Walk through its return mirror to reach the island." }),
       node("factory", factory.name, { land: "factory", via: "tunnel & shield", where: clock(factory.clock), zones: ["factory", "factory.hall"], ...at("lightning"),
         children: [node("hangar", zoneMap.landOf("factory.hangar"), { land: "factory", via: "door", zones: ["factory.hangar"], ...at("jet"),
           children: HANGAR_ROOMS.map((name, i) => node(`hangar-room-${i}`, name, { kind: "room", land: "factory", via: "keypad", blurb: "A room off the hangar floor, behind a door keypad." })) })] }),
@@ -142,18 +146,18 @@ export const buildTree = (BL = load()) => {
               node("arcade-carnival", "Carnival machines", { kind: "games", land: "arcade", via: "hall floor", items: CARNIVAL.map((name) => ({ name, href: null, note: null })),
                 blurb: "Tickets to win at the prize counter." }),
               node("arcade-haunt", "Haunted hallway", { land: "haunt", via: "hallway", zones: ["arcade.haunt", "ghost-arena.haunt"], blurb: "Off the mezzanine's end, out to the arena.",
-                children: [node("ghost-arena", zoneMap.landOf("ghost-arena"), { land: "haunt", via: "hallway's end", zones: ["ghost-arena", "arcade-hunt", "arcade.arena"],
+                children: [node("ghost-arena", zoneMap.landOf("ghost-arena"), { land: "haunt", via: "hallway's end", zones: ["ghost-arena", "arcade-hunt", "arcade.arena"], ...href("ghost-arena"),
                   objects: [{ cls: "GameHost", prefix: "ghost-hunt:" }], blurb: "A round of dark stone under the stars, where the ghost hunt is played." })] }),
               node("arcade-block-hall", "Block Frenzy hall", { land: "arcade", via: "upper hall", blurb: "An open-air ledge and the zipline out into the sky.",
                 children: [node("block-frenzy", zoneMap.landOf("block-frenzy"), { land: "block", via: "zipline", zones: ["block-frenzy"], ...at("blockfrenzy") })] }),
               node("arcade-raid", route("oogaraid").title, { land: "arcade", via: "back door", zones: ["scene-raid"], ...at("oogaraid") })
             ] })
         ] }),
-      node("rainforest", zoneMap.landOf("rainforest"), { land: "rainforest", via: "vine bridge", where: "between 3 and 4 o'clock", zones: ["rainforest"],
+      node("rainforest", zoneMap.landOf("rainforest"), { land: "rainforest", via: "vine bridge", where: "between 3 and 4 o'clock", zones: ["rainforest"], ...href("rainforest"),
         blurb: "A rainforest round a lake as deep as the transaction backlog.",
         children: [node("rainforest-under", route("mempool").title, { land: "rainforest", via: "tunnel", zones: ["rainforest-under"], ...at("mempool") })] }),
-      node("hq", hq.name, { land: "hq", via: "ramps", where: `${clock(hq.clock)} and ${clock(slot("c5").clock)}`, zones: ["hq"], blurb: "Under the island, where the Oogas sleep.",
-        children: [node("hq-basement", zoneMap.landOf("hq-basement"), { land: "hq", via: "stairs", zones: ["hq-basement"], blurb: "The rooms beneath headquarters." })] }),
+      node("hq", hq.name, { land: "hq", via: "ramps", where: `${clock(hq.clock)} and ${clock(slot("c5").clock)}`, zones: ["hq"], ...href("hq"), blurb: "Under the island, where the Oogas sleep.",
+        children: [node("hq-basement", zoneMap.landOf("hq-basement"), { land: "hq", via: "stairs", zones: ["hq-basement"], ...href("basement"), blurb: "The rooms beneath headquarters." })] }),
       node("repos", zoneMap.landOf("repos"), { land: "repos", via: "stone bridge", where: "off the south stairs", zones: ["repos"], ...at("repos") }),
       node("sphere", route("sphere").title, { land: "sphere", via: "bridge", where: "off the southwest rim", zones: ["sphere"], ...at("sphere"), children: rooms }),
       node("bca", bca.name, { land: "bca", via: "veil", where: clock(bca.clock), zones: ["bca"], ...at("bca") }),

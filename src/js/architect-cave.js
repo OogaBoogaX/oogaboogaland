@@ -1130,7 +1130,9 @@
       arrival.cameraX = p.x - x; arrival.cameraY = p.y - y; arrival.cameraZ = p.z - z;
       camera.target.x += arrival.cameraX; camera.target.y += arrival.cameraY; camera.target.z += arrival.cameraZ;
     };
-    return { prepare, update, travel, clampCamera, feeds, renderFeeds: cameras.renderFeeds, viewRoots, panels, group, cameras, seat, sit, toggleView, enhanceAt, hoverAt, supportAt, segmentClear: chairClear,
+    // A visitor who opened the Observatory's address (scene-hub.js `navigate`): taken in on the next frame with an Ooga.
+    const admit = () => { preview = true; };
+    return { prepare, update, travel, admit, clampCamera, feeds, renderFeeds: cameras.renderFeeds, viewRoots, panels, group, cameras, seat, sit, toggleView, enhanceAt, hoverAt, supportAt, segmentClear: chairClear,
       contains(x, y, z, actor = pilot.player) { return active && actor === visitor && contains(x, y, z); },
       nearbySeat(x, y, z, reach) {
         return active && !seat.sitter && Math.hypot(x, z) < Math.min(reach, 1.7)

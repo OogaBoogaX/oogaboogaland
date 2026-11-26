@@ -651,7 +651,7 @@ export const voiceAudible = (q, studio = null) => !!((q.body || (studio && q.zon
  *  table. Read from the listener's side: a crossing need not share both ways. */
 export const voiceTogether = (p, q) => {
   const group = zoneGroup(p.zone);
-  return sharesPlace(p, group, q) && (group !== "ember-den" || (p.pokerVoice ?? null) === (q.pokerVoice ?? null));
+  return sharesPlace(p, group, q) && (group !== "emberden" || (p.pokerVoice ?? null) === (q.pokerVoice ?? null));
 };
 
 /** Whether accounts `a` and `b` have each asked for a voice link with the other. */

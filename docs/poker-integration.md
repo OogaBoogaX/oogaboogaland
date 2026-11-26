@@ -91,7 +91,7 @@ can still lose a checkpoint; IndexedDB completion is not a backup guarantee.
 Watching a table selects that table's voice channel for players and spectators.
 **Walk the floor** selects the floor channel. Voice still uses Ooga's existing
 opt-in microphone, mute controls, authenticated room and driven-avatar rules.
-All avatars keep the `ember-den` visibility zone and can walk around each other;
+All avatars keep the `emberden` visibility zone and can walk around each other;
 voice selection does not split the visual scene. The room persists the channel
 through hibernation, restores it after a socket reconnect, rechecks it on track
 pulls, and clears it on departure. These are public conversations that spectators

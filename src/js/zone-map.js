@@ -8,7 +8,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const ROOT = "outside";
-  const LANDS = { outside: "The Island", repos: "Merge Rock", sphere: "Timechain Exterior", rainforest: "Mempool Rainforest", "rainforest-under": "Mempool Cave", bifrost: "₿IFRÖST", lab: "EntropyLab", factory: "Lightning Factory", arcade: "Ooga Arcade", "block-frenzy": "Block Frenzy", "ghost-arena": "Ghost Hunter's Arena", "arcade-hunt": "Ghost Hunter's Arena", hq: "HQ", "hq-basement": "Basement", "ember-den": "Ember Den", "byzantine-keep": "Valhodl", between: "Between lands", none: "Between lands", "scene-transition": "Between lands" };
+  const LANDS = { outside: "The Island", repos: "Merge Rock", sphere: "Timechain Exterior", rainforest: "Mempool Rainforest", "rainforest-under": "Mempool Cave", bifrost: "₿IFRÖST", lab: "EntropyLab", factory: "Lightning Factory", arcade: "Ooga Arcade", "block-frenzy": "Block Frenzy", "ghost-arena": "Ghost Hunter's Arena", "arcade-hunt": "Ghost Hunter's Arena", hq: "HQ", "hq-basement": "Basement", emberden: "Ember Den", "ember-den": "Ember Den", "byzantine-keep": "Valhodl", between: "Between lands", none: "Between lands", "scene-transition": "Between lands" };
   const landOf = (zone) => {
     if (zone === "factory.hangar") return "Lightning Jet Hangar";
     if (zone === "bifrost.chamber") return "₿IFRÖST chamber";
@@ -23,9 +23,10 @@
   // nowhere. The cave entrances are the island, whichever name a page loaded earlier still reports for one.
   // The haunted hallway is listed with the end of it a player stands on (#422): its near half with Ooga Arcade's hall,
   // its far half with Ghost Hunter's Arena, so each land is one heading; so too the arena's names from before #422 that a
-  // page loaded earlier still reports (`arcade-hunt`, `arcade.arena`).
+  // page loaded earlier still reports (`arcade-hunt`, `arcade.arena`), and the Ember Den's name before it was one word
+  // (`ember-den`).
   // The land between (the island's bridges and the air off its edge) is listed with anyone between scenes.
-  const JOINED = { "arcade.haunt": "arcade.hall", "ghost-arena.haunt": "ghost-arena", "arcade-hunt": "ghost-arena", "arcade.arena": "ghost-arena", between: "none", lab: ROOT, bca: ROOT, factory: ROOT, arcade: ROOT, mirror: ROOT };
+  const JOINED = { "arcade.haunt": "arcade.hall", "ghost-arena.haunt": "ghost-arena", "arcade-hunt": "ghost-arena", "arcade.arena": "ghost-arena", "ember-den": "emberden", between: "none", lab: ROOT, bca: ROOT, factory: ROOT, arcade: ROOT, mirror: ROOT };
   const groupOf = (zone) => zone === "scene-transition" ? "none" : keepPlace(zone) ? keepPlace(zone) : Object.hasOwn(JOINED, zone) ? JOINED[zone] : zone.startsWith("cave-") ? ROOT : zone.startsWith("scene-") ? "arcade.hall" : zone;
   // A heading names its own zone where one land holds several, each with coordinates of its own.
   const HEADINGS = {
@@ -47,7 +48,7 @@
     between: ROOT, lab: ROOT, bca: ROOT, mirror: ROOT, hq: ROOT, factory: ROOT, arcade: ROOT, sphere: ROOT, rainforest: ROOT, bifrost: ROOT, repos: ROOT,
     "hq-basement": "hq", "rainforest-under": "rainforest", "lab.hall": "lab", "factory.hall": "factory", "factory.hangar": "factory.hall", "arcade.hall": "arcade",
     "arcade.haunt": "arcade.hall", "ghost-arena.haunt": "arcade.haunt", "ghost-arena": "ghost-arena.haunt", "arcade-hunt": "ghost-arena", "arcade.arena": "ghost-arena",
-    "bifrost.chamber": "bifrost", "ember-den": "bifrost.chamber", "byzantine-keep": "bifrost.chamber", "byzantine-keep.halls": "byzantine-keep", "dsb-outside": "bifrost.chamber", "dsb-transit": "bifrost.chamber"
+    "bifrost.chamber": "bifrost", emberden: "bifrost.chamber", "ember-den": "emberden", "byzantine-keep": "bifrost.chamber", "byzantine-keep.halls": "byzantine-keep", "dsb-outside": "bifrost.chamber", "dsb-transit": "bifrost.chamber"
   };
   // A zone is whatever a page reports, so the tables are read by their own keys alone, never their prototype's.
   const parentOf = (zone) => Object.hasOwn(PARENTS, zone) ? PARENTS[zone] : keepPlace(zone) && keepPlace(zone) !== zone ? (keepPlace(zone) === "byzantine-keep" ? PARENTS["byzantine-keep"] : "byzantine-keep") : (zone.startsWith("cave-") ? ROOT : /^sphere-[0-9]$/.test(zone) ? "sphere"

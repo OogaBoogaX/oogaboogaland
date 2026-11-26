@@ -14,6 +14,8 @@
 // `place` folds each of their zones to its group and a crossing between them weighs a whole group at each end. The arena
 // is one voice region whether a hunt runs or not; its older names (`arcade-hunt`, a hunt under way, and `arcade.arena`,
 // the arena before #422, both still sent by a page loaded before it) are the same region (`ALIASES`), never the Arcade's.
+// The Ember Den's zone before it was one word (`ember-den`) is the Ember Den's (`emberden`) for the room's voice groups;
+// a page that still reports it is not shown to newer ones there until it reloads (docs/auth-and-presence.md, Zones).
 // A crossing is reported as the place it leads to (`to`) and the progress toward it, which the page keeps exact and the
 // room and other pages get in STEPS steps.
 // Weights: a player crossing from place A (`near`) `t` of the way to place B (`far`) has weight cos(πt/2) in A and
@@ -33,7 +35,7 @@
   // Places outside the world whose voices blend across the crossing between them, in one scene's coordinates.
   const PAIRS = [["arcade", "ghost-arena"], ["arcade", "block-frenzy"]];
   const GROUPED = ["arcade", "ghost-arena", "block-frenzy"];
-  const ALIASES = Object.freeze({ "arcade-hunt": "ghost-arena", "arcade.arena": "ghost-arena" });
+  const ALIASES = Object.freeze({ "arcade-hunt": "ghost-arena", "arcade.arena": "ghost-arena", "ember-den": "emberden" });
   // Whether a zone is in the main world. Allocates nothing.
   const world = (zone) => {
     for (let i = 0; i < WORLD.length; i++) if (WORLD[i] === zone) return true;

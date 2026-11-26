@@ -30,7 +30,7 @@ test("a link needs both asks, reaches across zones and past a body, and still ne
   assert.deepEqual(voicePeers(players, null, both).get(1), [2, 3], "the linked voice joins the zone's");
   assert.deepEqual(voicePeers(players, null, both).get(2), [1], "and it is the same both ways");
   assert.deepEqual(voicePeers(players, null, both).get(3), [1], "nobody else gains it");
-  const away = [speaker(1, "none", { body: null }), speaker(2, "ember-den", { pokerVoice: 3 })];
+  const away = [speaker(1, "none", { body: null }), speaker(2, "emberden", { pokerVoice: 3 })];
   assert.deepEqual(voicePeers(away, null, both).get(1), [2], "nowhere and bodiless, a link still carries");
   assert.deepEqual(voicePeers([speaker(1, "outside"), speaker(2, "dsb-outside", { voice: { sub: "s", track: null } })], null, both).get(1), [], "no microphone, nothing to hear");
   assert.deepEqual(voicePeers([speaker(1, "outside", { voice: { sub: null, track: "mic" } }), speaker(2, "dsb-outside")], null, both).get(1), [], "no receive session, nothing heard");

@@ -107,6 +107,11 @@
   // Who walked in, kept across a game so they come back out as themselves, and the ticket balance at the last visit,
   // so the wheel knows when to celebrate.
   let lastPlayer = null, lastTickets = null, unsubscribeAccount = null, remotes = null, footsteps = null;
+  // Ghost Hunter's Arena's own address (/ghost-arena, routes.js) arrives here: just inside the arena from its hallway,
+  // facing the middle. `spotPlace` is the routed place a reload's spot is kept under (visit-spot.js): the arena's, or
+  // the hall's ("").
+  const ARENA_PLACE = "arena";
+  let spotPlace = "";
   // The way out (#554): the doors, the walk through them, and the last frame held over the switch.
   let doors = null, doorWalk = null, grabNext = false, still = 0, stillHold = 0, sceneCanvas = null, caveCopy = null, caveYard = null;
   const scoreSubscriptions = [];
@@ -2138,9 +2143,11 @@
       // At a machine an Ooga plays, a step back from its spot, where that Ooga stands again. A reload of the hall
       // stands where the Ooga stood, on whichever floor, while that floor is still there to walk on from (visit-spot.js).
       const spawn = DEBUG ? debugSpawn() : null;
-      const stood = ctx.from === null && !ctx.place ? BL.visitSpot.take("arcade", "") : null;
+      spotPlace = ctx.place === ARENA_PLACE ? ARENA_PLACE : "";
+      const stood = ctx.from === null && (!ctx.place || ctx.place === ARENA_PLACE) ? BL.visitSpot.take("arcade", spotPlace) : null;
       const back = stood && Math.abs(supportAt(stood.x, stood.z, stood.y) - stood.y) < 0.05 && BL.visitSpot.holds(stood, walkableFor, avatar) ? stood : null;
-      const at = fromWatch ? AW.ARRIVAL : spawn ? spawn : fromBlockHall ? { x: BH.x, z: BH.z0 + 1, facing: 0 } : from >= 0 ? live.find((c) => c.game === from).play : retroFrom ? retroFrom.play : machineFrom ? (machineFrom.bot ? toHall({ x: machineFrom.play.x, z: machineFrom.play.z, turn: machineFrom.turn }, 0, 1.3, { facing: machineFrom.play.facing }) : machineFrom.play) : doorFrom ? doorFrom.play : back ? { x: back.x, z: back.z, facing: back.yaw } : { x: 0, z: HALL.front - 1.5, facing: Math.PI };
+      const at = fromWatch ? AW.ARRIVAL : spawn ? spawn : fromBlockHall ? { x: BH.x, z: BH.z0 + 1, facing: 0 } : from >= 0 ? live.find((c) => c.game === from).play : retroFrom ? retroFrom.play : machineFrom ? (machineFrom.bot ? toHall({ x: machineFrom.play.x, z: machineFrom.play.z, turn: machineFrom.turn }, 0, 1.3, { facing: machineFrom.play.facing }) : machineFrom.play) : doorFrom ? doorFrom.play : back ? { x: back.x, z: back.z, facing: back.yaw }
+        : ctx.place === ARENA_PLACE ? { x: HAUNT.end + 4, z: (HAUNT.z0 + HAUNT.z1) / 2, facing: Math.PI / 2, deck: true } : { x: 0, z: HALL.front - 1.5, facing: Math.PI };
       Object.assign(avatar.root.position, { x: at.x, y: avatar.baseY + supportAt(at.x, at.z, back && !spawn ? back.y : fromBlockHall || at.deck || retroFrom || from >= 0 && live.find(c => c.game === from).y === MEZZ.y ? MEZZ.y : 1), z: at.z });
       avatar.root.rotation.y = at.facing;
       // Carry the view and record the outside loadout before parking its weapons for the visit.
@@ -2317,7 +2324,7 @@
     if (drivenHere) {
       const p = drivenHere.root.position;
       BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, BL.crew.weaponFlags(drivenHere), BL.crew.visualState(drivenHere));
-      if (!leaving && !(doorWalk && doorWalk.holding)) BL.visitSpot.note("arcade", "", drivenHere);
+      if (!leaving && !(doorWalk && doorWalk.holding)) BL.visitSpot.note("arcade", spotPlace, drivenHere);
     }
     // The hallway joins Ooga Arcade to Ghost Hunter's Arena (#422), a voice group of its own: each half is a zone of the
     // land it leads to (`arcade.haunt`, `ghost-arena.haunt`), so the room hands both the hunt and a spectator there
@@ -2553,6 +2560,8 @@
     // Voice zone: the Arcade group, which its mouth on the island shares (`arcade`).
     voiceZone: "arcade.hall",
     id: "arcade", buildSteps: () => AM.buildSteps(), enter, update, overlay, onDonation, onKey, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
+    // The address followed the visitor between the hall and the arena (router.js `follow`).
+    routed(place) { spotPlace = place === ARENA_PLACE ? ARENA_PLACE : ""; },
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return !!(ghosts && ghosts.inMotion);

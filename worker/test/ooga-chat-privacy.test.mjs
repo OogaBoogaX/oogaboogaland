@@ -26,7 +26,7 @@ test("the registry: only the named outdoor zones are public; every level, room, 
   const rooms = Object.values(JSON.parse(dsb));
   assert.ok(rooms.length >= 10);
   for (const zone of rooms) assert.equal(body(zone).scope, null, zone);
-  for (const zone of ["sphere-0", "sphere-1", "sphere-9", "bifrost.chamber", "lab.hall", "factory.hall", "factory.hangar", "arcade.hall", "ghost-arena", "ember-den",
+  for (const zone of ["sphere-0", "sphere-1", "sphere-9", "bifrost.chamber", "lab.hall", "factory.hall", "factory.hangar", "arcade.hall", "ghost-arena", "emberden",
     "block-frenzy", "hq", "hq-basement", "rainforest-under", "none", "outside.room", "outsidex", "dsb", "dsb-outside.x", "", undefined])
     assert.equal(body(zone).scope, null, String(zone));
   assert.deepEqual(scopeOf({ body: null, zone: "outside" }), { scope: null, reason: "no-body" });

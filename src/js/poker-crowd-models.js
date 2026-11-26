@@ -13,6 +13,7 @@
   "use strict";
   const BL = window.BL, M = BL.models, S = BL.scene;
   const { fnv1a } = BL.math;
+  // The Ember Den's old spelling: each look is hashed from the whole name, so a new suffix would redress the crowd.
   const TAG = "/ember-den";
   // Giving way: the first has right of way over every later one.
   const TYPES = Object.freeze(["waiter", "security", "pitBoss", "lady", "highRoller", "businessman", "drunk"]);
