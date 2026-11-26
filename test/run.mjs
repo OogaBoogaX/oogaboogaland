@@ -51154,7 +51154,8 @@ const lecturePlayerChecks = async () => {
 // of the pile's ring and every working cave's zone; sleepers and the away are not shown; and its windows and caves
 // read as a page's crew reads them (roster-panel.js `stateAt`, contributors.js `hasRecentActivity`).
 const islandWorldProof = async () => {
-  const context = { window: { BL: {} }, crypto: globalThis.crypto };
+  let now = 1000;
+  const context = { window: { BL: {} }, crypto: globalThis.crypto, performance: { now: () => now } };
   for (const file of ["math.js", "npc-paths.js", "roster-panel.js", "island-layout.js", "island-sim.js", "game-wire.js", "game-timeline.js", "island-world.js"])
     runInNewContext(await readFile(join(root, "src/js", file), "utf8"), context);
   const BLx = context.window.BL, S = BLx.islandSim, L = BLx.islandLayout, ACT = S.ACT;
@@ -51226,7 +51227,55 @@ const islandWorldProof = async () => {
       last[i] = f ? { x: f.x, z: f.z, act: f.act } : null;
     });
   }
+  // Regression: signed in, the server's frames were drawn by the tick's wall clock, up to a step ahead of the world they
+  // carried, 150 ms behind with frames 100 ms or more apart: walkers sped up and slowed down every frame, and stood
+  // still whenever a frame came 50 ms late. Here the object's ticks run late and the frames arrive unevenly. And at under
+  // 10 fps, whose `dt` the director caps at 0.1 s, the play clock must still keep pace with the frames coming in.
+  let handlers = null, seed = 9;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32);
+  BLx.gameNet = { offers: () => true, open: (kind, venue, h) => { handlers = h; return { state: "live", serverNow: () => now - 30, close() {} }; } };
+  const follow = (frameMs, frames) => {
+    const followers = cast.slice(0, 6).map((c) => ({ traits: { name: c.name }, contributor: c.name, state: "working", bedTravel: { mode: null },
+      root: { visible: true, position: { x: 0, y: 0, z: 0 }, rotation: { y: 0 } } }));
+    const serverWorld = BLx.islandWorld.create({
+      crew: { list: followers, workSites: L.sites, siteActive: () => true, refreshStates() {}, refreshRosterRow() {} },
+      contributors: { stateFor: () => "working" }, net: { state: { me: { id: 1 } }, subscribe: () => () => {} }
+    });
+    const server = S.create({ seed: 7 });
+    server.setCast(cast.slice(0, 6));
+    cast.slice(0, 6).forEach((c) => server.setActivity(c.name, "working", 0b0101));
+    handlers.state({ s: { cast: cast.slice(0, 6).map((c) => c.name) } });
+    const inFlight = [], prior = followers.map(() => null), began = now;
+    let ranAt = now, tickAt = now + 100, steady = 0, lurches = 0, frozen = 0, behind = 0;
+    for (let frame = 0; frame < frames; frame++) {
+      now += frameMs;
+      while (now >= tickAt) {
+        server.step((tickAt - ranAt) / 1000); ranAt = tickAt;
+        const f = BLx.gameWire.frame();
+        server.motion(f, tickAt);
+        inFlight.push({ due: tickAt + 30 + rand() * 40, f });
+        tickAt += 100 + rand() * 30;
+      }
+      inFlight.sort((x, y) => x.due - y.due);
+      while (inFlight.length && inFlight[0].due <= now) handlers.motion(inFlight.shift().f);
+      serverWorld.update(Math.min(0.1, frameMs / 1000));
+      if (now - began > 5000) behind = Math.max(behind, serverWorld.stats.behind);
+      followers.forEach((cave, i) => {
+        const f = cave.follow, was = prior[i], d = f && was ? Math.hypot(f.x - was.x, f.z - was.z) : 0;
+        if (f && was && f.act === ACT.WALK && was.act === ACT.WALK && was.d > 0 && now - began > 5000) {
+          steady++;
+          if (d === 0) frozen++;
+          else if (Math.abs(d - was.d) > 0.25 * was.d) lurches++;
+        }
+        prior[i] = f ? { x: f.x, z: f.z, act: f.act, d } : null;
+      });
+    }
+    return { mode: serverWorld.stats.mode, steady, lurches, frozen, behind };
+  };
+  const fast = follow(1000 / 60, 60 * 60), slow = follow(200, 5 * 60);
   return {
+    serverSmooth: fast.mode === "server" && fast.steady > 3000 && (fast.frozen + fast.lurches) * 50 < fast.steady && fast.behind < 600,
+    serverPaced: slow.mode === "server" && slow.behind > 0 && slow.behind < 600,
     localSmooth: localWorld.stats.mode === "local" && walkFrames > 600 && stillFrames * 50 < walkFrames,
     startsPlaced: worker, startsSeated: seated, startsOnce: !z.start && Math.hypot(z.p.x - 7, z.p.z + 3) > 0.5,
     deterministic: rows(a) === rows(b) && rows(a) !== rows(world(6)),
@@ -51401,7 +51450,7 @@ const unitChecks = async () => {
   record("passive work legs: the authored fixed planner circles the real pile ring, follows one spoke out to the target, never crosses the pile, and replans rather than reuse a graph lane; a walker between spoke samples, or a goal between them, is never sent back to a sample behind it or past the goal; a passive return leg keeps its reserved pile slot on the planned path while an ordinary one keeps the direct pile approach; clanking to chilling from mid-outbound or mid-return walks back along the cave route to the pile slot, then to the chill spot, on terrain and ignoring objects; a passive gorilla's walk to its Ooga's pile slot goes straight over the pile while its work travel to a cave walks straight from another cave or the meadow, even when its origin is reset mid-walk, on terrain, still handing wall steps to the climber",
     Object.values(fixedRoutine).every(Boolean), JSON.stringify(fixedRoutine));
   const islandWorld = await islandWorldProof();
-  record("island world: one seed, one world; workers go round their active caves in turn, shoot from a place in the cave's fan and eat back at the reload fan, chillers idle on spots of their own clear of the pile's ring, sleepers and the away are not shown, its pile from a banana count is the hub's, its windows and caves read as a page's crew reads them, a world started beside a placed crew takes each Ooga up where it stands, once, and a signed-out page's own world moves every walking Ooga on every frame",
+  record("island world: one seed, one world; workers go round their active caves in turn, shoot from a place in the cave's fan and eat back at the reload fan, chillers idle on spots of their own clear of the pile's ring, sleepers and the away are not shown, its pile from a banana count is the hub's, its windows and caves read as a page's crew reads them, a world started beside a placed crew takes each Ooga up where it stands, once, a signed-out page's own world moves every walking Ooga on every frame, and a signed-in page draws the server's walkers at an even pace through late ticks and uneven arrivals",
     Object.values(islandWorld).every(Boolean), JSON.stringify(islandWorld));
   const passiveWeapons = await passiveWeaponTargetProof();
   record("passive weapon targets: a shot passes through a passive NPC to the body behind it, hover and carry picks still find the NPC, and a non-passive body takes the hit",

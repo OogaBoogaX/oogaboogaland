@@ -72,8 +72,13 @@ three. A frame for 60 Oogas is about 750 bytes.
   chiller on a seat or spot stays on it. One the crew has not placed within 2 s goes regardless. Its rows are ignored
   until then, so it is never hidden as away meanwhile.
 
-Either way the rows go into one `game-timeline.js` and are drawn 150 ms behind the newest (two steps behind for the
-local world), eased between frames, as the ghost hunt draws.
+Either way the rows go into one `game-timeline.js`, eased between frames, as the ghost hunt draws. The local world is
+drawn two steps behind its clock. The server's frames are kept by the world time their rows stand for (`gameMs`),
+never by the tick that sent them, which runs up to a step ahead of the world and comes late as the object's timer
+pleases. The page draws them on a play clock of its own, kept as far behind the newest frame it could have by now as
+the gaps between frames and the spread of their arrivals need (at least 180 ms, at most 600 ms; rising at once,
+easing back slowly), and eased toward that at most 8% faster or slower than real time, jumping only when a second or
+more out (a hidden tab, a restarted world).
 
 Each Ooga is then handled according to its row:
 
