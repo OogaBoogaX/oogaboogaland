@@ -723,6 +723,8 @@
     }
     if (!helpHeld) agentPlay.update(sceneDt);
     updateWorldClock(now);
+    // The view is final now: judge the driven heads from it, whatever moved it after the pilot did (pilot.js `settle`).
+    BL.pilot.settle(active.camera);
     const drawn = renderer.render(active.root, active.camera, active.renderOpts, activeMeshRigs);
     if (drawn && !firstPlayable && !curtain.isConnected && !inputHeld && !transition) {
       firstPlayable = true;
