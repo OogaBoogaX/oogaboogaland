@@ -384,7 +384,7 @@ export class Audience extends DurableObject {
   }
 
   // Speakers receive too, including while their microphone is opening. The island must not gate its microphone
-  // as alone merely because everybody in Ooga Chat pressed Join Voice.
+  // as alone merely because everybody in Ooga Chat pressed Join voice.
   // `ears`: for each island player the Room listed as linked, its partners here now, by name, so the island shows them.
   hearingCounts() {
     const main = this.model.counts("main"), dsb = this.model.counts("dsb"), ears = {};

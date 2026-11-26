@@ -106,7 +106,7 @@ Each dropdown starts with **Original look** (the character's own) and, where an
 Ooga can go without one, the slot's none (**Bald**, **Clean-shaven**, **No shirt**,
 **Barefoot**…). The foot counts unsaved changes beside **Save my look**, which
 saves the hat and the whole wardrobe at once, and its **Reset** puts the saved look
-back on. The signed-in account row's **My look** opens the studio on the player's own Ooga.
+back on. The account row's **My look** link that opened the studio on the player's own Ooga is out for now.
 
 The body wears the pieces by building its character again with them as data
 (`models.js` `templateFor`, keyed by what is worn) and giving each of its nodes the
@@ -330,7 +330,7 @@ including mutually visible main-world zones. Arrivals and reconnects receive
 current state, and stale updates cannot replace newer equipment. Pose handling
 performs no equipment storage reads.
 
-Open the hosted studio at `/?scene=studio` (or **My look** in the account row),
+Open the hosted studio at `/?scene=studio` (the account row's **My look** link is out for now),
 sign in, open the hat's row, choose a hat and press **Save my look**. **Hat size** normally previews 80–120% of the reviewed fitting;
 **Reset fitted size** returns to 100%. Both remain previews until Save. The
 percentage scales the hat uniformly around its fitting point (the center for

@@ -78,7 +78,7 @@ export const FIRST_LOAD_BUDGET = 256 * 1024;
 export const ISLAND_RULES = [".roster", ".players-", ".chat-", ".section-head", ".panel .chat-status", '.panel[data-panel="chat"] > .panel-title',
   ".help", ".link", ".account", ".foot-button", ".foot-primary", ".cloud-status", ".panel > .cloud-roster", ".cloud-tile",
   ".cloud-face", ".cloud-portrait", ".cloud-react", ".cloud-hand", ".cloud-pop", ".cloud-name", ".cloud-role",
-  ".cloud-mic", ".cloud-foot", ".cloud-mute", ".cloud-voice", ".reaction", ".panel-foot", ".voice-handoff"];
+  ".cloud-mic", ".cloud-foot", ".cloud-mute", ".cloud-voice", ".reaction", ".panel-foot", ".voice-handoff", ".mic-icon"];
 // Pictures the app loads only when they are wanted, never on a first visit: the face sheet, when a stats strip opens, and
 // the island view's map, when a chat's speaker walks its island.
 export const LAZY_ART = ["ooga-faces.png", "island-view-main.webp"];

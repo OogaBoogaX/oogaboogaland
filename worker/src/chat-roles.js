@@ -16,7 +16,7 @@
 // co-host who leaves the stage on their own word (or whose place lapses while they are still here) is a listener with
 // the offer back, so their slot stays theirs; the host may withdraw an offer, or make a co-host a plain speaker.
 // Times are the caller's clock (`now`), so the checks run without one; nothing here sets a timer. `nextAt` is the
-// earliest moment something changes by itself (an invite lapsing, a held place lapsing, the held host's two minutes),
+// earliest moment something changes by itself (an invite lapsing, a held place lapsing, the held host's minute),
 // for the object's alarm.
 
 export const COHOSTS_MAX = 3;
@@ -24,7 +24,7 @@ export const QUEUE_MAX = 50;
 export const INVITE_MS = 60 * 1000;
 export const DECLINE_MS = 60 * 1000;
 export const ASK_GAP_MS = 10 * 1000;
-export const HOST_HOLD_MS = 2 * 60 * 1000;
+export const HOST_HOLD_MS = 60 * 1000;
 export const STAGE_HOLD_MS = 60 * 1000;
 export const ID = /^(gh|x):[1-9][0-9]{0,19}$/;
 

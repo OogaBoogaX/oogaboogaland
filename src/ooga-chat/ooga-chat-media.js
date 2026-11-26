@@ -11,12 +11,12 @@
 // `blocked`, and the next tap or key anywhere on the page plays them all. A receiver that fails is opened again with
 // backoff (1 s to 30 s, RECEIVE_TRIES), then reads `failed` until `retry`.
 //
-// Speaking. Join Voice (`join`, from the click) asks for the microphone first, inside the gesture, and turns its track
+// Speaking. Join voice (`join`, from the click) asks for the microphone first, inside the gesture, and turns its track
 // off before anything can carry it, so it starts muted; only then asks the audience for a speaker lease (`setRole`,
 // answered over the feed with the lease's generation in `you.lease`), publishes the one microphone track
 // (`publish/open`, `publish/offer`, `publish/ready`) and becomes a speaker only on the server's acknowledgement. A
 // refusal, a denied or missing microphone, or a failed connection returns to listening with nothing held and says why
-// (`notice`). `mute` flips the track and tells the server (`setMic`). Leave Voice (`leave`) stops and releases the
+// (`notice`). `mute` flips the track and tells the server (`setMic`). Leave voice (`leave`) stops and releases the
 // microphone before telling the server (`publish/close`), and keeps listening. The server ending the lease (a `you` that
 // no longer says pending or active: an expiry, a revocation, the island taking the identity) stops capture at once.
 // Another zone (`zone`) ends speaking there and drops every voice of the old zone before the new zone's snapshot.
@@ -56,7 +56,7 @@
 // talking, elsewhere, localVersion, muteDuels }`; `localVersion` changes with local listening choices. `duel(msg)` takes
 // the Commons' pair-only snapshot/start/end or loss; `setMuteDuels(on)` is the account's opt-in, independent of manual
 // mute/volume, and `mutedByDuel(id)` explains an automatic mute. `elsewhere` says the account's voice is on another device (the island's, or another Ooga Chat
-// page's): Join Voice then needs the visitor's word, `join({ takeover: true })`, which moves it here. Speaking is this page's own meter on the captured microphone (as the island's voice.js meters it, the same
+// page's): Join voice then needs the visitor's word, `join({ takeover: true })`, which moves it here. Speaking is this page's own meter on the captured microphone (as the island's voice.js meters it, the same
 // levels): true while an unmuted speaker's voice is loud enough, whoever else is listening, so the visitor sees it work
 // alone. `talking` is the participants whose voices this page hears speaking now, from a meter on each voice it plays
 // (as the island's Online Oogas reads its own), a frozen list replaced only when someone starts or stops.
@@ -92,12 +92,12 @@
     inuse: "The microphone is in use by another app.",
     refused: "Speaking isn't open to this account right now.",
     unchecked: "Contributions can't be checked right now. Try again soon.",
-    island: "Your voice is on another device. Join Voice to move it here.",
+    island: "Your voice is on another device. Join voice to move it here.",
     full: "Every speaking spot here is taken. Try again soon.",
     busy: "Too many tries. Wait a moment, then try again.",
     failed: "Voice couldn't connect. Try again.",
-    ended: "Your speaking ended. Join Voice to speak again.",
-    reconnected: "Voice reconnected. Join Voice to speak again.",
+    ended: "Your speaking ended. Join voice to speak again.",
+    reconnected: "Voice reconnected. Join voice to speak again.",
     mic: "Your microphone stopped.",
     resumed: "Voice reconnected. You're muted.",
     reopened: "Voice reconnected. Your microphone is on.",
@@ -225,6 +225,20 @@
     // The voices heard: one context for their meters (`v.meter`, `{ source, analyser, quiet, speaking }`), one read of
     // them all every SPEAK_MS while any is metered, and who is talking (`talkKey` its participants, one a line).
     let hearAudio = null, hearTimer = 0, talking = IDLE.talking, talkKey = "";
+    // The voice marks' levels (`level`, `ownLevel`, native-icons.js `shapeLevel`): `subscribeLevels` is heard after each
+    // meter read while a level is up, and once more as it falls to nothing, so a mark empties.
+    // The heard voices' meter and the own one read on timers of their own, each with its own last word.
+    const levelSubs = new Set(), levelsWere = { heard: false, own: false };
+    const tellLevels = (from, up) => {
+      if (up || levelsWere[from]) for (const fn of levelSubs) fn();
+      levelsWere[from] = up;
+    };
+    const level = (participant) => {
+      for (const v of voices.values()) if (v.participant === participant) return v.meter ? v.meter.level : 0;
+      return 0;
+    };
+    const ownLevel = () => meter && state.speaking ? meter.level : 0;
+    const subscribeLevels = (fn) => { levelSubs.add(fn); return () => levelSubs.delete(fn); };
     const heardSamples = new Float32Array(SAMPLES);
     // TURN credentials, kept until shortly before they expire; requests waiting on the feed's `result`.
     let ice = null;
@@ -340,7 +354,7 @@
     };
     const readHeard = () => {
       hearTimer = 0;
-      let metered = false;
+      let metered = false, up = false;
       for (const v of voices.values()) {
         const m = v.meter;
         if (!m) continue;
@@ -348,11 +362,14 @@
         m.analyser.getFloatTimeDomainData(heardSamples);
         let sum = 0;
         for (let i = 0; i < SAMPLES; i++) sum += heardSamples[i] * heardSamples[i];
-        const loud = Math.sqrt(sum / SAMPLES) > SPEAK_ON;
+        const rms = Math.sqrt(sum / SAMPLES), loud = rms > SPEAK_ON;
         m.quiet = loud ? 0 : m.quiet + 1;
         m.speaking = loud || m.speaking && m.quiet < SPEAK_HOLD;
+        m.level = BL.nativeIcons.shapeLevel(m.level, rms);
+        if (m.level) up = true;
       }
       if (retalk()) emit();
+      tellLevels("heard", up);
       if (metered) hearTimer = timers.set(readHeard, SPEAK_MS);
     };
     const meterHeard = (v) => {
@@ -362,7 +379,7 @@
         hearAudio.addEventListener("statechange", emit);
       }
       const source = hearAudio.createMediaStreamSource(v.el.srcObject);
-      v.meter = { source, analyser: null, quiet: 0, speaking: false };
+      v.meter = { source, analyser: null, quiet: 0, speaking: false, level: 0 };
       const analyser = v.meter.analyser = hearAudio.createAnalyser();
       analyser.fftSize = SAMPLES;
       source.connect(analyser);
@@ -543,10 +560,12 @@
       meter.analyser.getFloatTimeDomainData(meter.samples);
       let sum = 0;
       for (let i = 0; i < SAMPLES; i++) sum += meter.samples[i] * meter.samples[i];
-      const loud = Math.sqrt(sum / SAMPLES) > SPEAK_ON;
+      const rms = Math.sqrt(sum / SAMPLES), loud = rms > SPEAK_ON;
       meter.quiet = loud ? 0 : meter.quiet + 1;
       const next = loud || speaking && meter.quiet < SPEAK_HOLD;
       if (next !== speaking) { speaking = next; emit(); }
+      meter.level = BL.nativeIcons.shapeLevel(meter.level, rms);
+      tellLevels("own", !!meter.level);
       meter.timer = timers.set(readMeter, SPEAK_MS);
     };
     const startMeter = (stream) => {
@@ -557,7 +576,7 @@
         analyser.fftSize = SAMPLES;
         source.connect(analyser);
         if (audio.state === "suspended") audio.resume().catch(() => {});
-        meter = { audio, source, analyser, samples: new Float32Array(SAMPLES), timer: 0, quiet: 0 };
+        meter = { audio, source, analyser, samples: new Float32Array(SAMPLES), timer: 0, quiet: 0, level: 0 };
         meter.timer = timers.set(readMeter, SPEAK_MS);
       } catch { meter = null; }
     };
@@ -983,7 +1002,7 @@
     };
     const supported = () => typeof R.PeerConnection === "function" && typeof R.getUserMedia === "function";
     const available = () => supported() && !!allowed();
-    return { heard, status, zone: zoneTo, join, leave, mute, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, identify, release, stop, retry, remember, dispose,
+    return { heard, status, zone: zoneTo, join, leave, mute, level, ownLevel, subscribeLevels, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, identify, release, stop, retry, remember, dispose,
       get available() { return available(); }, get why() { return supported() ? "" : NOTICE.unsupported; },
       get state() { return state; }, get stats() { return { ...stats, voices: voices.size, receiving: !!sub, publishing: !!pub, capturing: !!mic, connection, lease, relay: !!(ice && ice.relay), bare }; } };
   };

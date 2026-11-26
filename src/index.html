@@ -498,16 +498,17 @@
           <div class="reactions" id="roster-reactions" hidden></div>
           <div class="account" id="account" hidden>
             <button type="button" class="panel-primary" data-action="account-login" id="account-login" aria-label="Contributor sign-in with GitHub" title="Contributors can sign in with GitHub to control their own Ooga and gorilla."><span data-sign>Contributor sign-in</span></button>
-            <span class="account-who">
-              <span class="account-name" id="account-name" hidden></span>
-              <span class="account-room" id="account-room" hidden></span>
-            </span>
             <span class="account-actions">
               <button type="button" class="foot-button foot-primary" data-action="account-rejoin" id="account-rejoin" hidden>Play here</button>
               <button type="button" class="foot-button account-mute" data-action="account-mute" id="account-mute" aria-pressed="false" data-mic="" disabled hidden>Unmute</button>
               <button type="button" class="foot-button account-voice" data-action="account-voice" id="account-voice" hidden>Join voice</button>
               <button type="button" class="foot-button account-leave" data-action="account-voice-leave" id="account-voice-leave" hidden>Leave voice</button>
-              <a class="link" id="account-look" href="/?scene=studio" title="Choose what your Ooga wears: a hat, hair, clothes and more" hidden>My look</a>
+              <button type="button" class="foot-button account-end hc-danger" data-action="account-chat-end" id="account-chat-end" hidden>End chat</button>
+              <button type="button" class="foot-button account-leave" data-action="account-chat-leave" id="account-chat-leave" hidden>Leave chat</button>
+            </span>
+            <span class="account-who">
+              <span class="account-name" id="account-name" hidden></span>
+              <span class="account-room" id="account-room" hidden></span>
               <button type="button" class="link" data-action="account-logout" id="account-logout" hidden>Sign out</button>
             </span>
           </div>
@@ -633,10 +634,12 @@
           <div class="reactions" id="cloud-reactions" hidden></div>
           <div class="reactions" id="cloud-chat-reactions" hidden></div>
           <div class="cloud-foot" id="cloud-foot">
-            <span class="cloud-foot-name" id="cloud-foot-name"></span>
             <span class="cloud-foot-actions">
               <button type="button" class="foot-button cloud-mute" id="cloud-mute" aria-pressed="false" data-mic="" disabled>Unmute</button>
-              <button type="button" class="foot-button cloud-voice" id="cloud-voice" disabled>Join Voice</button>
+              <button type="button" class="foot-button cloud-voice" id="cloud-voice" disabled>Join voice</button>
+            </span>
+            <span class="cloud-foot-who">
+              <span class="cloud-foot-name" id="cloud-foot-name"></span>
               <button type="button" class="link" id="cloud-logout">Sign out</button>
             </span>
           </div>

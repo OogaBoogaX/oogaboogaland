@@ -51,8 +51,78 @@
    capitals. */
 .panel-title > .hc-room-bar .hc-room-back::before { content: ""; width: 7px; height: 7px; border-bottom: 2px solid currentColor; border-left: 2px solid currentColor; transform: translate(1.5px, -1px) rotate(45deg); }
 .panel-title > .hc-room-bar .hc-room-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; overflow-wrap: normal; }
+/* In a chat the title line is the chat's own dark bar, in both apps, out to the panel's edges (its padding and gap,
+   `--hc-pad-top`, `--hc-pad-x`, `--hc-gap`: the island's here, Ooga Chat's in ooga-chat.css; full screen fixes the same
+   bar over the view there): Back, the title over its counts, a host's Requests bell, Share and the view's fold button,
+   each 32px square. */
+.panel[data-space="on"] { --hc-pad-top: 12px; --hc-pad-x: 14px; --hc-gap: 10px; }
+.panel[data-space="on"] > .panel-title {
+  box-sizing: border-box; min-height: 52px; margin: calc(-1 * var(--hc-pad-top)) calc(-1 * var(--hc-pad-x)) calc(-1 * var(--hc-gap));
+  padding: 0 8px 0 4px; gap: 6px; border-bottom: 1px solid rgba(243, 239, 228, 0.08); border-radius: 0; background: #0c0b0a;
+}
+.panel[data-space="on"] > .panel-title > :is(.hc-requests, .hc-share) { width: 32px; height: 32px; }
+/* The island view's fold button the same square there, its edge amber while the view is open. */
+.panel[data-space="on"] > .panel-title > .iv-fold {
+  width: 32px; height: 32px; border-radius: 6px; background: rgba(36, 32, 28, 0.72); box-shadow: inset 0 0 0 1px rgba(243, 239, 228, 0.12); color: rgba(243, 239, 228, 0.9);
+}
+.panel[data-space="on"] > .panel-title > .iv-fold[aria-pressed="true"] { box-shadow: inset 0 0 0 1px var(--accent); color: #ffd59a; }
+.panel[data-space="on"] > .panel-title > .iv-fold svg { width: 17px; height: 17px; }
+/* A host's Requests pop-up drops from the bar over the top of the view across the panel's width, never pushing the view
+   or the roster, and scrolls itself past what the panel has room for under the bar (a phone's short island sheet
+   included). Ooga Chat's full screen fixes it under its fixed bar instead (ooga-chat.css). */
+.panel[data-space="on"] { position: relative; }
+.panel[data-space="on"] > .hc-dock:not(:empty) {
+  position: absolute; z-index: 5; top: 52px; left: 0; right: 0; max-height: calc(100% - 52px); margin: 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.panel[data-space="on"] > .hc-dock > .hc-pop.hc-docked { margin: 0; }
+/* The pop-up shrinks to the room under the bar, its list scrolling inside it, so none of it is ever clipped away. */
+.hc-dock:not(:empty) { display: flex; flex-direction: column; }
+.hc-dock > .hc-pop.hc-docked:not([hidden]) { display: flex; flex-direction: column; min-height: 0; }
+.hc-dock > .hc-pop.hc-docked > .hc-pop-slab { min-height: 0; }
+/* The title over how many speak and listen, one line each. */
+.hc-room-titles { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; gap: 1px; }
+.hc-room-titles > .hc-room-title { line-height: 1.15; }
+.hc-room-count { overflow: hidden; color: rgba(243, 239, 228, 0.6); font-size: 10.5px; font-weight: 400; letter-spacing: 0.03em; white-space: nowrap; text-overflow: ellipsis; }
+.hc-room-count:empty { display: none; }
+/* In a chat on a narrow screen the land's tag (the Chats list and the preview say it) gives its room to the title. */
+@media (max-width: 479px) { .panel[data-space="on"] > .panel-title > .panel-chip:not(.hc-requests) { display: none; } }
+/* Share, a square button of its own size in the title's row, its icon drawn in the text's colour. */
+.hc-share, .hc-requests {
+  position: relative; flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; cursor: pointer;
+  background: rgba(36, 32, 28, 0.72); box-shadow: inset 0 0 0 1px rgba(243, 239, 228, 0.12); color: rgba(243, 239, 228, 0.9); font: inherit;
+}
+:is(.hc-share, .hc-requests)[hidden] { display: none; }
+:is(.hc-share, .hc-requests) svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+:is(.hc-share, .hc-requests):is(:hover, :focus-visible) { background: rgba(36, 32, 28, 0.92); color: var(--paper); }
+:is(.hc-share, .hc-requests):focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+/* The Requests bell: amber while its pop-up is open; its words for assistive technology alone; the badge, how many wait. */
+.hc-requests[aria-expanded="true"] { box-shadow: inset 0 0 0 1px var(--accent); color: #ffd59a; }
+.hc-requests-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.hc-badge {
+  position: absolute; top: -5px; right: -5px; box-sizing: border-box; display: grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px;
+  border-radius: 9px; background: var(--accent); box-shadow: 0 0 0 2px #0c0b0a; color: var(--ink); font-size: 10.5px; font-weight: 700; line-height: 1;
+}
+.hc-badge[hidden] { display: none; }
+/* Alone in a chat: the roster gives its room to an invitation to share the chat. */
+.hc-alone { display: grid; flex: 1 1 auto; align-content: center; justify-items: center; gap: 6px; min-height: 0; padding: 12px; text-align: center; }
+.hc-alone[hidden] { display: none; }
+.hc-alone p { margin: 0; color: rgba(243, 239, 228, 0.7); font-size: 12px; }
+.hc-alone .hc-alone-head { color: var(--paper); font-size: 13px; font-weight: 700; }
+.hc-alone .hc-alone-share { margin-top: 4px; min-height: 36px; padding: 0 16px; }
+.panel:has(> .hc-alone:not([hidden])) > .cloud-roster { flex: none; min-height: 0; border-bottom-width: 0; }
+/* It continues the roster's slab out to the panel's sides, with no seam between them. */
+.panel[data-space="on"] > .hc-alone { margin: -10px -14px 0; border-width: 0; border-radius: 0; }
+/* The Requests panel's heading beside its × . */
+.hc-pop-top { display: flex; align-items: center; gap: 8px; }
+.hc-pop-top > .hc-pop-head { flex: 1 1 auto; min-width: 0; }
+.hc-pop-close {
+  flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px;
+  background: rgba(243, 239, 228, 0.08); color: rgba(243, 239, 228, 0.85); font: inherit; font-size: 18px; line-height: 1; cursor: pointer;
+}
+.hc-pop-close:is(:hover, :focus-visible) { background: rgba(243, 239, 228, 0.16); color: var(--paper); }
+@media (pointer: coarse) { .hc-pop-close { width: 36px; height: 36px; } }
 .panel-title:has(> .hc-room-bar:not([hidden])) > :is(h2, h3) { display: none; }
-.panel[data-space="on"] .cloud-foot-name, .panel:has(.hc-chat-here) .cloud-foot-name { display: none; }
 .hc-dock { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
 /* Empty, it takes no row, so the panel's gap under the title is not doubled. */
 .hc-dock:empty { display: none; }
@@ -67,7 +137,7 @@
   transform: translateX(-50%); padding: 6px 10px; border-radius: 6px; background: rgba(20, 14, 8, 0.86); color: var(--paper);
   font-size: 12px; line-height: 1.35; text-align: center; overflow-wrap: anywhere; pointer-events: none;
 }
-.iv-stage > .hc-chat-notice { max-width: calc(100% - 104px); }
+.iv-stage > .hc-chat-notice { max-width: calc(100% - 176px); }
 .hc-chat-notice.hc-flash { animation: hc-flash 6s ease forwards; }
 @keyframes hc-flash { 0% { opacity: 0; } 5% { opacity: 1; } 88% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .hc-chat-notice.hc-flash { animation: none; } }
@@ -76,19 +146,19 @@
 .hc-invite strong { color: var(--accent-text); font-size: 12px; }
 .hc-invite-go, .hc-start-go { display: flex; flex-wrap: wrap; gap: 8px; }
 .panel[data-space="on"] .cloud-face { cursor: pointer; }
-/* A microphone over the portrait for an open request (audience-tiles.js `data-request`); a host's or co-host's rank is
-   the label under the name, not a badge. */
-.cloud-tile:is([data-request="asked"], [data-request="invited"]) .cloud-face::before {
-  position: absolute; display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 3px; border: 1px solid var(--wood-edge);
-  border-radius: 8px; background: var(--plank); color: var(--paper); font-size: 8px; font-weight: 700; letter-spacing: 0.04em; line-height: 1;
+/* An open request's badge at the portrait's top right (audience-tiles.js `.cloud-badge`, by the tile's `data-request`): a
+   round, outlined microphone in amber for one who asked and in green for one invited to speak, an outlined star in the
+   purple of Ooga Chat's hosts for an open co-host offer. A host's or co-host's rank is the label under the name. */
+.cloud-badge {
+  position: absolute; z-index: 2; top: -3px; right: -5px; display: none; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  box-shadow: 0 0 0 2.5px #141110;
 }
-.cloud-tile:is([data-request="asked"], [data-request="invited"]) .cloud-face::before { content: "\1F399\FE0F"; top: -5px; right: -7px; z-index: 1; font-size: 9px; background: var(--accent); }
-.cloud-tile[data-request="invited"] .cloud-face::before { background: #22c55e; }
-/* An open co-host offer: a star on the same badge, in paper over the purple of Ooga Chat's hosts' ring. */
-.cloud-tile[data-request="cohost"] .cloud-face::before {
-  position: absolute; display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 3px; top: -5px; right: -7px; z-index: 1;
-  border: 1px solid var(--wood-edge); border-radius: 8px; background: #b18aff; color: var(--ink); content: "\2605"; font-size: 10px; font-weight: 700; line-height: 1;
-}
+.cloud-badge svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cloud-tile:is([data-request="asked"], [data-request="invited"], [data-request="cohost"]) .cloud-badge { display: grid; }
+.cloud-tile[data-request="asked"] .cloud-badge { background: var(--accent); color: var(--ink); }
+.cloud-tile[data-request="invited"] .cloud-badge { background: #22c55e; color: #06210f; }
+.cloud-tile[data-request="cohost"] .cloud-badge { background: #b18aff; color: #1d0f3a; }
+.cloud-tile[data-request="cohost"] .cloud-badge .badge-mic, .cloud-tile:not([data-request="cohost"]) .cloud-badge .badge-star { display: none; }
 /* A dropped speaker's, host's or co-host's tile, kept in place while they reconnect (audience-tiles.js `reconnecting`). */
 .cloud-tile[data-reconnecting] :is(.cloud-face, .cloud-name) { opacity: 0.45; }
 .cloud-tile[data-reconnecting] .cloud-role { color: rgba(243, 239, 228, 0.6); font-style: italic; }
@@ -128,6 +198,19 @@
 }
 /* The Requests pop-up's Removed section, under the requests. */
 .hc-pop-section { margin: 6px 0 0; color: rgba(243, 239, 228, 0.5); font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+/* A request's or a removed person's row: their face, their name, then round ✓ and ✕ (a request) or Allow back. */
+.hc-queue-face { flex: none; display: grid; place-items: center; width: 26px; height: 26px; overflow: hidden; border-radius: 50%; background: #3a3734; color: var(--paper); font-size: 12px; font-weight: 700; }
+.hc-queue-face img { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
+.hc-queue-removed :is(.hc-queue-face, .hc-queue-name) { opacity: 0.6; }
+.hc-pop .hc-queue-row .foot-button.hc-round { display: grid; place-items: center; flex: none; width: 32px; height: 32px; min-height: 0; padding: 0; border: 0; border-radius: 50%; box-shadow: none; text-shadow: none; }
+.hc-pop .hc-queue-row .hc-round svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.hc-pop .hc-queue-row .foot-button.hc-approve { background: #22c55e; color: #06210f; }
+.hc-pop .hc-queue-row .foot-button.hc-approve:is(:hover, :focus-visible) { background: #4ade80; }
+.hc-pop .hc-queue-row .foot-button.hc-decline { background: transparent; box-shadow: inset 0 0 0 1.5px rgba(229, 83, 61, 0.75); color: #ff9a8a; }
+.hc-pop .hc-queue-row .foot-button.hc-decline:is(:hover, :focus-visible) { background: rgba(229, 83, 61, 0.16); }
+.hc-pop .hc-queue-row .foot-button.hc-allow { flex: none; min-height: 30px; padding: 0 10px; border: 0; background: transparent; box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.6); color: #9ff0b8; text-shadow: none; }
+.hc-pop .hc-queue-row .foot-button.hc-allow:is(:hover, :focus-visible) { background: rgba(34, 197, 94, 0.14); }
+@media (pointer: coarse) { .hc-pop .hc-queue-row .foot-button.hc-round { width: 38px; height: 38px; } .hc-pop .hc-queue-row .foot-button.hc-allow { min-height: 38px; } }
 /* A chat's preview (chat-hosts.js): its title with the zone and Open stage tags, its stage in the chat's circles to look at
    only, how many listen and wait, and the two ways in. */
 .hc-preview { width: 460px; max-width: calc(100vw - 32px); padding: 14px 16px 16px; font: inherit; }
@@ -207,8 +290,25 @@
 .iv-reset, .iv-full-button { border-color: transparent; background: rgba(12, 10, 8, 0.32); color: rgba(243, 239, 228, 0.82); backdrop-filter: blur(2px); }
 .iv-reset:hover, .iv-full-button:hover, .iv-reset:focus-visible, .iv-full-button:focus-visible { background: rgba(12, 10, 8, 0.62); color: var(--paper); }
 .iv-reset:focus-visible, .iv-full-button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
-/* Go there over the island, in its lower left corner. */
+/* The chat's land on its island view, in the view's glass, just left of the full-screen button (or in that corner where
+   the page offers no full screen); the title's own tag stands aside while it shows. */
+.iv-land-tag {
+  position: absolute; z-index: 2; top: 6px; right: 6px; display: grid; place-items: center; box-sizing: border-box; height: 24px; padding: 0 8px;
+  border-radius: 5px; background: rgba(12, 10, 8, 0.45); color: rgba(243, 239, 228, 0.9); font-size: 10px; font-weight: 700; letter-spacing: 0.12em;
+  line-height: 1; text-transform: uppercase; backdrop-filter: blur(2px);
+}
+.iv-land-tag[hidden] { display: none; }
+.iv-full-button:not([hidden]) ~ .iv-land-tag { right: 36px; }
+.panel.hc-land-in-view[data-space="on"] > .panel-title > .panel-chip:not(.hc-requests) { display: none; }
+/* Join on island over the island, in its lower left corner, in the same dark glass as the view's own buttons rather
+   than a wood slab over the scene. */
 .iv-stage > .hc-go { position: absolute; left: 6px; bottom: 6px; min-height: 28px; padding: 0 10px; font-size: 11px; }
+.iv-stage > .hc-go, .iv-stage > .hc-go:disabled {
+  border-color: rgba(243, 239, 228, 0.16); background: rgba(12, 10, 8, 0.45); color: rgba(243, 239, 228, 0.92);
+  box-shadow: none; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6); backdrop-filter: blur(2px);
+}
+.iv-stage > .hc-go:is(:hover, :focus-visible):not(:disabled) { background: rgba(12, 10, 8, 0.68); color: var(--paper); }
+.iv-stage > .hc-go:disabled { color: rgba(243, 239, 228, 0.55); }
 .iv-stage > .hc-go[hidden] { display: none; }
 @media (max-width: 399px) { .iv-reset, .iv-stage > .hc-go { min-height: 44px; } .iv-stage { max-height: 180px; } }
 /* Full screen (island-view.js `fullscreen`): the view in a layer over the page, its panel's empty strip folded away, and
@@ -227,7 +327,15 @@
   .iv-split { top: calc(var(--iv-split, 55dvh) - 11px); right: 0; bottom: auto; left: 0; width: auto; height: 22px; cursor: row-resize; }
   .iv-split::after { top: 10px; right: 0; bottom: auto; left: 0; width: auto; height: 2px; }
 }
-@media (prefers-reduced-motion: reduce) { .iv-split::after { transition: none; } }
+/* Its grabber, a pill on the seam's middle (island-view.js `hint`): shown a few seconds as full screen opens, then fading,
+   and back while touched, dragged, hovered or focused. */
+.iv-split::before {
+  content: ""; position: absolute; top: 50%; left: 50%; width: 5px; height: 40px; margin: -20px 0 0 -2.5px; border-radius: 3px;
+  background: rgba(243, 239, 228, 0.6); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); opacity: 0; transition: opacity 400ms ease;
+}
+.iv-split:is([data-hint], [data-drag], :hover, :focus-visible)::before { opacity: 1; transition-duration: 150ms; }
+@media (max-aspect-ratio: 1 / 1) { .iv-split::before { width: 40px; height: 5px; margin: -2.5px 0 0 -20px; } }
+@media (prefers-reduced-motion: reduce) { .iv-split::after, .iv-split::before { transition: none; } }
 /* The view fills its side to the edges, square and with no border, meeting the panel beside or under it with no gap. */
 .iv-full-host .iv-stage { flex: 1 1 auto; aspect-ratio: auto; max-height: none; min-height: 0; border-width: 0; border-radius: 0; box-shadow: none; }
 html.iv-full .hc-room-strip { display: none; }
@@ -237,19 +345,22 @@ html.iv-full .hc-room-strip { display: none; }
    meeting with no gap, at every width: the island's panel here, Ooga Chat's in ooga-chat.css (8px on a phone). */
 .panel[data-space="on"] > :is(.hc-room-strip, .cloud-roster) { margin-right: -14px; margin-left: -14px; border-right-width: 0; border-left-width: 0; border-radius: 0; }
 .panel[data-space="on"] > .hc-room-strip .iv-stage { border-right-width: 0; border-left-width: 0; border-radius: 0; }
-/* In a chat on a narrow screen the footer is one row: the buttons, each as wide as its words (Unmute, Join Voice,
+/* In a chat on a narrow screen the footer is one row: the buttons, each as wide as its words (Unmute, Join voice,
    Request to speak, End chat), then the links (Leave chat); any note a button carries goes under them. */
 @media (max-width: 479px) {
   .panel[data-space="on"] .cloud-foot { flex-wrap: wrap; gap: 6px 8px; }
   .panel[data-space="on"] .cloud-foot-actions { display: contents; }
   .panel[data-space="on"] .cloud-foot .foot-button { order: 1; flex: 1 1 auto; min-width: 0; padding: 0 6px; letter-spacing: 0.04em; }
   .panel[data-space="on"] .cloud-foot .link { order: 2; flex: none; }
-  .panel[data-space="on"] .cloud-foot > :not(.cloud-foot-name, .cloud-foot-actions) { order: 3; flex-basis: 100%; }
+  .panel[data-space="on"] .cloud-foot > :not(.cloud-foot-who, .cloud-foot-actions) { order: 3; flex-basis: 100%; }
+  .panel[data-space="on"] .cloud-foot > .cloud-foot-who { order: 4; }
 }
 
-/* The Requests panel in the panel's flow under the chat's bar (chat-hosts.js `dock`): it pushes the roster down, never
-   covers it, and scrolls itself when long. Placed last so it wins over the floating pop-up's phone sheet. */
+/* The Requests panel dropped from the chat's bar (chat-hosts.js `dock`, laid over the view by the rules on the chat
+   bar), scrolling itself when long. Placed last so it wins over the floating pop-up's phone sheet. */
 .hc-pop.hc-docked { position: static; z-index: auto; width: auto; max-width: none; margin: 6px 0 0; padding: 0; inset: auto; }
+/* It takes the chat bar's dark rather than a wood frame, so it reads as part of the bar it drops from. */
+.hc-pop.hc-docked { border: 0; border-radius: 0; background: #0c0b0a; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45); }
 .hc-pop.hc-docked .hc-pop-slab { max-height: min(40vh, 320px); overflow-y: auto; }
 
 /* Review fixes (desktop and phone). The invite and co-host offer cards are slabs but never stretch to fill the panel. */
@@ -261,9 +372,8 @@ html.iv-full .hc-room-strip { display: none; }
   .hc-preview .hc-start-go { flex-direction: column-reverse; }
   .hc-preview .hc-start-go .foot-button { width: 100%; }
 }
-/* In a chat, Sign out waits in the other tabs (it sat beside Leave chat, a slip away); Leave chat and Back to chats are
-   real tap targets on a touch screen. */
-.panel[data-space="on"] .cloud-foot-actions > .link:not(.hc-leave) { display: none; }
+/* Sign out stays in a chat on its own line under the buttons (cloud-foot-who), well away from Leave chat; Leave chat and
+   Back to chats are real tap targets on a touch screen. */
 @media (pointer: coarse) {
   .panel[data-space] :is(.hc-room-back, .hc-leave) { min-height: 40px; padding: 0 8px; }
 }
