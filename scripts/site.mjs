@@ -21,7 +21,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync,
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
-import { externalizeAudio } from "./distribution-audio.mjs";
+import { externalizeAudio, externalizeLoungeTrack } from "./distribution-audio.mjs";
 import { stageIcons } from "./distribution-icons.mjs";
 import { MAP_ENTRY, stageMap } from "./distribution-map.mjs";
 import { PICTURE_MODULES, externalizeModules, externalizePage, externalizePictures } from "./distribution-modules.mjs";
@@ -70,6 +70,7 @@ const pictures = process.argv.includes("--image-assets");
 // A picture module outside every data-defer group stays in the page's own script and is rewritten there.
 const inlinePictures = pictures ? PICTURE_MODULES.filter((src) => ![...deferred.values()].some((sources) => sources.includes(src))) : [];
 const hostedModule = (src, text) => {
+  if (process.argv.includes("--audio-assets") && src.startsWith("js/lounge-track-")) return externalizeLoungeTrack(src, text, out);
   if (src === portableLounge) return "";
   return pictures && PICTURE_MODULES.includes(src) ? externalizePictures(src, text, out) : text;
 };

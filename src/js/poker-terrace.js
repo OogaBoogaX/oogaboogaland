@@ -10,6 +10,7 @@
   const formerArea=throatArea+14*(32.2-inner)-4;
   const far=inner+(10*formerArea-throatArea+.25*(halfSpan-flatSpan)**2)/(2*halfSpan);
   const outer=z=>far-.25*Math.max(0,Math.abs(z)-flatSpan);
+  const contains=(x,z)=>x>=inner && Math.abs(z)<=halfSpan && x<=outer(z);
   const station=Object.freeze({x:far-2.5,y:1.62,z:-.6});
   const box = (x,y,z,w,h,d,color,emissive=0) => M.box({ w,h,d,color,emissive,offset:{x,y,z} });
   const turned = (x,y,z,profile,color,n=10,emissive=0) => M.moved(M.lathe({profile,color,segments:n,emissive}),x,y,z);
@@ -660,5 +661,5 @@
     for(const y of [-.43,-.13,.23,.60]){const r=y>.2?.165:.134;const band=turned(0,0,0,[[r,y],[r+.007,y+.016],[r,y+.044]],dark,16);S.addChild(pitch,S.createNode({geometry:M.turnedX(band,Math.PI/2)}));}
     const target=add(pitch,M.turnedX(tube,Math.PI/2));return {root,yaw,pitch,target,station};
   };
-  BL.pokerTerrace=Object.freeze({station,halfSpan,outer,clear,serviceX,cocktail,bar,roofBar,mount,build});
+  BL.pokerTerrace=Object.freeze({station,halfSpan,outer,contains,clear,serviceX,cocktail,bar,roofBar,mount,build});
 })();

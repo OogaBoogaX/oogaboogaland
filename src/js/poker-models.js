@@ -55,7 +55,8 @@
     return { x, z, yaw, hipX:x+.17*Math.sin(yaw), hipZ:z+.17*Math.cos(yaw) };
   });
   // Enclose the full chair ring and rail before testing the swept body against either.
-  const TABLE_HX = Math.max(WALK_A, SEAT_A + 0.53), TABLE_HZ = Math.max(WALK_B, SEAT_B + 0.53);
+  const CHAIR_RADIUS = 0.53;
+  const TABLE_HX = Math.max(WALK_A, SEAT_A + CHAIR_RADIUS), TABLE_HZ = Math.max(WALK_B, SEAT_B + CHAIR_RADIUS);
   const SIGN_X=3.15, SIGN_Z=-1.52, SIGN_YAW=-.76;
   const PLACES = Object.freeze(seatAngles.map(a => Object.freeze({ x: Math.cos(a) * 6 * TABLE_K, z: Math.sin(a) * 4.2 * TABLE_K })));
   // The dealer stands 0.43 m behind the rail's outer edge on the gap the chairs leave.
@@ -615,7 +616,7 @@
     // Leave room to reach the glass, but never continue through the wall behind it.
     const rear = Math.abs(bx) < BL.bifrostModels.WINDOW.halfW - r ? REAR_WALL_Z - 0.01 : 35.5 - r;
     if (bx < -23 + r || !BL.pokerTerrace.clear(ax, az, bx, bz, r) || bz < -35.5 + r || bz > rear) return false;
-    const vx = bx - ax, vz = bz - az, dd = vx * vx + vz * vz, chairRadius2 = (r + 0.53) ** 2;
+    const vx = bx - ax, vz = bz - az, dd = vx * vx + vz * vz, chairRadius2 = (r + CHAIR_RADIUS) ** 2;
     const rx = WALK_A + r, rz = WALK_B + r, dx = vx / rx, dz = vz / rz, d = dx * dx + dz * dz;
     const left = Math.min(ax, bx) - r - TABLE_HX, right = Math.max(ax, bx) + r + TABLE_HX;
     const near = Math.min(az, bz) - r - TABLE_HZ, far = Math.max(az, bz) + r + TABLE_HZ;
@@ -806,5 +807,5 @@
     if (p.legL) p.legL.rotation.x = 0; if (p.legR) p.legR.rotation.x = 0;
     if (p.armL) p.armL.rotation.x = STAND_ARMS; if (p.armR) p.armR.rotation.x = STAND_ARMS;
   };
-  BL.pokerModels = { CHANDELIER_LIGHT_Y, TABLE_K, FELT_A, FELT_B, RAIL_A, RAIL_B, TOP_A, TOP_B, WALK_A, WALK_B, DEALER_Z, DEAL_FROM, DEAL_RUN, FELT_Y, RAIL_TOP, SEAT_TOP, SIT_HIP, DEALER_SCALE, sitY, PLACES, BEAD_Y, TABLES, GAMES, SEATS, REAR_WALL_Z, PORTAL_Z, EXIT_Z, FURNITURE, HIGH_ROLLER, geometry, card, build, walkable, crosses, setLite, nearestClear, CLUB_LIGHTS, COLONNADE, LOUNGE_LIGHTS, GAME_LIGHTS, spots, bendKnees, sitPose, standPose };
+  BL.pokerModels = { CHANDELIER_LIGHT_Y, TABLE_K, FELT_A, FELT_B, RAIL_A, RAIL_B, TOP_A, TOP_B, WALK_A, WALK_B, TABLE_HX, TABLE_HZ, CHAIR_RADIUS, DEALER_Z, DEAL_FROM, DEAL_RUN, FELT_Y, RAIL_TOP, SEAT_TOP, SIT_HIP, DEALER_SCALE, sitY, PLACES, BEAD_Y, TABLES, GAMES, SEATS, REAR_WALL_Z, PORTAL_Z, EXIT_Z, FURNITURE, HIGH_ROLLER, geometry, card, build, walkable, crosses, setLite, nearestClear, CLUB_LIGHTS, COLONNADE, LOUNGE_LIGHTS, GAME_LIGHTS, spots, bendKnees, sitPose, standPose };
 })();

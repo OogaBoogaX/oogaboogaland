@@ -6,7 +6,7 @@
   let identity, handKey, keyHand = "", token = "", table = 0, mirror = null, record = null, lastRecord = null;
   let running = false, fatal = false, controller = null, revision = -1, seq = 0, latest = null;
   let connecting = false, storage = null, instance = "", account = null, display = null, pending = null;
-  let activeAction = 0, acknowledged = 0;
+  let activeAction = 0, acknowledged = 0, departing = false;
   const finishAction = () => { if (!pending && activeAction) { acknowledged = activeAction; activeAction = 0; } };
   const actions = [];
   const post = (type, value) => self.postMessage({ type, ...value });
@@ -15,7 +15,7 @@
     if (!storage) return;
     try {
       await storage.save({ version: 1, instance, identity: identity.checkpoint(), publicKey: identity.publicKey,
-        table, seq, hand: handKey?.checkpoint() || null, keyHand, record, lastRecord, pending });
+        table, seq, hand: handKey?.checkpoint() || null, keyHand, record, lastRecord, pending, departing });
     } catch { const error = new Error("Recovery could not be saved. Live play stopped; free storage and reload before the hand times out."); error.fatal = true; throw error; }
   };
   const jsonFetch = async (path, options = {}) => {
@@ -102,15 +102,20 @@
       packet.tables[table] = { table, phase: s.phase, revision: s.revision, state: s.state };
     }
     if (!mirror?.active) { handKey?.dispose(); handKey = null; keyHand = ""; }
+    if (!packet.tables[table].state.seats.some(p => p?.id === identity.publicKey)) departing = false;
     await persist();
-    post("state", { packet: { tables: packet.tables, table, identity: identity.publicKey, deadline: packet.deadline, acknowledged,
+    post("state", { packet: { tables: packet.tables, table, identity: identity.publicKey, deadline: packet.deadline, acknowledged, departing,
       fairness: { phase: s?.phase || "idle", checked: s?.shuffleAt || 0, total: s?.context?.members.length || 0, root: s?.root || "", exportable: !!record || !!lastRecord, complete: s?.phase === "complete", recoverable: !!storage } } });
     if (canceled) post("notice", { message: "Hand canceled. Committed chips were refunded and missing players' seats released." });
   };
   const automatic = async () => {
-    if (!mirror?.active) return false;
+    if (!mirror?.active) {
+      if (departing) { await command("leave", {}); return true; }
+      return false;
+    }
     const s = mirror.state(identity.publicKey), id = identity.publicKey;
     if (!s.context.members.some(m => m.id === id)) return false;
+    if (departing && s.state.legal) { await command("act", { version:s.state.version, action:"fold", amount:null }); return true; }
     const hand = s.context.nonce + ":" + s.context.epoch;
     if (s.phase === "keys" && !s.keys.some(([who]) => who === id)) {
       if (keyHand !== hand) { handKey?.dispose(); handKey = C.player(); keyHand = hand; await persist(); }
@@ -136,6 +141,11 @@
   };
   const act = async request => {
     const { name, value, expectedVersion } = request;
+    if (name === "depart") {
+      if (latest?.tables[table].state.seats.some(p => p?.id === identity.publicKey)) { departing = true; await persist(); }
+      return;
+    }
+    if (departing && !["verify","export"].includes(name)) throw new Error("Your seat releases when the live hand settles.");
     if (name === "forget") {
       if (!storage || !latest || latest.tables.some(t => t.state.seats.some(p => p?.id === identity.publicKey))) throw new Error("Stand between hands before forgetting this device's recovery");
       await storage.clear(); stop("Recovery cleared. Reload to connect again; allow 90 seconds for the old connection to expire."); return;
@@ -209,7 +219,7 @@
         identity = C.player(saved?.identity ?? null);
         if (saved && identity.publicKey !== saved.publicKey) throw new Error("Recovered identity does not match");
         if (saved?.instance === instance) {
-          table = saved.table; seq = saved.seq; keyHand = saved.keyHand; record = saved.record; lastRecord = saved.lastRecord; pending = saved.pending;
+          departing = saved.departing === true; table = saved.table; seq = saved.seq; keyHand = saved.keyHand; record = saved.record; lastRecord = saved.lastRecord; pending = saved.pending;
           if (saved.hand) handKey = C.player(saved.hand);
           if (record) { if (record.table !== table) throw new Error("Wrong recovered table"); mirror = await M.replay(record); }
           if (pending) {

@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Ember Den · Table preview</title><link rel="stylesheet" href="preview.css"></head>
+<body>
+<header class="top"><a href="index.html" aria-label="Back to all ten concepts">‹ <span>All tables</span></a><strong>THE EMBER DEN</strong><button id="switch" aria-label="Table options">Table menu ▾</button></header>
+<main><header class="mast"><div class="identity"><canvas class="crest" width="120" height="120" aria-hidden="true"></canvas><div><p class="eyebrow" id="edition"></p><h1></h1></div></div><div class="rules"><strong>No-limit Hold’em</strong><span>Practice · Blinds 5 / 10</span></div></header>
+<div class="layout"><div class="playing"><section class="arena" aria-label="Poker table">
+<div class="surface"></div><div class="seats"></div>
+<div class="boardzone"><div class="dealer"><img src="art/dealer.png" alt=""> House gorilla</div><div class="pot"><span>Total pot</span><strong id="pot">60</strong></div><div class="cards" id="board" aria-label="Community cards"></div><span class="street">Flop</span></div>
+</section><section class="dock"><div class="hole"><div id="private" class="cards"></div><div><span class="eyebrow">Your hand</span><strong>High card</strong><small>Stack <b id="stack">990</b></small></div></div><div class="decision"><p id="decision" role="status">Your turn <span>· Check for free or bet</span></p><div class="actions"><button id="fold">Fold</button><button id="check">Check</button><button class="primary" id="bet">Bet…</button></div></div></section></div>
+<aside><section class="history"><h2>Hand history</h2><div id="log"></div></section></aside></div>
+<nav class="mobiletools" aria-label="Table tools"><button id="history">Hand history</button></nav>
+</main><dialog id="sheet"><div class="sheet-head"><h2 id="sheet-title"></h2><button id="close" aria-label="Close">×</button></div><div id="content"></div></dialog>
+<script>window.BL={};</script><script src="../../../src/js/poker-cards.js"></script><script src="../../../src/js/poker-table-hud.js"></script><script src="preview.js"></script></body></html>
