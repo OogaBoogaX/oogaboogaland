@@ -13150,6 +13150,8 @@
     }
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
+    // The hill's plug for a chat's copy (`buildLibraryPlug`) hangs on the root outside `placed`.
+    if (libraryPlugNode) removeChild(root, libraryPlugNode);
     if (physics) { physics.dispose(); physics = null; }
     targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixGates.length = sealedCaves.length = clouds.length = lamps.length = pilePosts.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
     fireHazards.length = 0;
