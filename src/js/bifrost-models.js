@@ -46,12 +46,21 @@
     key: "dsb", bands: [[0, 0.3, "#403054", 0.55], [0.3, 0.36, "#49ddd9", 0.8], [0.36, 0.62, "#2a1648", 0.7], [0.62, 1, "#12082a", 0.8]],
     dots: ["#49ddd9", "#ffdf38"], dotY: [0.66, 0.3]
   };
+  // Valhodl's, until its baked picture (`art`, bifrost-valhodl-art.js) has decoded: its night over the castle's stone
+  // and the moat, its windows lit.
+  const KEEP_STAND = {
+    key: "keep", bands: [[0, 0.2, "#22331f", 0.4], [0.2, 0.27, "#1f5a6e", 0.7], [0.27, 0.6, "#4a3f37", 0.45], [0.6, 1, "#0d1230", 0.8]],
+    dots: ["#ffbe5c", "#ffe9a8"], dotY: [0.33, 0.24]
+  };
   // The windows, left to right as the tunnel looks in, at their bearings round the wall. Only an open world carries a
   // label, a `tint` (the colour its frame's rim and light glow in, the colour of that world) and a `stand`-in; a world
   // whose looks come from a file loaded after this one gives all of them through `look`. `instant` crosses without the fade, as that world's own way
-  // back does.
+  // back does. A `lazy` world is never fetched or photographed by the chamber: nothing of it loads until someone walks
+  // through its window, which shows its stand-in, or the picture `art` names (`BL.bifrostArt`), baked from the land
+  // beforehand. A world left by another of its scenes too names it in `via`, so the
+  // traveller comes back out of its window all the same.
   const WINDOWS = [
-    { id: "west", kind: "mirror" },
+    { id: "keep", kind: "travel", scene: "keep", via: ["keephalls"], name: "Valhodl", label: "VALHODL", tint: "#a56bff", stand: KEEP_STAND, lazy: true, art: "valhodl" },
     { id: "dsb", kind: "travel", scene: "dsb", name: "DSB Land", label: "DSB", tint: "#3f8cff", stand: DSB_STAND },
     { id: "poker", kind: "travel", scene: "poker", name: "The Ember Den", label: "EMBER DEN", instant: true, look: () => pokerLook() },
     { id: "east", kind: "mirror" }
@@ -622,7 +631,7 @@
     };
   };
   // An open world's looks now: the key its picture goes by, its tint and its stand-in.
-  const lookOf = (row) => row.look ? row.look() : { key: row.id, tint: row.tint, stand: row.stand };
+  const lookOf = (row) => row.look ? row.look() : { key: row.id, tint: row.tint, stand: row.stand, art: row.art || null };
   // A window's mirror, `MIRROR_Z` past the wall's face inside its arch: one quad facing +z at z 0, a reflector keyed on
   // its own geometry, so each window has a glass of its own (by slot). `backing` closes the arch behind the glass,
   // which shows nothing until its first capture and on Canvas 2D only its sheen. Every window shares the backing.

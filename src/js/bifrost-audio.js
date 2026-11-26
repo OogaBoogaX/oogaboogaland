@@ -231,6 +231,12 @@
     };
 
     const CUES = {
+      // Far thunder through Valhodl's window, `k` as loud as it is near: a low rolling rumble and a duller crack.
+      thunder: (k) => {
+        hiss(0, "lowpass", 420, 90, 0.7, 3.4, 0.09 * k, 0.25);
+        hiss(0.15, "lowpass", 220, 70, 0.6, 2.6, 0.07 * k, 0.4);
+        tone(0, "sine", 62, 34, 2.4, 0.06 * k, 0.12);
+      },
       // Through a field into the chamber: the membrane's whoom, the hum coming up under it, the signature over it.
       arrive: () => {
         tone(0, "sine", 150, 58, 1.6, 0.32, 0.05);

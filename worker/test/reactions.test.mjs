@@ -79,6 +79,14 @@ test("the room relays a reaction to the sender's zone alone, from a driven body,
   assert.equal(room.chat.size, 0, "no history");
 });
 
+test("a reaction crosses an area's edge in one Valhodl scene, never into the keep's halls", () => {
+  const { room, join } = reactionRoom({ now: 1000 });
+  const a = join(1, "byzantine-keep.y1r0"), b = join(2, "byzantine-keep.y2r0"), halls = join(3, "byzantine-keep.halls");
+  room.webSocketMessage(a, '{"t":"react","e":"😂"}');
+  assert.deepEqual(b.sent, ['{"t":"react","id":1,"e":"😂"}'], "the neighbouring area sees it");
+  assert.deepEqual(halls.sent, [], "the halls are a scene of their own");
+});
+
 test("the raised hand lives on the record, its attachment and every view, and goes to everyone on a change only", () => {
   const clock = { now: 1000 };
   const { room, join } = reactionRoom(clock);

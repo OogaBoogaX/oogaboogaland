@@ -8,6 +8,7 @@
     poseYaw: 0,
     poseLean: 0,
     poseLeanY: 0,
+    poseTip: 0,
     scale: { x: 1, y: 1, z: 1 },
     geometry: null,
     glow: 1,
@@ -63,6 +64,16 @@
         const x = m[i], y = m[i + 1] - (i === 12 ? pivot : 0);
         m[i] = c * x - s * y;
         m[i + 1] = s * x + c * y + (i === 12 ? pivot : 0);
+      }
+    }
+    // A body tipped forward (+) or back (-) about the hips, the root's origin, in the parent's frame: the upper-body
+    // parts turned together about its side axis, as `poseLean` rolls them about its front one.
+    if (node.poseTip) {
+      const m = node.local, c = Math.cos(node.poseTip), s = Math.sin(node.poseTip);
+      for (let i = 0; i < 16; i += 4) {
+        const y = m[i + 1], z = m[i + 2];
+        m[i + 1] = c * y - s * z;
+        m[i + 2] = s * y + c * z;
       }
     }
   };
