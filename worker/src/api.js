@@ -12,6 +12,7 @@ import { turnConfigured } from "./sfu.js";
 import { GAME_KINDS } from "./games.js";
 import { equipmentEnabled } from "./equipment-model.js";
 import { revokeChats } from "./chat-revoke.js";
+import { announceRename } from "./renames.js";
 
 const BODY_MAX = 1024;
 
@@ -38,6 +39,8 @@ const me = async (request, env) => {
     const display = sanitizeDisplay(body && body.display);
     if (!display) return json({ error: "display must be 3-24 letters, digits or simple punctuation" }, 400);
     await updateDisplay(env.DB, found.player.id, display);
+    // Every live page and Ooga Chat connection showing this account takes the new name now (renames.js).
+    await announceRename(env, found.player.id, display);
     return json({ player: publicPlayer(await getPlayer(env.DB, found.player.id)) });
   }
 

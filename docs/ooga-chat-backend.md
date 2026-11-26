@@ -133,7 +133,7 @@ The app's own contract (`docs/ooga-chat-app.md`) is the source of truth for shap
 | `GET /api/chat/audience`, upgraded | the audience socket (#665, below), from the app's own page with a session |
 | `POST /api/chat/media/<op>` | media signalling (#666, below), from the app's own page with a session; `publish/*` needs `speak` and GitHub |
 | `GET /api/chat/commons`, upgraded | The Commons and Online Oogas (#670, below), from the app's own page, for an eligible GitHub contributor |
-| `POST /api/chat/commons/name` | `{ display }` → `{ display }`: the member's name, saved as their island display name through the bridge's `display` and kept as the account's chosen name here (`chosen_display`), from the app's own page, for an eligible GitHub contributor while the Commons is on: 401 no session, 403 not eligible now, 429 too many saves (`CHAT_AUTH_LIMITER`), 400 a name the island refuses, 503 off or unanswered. The app then joins the Commons again, so the Room's welcome and every later line carry the new name |
+| `POST /api/chat/commons/name` | `{ display }` → `{ display }`: the member's name, saved as their island display name through the bridge's `display` and kept as the account's chosen name here (`chosen_display`), from the app's own page, for an eligible GitHub contributor while the Commons is on: 401 no session, 403 not eligible now, 429 too many saves (`CHAT_AUTH_LIMITER`), 400 a name the island refuses, 503 off or unanswered. The app then joins the Commons again, so the Room's welcome and every later line carry the new name. Every other live connection takes it at once (**Live renames**, below) |
 | any other `/api/*`, `/auth/*`, `/donations/*` | a JSON 404 (`{ error: { code: "not_found" } }`), never the app's HTML |
 
 Every other path is served from the staged app. Only `/api/*`, `/auth/*` and `/donations/*` run the Worker
@@ -695,7 +695,7 @@ A socket kept open across a hibernation misses nothing and gets no second welcom
 | Private conversations | no | no | no | no (island only) | yes |
 | Voice links | no | no | no | yes, in Online Oogas: the island's own asks, its audio both ways | yes |
 | A body, poses, NPC host, games, chalk | no | no | no | no | yes |
-| Edit the display name | no | no | no | yes, the name field at the top of The Commons (`POST /api/chat/commons/name`), saved as the island's own; shown in both | yes (`PATCH /api/me`) |
+| Edit the display name | no | no | no | yes, the name field at the top of The Commons (`POST /api/chat/commons/name`), saved as the island's own; shown in both, live everywhere | yes (`PATCH /api/me`), live everywhere |
 
 **Access ends.** Signing out, deleting the account or losing eligibility (the edge's `revoke`, #663) closes every member
 socket of that account at once (`communityRevoke`); the Room's minute sweep closes one past its hourly re-authentication
@@ -795,3 +795,17 @@ let the media cleanup (#667) retire what is open, then redeploy the previous com
 (`npx wrangler rollback --config ../wrangler.ooga-chat.<env>.jsonc` from `worker/`, or the previous commit through the
 workflow). Never drop D1 tables or Durable Object namespaces as a rollback: old clients and cleanup still need them. A
 DNS change alone does not end an open audio session; the island's kill switch does.
+
+## Live renames
+
+A display name saved on either side (the island's `PATCH /api/me`, `api.js`, or Ooga Chat's Commons name field through the
+bridge's `display`, `chat-display.js`) is announced to every live connection by `worker/src/renames.js`
+(`announceRename`), with no reconnect: the island's Room (`renamed`) sets it on that account's player and Commons member
+records (their hibernation attachments too), tells every page and Commons member `{ t: "renamed", id, display }`, and
+sends Ooga Chat's audience its speakers again; Ooga Chat's public audience and every live hosted chat (`Audience.renamed`)
+set it on the account's rows, which reach every client as an ordinary delta (rosters, tiles, clouds, a chat card's host).
+The island's page (`net.js`) applies `renamed` to the player's record and, for its own account, in place; Ooga Chat's
+Commons model (`ooga-chat-commons.js`) to Online Oogas and, for its own account, the footer, saving the name as this
+account's chosen name too (the Commons name field's own path, once a name), so a later account check keeps it. Best
+effort: an object that can't be reached shows the name when its sockets next join, as before. Lines already said keep
+the name they were said under.

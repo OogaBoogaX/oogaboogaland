@@ -383,6 +383,13 @@
       feeding.open(mode === "demo");
     };
     BL.oogaChatPortraits?.configure(() => adapter.contributors());
+    // Renamed elsewhere (on the island, or in another of this account's tabs or devices: the Room's `renamed`, through
+    // the Commons): the account controller takes the name at once and has the server ask the island for it, so this
+    // account's chosen name here follows the island's (ooga-chat-auth.js `renamed`). Never written back: the island's own
+    // save is the only one.
+    town.subscribe((kind) => {
+      if (kind === "renamed" && town.state.you) auth.renamed(town.state.you.display);
+    });
     const ctx = { actions, media, install: () => device.install(), reload: () => device.reload(), storageKey: (name) => storageKey(adapter.kind, name),
       demo: fixture ? adapter.demo : null, feed: feedOogas, commons: { model: town, send: (data) => !!member && member.send(data),
         // The name field: saved as the island's display name, then the Commons is joined again so the Room's welcome,

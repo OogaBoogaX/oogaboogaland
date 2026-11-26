@@ -31,7 +31,7 @@ export const REAUTH_MS = 60 * 60 * 1000;
 export const SILENT_MS = 75000;
 // `chat-online` is how many are in hosted chats through Ooga Chat and not on the island, the one number every "N online"
 // adds (room-chat-members.js), so a member's counts agree with the island's.
-const RELAYED = new Set(["join", "leave", "body", "zone", "vstate", "hand", "chat", "clouds", "chat-online", "chat-people"]);
+const RELAYED = new Set(["join", "leave", "body", "zone", "vstate", "hand", "chat", "clouds", "chat-online", "chat-people", "renamed"]);
 const CLOSE = { stale: 4000, bad: 4400, auth: 4401, full: 4429 };
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 
@@ -185,6 +185,15 @@ export const commonsRoom = {
     }
     const out = JSON.stringify(frame);
     for (const m of room.community.values()) room.send(m.ws, out);
+  },
+
+  /** An account renamed (room.js `renamed`): its member sockets carry the new name on every line from now on. */
+  rename(room, id, display) {
+    for (const m of members(room).values()) {
+      if (m.id !== id || m.display === display) continue;
+      m.display = display;
+      try { m.ws.serializeAttachment(attachmentOf(m)); } catch { /* closing */ }
+    }
   },
 
   /** An account's access ends (signed out, deleted, eligibility lost): every member socket of it closes. */

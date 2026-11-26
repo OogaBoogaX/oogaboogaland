@@ -47275,6 +47275,25 @@ const chatClientChecks = async () => {
     unread.join() === "0,1,2,2,0,1,0", unread.join());
   record("ooga chat client: lost receipts time out to a stable retry; edited identical drafts and newer sends survive old receipts; explicit logout clears local text; Unicode, invalid controls and old-server gating use the shared policy", waiting && uncertain && stable && revision && late && policy && unicode && gated && restored && input.value === "" && C.stats.lines === 0 && timers.size === 0, JSON.stringify({ waiting, uncertain, stable, revision, late, policy, lines: C.stats.lines, timers: timers.size }));
 };
+// A rename from the island or Ooga Chat (worker/src/renames.js) reaches an open page with no rejoin: another player's
+// record and the roster, and the page's own account in place (its own rename's answer checks it is the same object).
+const renameWireChecks = async BL => {
+  const f = netFixture(BL, () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "Tester", display: "Tester" } }) }), 0);
+  await f.net.start();
+  const ws = f.sockets[0], message = v => ws.onmessage({ data: JSON.stringify(v) });
+  message({ t: "welcome", you: { id: 71 }, now: Date.now(), features: [], players: [{ id: 2, login: "anna", display: "Anna", zone: "outside" }] });
+  let rosterCalls = 0, heard = 0;
+  const offRoster = f.net.subscribeRoster(() => rosterCalls++), off = f.net.subscribe(() => heard++);
+  const me = f.net.state.me;
+  message({ t: "renamed", id: 2, display: "Anna Bold" });
+  message({ t: "renamed", id: 71, display: "Tester Two" });
+  message({ t: "renamed", id: 2, display: "bad\u0000" });
+  message({ t: "renamed", id: 2, display: "x".repeat(51) });
+  const anna = f.net.remotes.get(2).display, mine = { same: f.net.state.me === me, display: f.net.state.me.display };
+  offRoster(); off(); f.net.dispose();
+  record("live renames: another player's name and the page's own account change in place, telling the roster and the account row, and a malformed name is dropped",
+    anna === "Anna Bold" && mine.same && mine.display === "Tester Two" && rosterCalls >= 1 && heard >= 1, JSON.stringify({ anna, mine, rosterCalls, heard }));
+};
 // Reactions and the raised hand share one room bucket (worker/src/room.js reactToken); the page spends its mirror of it.
 const reactionWireChecks = async BL => {
   const f = netFixture(BL, () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "Tester", display: "Tester" } }) }), 0);
@@ -50212,6 +50231,42 @@ const oogaChatChecks = async () => {
   record("Ooga Chat account: every sign-in lands as a listener with gates only the server's answer opens, a stale window (asked again two minutes before it ends), a failed check or the server's own unsure answer closes them without ending a lease held, sign-out releases capture before the request and offers a retry when unconfirmed, a session the server still holds after it is never adopted again, and another principal or an expired session releases and says so",
     Object.values(flow).every(Boolean), JSON.stringify(flow));
 
+  // Renamed live (worker/src/renames.js, heard through the Commons): the heard name is the account's at once; an answer
+  // still carrying the old one (the server's island answer under its 10 s window) keeps the heard name and is renameAsks again
+  // after that window; one that agrees ends it, and nothing is renameAsks after.
+  const renaming = await signedIn(account("github", "speaker", "eligible", { identity: { display: "Old Name" } }));
+  renaming.auth.renamed("New Name");
+  const atOnce = renaming.auth.state.session.identity.display === "New Name";
+  await renaming.advance(0);
+  await new Promise((resolve) => setImmediate(resolve));
+  const renameAsks = renaming.log.filter((entry) => entry === "session").length;
+  const keptOverOld = renaming.auth.state.session.identity.display === "New Name" && renaming.timers.some((t) => t.at >= NOW + 11_000);
+  renaming.answer = account("github", "speaker", "eligible", { identity: { display: "New Name" } });
+  await renaming.advance(11_000);
+  await new Promise((resolve) => setImmediate(resolve));
+  const agreed = renaming.auth.state.session.identity.display === "New Name" && renaming.log.filter((entry) => entry === "session").length === renameAsks + 1;
+  await renaming.advance(60_000);
+  const settled = renaming.log.filter((entry) => entry === "session").length === renameAsks + 1;
+  // The heard name is that account's alone: a check answering another account (switched in another tab) gives it its own
+  // name and asks nothing more, and signing out forgets it.
+  const switching = await signedIn(account("github", "speaker", "eligible", { identity: { display: "Old Name" } }));
+  switching.auth.renamed("New Name");
+  switching.answer = account("github", "someone", "eligible", { identity: { display: "Someone" } });
+  await switching.advance(0);
+  await new Promise((resolve) => setImmediate(resolve));
+  const switchAsks = switching.log.filter((entry) => entry === "session").length;
+  await switching.advance(60_000);
+  const ownName = switching.auth.state.session.identity.display === "Someone" && switching.log.filter((entry) => entry === "session").length === switchAsks;
+  const leavingName = await signedIn(account("github", "speaker", "eligible", { identity: { display: "Old Name" } }));
+  leavingName.auth.renamed("New Name");
+  leavingName.auth.signOut();
+  await new Promise((resolve) => setImmediate(resolve));
+  const leaveAsks = leavingName.log.filter((entry) => entry === "session").length;
+  await leavingName.advance(60_000);
+  const forgotten = leavingName.log.filter((entry) => entry === "session").length === leaveAsks;
+  record("Ooga Chat account: a name heard live is the account's at once, kept over an answer still carrying the old one, which is asked again after the server's window, until one agrees; never given to another account, and forgotten on signing out",
+    atOnce && renameAsks === 2 && keptOverOld && agreed && settled && ownName && forgotten, JSON.stringify({ atOnce, renameAsks, keptOverOld, agreed, settled, ownName, forgotten }));
+
   // The audience roster (audience protocol 1): the space's one order, and a snapshot and deltas applied whole or not at
   // all, by participant and generation, with stale ones dropped and gaps found.
   const R = load(["src/ooga-chat/ooga-chat-config.js", "src/ooga-chat/ooga-chat-roster.js"], { window: {}, URLSearchParams }).oogaChatRoster;
@@ -51779,6 +51834,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await privatePadChecks();
   await playersColumnChecks();
   await reactionWireChecks(BL);
+  await renameWireChecks(BL);
   await persistentSlotChecks(BL);
   await chalkboardClientChecks(BL);
   await chalkboardEraserChecks(BL);

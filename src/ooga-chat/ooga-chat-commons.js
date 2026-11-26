@@ -127,6 +127,13 @@
         if (!p) return;
         Object.assign(p, handOf(frame.on, frame.tone, frame.e));
         emit("players");
+      } else if (frame.t === "renamed") {
+        // An account's new display name (the island's worker/src/renames.js): its row, and the member's own name when it
+        // is theirs, at once; the app hears `renamed` for the rest of the page (its footer).
+        if (!id(frame.id) || !words(frame.display, 50) || !frame.display.trim()) return;
+        const p = state.players.get(frame.id);
+        if (p && p.display !== frame.display) { p.display = frame.display; emit("players"); }
+        if (state.you && state.you.id === frame.id && state.you.display !== frame.display) { state.you.display = frame.display; emit("renamed"); }
       }
     };
     const reset = () => {

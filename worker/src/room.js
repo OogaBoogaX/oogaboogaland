@@ -1809,6 +1809,24 @@ export class Room extends DurableObject {
   audienceClouds(list) { return audienceRoom.clouds(this, list); }
   // An Ooga Chat account's access ended (#670): its community sockets close.
   communityRevoke(id, reason) { return commonsRoom.revoke(this, id, reason); }
+  // An account renamed (renames.js, from the island's account API or Ooga Chat's Commons name field): its records here and
+  // its Commons members take the new name, every page and member is told (`renamed`), and Ooga Chat's audience hears the
+  // island's speakers again with it. Lines already said keep the name they were said under.
+  renamed(id, display) {
+    id = Number(id);
+    if (!Number.isSafeInteger(id) || id <= 0 || typeof display !== "string" || !display || display.length > 50) return { renamed: 0 };
+    let n = 0;
+    for (const p of this.players.values()) {
+      if (p.id !== id || p.display === display) continue;
+      p.display = display;
+      try { p.ws.serializeAttachment(this.attachment(p)); } catch { /* held or closing: the next join reads the account */ }
+      n++;
+    }
+    commonsRoom.rename(this, id, display);
+    this.broadcast({ t: "renamed", id, display });
+    audienceRoom.world(this);
+    return { renamed: n };
+  }
   audienceListeners(counts) { audienceRoom.listeners(this, counts); }
 
   // /voice/<op> from the Worker, which checked the session and set x-player-id. Ops: session (a publish
