@@ -160,7 +160,8 @@
       signedOut.hidden = !!who || mode === "loading" || live && auth === "checking";
       node.dataset.space = who ? chats && !state.room ? "list" : "on" : busy === "signout" ? "foot" : "off";
       // In a chat its land; on the chats list none (no zone is shown there), even before the chats' views have loaded.
-      set(head.chip, "textContent", who ? state.room && BL.chatHosts ? BL.chatHosts.ZONE_NAMES[state.room.zone] || "" : chats ? "" : ZONE_NAMES[state.zone] : "");
+      if (who && state.room && BL.chatHosts) BL.chatHosts.tagged(head.chip, state.room.zone);
+      else { set(head.chip, "textContent", who && !chats ? ZONE_NAMES[state.zone] : ""); head.chip.title = ""; }
       if (live) sayWelcome(!!boot.features.chats);
       let words = STATUS[mode] || "";
       if (live && auth === "checking") words = "Checking your sign-in…";
@@ -398,11 +399,11 @@
       if (!state.session) { chooseVolume(null); return; }
       const { audience: now, zone } = state;
       // The feed's state first; then voice's (playback the browser held back, a receiver that gave up, what the last try
-      // to speak said); then an empty zone.
+      // to speak said, which in a Main Island chat floats over the island view instead, chat-hosts.js); then an empty zone.
       const failed = now.status === "live" && state.voice.phase === "failed";
       const place = state.room ? "chat" : "zone";
       const words = HEARD[now.status]?.(zone, !!state.room) || (now.status !== "live" ? "" : state.voice.blocked ? `Tap anywhere to hear this ${place}.`
-        : failed ? `Can't hear this ${place} right now. ` : state.voice.notice || (!now.list.length ? "Nobody is here yet." : ""));
+        : failed ? `Can't hear this ${place} right now. ` : (state.room && state.room.zone === "main" ? "" : state.voice.notice) || (!now.list.length ? "Nobody is here yet." : ""));
       set(statusText, "textContent", words);
       set(retryVoice, "hidden", !failed);
       set(heard, "hidden", !words);
@@ -485,22 +486,36 @@
     return { node, update, focus, dispose, parts: { mute, join, actions: footActions } };
   };
   // Under the frame: install help the browser actually offers (its own prompt, or Safari's Share menu), and a waiting
-  // update, which never reloads by itself and waits while the visitor speaks.
+  // update, which never reloads by itself and waits while the visitor speaks. Each line has its own × to hide it: the
+  // install offer for good in this browser (localStorage `ooga-chat-install-hidden`; the browser's own menu still
+  // installs), the update until this page loads again.
+  const INSTALL_HIDDEN = "ooga-chat-install-hidden";
   const device = ({ install, reload }) => {
     const listeners = new AbortController(), { signal } = listeners;
     const offer = button("link", "Install Ooga Chat"), hint = make("span", "", "To install Ooga Chat, tap Share, then Add to Home Screen.");
     const fresh = make("span", ""), take = button("link", "Reload");
+    const closer = (words) => { const b = button("oc-device-close", "×"); b.setAttribute("aria-label", words); b.title = words; return b; };
+    const hideInstall = closer("Hide the install offer"), hideUpdate = closer("Hide this until the page reloads");
+    let installHidden = false, updateHidden = false, last = null;
+    try { installHidden = localStorage.getItem(INSTALL_HIDDEN) === "1"; } catch { /* shown */ }
     offer.addEventListener("click", () => install(), { signal });
     take.addEventListener("click", () => reload(), { signal });
-    const installLine = make("p", "oc-device-line", offer, hint), updateLine = make("p", "oc-device-line", fresh, take);
+    hideInstall.addEventListener("click", () => {
+      installHidden = true;
+      try { localStorage.setItem(INSTALL_HIDDEN, "1"); } catch { /* hidden for this page */ }
+      if (last) update(last);
+    }, { signal });
+    hideUpdate.addEventListener("click", () => { updateHidden = true; if (last) update(last); }, { signal });
+    const installLine = make("p", "oc-device-line", offer, hint, hideInstall), updateLine = make("p", "oc-device-line", fresh, take, hideUpdate);
     updateLine.setAttribute("role", "status");
     const node = make("div", "oc-device", updateLine, installLine);
     const update = (state) => {
+      last = state;
       const { install: way, update: waiting } = state.device, speaking = state.voice.role === "speaker";
       offer.hidden = way !== "prompt";
       hint.hidden = way !== "ios";
-      installLine.hidden = !way;
-      updateLine.hidden = !waiting;
+      installLine.hidden = !way || installHidden;
+      updateLine.hidden = !waiting || updateHidden;
       const words = speaking ? "A newer Ooga Chat is ready. Reload once you've left voice." : "A newer Ooga Chat is ready.";
       if (fresh.textContent !== words) fresh.textContent = words;
       take.disabled = speaking;
