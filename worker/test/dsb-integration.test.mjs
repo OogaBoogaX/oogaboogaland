@@ -685,13 +685,13 @@ test("room scopes poker voice to Ember Den and clears it on departure", () => {
   room.players.set(1, player);
   const send = message => room.webSocketMessage(ws, JSON.stringify(message));
   send({ t: "poker-voice", table: 2 }); assert.equal(player.pokerVoice, null);
-  send({ t: "zone", name: "ember-den" }); send({ t: "poker-voice", table: 2 });
+  send({ t: "zone", name: "emberden" }); send({ t: "poker-voice", table: 2 });
   assert.equal(attachment.pokerVoice, 2);
   assert.equal(room.record(ws, attachment).pokerVoice, 2);
-  assert.equal(room.view(player).zone, "ember-den");
+  assert.equal(room.view(player).zone, "emberden");
   send({ t: "zone", name: "outside" });
   assert.equal(attachment.pokerVoice, null);
-  send({ t: "zone", name: "ember-den" }); assert.equal(player.pokerVoice, null);
+  send({ t: "zone", name: "emberden" }); assert.equal(player.pokerVoice, null);
 });
 
 // The merged rules: the Studio's bodiless listeners and permitted speakers, and Ember Den table voice, hold together.
@@ -702,11 +702,11 @@ test("voicePeers keeps Studio listener and speaker rules and Ember Den table iso
     { id: 1, zone: studio.STUDIO_ZONE, body: "ooga-1", voice: voice() },
     { id: 2, zone: studio.STUDIO_ZONE, body: null, voice: voice(null) },
     { id: 3, zone: studio.STUDIO_ZONE, body: "ooga-3", studioSeat: 0, voice: voice() },
-    { id: 4, zone: "ember-den", body: "ooga-4", pokerVoice: 1, voice: voice() },
-    { id: 5, zone: "ember-den", body: "ooga-5", pokerVoice: 2, voice: voice() },
-    { id: 6, zone: "ember-den", body: "ooga-6", pokerVoice: 1, voice: voice() },
-    { id: 7, zone: "ember-den", body: "ooga-7", pokerVoice: null, voice: voice() },
-    { id: 8, zone: "ember-den", body: null, pokerVoice: 1, voice: voice() },
+    { id: 4, zone: "emberden", body: "ooga-4", pokerVoice: 1, voice: voice() },
+    { id: 5, zone: "emberden", body: "ooga-5", pokerVoice: 2, voice: voice() },
+    { id: 6, zone: "emberden", body: "ooga-6", pokerVoice: 1, voice: voice() },
+    { id: 7, zone: "emberden", body: "ooga-7", pokerVoice: null, voice: voice() },
+    { id: 8, zone: "emberden", body: null, pokerVoice: 1, voice: voice() },
   ];
   const peers = protocol.voicePeers(players, s);
   assert.deepEqual(peers.get(2), [1], "a bodiless Studio listener hears the host only, not an unpermitted attendee");
@@ -719,13 +719,13 @@ test("voicePeers keeps Studio listener and speaker rules and Ember Den table iso
   assert.ok(!peers.get(6).includes(8));
   s.mode = "discussion";
   assert.deepEqual(protocol.voicePeers(players, s).get(2), [1, 3], "a seated attendee is heard once discussion permits it");
-  players[2].zone = "ember-den"; players[2].pokerVoice = 2;
+  players[2].zone = "emberden"; players[2].pokerVoice = 2;
   assert.deepEqual(protocol.voicePeers(players, s).get(5), [3], "Studio permission never widens Ember Den table voice");
 });
 
 test("a pull keeps still-eligible tracks, closes the rest through cleanup and records only kept MIDs", async () => {
   const { room, add, call, pending } = studioRoom();
-  const listener = add(2, { zone: "ember-den", pokerVoice: 1 }), a = add(1, { zone: "ember-den", pokerVoice: 1 }), b = add(3, { zone: "ember-den", pokerVoice: 1 }), c = add(4, { zone: "ember-den", pokerVoice: 1 });
+  const listener = add(2, { zone: "emberden", pokerVoice: 1 }), a = add(1, { zone: "emberden", pokerVoice: 1 }), b = add(3, { zone: "emberden", pokerVoice: 1 }), c = add(4, { zone: "emberden", pokerVoice: 1 });
   listener.voice = { ...listener.voice, sub: "receive" };
   a.voice = { ...a.voice, pub: "pub-a", track: "mic", gen: 1 };
   b.voice = { ...b.voice, pub: "pub-b", track: "mic", gen: 1 };

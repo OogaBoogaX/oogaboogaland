@@ -9548,16 +9548,16 @@ body[data-active-scene="timechain"] .weapon-reticle > span {
 }
 
 /* DSB keeps controls in the existing page and its world in a separate scene. */
-.dsb-island-icon, .ember-den-icon { display: none; }
+.dsb-island-icon, .emberden-icon { display: none; }
 body[data-active-scene="dsb"] .dsb-island-icon,
-body[data-active-scene="poker"] .ember-den-icon {
+body[data-active-scene="poker"] .emberden-icon {
   display: block;
   width: 56px;
   height: 44px;
   filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
 }
 body[data-active-scene="poker"] #freeroam-icon { display: none; }
-body[data-active-scene="poker"] .ember-den-icon {
+body[data-active-scene="poker"] .emberden-icon {
   position: absolute;
   left: 50%;
   top: 50%;

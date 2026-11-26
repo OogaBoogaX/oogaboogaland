@@ -14,6 +14,7 @@
   // at FLOOR_Y, and the pool's surface at POOL_Y. The pedestal stands in the pool to PEDESTAL_Y, where the figure stands.
   const RIM_Y = 0.58, INNER = 2.02, FLOOR_Y = 0.16, POOL_Y = 0.46, PEDESTAL_Y = 1.2;
   // The figure's height (the caveman's `height` trait; its head's top stands about 0.4 of it over the pivot) and pose.
+  // The Ember Den's old spelling, as the crowd's (poker-crowd-models.js `TAG`): its look is hashed from it.
   const FIGURE_H = 1.08, NAME = "fountain/ember-den";
   const TOGA = "#f4f1ea", FOLD = "#9e968a", SKIN = "#c9bfae", LAUREL = "#8d927a";
   // The urn's half height and tip (its mouth turned past level, forward and down), and the water leaving it.

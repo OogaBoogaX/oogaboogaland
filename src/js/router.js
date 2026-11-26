@@ -4,6 +4,9 @@
 // scene even when two share an address. Served at a directory (oogabooga.land/oogarally, `npm run serve`)
 // the address is a path; from disk or as a named file, where a path would name a missing file, it is a
 // hash (oogaboogaland.html#/oogarally).
+// The address also follows the zone the visitor stands in (`follow`, from the director each frame): a route names the
+// zones it stands for (`zone` in routes.js), and walking into another zone of the same scene replaces the address with
+// that zone's route, in place, so walking to and fro never piles up history and Back still steps a scene at a time.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -16,6 +19,13 @@
       if (scenes[entry.scene]) byPath.set(entry.path, { place: null, ...entry });
     }
     const HOME = byPath.get("");
+    const zonesOf = (entry) => entry.zone === undefined ? [] : Array.isArray(entry.zone) ? entry.zone : [entry.zone];
+    // A scene's zone route: the first listed for it, so a zone's own route comes before places that also stand in it.
+    const byZone = new Map();
+    for (const entry of byPath.values()) for (const zone of zonesOf(entry)) {
+      const key = `${entry.scene} ${zone}`;
+      if (!byZone.has(key)) byZone.set(key, entry);
+    }
     const routeOf = (scene, place) => {
       for (const entry of byPath.values()) if (entry.scene === scene && entry.place === place) return entry;
       return place ? routeOf(scene, null) : { ...HOME, scene };
@@ -36,12 +46,13 @@
       const query = params.toString();
       return `/${entry.path}${query ? `?${query}` : ""}`;
     };
-    let at = HOME, popped = false, queued = null;
+    let at = HOME, popped = false, queued = null, zoneAt = null;
     // Called by the director on every arrival. Boot tidies the address in place, leaving a bare landing
     // (`/?scene=dsb`) as it came; a Back or Forward arrival finds its entry already there; any other
     // arrival pushes a new one.
     const arrive = (scene, place, boot) => {
       const entry = at = routeOf(scene, place);
+      zoneAt = null;
       document.title = routes.title(entry);
       const state = { scene, place: entry.place };
       if (popped) popped = false;
@@ -54,6 +65,29 @@
       at = routeOf(scene, null);
       document.title = routes.title(at);
       history.replaceState({ scene, place: at.place }, "", urlOf(at));
+    };
+    // The visitor's zone in the scene they are in, read every frame: a change into a zone the current route does not
+    // stand for replaces the address with that zone's route in the same scene and returns it; anything else (no change,
+    // a zone the route covers, the land between, a zone with no route) leaves the address and returns null. A place
+    // that stands in a zone (EntropyLab's mouth on the island) keeps its address until the visitor leaves that zone.
+    // A zone with no route of its own goes by its land's (zone-map.js `groupOf`): Valhodl's areas by its yard or halls.
+    const follow = (scene, zone) => {
+      if (zone === zoneAt) return null;
+      zoneAt = zone;
+      if (scene !== at.scene) return null;
+      const zones = zonesOf(at);
+      if (zones.includes(zone)) return null;
+      let entry = byZone.get(`${scene} ${zone}`);
+      if (!entry && BL.zoneMap) {
+        const land = BL.zoneMap.groupOf(zone);
+        if (land === zone || zones.includes(land)) return null;
+        entry = byZone.get(`${scene} ${land}`);
+      }
+      if (!entry || entry === at) return null;
+      at = entry;
+      document.title = routes.title(entry);
+      history.replaceState({ scene, place: entry.place }, "", urlOf(entry));
+      return entry;
     };
     // Back and Forward travel through `go`, so they fade and keep the leave contract like any other trip.
     // Our entries always change scene; a hash edited by hand to another place in the same scene (only from
@@ -86,7 +120,7 @@
       popped = false;
       history.replaceState({ scene: at.scene, place: at.place }, "", urlOf(at));
     };
-    return { current, arrive, dismissPlace, abandon, settled, dispose };
+    return { current, arrive, follow, dismissPlace, abandon, settled, dispose };
   };
   BL.router = { create, served: SERVED };
 })();

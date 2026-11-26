@@ -707,6 +707,9 @@
   // out of a Timechain room the address is the Sphere's doors, and a reload after walking on is not a trip back to them.
   const SPOT_KEY = "ooga-spot", SPOT_MAX = 1e3, SPOT = { x: 0, y: 0, z: 0, yaw: 0 };
   let spotKnown = false, spotPlace = "";
+  // The place a spot is kept under: one of the island's routed places (routes.js), else the bare address. The donation
+  // popup's place and a game's way back are not places to come back to.
+  const spotPlaceOf = (place) => place && place !== "donate" && BL.routes.list.some((e) => e.scene === "hub" && e.place === place) ? place : "";
   if (!DEBUG) {
     let v = null;
     try { v = JSON.parse(localStorage.getItem(SPOT_KEY)); } catch { /* Storage may be unavailable. */ }
@@ -7479,6 +7482,13 @@
   // `look`: the map's and the views' buttons. With an Ooga driven they only look at the place (pilot.js `look`): the Ooga
   // stays where it stands, driven, and a movement brings the view back to it. Arrivals and respawns travel.
   const navigate = (name, respawn = false, preserveActor = !respawn, look = false) => {
+    // The Observatory (its route, /observatory): stand before the mirror, then the chamber takes the Ooga in through it
+    // on its next frame, as a crossing would (architect-cave.js `admit`).
+    if (name === "observatory") {
+      const done = navigate("mirror", respawn, preserveActor, look);
+      if (done === true && !look && architectCave) architectCave.admit();
+      return done;
+    }
     const destination = NAVIGATION, p = destination.position, target = destination.target;
     const gorilla = preserveActor && clankerPlay.active ? clankerPlay.player : null, ooga = pilot.player;
     const viewing = look && !!ooga && !gorilla, player = viewing ? null : gorilla || ooga;
@@ -7543,6 +7553,14 @@
       setVec(target, M.worldX(0, M.layout.CHAMBER_R - 0.1), floor + 2.3, M.worldZ(0, M.layout.CHAMBER_R - 0.1));
       pitch = player ? 0.1 : 0.06;
       dist = player ? 5 : 7.5;
+    } else if (name === "rainforest" && mempoolIsland) {
+      // On the bridge court, just off the vine bridge, looking in across the forest toward the lake.
+      const M = mempoolIsland;
+      yaw = M.place.ry;
+      x = M.worldX(0, 16); z = M.worldZ(0, 16);
+      setVec(target, M.worldX(0, 6), M.place.y + 1.6, M.worldZ(0, 6));
+      pitch = player ? 0.16 : 0.2;
+      dist = player ? 6 : 10;
     } else if (name === "repos" && repoIsland) {
       // Off the bridge onto Repo Island, facing down the path to Bitcoin Core in the plaza; a look sees across it.
       const a = repoIsland.arrival;
@@ -7571,9 +7589,9 @@
       else {
         p.x = x + Math.cos(yaw) * offset + Math.sin(yaw) * depth;
         p.z = z - Math.sin(yaw) * offset + Math.cos(yaw) * depth;
-        p.y = saved ? SPOT.y : name === "repos" ? repoIsland.arrival.y : name === "timechain" ? timechainIsland.place.y + BL.timechainModels.SITE.bridgeFloor : name === "mempool" ? mempoolIsland.place.y + mempoolIsland.layout.FLOOR : name === "bifrost" ? bifrostIsle.site.arrival.y : underground ? (basement ? island.headquarters.basement.floor : island.headquarters.floor) : island.surfaceAt(p.x, p.z);
+        p.y = saved ? SPOT.y : name === "repos" ? repoIsland.arrival.y : name === "rainforest" ? mempoolIsland.place.y + mempoolIsland.layout.groundAt(mempoolIsland.localX(p.x, p.z), mempoolIsland.localZ(p.x, p.z)) : name === "timechain" ? timechainIsland.place.y + BL.timechainModels.SITE.bridgeFloor : name === "mempool" ? mempoolIsland.place.y + mempoolIsland.layout.FLOOR : name === "bifrost" ? bifrostIsle.site.arrival.y : underground ? (basement ? island.headquarters.basement.floor : island.headquarters.floor) : island.surfaceAt(p.x, p.z);
       }
-      if (!saved && name !== "timechain" && name !== "bifrost" && name !== "mempool" && name !== "repos" && !island.onLand(p.x, p.z)) continue;
+      if (!saved && name !== "timechain" && name !== "bifrost" && name !== "mempool" && name !== "rainforest" && name !== "repos" && !island.onLand(p.x, p.z)) continue;
       if (player) {
         const floor = gorilla ? clankerSupportAt(gorilla, p.x, p.z, p.y, STEP_MAX) : playerSupportAt(p.x, p.z, p.y, p.y, player);
         if (!Number.isFinite(floor) || Math.abs(floor - p.y) > STEP_MAX) continue;
@@ -8825,7 +8843,7 @@
   // A body standing free counts as where the visitor is: not in the air, on a seat or in a bed, on a scripted walk through
   // a doorway, or in an island game. Written in place, every frame.
   const noteSpot = (cave) => {
-    if (gameMode || entering || cave.hop !== 0 || cave.hopV > 0 || cave.camp.seat || cave.root.quaternion || cave.bedTravel.mode || timechainIsland.gate.busy) return;
+    if (gameMode || entering || cave.hop !== 0 || cave.hopV > 0 || cave.camp.seat || cave.root.quaternion || cave.bedTravel.mode || timechainIsland.gate.busy || architectCave?.active) return;
     const p = cave.root.position;
     SPOT.x = p.x; SPOT.y = p.y - cave.baseY; SPOT.z = p.z; SPOT.yaw = cave.root.rotation.y;
     spotKnown = true;
@@ -11587,7 +11605,7 @@
     BL.players.setDoors(doorToward);
     BL.players.setCloudSpot(cloudSpotOf);
     BL.chatCopy.attach(copyHooks);
-    spotPlace = ctx.place || "";
+    spotPlace = spotPlaceOf(ctx.place);
     const donate = ctx.place === "donate", routedPlace = donate || ctx.place === "cloud-hopper-return" ? null : ctx.place;
     const bifrostCrossing = ctx.from === "bifrost" ? world.bifrostCrossing : null;
     world.bifrostCrossing = null;
@@ -12677,9 +12695,10 @@
     crew.refreshStates(true);
     yield* pause(slice);
     unsubscribeActivity = contributors.subscribe(() => crew.refreshStates());
-    // A reload of this tab, at whichever address the island had: where its Ooga stood, in place of the routed place.
-    spotPlace = ctx.place || "";
-    const stood = ctx.from === null ? BL.visitSpot.take("hub", spotPlace) : null;
+    // A reload of this tab, at whichever address the island had: where its Ooga stood, in place of the routed place. The
+    // Observatory keeps no spot (it is entered only through its mirror), so its address always takes the Ooga in.
+    spotPlace = spotPlaceOf(ctx.place);
+    const stood = ctx.from === null && ctx.place !== "observatory" ? BL.visitSpot.take("hub", spotPlace) : null;
     if (stood) { SPOT.x = stood.x; SPOT.y = stood.y; SPOT.z = stood.z; SPOT.yaw = stood.yaw; spotKnown = true; }
     const resumed = !!stood && !!ctx.place;
     // Sign-in returns to the bare page; a routed hub place (a shared link, the Sphere's keypad) is still honoured.
@@ -13262,6 +13281,9 @@
     get architect() { return architectCave; },
     get retained() { return heldHub; }, get elapsed() { return now; },
     get retainedRoot() { return heldHub ? root : null; },
+    // The address followed the visitor into another zone of the island (router.js `follow`): their spot is kept under
+    // that route's place, so a reload of the new address stands them where they were.
+    routed(place) { spotPlace = spotPlaceOf(place); },
     // Readying the hall takes a slice of frames that are otherwise the island's; the tier does not judge them.
     get warming() { return factoryWalk.warming || !!arcadeMouth?.entrance.warming; },
     // The wall build a WebGL2 boot leaves for after its first paint, as a share of the boot CPU measured without it.

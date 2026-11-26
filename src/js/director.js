@@ -343,6 +343,13 @@
     if (text === home.textContent) zoneLine.replaceChildren(...home.cloneNode(true).childNodes);
     else zoneLine.textContent = text;
   };
+  // The address follows the zone the visitor stands in (router.js `follow`), never during a trip, when the history entry
+  // may already be the next scene's. The scene hears its new place (`routed`), so what it remembers of where the visitor
+  // stands (visit-spot.js) is kept under the address a reload will open.
+  const followZone = () => {
+    const entry = router.follow(active.id, window.BL.net.state.zone);
+    if (entry && active.routed) active.routed(entry.place);
+  };
   // The title cards of the games that have no phase of their own for one: shown on every arrival,
   // closed by their button, Enter, Space or Escape, and nothing else reaches the scene while one shows.
   const intros = [...document.querySelectorAll("[data-intro]")];
@@ -716,6 +723,7 @@
     }
     if (active.id !== "studio") BL.equipment.applyLocal(active.debug?.pilot?.player || active.debug?.crew?.player);
     showZoneLine();
+    if (!transition) followZone();
     cabinetView.update(dt, active, !!openIntro() || !!active.cabinetMenu, !!transition);
     if (POSITION_DEBUG && active.id !== "hub" && elapsed >= positionDebugNext) {
       positionDebugNext = elapsed + 0.1;
@@ -1020,10 +1028,11 @@
   // EntropyLab currently lives in its island cave; retain the isolated scene for debug checks only.
   // The character studio also opens directly for same-origin wardrobe saves.
   // The bare address goes back to the place the visitor last stood in this browser (visit-spot.js), as its own route
-  // would: a Timechain room by its number, any other scene as a whole. The island stands its Ooga at its own spot.
+  // would: a Timechain room by its number, a DSB Land venue or a place on the island (its zone's route) by its name, any
+  // other scene as a whole. The island's own bare address stands its Ooga at its own spot.
   const resumeRoute = () => {
     const was = DEBUG || params.has("scene") || WIP ? null : window.BL.visitSpot.resume();
-    if (!was || was.scene === "hub" || !Object.hasOwn(scenes, was.scene)) return null;
+    if (!was || was.scene === "hub" && !was.place || !Object.hasOwn(scenes, was.scene)) return null;
     const list = window.BL.routes.list;
     return list.find((e) => e.scene === was.scene && (e.place || "") === was.place) || list.find((e) => e.scene === was.scene && !e.place) || { scene: was.scene, place: null };
   };

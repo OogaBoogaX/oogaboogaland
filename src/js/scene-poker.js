@@ -1668,7 +1668,7 @@
     if (cosmos) cosmos.liveGeometry(set); };
   const stats = () => { let allNodes = 0, visibleNodes = 0; const walk = n => { allNodes++; for (const c of n.children) walk(c); }; walk(root); S.traverseVisible(root, () => visibleNodes++); return { allNodes, visibleNodes, targets: input.targetCount, tweens: S.tweenCount(), ...fx.stats(), ...(remotes ? remotes.stats() : {}), ...(crowd ? crowd.stats() : {}) }; };
   // Voice zone: the Ember Den, a portal of its own off the Bifrost chamber.
-  const scene = BL.deferred.scene("poker", { id: "poker", voiceZone: "ember-den", micKey: true, enter, update, overlay: dt => { photo.afterDraw(); if(!exterior)fx.drawOverlay(dt, extra); }, onKey, leave, liveGeometry, stats, renderOpts,
+  const scene = BL.deferred.scene("poker", { id: "poker", voiceZone: "emberden", micKey: true, enter, update, overlay: dt => { photo.afterDraw(); if(!exterior)fx.drawOverlay(dt, extra); }, onKey, leave, liveGeometry, stats, renderOpts,
     onDonation(donation, counted = null) {
       game.recordDonation(donation, counted && counted.exact);
       world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));

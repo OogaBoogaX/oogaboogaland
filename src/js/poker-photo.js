@@ -14,7 +14,7 @@
     let saved=null,pending=false,serial=0,url=null;
     const take=button("Take portrait",()=>{pending=true;take.disabled=true;});
     const download=document.createElement("a");
-    download.download="ember-den-moon-portrait.png";download.textContent="Save PNG";download.hidden=true;controls.append(download);
+    download.download="emberden-moon-portrait.png";download.textContent="Save PNG";download.hidden=true;controls.append(download);
     const release=()=>{if(url)URL.revokeObjectURL(url);url=null;download.hidden=true;download.removeAttribute("href");};
     const close=()=>{
       if(!saved)return;
