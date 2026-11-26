@@ -1,8 +1,15 @@
 // The island's world on the page (docs/island-world.md): every Ooga nobody drives goes where the island's world puts
 // it. Signed in, and offered the `island` game by the Worker, the page follows the server's world (worker/src/games/
 // island.js, over game-net.js); otherwise it runs the same world itself (island-sim.js), from this page's own
-// contributors. Either way the rows go into one timeline and are drawn `DELAY_MS` behind the newest, eased between
+// contributors. Either way the rows go into one timeline and are drawn a little behind the newest, eased between
 // frames, as the ghost hunt draws its enemies.
+//
+// The server's frames are kept by the moment the world's rows stand for (`gameMs`, the world's own clock in whole
+// steps), never by the tick that sent them, which runs up to a step ahead of the world and comes late as the object's
+// timer pleases: drawn by those stamps, every walker sped up and slowed down from one frame to the next. They are drawn
+// on a play clock this page runs at its own frame rate, kept `delay` behind the newest it could have by now: as far
+// behind as the gaps between frames and how unevenly they arrive need (`heard`), so the next frame is nearly always in
+// before it is wanted, and eased toward where it should be a little at a time (`SLEW`) rather than jumped.
 //
 // A working or chilling Ooga the world shows is followed: its `follow` (where it stands, its heading, what it does and
 // the cave it works) is written here before the crew's update, and the crew poses it as it poses its own (crew.js
@@ -19,7 +26,12 @@
   const SIM = BL.islandSim, W = BL.gameWire, TIMELINE = BL.gameTimeline;
   const { ACT, STATES } = SIM;
   // A row in the timeline: the Ooga's id, x, z, its heading's cosine and sine, its gorilla's cave plus one, flags.
-  const WIDTH = 7, DELAY_MS = 150, DEPTH = 24, LOCAL_DELAY_MS = 2 * SIM.STEP * 1000, ACTIVITY_S = 1, REFRESH_S = 0.5, SEED_S = 2;
+  const WIDTH = 7, DEPTH = 24, LOCAL_DELAY_MS = 2 * SIM.STEP * 1000, ACTIVITY_S = 1, REFRESH_S = 0.5, SEED_S = 2;
+  // The server's play clock: the last `HEARD` frames' leads (their world time less when they came) and gaps; the delay
+  // never under `DELAY_MIN_MS` or over `DELAY_MAX_MS`, `MARGIN_MS` over what they need, rising at once and easing back
+  // at `EASE_MS_S` a second; a gap over `GAP_MAX_MS` is the world resting (a frame every 2 s while nothing moves), which
+  // needs no delay. The clock runs at most `SLEW` faster or slower than real time, and jumps only past `SNAP_MS` out.
+  const HEARD = 40, DELAY_MIN_MS = 180, DELAY_MAX_MS = 600, MARGIN_MS = 40, EASE_MS_S = 25, GAP_MAX_MS = 500, SLEW = 0.08, SNAP_MS = 1000;
 
   const enabled = () => !/(?:^|[?&])islandworld=0(?:&|$)/.test(location.search.slice(1));
   // The account this page was kicked from the server's world as, if it was, for the page's life: it stays on its own
@@ -37,7 +49,10 @@
     let link = null, sim = null, frame = null, activityIn = 0, live = false, refresh = false, refreshIn = 0, age = 0, unseeded = 0;
     // When each Ooga went to the local world, in its clock's ms (Infinity before): its rows before then are not its.
     const seededAt = new Float64Array(n).fill(Infinity);
-    const stats = { mode: "", frames: 0, followed: 0, refused: "" };
+    const stats = { mode: "", frames: 0, followed: 0, refused: "", delay: 0, behind: 0 };
+    const leads = new Float64Array(HEARD), gaps = new Float64Array(HEARD);
+    let heardCount = 0, heardHead = -1, lastGame = NaN, play = NaN, delay = DELAY_MIN_MS, ranAt = NaN;
+    const resetClock = () => { heardCount = 0; heardHead = -1; lastGame = NaN; play = NaN; delay = DELAY_MIN_MS; ranAt = NaN; };
 
     // A frame's rows into the timeline at `t` (ms), in the slots the cast puts them.
     const take = (f, t) => {
@@ -77,11 +92,52 @@
     const startServer = () => {
       stats.mode = "server";
       sim = null;
-      timeline.clear(); live = false;
+      timeline.clear(); live = false; resetClock();
       link = BL.gameNet.open("island", "main", {
         state: (msg) => { if (msg.s && Array.isArray(msg.s.cast)) cast(msg.s.cast); },
-        motion: (f) => { if (f.kind === SIM.KIND && slots.some(Boolean)) take(f, f.serverMs); }
+        motion: (f) => { if (f.kind === SIM.KIND && slots.some(Boolean)) heard(f); }
       });
+    };
+    // A server frame, kept by its world time. One no newer than the last is a repeat, unless it is far older: the
+    // world started afresh (its object restarted), and the page starts with it.
+    const heard = (f) => {
+      const g = f.gameMs, now = performance.now();
+      if (lastGame === lastGame && g <= lastGame) {
+        if (g > lastGame - SNAP_MS) return;
+        timeline.clear(); live = false; resetClock();
+      }
+      const gap = lastGame === lastGame ? g - lastGame : 0;
+      lastGame = g;
+      heardHead = (heardHead + 1) % HEARD;
+      leads[heardHead] = g - now; gaps[heardHead] = gap <= GAP_MAX_MS ? gap : 0;
+      if (heardCount < HEARD) heardCount++;
+      take(f, g);
+    };
+    // The world time to draw this frame. The newest frame there could be by now is the soonest one's lead on: the next
+    // comes a gap after it and as much later as the leads spread, so the delay covers the widest gap and that spread.
+    // The clock moves by the real time since it last ran, never the scene's `dt`, which the director caps at 0.1 s: under
+    // 10 fps the Oogas would walk slow and then jump.
+    const serverClock = () => {
+      const now = performance.now(), step = ranAt === ranAt ? now - ranAt : 0;
+      ranAt = now;
+      let lead = -Infinity, low = Infinity, gap = 0;
+      for (let k = 0; k < heardCount; k++) {
+        const v = leads[k];
+        if (v > lead) lead = v;
+        if (v < low) low = v;
+        if (gaps[k] > gap) gap = gaps[k];
+      }
+      const need = Math.min(DELAY_MAX_MS, Math.max(DELAY_MIN_MS, gap + lead - low + MARGIN_MS));
+      delay = need > delay ? need : Math.max(need, delay - EASE_MS_S * step / 1000);
+      const target = now + lead - delay;
+      if (!(Math.abs(target - play) < SNAP_MS)) play = target;
+      else {
+        play += step;
+        const err = target - play, most = SLEW * step;
+        play += err > most ? most : err < -most ? -most : err;
+      }
+      stats.delay = delay; stats.behind = lastGame - play;
+      return play;
     };
     const offered = () => {
       const id = net.state.me ? net.state.me.id : null;
@@ -137,9 +193,10 @@
         sim.step(dt);
         if (sim.t !== before) { sim.motion(frame, 0); take(frame, sim.t * 1000); }
       }
-      if (!live) return;
       // The local world steps 20 times a second; drawn by `t` alone, every Ooga would stand still for frames and then jump.
-      const at = sim ? sim.clock * 1000 - LOCAL_DELAY_MS : link.serverNow() - DELAY_MS;
+      // The server's play clock runs on while the timeline is refilled, so it never comes back to a stale one.
+      const at = sim ? sim.clock * 1000 - LOCAL_DELAY_MS : heardCount ? serverClock() : NaN;
+      if (!live || at !== at) return;
       if (Number.isNaN(timeline.sample(at, shown))) return;
       let followed = 0;
       for (let i = 0; i < n; i++) {
