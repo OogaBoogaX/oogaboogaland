@@ -71,36 +71,8 @@
   };
   const emblemY=5.71, crownY=13.5;
   const bitcoinPanel=()=>{
-    // One continuous silhouette, with a wider lower bowl and two open counters.
-    const outer=[[-.78,.94],[-.40,.94],[-.40,1.27],[-.22,1.27],[-.22,.94],[-.015,.94],[-.015,1.27],[.165,1.27],[.165,.94]];
-    const curve=(ring,b,c,d)=>{
-      const a=ring[ring.length-1];
-      for(let i=1;i<=12;i++){
-        const t=i/12,u=1-t;
-        ring.push([0,1].map(k=>u*u*u*a[k]+3*u*u*t*b[k]+3*u*t*t*c[k]+t*t*t*d[k]));
-      }
-    };
-    curve(outer,[.88,.94],[.92,.27],[.51,.09]);
-    curve(outer,[1.04,-.04],[1.01,-.90],[.165,-.94]);
-    outer.push([.165,-1.27],[-.015,-1.27],[-.015,-.94],[-.22,-.94],[-.22,-1.27],[-.40,-1.27],[-.40,-.94],[-.83,-.94],[-.78,-.71],[-.65,-.71]);
-    curve(outer,[-.55,-.71],[-.53,-.68],[-.53,-.57]);
-    outer.push([-.53,.60]);
-    curve(outer,[-.53,.69],[-.58,.71],[-.67,.71]);
-    outer.push([-.78,.71]);
-    const counter=(bottom,top,reach)=>{
-      const ring=[[-.17,bottom],[-.02,bottom]];
-      curve(ring,[reach,bottom],[reach,top],[-.02,top]);
-      ring.push([-.17,top]);
-      return ring;
-    };
-    const rings=[outer,counter(.20,.67,.59),counter(-.66,-.095,.69)];
-    const c=Math.cos(.24),s=Math.sin(.24);
-    for(const ring of rings)for(const p of ring){
-      const [x,y]=p;p[0]=x*c+y*s;p[1]=y*c-x*s;
-    }
-    const xs=outer.map(p=>p[0]),ys=outer.map(p=>p[1]);
-    const cx=(Math.min(...xs)+Math.max(...xs))/2,cy=(Math.min(...ys)+Math.max(...ys))/2;
-    for(const ring of rings)for(const p of ring){p[0]-=cx;p[1]-=cy;}
+    // The mark's silhouette (factory-models.js): the outer ring, with a wider lower bowl, and two open counters.
+    const rings=BL.factoryModels.bitcoinOutline();
     const offset=width=>rings.map(ring=>ring.map(([x,y],i)=>{
       const a=ring[(i+ring.length-1)%ring.length],b=ring[(i+1)%ring.length];
       const al=Math.hypot(x-a[0],y-a[1]),bl=Math.hypot(b[0]-x,b[1]-y);

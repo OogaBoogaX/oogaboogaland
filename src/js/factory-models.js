@@ -249,6 +249,40 @@
     rect(-0.45, 0.75, -0.3, 1), rect(-0.12, 0.75, 0.03, 1), rect(-0.45, -1, -0.3, -0.75), rect(-0.12, -1, 0.03, -0.75)
   ];
   const smoothBitcoin = (height, depth, color, emissive = 1) => solidGlyph(BTC_PIECES, height, depth, color, emissive, 0.24);
+  // The Bitcoin mark as one silhouette, the Ember Den hearth's (poker-hearth.js) and the Genesis Museum ceiling's: the
+  // outer ring (the stem, the two bowls with the lower one wider, and the two short strokes above and below) and its
+  // two counters, as [x, y] loops leant 0.24 rad as the logo leans and centred on their bounds, 2.54 tall before the
+  // lean. Fresh arrays every call, so a caller may move them in place.
+  const bitcoinOutline = () => {
+    const outer = [[-.78, .94], [-.40, .94], [-.40, 1.27], [-.22, 1.27], [-.22, .94], [-.015, .94], [-.015, 1.27], [.165, 1.27], [.165, .94]];
+    const curve = (ring, b, c, d) => {
+      const a = ring[ring.length - 1];
+      for (let i = 1; i <= 12; i++) {
+        const t = i / 12, u = 1 - t;
+        ring.push([0, 1].map((k) => u * u * u * a[k] + 3 * u * u * t * b[k] + 3 * u * t * t * c[k] + t * t * t * d[k]));
+      }
+    };
+    curve(outer, [.88, .94], [.92, .27], [.51, .09]);
+    curve(outer, [1.04, -.04], [1.01, -.90], [.165, -.94]);
+    outer.push([.165, -1.27], [-.015, -1.27], [-.015, -.94], [-.22, -.94], [-.22, -1.27], [-.40, -1.27], [-.40, -.94], [-.83, -.94], [-.78, -.71], [-.65, -.71]);
+    curve(outer, [-.55, -.71], [-.53, -.68], [-.53, -.57]);
+    outer.push([-.53, .60]);
+    curve(outer, [-.53, .69], [-.58, .71], [-.67, .71]);
+    outer.push([-.78, .71]);
+    const counter = (bottom, top, reach) => {
+      const ring = [[-.17, bottom], [-.02, bottom]];
+      curve(ring, [reach, bottom], [reach, top], [-.02, top]);
+      ring.push([-.17, top]);
+      return ring;
+    };
+    const rings = [outer, counter(.20, .67, .59), counter(-.66, -.095, .69)];
+    const c = Math.cos(.24), s = Math.sin(.24);
+    for (const ring of rings) for (const p of ring) { const [x, y] = p; p[0] = x * c + y * s; p[1] = y * c - x * s; }
+    const xs = outer.map((p) => p[0]), ys = outer.map((p) => p[1]);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    for (const ring of rings) for (const p of ring) { p[0] -= cx; p[1] -= cy; }
+    return rings;
+  };
   // The network sign the concept puts on the blue tank: three nodes joined by two links.
   const NET_PIECES = (() => {
     const disc = (cx, cy, r) => Array.from({ length: 10 }, (_, k) => [cx + Math.cos(k / 10 * TAU) * r, cy + Math.sin(k / 10 * TAU) * r]);
@@ -1659,7 +1693,7 @@
     return geo;
   };
   BL.factoryModels = {
-    FLOOR_BIAS, LAYOUT, LEVEL, HALL, WALL_LEAN, STATION_BACK, KORTIK, kortikAt, kortikFrom, kortikLamps, kortikLights, stationX, stationZ, SHIELD_Z, porchOf, FORGE_TRACKS, FORGE_STORES, FORGE_CY, SHAFTS, LINE_STEP, COIN_R, forgeWave, COILS, banner, TUNNEL_SIGN, TUNNEL_POST, EXIT_Z, CONDUIT_SAMPLES, TUNNEL_THEMES, STEP, sat, satFailed, REB, TRE, COOK, ROOF_TUBE, bananaOutlet, outletShaft, KIOSK, donationCorner, BOARD, LOOKOUT_BEAM, STUDY, label, lanterns, hubTunnel, hubWindow, bakeWindow, windowLights, outsideView, hangarEntry, HANGAR_DOOR, hangarLamps, hangarLanding, beam, moved, turnedY, smoothBolt, smoothBitcoin
+    FLOOR_BIAS, LAYOUT, LEVEL, HALL, WALL_LEAN, STATION_BACK, KORTIK, kortikAt, kortikFrom, kortikLamps, kortikLights, stationX, stationZ, SHIELD_Z, porchOf, FORGE_TRACKS, FORGE_STORES, FORGE_CY, SHAFTS, LINE_STEP, COIN_R, forgeWave, COILS, banner, TUNNEL_SIGN, TUNNEL_POST, EXIT_Z, CONDUIT_SAMPLES, TUNNEL_THEMES, STEP, sat, satFailed, REB, TRE, COOK, ROOF_TUBE, bananaOutlet, outletShaft, KIOSK, donationCorner, BOARD, LOOKOUT_BEAM, STUDY, label, lanterns, hubTunnel, hubWindow, bakeWindow, windowLights, outsideView, hangarEntry, HANGAR_DOOR, hangarLamps, hangarLanding, beam, moved, turnedY, smoothBolt, smoothBitcoin, bitcoinOutline
   };
   // Private lexical bindings used by the scene-only extension; read once when that group evaluates.
   BL.factoryModelsSceneKit = { BL, BOARD, BOARD_FACE, BOARD_VALUES, BRASS, BRONZE, BRONZE_DK, CAP, CAP_BLUE, CAP_ORANGE, COILS, COIN_R, CONDUIT_SAMPLES, CONSOLE, COOK, COPPER, COPPER_DK, CRYSTAL, CYAN, FALLS, FLOOR, FORGE_CONSOLE, FORGE_CY, FORGE_TRACKS, GOLD, HALL, HANGAR_DOOR, HANGAR_SET_BACK, IRON_BK, IRON_DK, IRON_LT, KIOSK, LABEL_FONT, LAYOUT, LEVEL, LINE_STEP, LOOKOUT_BEAM, MONITORS, ORANGE, PORCH_HALF, REB, RING_BRIDGES, SHAFTS, STEP, STONE, STONE_DK, STUDY, TAU, TIMBER, TIMBER_DK, TIMBER_LT, TRE, TUNNEL_BOX, TUNNEL_POST, TUNNEL_THEMES, WALL_LEAN, along, banner, beam, bevelBox, box, cached, chain, columnParts, conduitPath, deckParts, donationCorner, face, flame, forwardLathe, gem, geometry, groundUnder, hangarEntry, hexToRgb, label, labelCache, lanternParts, lathe, makeVox, merge, models, moved, mulberry32, networkGlyph, noShadow, outcropTop, outcrops, plate, porchOf, prism, pushVert, railParts, railPlan, deckRailing, walkRails, ringLanding, shaded, smoothBitcoin, smoothBolt, span, stairParts, stationX, stationZ, torus, tube, tunnelFrame, HALL_FLOOR, turn, turnedX, turnedY, turnedZ, voxelGeometry };

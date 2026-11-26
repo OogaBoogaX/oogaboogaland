@@ -1140,19 +1140,31 @@
   // and coloured by fee rate on the room's own ramp (`DISC_RAMP`: slate, teal, cream, amber, orange, red, rose), packed
   // into the ₿ from its foot up in fee order (the highest payers at the foot); once the ₿ is full the rest of the waiting
   // mempool fills the disc round it as beads, nearest first, each `beadVB` of it, a moat of one unit clear of the ₿ and
-  // its rim left clear (`edge`). The ₿ is drawn afresh and larger (`DISC_SYMBOL`), two fine units to each of
-  // its cells; one unit is its share of a block (`block` vB over its units). A square is one or two units (small
-  // transactions gathered in fee order) or, for a large transaction alone, up to `maxSide`. Full, it holds and waits:
-  // nothing flashes until a block is found.
-  const DISC_SYMBOL = ["......#..#.......", ".....##..##......", ".....##..##......", "...########......", "...#########.....", "...##########....", "...###....###....", "...###....###....", "...####...###....", "...##########....", "...#########.....", "...#########.....", "...##########....", "...####...####...", "...###.....###...", "...###.....###...", "...####....###...", "...###########...", "...##########....", "...#########.....", ".....##..##......", ".....##..##......", "......#..#......."];
-  const DISC = { cell: 0.32, block: 1e6, maxSide: 5, thick: 0.14, gap: 0.03, beadLift: 0.08, edge: 0.25, steps: 12 };
-  DISC.fine = DISC.cell / 2; DISC.fc = DISC_SYMBOL[0].length * 2; DISC.fr = DISC_SYMBOL.length * 2;
-  // The ₿'s fine units (`inB`), and its foot's middle, where a found block falls from.
-  const DISC_IN = new Uint8Array(DISC.fc * DISC.fr);
-  DISC_SYMBOL.forEach((row, r) => { for (let c = 0; c < row.length; c++) if (row[c] === "#") for (let j = 0; j < 4; j++) DISC_IN[(r * 2 + (j >> 1)) * DISC.fc + c * 2 + (j & 1)] = 1; });
-  DISC.units = DISC_IN.reduce((a, b) => a + b, 0); DISC.unitVB = DISC.block / DISC.units;
+  // its rim left clear (`edge`). The ₿ is the standard mark, the Ember Den hearth's outline (factory-models.js
+  // `bitcoinOutline`, leant as the logo leans) `mark` metres to its unit, and its fine units (`fine`, half a `cell`) are
+  // the ones whose middles lie inside it; one unit is its share of a block (`block` vB over its units). A square is one
+  // or two units (small transactions gathered in fee order) or, for a large transaction alone, up to `maxSide`. Full, it
+  // holds and waits: nothing flashes until a block is found.
+  const DISC = { cell: 0.32, mark: 2.75, block: 1e6, maxSide: 5, thick: 0.14, gap: 0.03, beadLift: 0.08, edge: 0.25, steps: 12 };
+  // The outline on the cap as [x, z] loops: x across and z toward the back, so it reads upright to a visitor facing the
+  // front; and whether a point is inside it (even-odd, so the counters stay open) and how far it is from its edge.
+  const DISC_RINGS = BL.factoryModels.bitcoinOutline().map((ring) => ring.map(([x, y]) => [x * DISC.mark, y * DISC.mark]));
+  const discInside = (x, z) => { let c = false; for (const g of DISC_RINGS) for (let i = 0, j = g.length - 1; i < g.length; j = i++) { const [xi, zi] = g[i], [xj, zj] = g[j]; if ((zi > z) !== (zj > z) && x < xi + (z - zi) * (xj - xi) / (zj - zi)) c = !c; } return c; };
+  const discEdge = (x, z) => { let d = Infinity; for (const g of DISC_RINGS) for (let i = 0, j = g.length - 1; i < g.length; j = i++) { const [ax, az] = g[j], ex = g[i][0] - ax, ez = g[i][1] - az, t = Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / (ex * ex + ez * ez))); d = Math.min(d, Math.hypot(x - ax - ex * t, z - az - ez * t)); } return d; };
+  DISC.fine = DISC.cell / 2;
+  DISC.fc = 2 * Math.ceil(Math.max(...DISC_RINGS[0].map((p) => Math.abs(p[0]))) / DISC.fine) + 2;
+  DISC.fr = 2 * Math.ceil(Math.max(...DISC_RINGS[0].map((p) => Math.abs(p[1]))) / DISC.fine) + 2;
   const discX = (fc) => (fc - DISC.fc / 2) * DISC.fine, discZ = (fr) => -(fr - DISC.fr / 2) * DISC.fine;
-  DISC.foot = { x: 0, z: discZ(DISC.fr - 4) };
+  // The ₿'s fine units (`inB`), and its foot's middle (the lowest four rows of it, the two strokes below), where a
+  // found block falls from.
+  const DISC_IN = new Uint8Array(DISC.fc * DISC.fr);
+  for (let r = 0; r < DISC.fr; r++) for (let c = 0; c < DISC.fc; c++) DISC_IN[r * DISC.fc + c] = discInside(discX(c + 0.5), discZ(r + 0.5)) ? 1 : 0;
+  DISC.units = DISC_IN.reduce((a, b) => a + b, 0); DISC.unitVB = DISC.block / DISC.units;
+  DISC.foot = (() => {
+    let low = DISC.fr - 1; while (low > 3 && !DISC_IN.subarray(low * DISC.fc, (low + 1) * DISC.fc).some(Boolean)) low--;
+    let x = 0, n = 0; for (let r = low - 3; r <= low; r++) for (let c = 0; c < DISC.fc; c++) if (DISC_IN[r * DISC.fc + c]) { x += discX(c + 0.5); n++; }
+    return { x: x / n, z: discZ(low - 3) };
+  })();
   // The cap swells down out of the ceiling as one smooth satin surface (`DOME`), an orange ring round its rim (`bulge` at its
   // middle, falling to nothing at the rim), with the ₿ sunk into it `depth` deep behind bevelled walls `bevel` wide; the
   // transactions fill the recess's floor and the beads sit on the dome as small lights, dim until the queue reaches
@@ -1160,16 +1172,17 @@
   // read from the floor; Canvas 2D keeps the flat cap.
   const DOME = { bulge: 0.9, depth: 0.34, bevel: 0.16, tone: [40, 46, 64], lift: 0.95, rim: 0.1, at: 0.25 };
   DISC.thick = 0.08;
-  // The recess (0 outside the ₿, 1 a bevel's width inside its edge), from a distance field over a grid twice as fine.
+  // The recess (0 outside the ₿, 1 a bevel's width inside its edge), from the outline's own distance over a grid
+  // twice as fine as its units, the edge set half a unit out so the units along it lie on the recess's floor.
   const DOME_F = (() => {
-    const S = 4, W = DISC.fc * 2 + 2 * S, H = DISC.fr * 2 + 2 * S, d = new Float32Array(W * H).fill(0), step = DISC.fine / 2;
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const fc = Math.floor((x - S) / 2), fr = Math.floor((y - S) / 2); d[y * W + x] = fc >= 0 && fr >= 0 && fc < DISC.fc && fr < DISC.fr && DISC_IN[fr * DISC.fc + fc] ? 1e9 : 0; }
-    // two chamfer passes: the distance inside the ₿ to its edge, in grid steps
-    for (let y = 1; y < H; y++) for (let x = 1; x < W - 1; x++) { const i = y * W + x; if (d[i]) d[i] = Math.min(d[i], d[i - 1] + 1, d[i - W] + 1, d[i - W - 1] + 1.414, d[i - W + 1] + 1.414); }
-    for (let y = H - 2; y >= 0; y--) for (let x = W - 2; x > 0; x--) { const i = y * W + x; if (d[i]) d[i] = Math.min(d[i], d[i + 1] + 1, d[i + W] + 1, d[i + W + 1] + 1.414, d[i + W - 1] + 1.414); }
-    const x0 = discX(0) - S * step, z0 = discZ(0) + S * step, k = step / DOME.bevel;
+    const S = 4, W = DISC.fc * 2 + 2 * S, H = DISC.fr * 2 + 2 * S, d = new Float32Array(W * H), step = DISC.fine / 2;
+    const x0 = discX(0) - S * step, z0 = discZ(0) + S * step;
+    for (let b = 0; b < H; b++) for (let a = 0; a < W; a++) {
+      const x = x0 + (a + 0.5) * step, z = z0 - (b + 0.5) * step, e = discEdge(x, z) * (discInside(x, z) ? 1 : -1);
+      d[b * W + a] = Math.max(0, Math.min(1, (e + DISC.fine / 2) / DOME.bevel));
+    }
     // The depth at a grid point, 0 to 1; defined once, so a frame's samples (a crossing dot, a landing) make nothing.
-    const at = (a, b) => Math.min(1, d[b * W + a] * k);
+    const at = (a, b) => d[b * W + a];
     return (x, z) => {
       const gx = (x - x0) / step - 0.5, gy = (z0 - z) / step - 0.5, ix = Math.floor(gx), iy = Math.floor(gy);
       if (ix < 0 || iy < 0 || ix >= W - 1 || iy >= H - 1) return 0;
@@ -1409,10 +1422,12 @@
     const bg = ctx.createRadialGradient(N / 2, N / 2, 0, N / 2, N / 2, CAP.rIn * s); bg.addColorStop(0, "#151826"); bg.addColorStop(1, "#0e1018");
     ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(N / 2, N / 2, CAP.rIn * s, 0, TAU); ctx.fill();
     ctx.save(); ctx.translate(N / 2, N / 2);
-    // No outline: a faint dark shadow just round the ₿ on the cap, so its squares stand off the beads.
-    const X = (fc) => discX(fc) * s, Y = (fr) => -discZ(fr) * s, m = 0.1 * s;
-    ctx.fillStyle = "rgba(4,5,9,.75)"; ctx.shadowColor = "rgba(0,0,0,.9)"; ctx.shadowBlur = 0.3 * s;
-    DISC_SYMBOL.forEach((row, r) => { for (let c = 0; c < row.length; c++) if (row[c] === "#") ctx.fillRect(X(c * 2) - m, Y(r * 2) - m, X(c * 2 + 2) - X(c * 2) + 2 * m, Y(r * 2 + 2) - Y(r * 2) + 2 * m); });
+    // No outline: a faint dark shadow just round the ₿ on the cap (its own outline grown `m`, counters open), so its
+    // squares stand off the beads.
+    const m = 0.1 * s + DISC.fine / 2 * s;
+    ctx.fillStyle = ctx.strokeStyle = "rgba(4,5,9,.75)"; ctx.shadowColor = "rgba(0,0,0,.9)"; ctx.shadowBlur = 0.3 * s; ctx.lineWidth = 2 * m; ctx.lineJoin = "round";
+    ctx.beginPath(); for (const g of DISC_RINGS) { g.forEach(([x, z], i) => (i ? ctx.lineTo(x * s, -z * s) : ctx.moveTo(x * s, -z * s))); ctx.closePath(); }
+    ctx.fill("evenodd"); ctx.stroke();
     ctx.shadowBlur = 0;
     ctx.restore();
   };
