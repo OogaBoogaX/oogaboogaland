@@ -7,7 +7,7 @@
 import { bridgeCall, bridgeHello } from "./bridge.js";
 import { effective } from "./config.js";
 import { allowed, fromSite, json, readBody, refusal } from "./http.js";
-import { assertion, readSession } from "./session.js";
+import { assertion, displayOf, readSession } from "./session.js";
 
 const CHAT_ID = /^[A-Za-z0-9_-]{16}$/;
 const BODY_MAX = 512;
@@ -46,7 +46,7 @@ export const handleChats = async (request, env, deps) => {
   let body;
   try { body = JSON.parse(raw); } catch { return refusal("malformed", 400); }
   if (!body || typeof body.title !== "string" || typeof body.zone !== "string") return refusal("malformed", 400);
-  const reply = await bridgeCall(env, "startChat", { title: body.title, zone: body.zone, display: found.principal.display || found.principal.login }, assertion(found.principal));
+  const reply = await bridgeCall(env, "startChat", { title: body.title, zone: body.zone, display: displayOf(found.principal) }, assertion(found.principal));
   if (reply.ok && reply.result && reply.result.chat) return json({ chat: reply.result.chat }, 201);
   const { code, retryable, retryAfter } = reply.ok ? { code: "unavailable", retryable: true } : reply.error;
   return refusal(code, STATUS[code] || (retryable ? 429 : 503), { retryable, retryAfter });

@@ -11,7 +11,7 @@ import { assertionFor, closedSocket } from "./audience.js";
 import { bridgeCall, bridgeHello } from "./bridge.js";
 import { effective } from "./config.js";
 import { allowed, fromSite, json, readBody, refusal } from "./http.js";
-import { assertion, readSession } from "./session.js";
+import { assertion, chooseDisplay, readSession } from "./session.js";
 
 const SOCKET_HEADERS = ["upgrade", "connection", "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions"];
 
@@ -57,7 +57,12 @@ export const handleCommonsName = async (request, env, deps) => {
   if (!body || typeof body.display !== "string") return refusal("invalid_display", 400);
   if (!(await assertionFor(env, found, deps)).eligible) return refusal("capability_required", 403);
   const reply = await bridgeCall(env, "display", { display: body.display }, assertion(found.principal));
-  if (reply.ok && reply.result && typeof reply.result.display === "string") return json({ display: reply.result.display });
+  // The island kept it: it is this account's chosen name here too, so Ooga Chat's own footers, tiles and the chats it
+  // starts show it (session.js `displayOf`) rather than the provider's.
+  if (reply.ok && reply.result && typeof reply.result.display === "string") {
+    await chooseDisplay(env.DB, found.principal.id, reply.result.display);
+    return json({ display: reply.result.display });
+  }
   const code = reply.ok ? "unavailable" : reply.error.code;
   if (code === "invalid_display") return refusal(code, 400);
   if (code === "capability_required") return refusal(code, 403);

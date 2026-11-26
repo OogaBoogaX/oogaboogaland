@@ -387,6 +387,10 @@ test("the edge's Commons name: only an eligible GitHub contributor's save from t
   const ok = await save(amy, { display: " Amy B " });
   assert.equal(ok.status, 200);
   assert.deepEqual(await ok.json(), { display: "Amy B" });
+  assert.equal(await env.DB.prepare("SELECT chosen_display FROM principals WHERE login = 'amy'").first("chosen_display"), "Amy B",
+    "the island's kept name is the account's chosen name here too");
+  const me = await route(new Request("https://chat.example/api/chat/me", { headers: { cookie: `__Host-ooga_chat_session=${amy}` } }), env, { fetch, waitUntil: null, cache: null });
+  assert.equal((await me.json()).identity.display, "Amy B", "and Ooga Chat shows it");
   assert.equal(asked.length, 1);
   assert.equal(asked[0].principal.providerUserId, "1");
   assert.equal(asked[0].principal.provider, "github");

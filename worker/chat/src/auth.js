@@ -32,7 +32,7 @@ import { allowed, clientIp, fromSite, html, json, readBody, redirect, refusal } 
 import { authorizeUrl, PROVIDERS, profileFor } from "./providers.js";
 import {
   avatarPath, cleanDisplay, clearSessionCookie, cookieNames, createSession, deleteAllSessions, deletePrincipal, deleteSession,
-  bearerToken, readSession, sessionCookie, upsertPrincipal,
+  bearerToken, displayOf, readSession, sessionCookie, upsertPrincipal,
 } from "./session.js";
 
 export const OAUTH_MS = 10 * 60 * 1000;
@@ -69,7 +69,7 @@ const oauthCookie = (env, value, ms) => serializeCookie(cookieNames(env.SITE_ORI
 // on to) and no frame round it, so no other page can dress it up or click it through.
 const escape = (text) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const consentPage = (provider, port, principal, consent, cookies) => {
-  const who = principal.display && principal.display !== principal.login ? `${escape(principal.display)} (${escape(principal.login)})` : escape(principal.login);
+  const shown = displayOf(principal), who = shown !== principal.login ? `${escape(shown)} (${escape(principal.login)})` : escape(principal.login);
   return html(`<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Ooga Chat sign-in</title></head>
@@ -195,7 +195,7 @@ export const sessionView = (found, capability) => {
     schema: IDENTITY_SCHEMA,
     // `participant` is how the audience lists this account (gh:<id> or x:<id>, #665): one row a person, whichever app.
     identity: { principal: p.id, participant: `${p.provider === "github" ? "gh" : "x"}:${p.provider_user_id}`, provider: p.provider,
-      providerUserId: p.provider_user_id, login: p.login, display: p.display || p.login, avatar: avatarPath(p) },
+      providerUserId: p.provider_user_id, login: p.login, display: displayOf(p), avatar: avatarPath(p) },
     capabilities: { listen: true, react: true, speak: eligible, contributor: eligible, raiseHand: eligible },
     eligibility: { state: p.provider === "github" ? capability.state : "ineligible", checkedAt: capability.checkedAt, staleAfter: STALE_MS / 1000, policy: capability.policy },
     character: eligible && capability.character ? { handle: capability.character } : null,
