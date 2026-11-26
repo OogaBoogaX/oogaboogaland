@@ -40,35 +40,31 @@ const finite = (v) => typeof v === "number" && Number.isFinite(v);
 
 /** One reading of the banana pile from bananapayserver, through the DONATIONS binding: a short socket to its
  * /donations/socket (as donations.js passes a page's on), its first `pile` message, then closed. Resolves
- * { bananas, at, eatPerHour } (bananapayserver's docs/protocol.md), or null with no reading within `PILE_WAIT_MS`;
- * `why(reason)` hears why it was null. */
-export const readPile = async (donations, origin, why = () => {}) => {
+ * { bananas, at, eatPerHour } (bananapayserver's docs/protocol.md), or null with no reading within `PILE_WAIT_MS`. */
+export const readPile = async (donations, origin) => {
   const key = new Uint8Array(16);
   crypto.getRandomValues(key);
   const res = await donations.fetch(new Request(new URL("/donations/socket", origin), { headers: { upgrade: "websocket", connection: "Upgrade",
     "sec-websocket-version": "13", "sec-websocket-key": btoa(String.fromCharCode(...key)), "x-client": "island-world" } }));
   const ws = res.webSocket;
-  if (!ws) { why(`no socket (${res.status})`); return null; }
+  if (!ws) return null;
   ws.accept();
   return new Promise((resolve) => {
-    let timer = 0, settled = false;
+    let timer = 0;
     const done = (pile) => {
-      if (settled) return;
-      settled = true;
       clearTimeout(timer);
       try { ws.close(1000, "read"); } catch { /* closed */ }
       resolve(pile);
     };
-    const fail = (reason) => { if (!settled) { why(reason); done(null); } };
-    timer = setTimeout(() => fail("no pile in time"), PILE_WAIT_MS);
+    timer = setTimeout(() => done(null), PILE_WAIT_MS);
     ws.addEventListener("message", (e) => {
       let m = null;
       try { m = JSON.parse(e.data); } catch { return; }
       if (m && m.type === "pile" && finite(m.bananas) && finite(m.eatPerHour))
         done({ bananas: Math.max(0, m.bananas), at: finite(m.at) ? m.at : Date.now(), eatPerHour: Math.max(0, m.eatPerHour) });
     });
-    ws.addEventListener("close", (e) => fail(`closed (${e.code})`));
-    ws.addEventListener("error", () => fail("socket error"));
+    ws.addEventListener("close", () => done(null));
+    ws.addEventListener("error", () => done(null));
   });
 };
 /** The pile a reading gives at `at`: its bananas less what has been eaten since, never below none. */
@@ -138,17 +134,13 @@ const create = (now, env) => {
   // simulated, the checks) the world keeps island-sim.js's own nominal pile.
   const donations = env && env.DONATIONS && typeof env.DONATIONS.fetch === "function" ? env.DONATIONS : null;
   const origin = env && env.SITE_ORIGIN || "https://oogaboogaland.invalid";
-  let pile = null, pileAt = -Infinity, pileReading = null, loggedRing = NaN;
-  // To Workers Logs, while we find out why the server's pile differs from the page's: each read that fails, and the
-  // pile each time its ring moves (a step of the path, so a pile shrinking by the hour logs rarely), never a read that
-  // only confirms what the world has.
-  const logPile = (fields) => console.log(JSON.stringify({ event: "island-pile", ...fields }));
+  let pile = null, pileAt = -Infinity, pileReading = null;
   const readPileSoon = (at) => {
     if (!donations || pileReading || at < pileAt) return;
     pileAt = at + PILE_RETRY_MS;
-    pileReading = readPile(donations, origin, (reason) => logPile({ ok: false, reason }))
+    pileReading = readPile(donations, origin)
       .then((reading) => { if (reading) { pile = reading; pileAt = at + PILE_MS; } })
-      .catch((e) => logPile({ ok: false, reason: String(e && e.message || e).slice(0, 160) }))
+      .catch(() => {})
       .finally(() => { pileReading = null; });
   };
   // Without the binding (a local Worker, the checks) the bundled stamps stand.
@@ -172,13 +164,7 @@ const create = (now, env) => {
       if (at - appliedAt >= ACTIVITY_MS) {
         appliedAt = at;
         applyActivity(sim, cast, at);
-        if (pile) {
-          sim.setBananas(bananasAt(pile, at));
-          if (sim.ring.inner !== loggedRing) {
-            loggedRing = sim.ring.inner;
-            logPile({ ok: true, bananas: Math.round(bananasAt(pile, at)), platform: Math.round(sim.platform * 100) / 100 });
-          }
-        }
+        if (pile) sim.setBananas(bananasAt(pile, at));
       }
       sim.step(Math.min(STEP_MAX_MS, Math.max(0, at - last)) / 1000);
       last = at;
