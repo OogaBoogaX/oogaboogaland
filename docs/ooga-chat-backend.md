@@ -753,8 +753,11 @@ To do, by the owner:
 - [x] X developer account "Ooga Chat" on @w_s_bitcoin (pay-per-use, 2026-11-14) and its "Ooga Chat" app: OAuth 2.0
       confidential web app, read only, no email, callbacks `<SITE_ORIGIN>/auth/x/callback` for both environments, its
       client id in both configs' `vars`.
-- [ ] Regenerate the X app's client secret and store it with `wrangler secret put X_CLIENT_SECRET` for each edge; buy
-      credits and set the console's spending limit, then confirm the price of `/2/users/me` there, before turning `x` on.
+- [x] Regenerate the X app's client secret and store it with `wrangler secret put X_CLIENT_SECRET` for each edge; buy
+      credits and set the console's spending limit, then confirm the price of `/2/users/me` there, before turning `x` on
+      (2026-11-25: both edges hold the secret; $40 in credits, a $20 spend cap a billing cycle, User: Read $0.010).
+- [x] Turn `x` on: staging first (2026-11-25, an X sign-in landed one principal with its picture and a session), then
+      production.
 - [ ] Deploy the island's Worker with the `ChatBridge` entrypoint before the edge's first deploy, or the edge's
       deploy fails on the binding.
 - [ ] Before changing any existing Worker's compatibility date, verify WebSocket close and hibernation on staging.

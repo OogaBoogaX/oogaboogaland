@@ -29,8 +29,10 @@
     // The island this edge's chats belong to: a chat's Go there opens it there (the bootstrap's `island`).
     "ISLAND_ORIGIN": "https://oogabooga.land",
     // Comma-separated: github, x, listen, speak, feed, commons, cloud. Turned on in stages by the release runbook.
-    // Production: GitHub sign-in, listening and speaking (speakers on the island's clouds), Feed the Oogas and The Commons.
-    "FEATURES": "github,listen,speak,feed,commons,chats",
+    // Production: GitHub and X sign-in, listening and speaking (speakers on the island's clouds), Feed the Oogas, The
+    // Commons and hosted chats. An X account never speaks on the public clouds, uses The Commons or appears as a
+    // contributor's Ooga, but may speak in a hosted chat when its host lets it (docs/ooga-chat-hosts.md).
+    "FEATURES": "github,x,listen,speak,feed,commons,chats",
     // OogaBoogaX's "Ooga Chat" OAuth App (callback https://ooga.chat/auth/github/callback). A client id is public.
     "GITHUB_CLIENT_ID": "Ov23lilwmHOnCXhvwsKJ",
     // @w_s_bitcoin's "Ooga Chat" X app, OAuth 2.0 confidential client (callbacks for both environments). Public.
