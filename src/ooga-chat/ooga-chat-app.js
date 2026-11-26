@@ -163,8 +163,20 @@
     const handoff = BL.voiceHandoff.build({ onSwitch: () => { if (media.available && mayJoin()) media.join({ takeover: true }); } });
     document.body.append(handoff.node);
     page.signal.addEventListener("abort", () => handoff.node.remove());
+    // A saved name not yet on the visitor's own tile (`renamed`): the audience socket opened again as soon as their voice
+    // is idle, so the server's next assertion carries it.
+    let renamed = false;
+    const RENAME_AGAIN_MS = 1500;
+    const renameTile = () => {
+      if (!renamed || !listening || state.voice.role === "speaker" || state.voice.busy) return;
+      renamed = false;
+      const kept = listening;
+      listening = null;
+      listen(kept);
+    };
     const set = (patch) => {
       state = { ...state, ...patch, voice: media.state };
+      if (renamed) queueMicrotask(renameTile);
       shell.update(state);
       bar.update(state);
       syncLink();
@@ -374,10 +386,19 @@
     const ctx = { actions, media, install: () => device.install(), reload: () => device.reload(), storageKey: (name) => storageKey(adapter.kind, name),
       demo: fixture ? adapter.demo : null, feed: feedOogas, commons: { model: town, send: (data) => !!member && member.send(data),
         // The name field: saved as the island's display name, then the Commons is joined again so the Room's welcome,
-        // and every line after it, carries the new name (as an island page joins again after its own rename).
+        // and every line after it, carries the new name (as an island page joins again after its own rename). The
+        // account is read again so the footer shows it at once, and the audience socket, whose assertion names the
+        // visitor's own tile, is opened again (`renameTile`), at once for a listener and, for a speaker, once their voice
+        // is idle, so it never interrupts their speaking: until then a speaker's tile keeps the old name.
         rename: async (display) => {
           const result = await adapter.commonsName(display);
-          if (result.ok) { membership = null; joinCommons(); }
+          if (result.ok) {
+            membership = null; joinCommons();
+            // A check already under way may answer with the old name: asked again once it has.
+            if (state.auth === "checking") setTimeout(() => auth.check("rename"), RENAME_AGAIN_MS); else auth.check("rename");
+            renamed = true;
+            renameTile();
+          }
           return result;
         } },
       contributors: () => adapter.contributors(),

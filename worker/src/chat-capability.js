@@ -26,22 +26,26 @@ export const githubAccount = (principal) => {
 
 // The ban, and the island's identity-collision rule (migrations/0009_identity_collision_guard.sql): unless this id
 // already holds this login, another player row with it, or an Ooga leaderboard owning it under another id, is a collision.
-const COLLISION = `SELECT (SELECT banned_at FROM players WHERE id = ?1) AS banned_at,
+const COLLISION = `SELECT (SELECT banned_at FROM players WHERE id = ?1) AS banned_at, (SELECT display FROM players WHERE id = ?1) AS display,
   (NOT EXISTS (SELECT 1 FROM players WHERE id = ?1 AND lower(login) = lower(?2))
     AND (EXISTS (SELECT 1 FROM players WHERE id <> ?1 AND lower(login) = lower(?2))
       OR EXISTS (SELECT 1 FROM game_highscores WHERE score_type = 'ooga'
         AND json_extract(owners, '$.' || json_quote(lower(?2))) <> ?1))) AS collision`;
 
-/** The island's decision for a GitHub principal, as the bridge's `capability` answers it and the audience asks it again. */
+/** The island's decision for a GitHub principal, as the bridge's `capability` answers it and the audience asks it again.
+ * It carries the island's own name for the account (`display`, the player row's, null without one), which the edge keeps
+ * as the account's chosen name (worker/chat/src/capability.js), so a rename on the island reaches Ooga Chat. */
 export const decideCapability = async (env, principal, contributorFor, now = Date.now) => {
   const { id, login } = githubAccount(principal);
-  const answer = (state, character = null, reason = null) => ({ state, character, reason, policy: POLICY, checkedAt: now() });
+  let display = null;
+  const answer = (state, character = null, reason = null) => ({ state, character, reason, policy: POLICY, checkedAt: now(), display });
   if (env.DB) {
     let row;
     try { row = await env.DB.prepare(COLLISION).bind(id, login).first(); }
     // `ban-unread`: the ban and collision could not be read, which a hosted chat (that waives the contributor rule but
     // never a ban) must refuse on, unlike an unread contributor snapshot.
     catch { return answer("unknown", null, "ban-unread"); }
+    display = row && typeof row.display === "string" && row.display ? row.display : null;
     if (row && row.banned_at) return answer("ineligible", null, "banned");
     // A login another id holds (renamed away on GitHub, then registered by someone else) is not this account's Ooga.
     if (row && row.collision) return answer("ineligible", null, "identity-collision");

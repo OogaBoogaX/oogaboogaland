@@ -18,10 +18,10 @@ const SITE = "https://chat.example";
 const BIG_X_ID = "1790000000000000001";
 
 // The island, behind its bridge: a contributor lookup the check controls, a ban list, and every `revoke` it was asked.
-const islandOf = ({ contributors = { "ooga-dev": "ooga-dev" }, fresh = true, banned = [] } = {}) => {
+const islandOf = ({ contributors = { "ooga-dev": "ooga-dev" }, fresh = true, banned = [], names = {} } = {}) => {
   const revoked = [];
   const contributorFor = Object.assign(async (login) => contributors[login.toLowerCase()] ? { handle: contributors[login.toLowerCase()] } : null, { fresh: () => fresh });
-  const DB = { prepare: () => ({ bind: (id) => ({ first: async () => (banned.includes(id) ? { banned_at: 1 } : null) }) }) };
+  const DB = { prepare: () => ({ bind: (id) => ({ first: async () => (banned.includes(id) ? { banned_at: 1 } : names[id] ? { display: names[id] } : null) }) }) };
   const env = { ENVIRONMENT: "staging", OOGA_CHAT_FEATURES: "bridge", REALTIME_APP_ID: "app", REALTIME_SECRET: "s", DB };
   const ops = { ...BASE_OPS, ...capabilityOps({ contributorFor }),
     revoke: { run: (_env, envelope) => { revoked.push({ principal: envelope.principal.id, reason: envelope.payload.reason }); return { revoked: 1 }; } } };
@@ -360,15 +360,16 @@ test("display names keep what a person chose and nothing that reorders or hides 
 
 test("the island's capability answer: GitHub principals only, its ban list, and unknown when it could not tell", async () => {
   const env = { ENVIRONMENT: "staging", OOGA_CHAT_FEATURES: "bridge" };
-  const ask = async (principal, { contributors = {}, fresh = true, banned = false } = {}) => {
+  const ask = async (principal, { contributors = {}, fresh = true, banned = false, name = null } = {}) => {
     const contributorFor = Object.assign(async (login) => contributors[login] ? { handle: contributors[login] } : null, { fresh: () => fresh });
-    const DB = { prepare: () => ({ bind: () => ({ first: async () => (banned ? { banned_at: 5 } : null) }) }) };
+    const DB = { prepare: () => ({ bind: () => ({ first: async () => (banned ? { banned_at: 5 } : name ? { display: name } : null) }) }) };
     const ops = { ...BASE_OPS, ...capabilityOps({ contributorFor, now: () => 42 }) };
     return handleEnvelope({ ...env, DB }, makeEnvelope("staging", "capability", {}, principal), ops);
   };
   const gh = { id: "pr_aaaaaaaaaaaaaaaaaaaaaa", provider: "github", providerUserId: "583231", login: "ooga-dev" };
-  assert.deepEqual((await ask(gh, { contributors: { "ooga-dev": "ooga-dev" } })).result, { state: "eligible", character: "ooga-dev", reason: null, policy: POLICY, checkedAt: 42 });
+  assert.deepEqual((await ask(gh, { contributors: { "ooga-dev": "ooga-dev" } })).result, { state: "eligible", character: "ooga-dev", reason: null, policy: POLICY, checkedAt: 42, display: null });
   assert.equal((await ask(gh)).result.state, "ineligible");
+  assert.equal((await ask(gh, { contributors: { "ooga-dev": "ooga-dev" }, name: "wicked" })).result.display, "wicked", "the island's own name for the account");
   assert.equal((await ask(gh, { fresh: false })).result.state, "unknown");
   assert.equal((await ask(gh, { contributors: { "ooga-dev": "ooga-dev" }, banned: true })).result.reason, "banned");
   assert.equal((await ask({ ...gh, provider: "x" })).error.code, "capability_required");
@@ -376,6 +377,35 @@ test("the island's capability answer: GitHub principals only, its ban list, and 
   for (const bad of ["0", "-1", "1e3", "12345678901234567", ""]) assert.equal((await ask({ ...gh, providerUserId: bad })).error.code, "malformed", bad);
   assert.equal((await ask({ ...gh, login: "--x" })).error.code, "malformed");
   assert.deepEqual(githubAccount(gh), { id: 583231, login: "ooga-dev" });
+});
+
+test("a name the account chose: the island's own name for it, kept across sign-ins and shown before the provider's", async () => {
+  const names = {};
+  const s = setup({ island: islandOf({ names }) });
+  await s.signIn("github");
+  assert.equal((await (await s.me()).json()).identity.display, "Ooga Dev", "with no name of its own, the provider's");
+  names[583231] = "wicked";
+  await s.signIn("github");
+  assert.equal((await (await s.me()).json()).identity.display, "wicked", "the island's name, from its capability answer");
+  const row = await s.env.DB.prepare("SELECT display, chosen_display FROM principals").first();
+  assert.deepEqual(row, { display: "Ooga Dev", chosen_display: "wicked" }, "a sign-in refreshes the provider's name and keeps the chosen one");
+  delete names[583231];
+  await s.signIn("github");
+  assert.equal((await (await s.me()).json()).identity.display, "wicked", "an island with no name for it leaves the chosen one");
+  // A rename on the island reaches the principal the caller holds, so the answer built on this very refresh names it.
+  const principal = await s.env.DB.prepare("SELECT * FROM principals").first();
+  names[583231] = "Wicked Smart";
+  const t0 = await s.env.DB.prepare("SELECT checked_at FROM capabilities").first("checked_at");
+  await capabilityFor(s.env, principal, { now: t0 + REFRESH_MS + 1 });
+  assert.equal(principal.chosen_display, "Wicked Smart", "the held principal carries the island's new name at once");
+  // A write that fails is best effort: the answer still comes, and the principal keeps the name it had.
+  const held = await s.env.DB.prepare("SELECT * FROM principals").first(), prepare = s.env.DB.prepare.bind(s.env.DB);
+  names[583231] = "Another";
+  s.env.DB.prepare = (sql) => /chosen_display = \?2/.test(sql) ? { bind: () => ({ run: async () => { throw new Error("D1 down"); } }) } : prepare(sql);
+  const answer = await capabilityFor(s.env, held, { force: true, now: t0 + REFRESH_MS + 2 });
+  s.env.DB.prepare = prepare;
+  assert.equal(answer.state, "eligible", "a failed name write leaves the answer standing");
+  assert.equal(held.chosen_display, "Wicked Smart", "and the name it had");
 });
 
 test("expired sessions and abandoned sign-ins are purged daily", async () => {
@@ -399,7 +429,7 @@ test("the island refuses a login another GitHub id holds there, by its own ident
   const ask = async (id, login) => (await handleEnvelope({ ENVIRONMENT: "staging", OOGA_CHAT_FEATURES: "bridge", DB },
     makeEnvelope("staging", "capability", {}, { id: "pr_x", provider: "github", providerUserId: String(id), login }), ops)).result;
   assert.deepEqual([(await ask(1, "alice")).state, (await ask(1, "Alice")).state], ["eligible", "eligible"], "the id that holds the login");
-  assert.deepEqual(await ask(2, "ALICE"), { state: "ineligible", character: null, reason: "identity-collision", policy: POLICY, checkedAt: 42 },
+  assert.deepEqual(await ask(2, "ALICE"), { state: "ineligible", character: null, reason: "identity-collision", policy: POLICY, checkedAt: 42, display: null },
     "a login renamed away and taken by another account is not their Ooga");
   assert.equal((await ask(3, "bob")).state, "eligible", "a leaderboard owner under its own id");
   assert.equal((await ask(4, "bob")).reason, "identity-collision", "a leaderboard that owns the login under another id");
