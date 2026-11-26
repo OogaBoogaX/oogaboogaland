@@ -66,6 +66,8 @@
   };
   const create = ({ adapter, media, now = () => Date.now(), timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) }, onChange = () => {} }) => {
     let boot = null, timer = null, lastCheck = -Infinity, ticket = 0, disposed = false;
+    // A name heard live, its account and its retries (`renamed`, below).
+    let heard = null, heardTries = 0, heardTimer = null;
     let state = { auth: "checking", session: null, notice: null, busy: false }, open = false;
     // Every change passes here: capture is released before anyone hears of the new state. `open` is whether Join voice
     // was allowed when last said, so a window that passed between two changes still counts as a loss. A loss that is
@@ -82,6 +84,8 @@
       if (disposed) return;
       const was = state.session;
       state = { ...state, ...patch };
+      // A name heard for one account is never another's (signing out does not pass `adopt`).
+      if (heard && (!state.session || state.session.identity.principal !== heard.principal)) forgetHeard();
       const is = state.session, opened = gates(state, now()).joinVoice;
       if (was && (!is || is.identity.principal !== was.identity.principal)) media.release(is ? "identity" : why);
       else if (open && !opened && lost(is, why)) media.release(why);
@@ -109,10 +113,45 @@
     };
     // While a sign-out the server didn't confirm stands, the page stays signed out: a session still found is never
     // taken back (only said, with the sign-out to send again), and none found is the confirmation.
+    // A name heard live (`renamed(display)`: the island's worker/src/renames.js, through the Commons) is this account's
+    // name at once, here as in the footer, so a check under way never shows the old one, and the server is asked for it
+    // (`refresh`). An answer still carrying another name (the server's island answer was under its REFRESH_SOON_MS) keeps
+    // the heard one and asks again once that window has passed, RENAME_TRIES at most; one that agrees ends it. The name is
+    // the account's it was heard for (`heard.principal`): signed out, expired or another account forgets it.
+    const RENAME_AGAIN_MS = 11 * 1000, RENAME_BUSY_MS = 1500, RENAME_TRIES = 3;
+    const forgetHeard = () => {
+      heard = null;
+      if (heardTimer !== null) { timers.clear(heardTimer); heardTimer = null; }
+    };
+    const named = (is, display) => is && is.identity.display !== display ? { ...is, identity: { ...is.identity, display } } : is;
+    const askRenamed = (wait) => {
+      if (heardTimer !== null) timers.clear(heardTimer);
+      heardTimer = timers.set(() => {
+        heardTimer = null;
+        if (!heard || disposed) return;
+        if (state.auth === "checking") askRenamed(RENAME_BUSY_MS); else check("renamed");
+      }, wait);
+    };
+    const renamed = (display) => {
+      if (disposed || !state.session || typeof display !== "string" || !display || state.session.identity.display === display) return;
+      heard = { display, principal: state.session.identity.principal };
+      heardTries = 0;
+      set({ session: named(state.session, display) }, "renamed");
+      askRenamed(0);
+    };
     const adopt = (next, why) => {
       if (state.notice?.kind === "signout") {
         set({ notice: next ? NOTICE.held : null });
         return;
+      }
+      if (heard && (!next || next.identity.principal !== heard.principal)) forgetHeard();
+      if (heard) {
+        if (next.identity.display === heard.display) forgetHeard();
+        else {
+          next = named(next, heard.display);
+          if (why === "renamed" && ++heardTries < RENAME_TRIES) askRenamed(RENAME_AGAIN_MS);
+          else if (why === "renamed") forgetHeard();
+        }
       }
       const expired = !!state.session && !next;
       const notice = expired ? NOTICE.expired : state.notice?.kind === "check" ? null : state.notice;
@@ -139,17 +178,19 @@
       set({ session: next, auth: status(next, now()), notice }, "start");
       schedule();
     };
-    // Checks the session again. A timer, a retry or a saved name (`rename`, whose footer shows it at once) always asks; a
+    // Checks the session again. A timer, a retry, a saved name (`rename`, whose footer shows it at once) or one renamed live
+    // elsewhere (`renamed`, which also has the server read the island's name again) always asks; a
     // return to the page or the network at most every RECHECK_MIN_MS. A passing stale window downgrades before the answer comes, and a lost session reads as expired.
     const check = async (why = "check") => {
       if (disposed || !boot || state.busy || state.auth === "checking") return;
       const at = now();
-      if (why !== "timer" && why !== "retry" && why !== "rename" && at - lastCheck < RECHECK_MIN_MS) return;
+      if (why !== "timer" && why !== "retry" && why !== "rename" && why !== "renamed" && at - lastCheck < RECHECK_MIN_MS) return;
       lastCheck = at;
       const mine = ++ticket;
       if (state.session) set({ auth: status(state.session, at) }, "stale");
       try {
-        const next = await adapter.session(boot);
+        // Renamed live elsewhere: the server reads the island's name again (`refresh`).
+        const next = await adapter.session(boot, why === "renamed" ? { refresh: true } : undefined);
         if (mine === ticket && !disposed) adopt(next, why);
       } catch {
         if (mine === ticket && !disposed) set({ auth: state.session ? "error" : "signed-out", notice: state.session ? NOTICE.check : state.notice }, "error");
@@ -206,8 +247,9 @@
     const dispose = () => {
       disposed = true;
       stop();
+      forgetHeard();
     };
-    return { start, check, signIn, signOut, retry, resume, dispose, get state() { return state; }, get timed() { return timer !== null; } };
+    return { start, check, renamed, signIn, signOut, retry, resume, dispose, get state() { return state; }, get timed() { return timer !== null; } };
   };
   BL.oogaChatAuth = { create, status, gates, eligibilityAt, RECHECK_MIN_MS, TIMER_MIN_MS, TIMER_MAX_MS, STALE_LEAD_MS, NOTICE, WHY };
 })();

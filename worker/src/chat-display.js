@@ -5,11 +5,12 @@
 // banned, a login another id holds, or no Ooga is refused), and only while the bridge's `commons` switch is on. An
 // account that never signed in on the island gets a player row here marked as never signed in (db.js
 // `ensureChatPlayer`), which deleting the Ooga Chat account takes back (chat-bridge.js `revoke`, reason `deleted`).
-// Live sockets pick the name up when they join again, as an island page's own do after a rename.
+// Live connections take it at once, on the island and in Ooga Chat (renames.js).
 
 import { BridgeRefusal, bridgeFeatures } from "./chat-bridge-protocol.js";
 import { decideCapability, githubAccount } from "./chat-capability.js";
 import { ensureChatPlayer, sanitizeDisplay, updateDisplay } from "./db.js";
+import { announceRename } from "./renames.js";
 
 export const displayOps = ({ contributorFor, contributorForEnv, now = Date.now }) => ({
   display: {
@@ -24,6 +25,7 @@ export const displayOps = ({ contributorFor, contributorForEnv, now = Date.now }
       if (decision.state !== "eligible") throw new BridgeRefusal("capability_required");
       await ensureChatPlayer(env.DB, { id, login });
       await updateDisplay(env.DB, id, display);
+      await announceRename(env, id, display);
       return { display };
     },
   },

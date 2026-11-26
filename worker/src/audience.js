@@ -1636,6 +1636,23 @@ export class Audience extends DurableObject {
    * A principal's access ends (`logout`, `logout-all`, `deleted`) or narrows (`eligibility`): every socket of that
    * principal closes (4401) or, for eligibility, drops its lease and its right to ask again. Safe to repeat.
    */
+  /**
+   * An account renamed (renames.js): its rows take the new name in a delta, as any change does, so every roster, tile,
+   * cloud and chat card shows it at once, and its sockets keep it through hibernation. `identity` is `gh:<id>`.
+   */
+  async renamed(identity, display) {
+    const p = typeof identity === "string" ? this.model.people.get(identity) : null;
+    if (!p || typeof display !== "string" || !display || display.length > 50 || p.info.display === display) return { renamed: 0 };
+    this.model.setInfo(identity, { display });
+    for (const connId of p.conns.keys()) this.save(connId);
+    // A hosted chat's held speaker (disconnected, their place kept) lives in the stored quiet holds: written again, or a
+    // wake would bring the old name back at the new revision.
+    if (p.held) await this.saveQuiet();
+    await this.flush();
+    if (this.chat) this.listed();
+    return { renamed: 1 };
+  }
+
   async revoke(principal, reason) {
     if (!principal || !PRINCIPAL.test(principal.id)) return { revoked: 0 };
     let revoked = 0;

@@ -815,6 +815,22 @@ test("the island view's looks: to viewers alone, on change, the last to a viewer
   assert.equal(again.looksText, JSON.stringify(look), "kept across a nap");
 });
 
+test("a rename reaches a held host: their tile changes for everyone, and a wake keeps the new name", async () => {
+  now += START_GAP_MS;
+  const w = await world();
+  const { chat } = await startChat(w.env, host(1), { title: "Renamed", zone: "main" });
+  const amy = await connect(w, chat.id, 1), bea = await connect(w, chat.id, 2);
+  const { a, ctx } = w.objects.get(chatName(chat.id));
+  await a.webSocketClose(amy.ws);
+  await w.settle();
+  assert.ok(a.model.people.get("gh:1").held, "the host's drop holds their place");
+  assert.equal((await a.renamed("gh:1", "Amy Bold")).renamed, 1);
+  assert.equal(rowOf(bea, "gh:1").display, "Amy Bold", "everyone in the chat sees it at once");
+  const again = new Audience(ctx, w.env);
+  await ctx.ready;
+  assert.equal(again.model.people.get("gh:1").info.display, "Amy Bold", "a wake brings back the new name, not the old");
+});
+
 test("the island view's clouds: who sits where to viewers alone, on change, whether or not anyone walks, with the server's clock, and to a viewer starting", async () => {
   now += START_GAP_MS;
   const w = await world();

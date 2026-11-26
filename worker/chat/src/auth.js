@@ -211,7 +211,10 @@ const me = async (request, env, deps) => {
   if (request.method === "GET") {
     if (!found) return refusal("auth_required", 401);
     let capability;
-    try { capability = await capabilityFor(env, found.principal, { waitUntil: deps.waitUntil }); }
+    // `?refresh=name`: the page heard its own account renamed live (worker/src/renames.js on the island), so the island's
+    // answer, and the name it carries, is asked for again if it is more than a few seconds old.
+    const soon = new URL(request.url).searchParams.get("refresh") === "name";
+    try { capability = await capabilityFor(env, found.principal, { soon, waitUntil: deps.waitUntil }); }
     catch { return refusal("unavailable", 503, { retryable: true, retryAfter: 5 }); }
     return json(sessionView(found, capability));
   }
