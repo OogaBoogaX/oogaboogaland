@@ -24759,8 +24759,11 @@ const hubMirror = { name: "hub mirror", why: "rule: rifle shots and melee ripple
       === room.feeds.find(f => f.channel.id === "factory-lines").source;
     const sharedArcade = room.feeds.find(f => f.channel.id === "arcade-floor").source
       === room.feeds.find(f => f.channel.id === "arcade-mezzanine").source;
-    const sharedHangar = room.feeds.find(f => f.channel.id === "hangar-jet").source
-      === room.feeds.find(f => f.channel.id === "hangar-workshop").source;
+    // Two channels of one place share one observer, read once both are on screens: with more channels than the 32
+    // screens (room 8 opened), the hangar's workshop starts off them and rotates on at the first switch.
+    const shares = (a, b) => { const fa = room.feeds.find(f => f.channel.id === a), fb = room.feeds.find(f => f.channel.id === b);
+      return fa && fb && fa.source && fb.source ? fa.source === fb.source : null; };
+    let sharedHangar = shares("hangar-jet", "hangar-workshop");
     const id = "observatory-regression", rec = { id, body: "test", zone: "bifrost.chamber", poseZone: "bifrost.chamber", x: 1.234, y: 0, z: 2.345, yaw: 0.6 };
     let livePose = false, staleHidden = false;
     BL.net.remotes.set(id, rec);
@@ -24786,6 +24789,7 @@ const hubMirror = { name: "hub mirror", why: "rule: rifle shots and melee ripple
       stable &&= room.feeds.length === 32 && room.feeds.every((f, j) => f.geometry === slots[j])
         && new Set(room.feeds.map(f => f.channel.id)).size === 32;
       for (const feed of room.feeds) seen.add(feed.channel.id);
+      if (sharedHangar === null) sharedHangar = shares("hangar-jet", "hangar-workshop");
     }
     let privateRefused = false;
     try { BL.observatoryTimechain.create(B.renderer, 0); } catch { privateRefused = true; }
@@ -38472,9 +38476,11 @@ const hubInOogaChat = (phone) => ({ name: phone ? "in ooga chat phone" : "in oog
       if (u.startsWith("/api/chats/") && u.length === 27) return json(200, { chat: { id: u.slice(-16), open: u.endsWith("AAAAAAAAAAAAAAAA") }, stage: u.endsWith("AAAAAAAAAAAAAAAA") ? stage : stage.slice(0, 1), listeners: 12, requests: 1 });
       if (u.startsWith("/api/chats/")) return json(404, { error: { code: "not_found" } });
       return W.fetch(url, options); };
-    window.WebSocket = class { static OPEN = 1; constructor(url) { this.url = String(url); this.readyState = 1; W.sockets.push(this); } send() {} close() { this.readyState = 3; } addEventListener() {} };
+    window.WebSocket = class { static OPEN = 1; constructor(url) { this.url = String(url); this.readyState = 1; this.on = {}; W.sockets.push(this); } send() {} close() { this.readyState = 3; } addEventListener(type, fn) { this.on[type] = fn; } };
     BL.net.state.started = true; BL.net.state.resolved = false; await BL.net.recheck();
     W.room = m => W.sockets.filter((s) => !s.url.includes("/api/chats/")).at(-1).onmessage({ data: JSON.stringify(m) });
+    // The chat's own socket (chat-call.js), which tells the visitor their standing in it.
+    W.chat = m => W.sockets.filter((s) => s.url.includes("/api/chats/")).at(-1).on.message({ data: JSON.stringify(m) });
     const sum = (chat, title, speakers, listeners, app) => ({ chat, title, speakers, listeners, app });
     W.room({ t: "welcome", you: { id: 71 }, now: Date.now(), features: ["call-v1", "chat-summary-v1"],
       players: [{ id: 2, login: "bea", display: "Bea", zone: "outside", x: 2, y: 0, z: 3, yaw: 0 }],
@@ -38501,6 +38507,9 @@ const hubInOogaChat = (phone) => ({ name: phone ? "in ooga chat phone" : "in oog
   const pop = () => b.evaluate(`(() => { const d = document.querySelector("dialog.hc-preview"), r = d && d.open ? d.getBoundingClientRect() : null;
     return r ? { title: d.querySelector("h2").textContent, open: !d.querySelector(".hc-open-tag").hidden, stage: d.querySelectorAll(".hc-preview-stage > *").length, count: d.querySelector(".hc-preview-count").textContent,
       join: [...d.querySelectorAll("button")].map((e) => e.textContent).filter((t) => /^Join/.test(t)).join(), focus: document.activeElement?.textContent || "",
+      line: d.querySelector(".hc-switch-line").hidden ? "" : d.querySelector(".hc-switch-line").textContent,
+      go: d.querySelector(".hc-switch-host").hidden ? "" : [...d.querySelectorAll(".hc-switch-host button")].map((e) => e.textContent).join(),
+      ways: [...d.querySelectorAll(".hc-start-go:not(.hc-switch-host) button")].filter((e) => !e.hidden).map((e) => e.textContent).join(),
       inside: r.left >= -1 && r.right <= innerWidth + 1 && r.top >= -1 && r.bottom <= innerHeight + 1, shown: r.width > 0 && r.height > 0 } : null; })()`);
   const untilPop = async (test) => { let at; for (let t = 0; t < 4000 && !test(at = await pop()); t += 100) await b.sleep(100); return at; };
   const room = () => b.evaluate(`(() => { const d = document.querySelector("dialog.hosted-switch"), r = d && d.open ? d.getBoundingClientRect() : null;
@@ -38522,21 +38531,17 @@ const hubInOogaChat = (phone) => ({ name: phone ? "in ooga chat phone" : "in oog
   const again = await untilRoom((r) => r.cloud);
   await b.sleep(300);
   const againPop = await pop();
-  // As its host, the routing chat's Join as listener is held: hand the chat over or end it first, with only Stay, which
-  // keeps the call and gives the row the focus back. As anyone else, Switch chats moves.
-  await b.evaluate(`(() => { __inChats.toPlayers(); BL.chatCall.room.you = { rank: "host" }; __inChats.rowOf("Routing fees, channel liquidity and the rebalancer at work").click(); })()`);
-  await untilPop((p) => p && p.title === "Routing fees, channel liquidity and the rebalancer at work");
+  // From inside another chat the preview says what joining does there (#908). As its host, the ways in give way to
+  // ending it first, and Stay keeps the chat and gives the row the focus back; as anyone else, joining leaves it.
+  const ROUTING = "Routing fees, channel liquidity and the rebalancer at work";
+  await b.evaluate(`(() => { __inChats.toPlayers(); __inChats.chat({ type: "chat", you: { rank: "host" } }); __inChats.rowOf("${ROUTING}").click(); })()`);
+  const hostPop = await untilPop((p) => p && p.title === ROUTING && p.line !== "");
+  await b.evaluate(`[...document.querySelectorAll("dialog.hc-preview button")].find((e) => e.textContent === "Stay").click()`);
+  const stayed = await untilRoom((r) => !r.preview && r.focus !== "");
+  await b.evaluate(`(() => { __inChats.chat({ type: "chat", you: { rank: "" } }); __inChats.rowOf("${ROUTING}").click(); })()`);
+  const listenerPop = await untilPop((p) => p && p.title === ROUTING && p.line !== "" && p.ways.includes("Join as listener"));
   await b.evaluate(`[...document.querySelectorAll("dialog.hc-preview button")].find((e) => e.textContent === "Join as listener").click()`);
-  const asked = await untilRoom((r) => !!r.ask);
-  await b.evaluate(`[...document.querySelectorAll("dialog.hosted-switch button")].find((e) => e.textContent === "Stay").click()`);
-  const stayed = await room();
-  const switchShown = await b.evaluate(`!document.querySelector("dialog.hosted-switch .foot-primary").hidden`);
-  await b.evaluate(`(() => { BL.chatCall.room.you = { rank: "" }; __inChats.rowOf("Routing fees, channel liquidity and the rebalancer at work").click(); })()`);
-  await untilPop((p) => p && p.title === "Routing fees, channel liquidity and the rebalancer at work");
-  await b.evaluate(`[...document.querySelectorAll("dialog.hc-preview button")].find((e) => e.textContent === "Join as listener").click()`);
-  const listenerAsk = await untilRoom((r) => !!r.ask);
-  await b.evaluate(`document.querySelector("dialog.hosted-switch .foot-primary").click()`);
-  const switched = await untilRoom((r) => r.room === "BBBBBBBBBBBBBBBB" && r.cloud && r.title === "Routing fees, channel liquidity and the rebalancer at work");
+  const switched = await untilRoom((r) => r.room === "BBBBBBBBBBBBBBBB" && r.cloud && r.title === ROUTING);
   // A chat the live list no longer has: said to have ended, and nothing changes.
   await b.evaluate(`(() => { __inChats.toPlayers(); __inChats.room({ t: "chat-summary", chat: "EEEEEEEEEEEEEEEE", title: "Gone already", speakers: 1, listeners: 0, app: 1 }); })()`);
   await b.sleep(200);
@@ -38544,16 +38549,15 @@ const hubInOogaChat = (phone) => ({ name: phone ? "in ooga chat phone" : "in oog
   const gone = await untilRoom((r) => /That chat has ended/.test(r.toast));
   await b.evaluate(`(() => { __inChats.room({ t: "chat-summary", chat: "EEEEEEEEEEEEEEEE", title: "", speakers: 0, listeners: 0, app: 0 }); BL.chatCall.leave(); __inChats.toPlayers(); })()`);
   await b.sleep(200);
-  record(`in ooga chat${phone ? " (390 px)" : ""}: a chat pressed in In Ooga Chat opens its preview (its stage, the Open stage tag, its counts, Join as listener focused, on screen) over Online Oogas; Join as listener opens it in the Ooga Chat tab and its row then reads "You're in this chat", and pressing it again only shows that tab; from another chat a preview's Join asks Change chats?: its host is told to hand the chat over or end it first, with only Stay, which keeps the chat and gives the row the focus back, and anyone else gets Switch chats, which moves; a chat no longer listed is said to have ended`,
+  record(`in ooga chat${phone ? " (390 px)" : ""}: a chat pressed in In Ooga Chat opens its preview (its stage, the Open stage tag, its counts, Join as listener focused, on screen) over Online Oogas; Join as listener opens it in the Ooga Chat tab and its row then reads "You're in this chat", and pressing it again only shows that tab; from another chat the preview says what joining does there: its host is told to end it first, with End chat and join and Stay in place of the ways in, Stay keeping the chat and giving the row the focus back, and anyone else is told joining leaves it, Join as listener moving; a chat no longer listed is said to have ended`,
     previewed?.title === "Lightning dev call" && previewed.open && previewed.stage === 3 && previewed.count === "12 listening · 1 waiting to speak" && previewed.join === "Join as speaker,Join as listener" && previewed.focus === "Join as listener" && previewed.inside && previewed.shown
       && joined.room === "AAAAAAAAAAAAAAAA" && joined.cloud && !joined.preview && marked.rows.includes("Lightning dev call=3 speaking · 12 listening=here")
       && again.room === "AAAAAAAAAAAAAAAA" && again.cloud && !againPop
-      && asked.ask?.head === "Change chats?" && asked.ask.text === "You host Lightning dev call. Before joining Routing fees, channel liquidity and the rebalancer at work, hand it to a co-host with Leave chat, or end it."
-      && asked.ask.note === "" && asked.ask.focus === "Stay" && asked.ask.inside && !switchShown
-      && listenerAsk.ask?.text === "You're in Lightning dev call. Leave it and join Routing fees, channel liquidity and the rebalancer at work?" && listenerAsk.ask.focus === "Switch chats"
-      && !stayed.ask && stayed.room === "AAAAAAAAAAAAAAAA" && stayed.focus === "Routing fees, channel liquidity and the rebalancer at work"
+      && hostPop?.line === "You host Lightning dev call. End it first, or add a co-host to hand it to." && hostPop.go === "End chat and join" && hostPop.ways === "Stay" && hostPop.inside
+      && !stayed.preview && stayed.room === "AAAAAAAAAAAAAAAA" && stayed.focus === ROUTING
+      && listenerPop?.line === "Joining leaves Lightning dev call." && listenerPop.go === "" && listenerPop.ways === "Stay,Ask to speak,Join as listener" && listenerPop.focus === "Join as listener"
       && switched.room === "BBBBBBBBBBBBBBBB" && switched.cloud && gone.room === "BBBBBBBBBBBBBBBB" && /That chat has ended/.test(gone.toast) && !gone.preview,
-    JSON.stringify({ previewed, joined, marked, again, againPop, asked, switchShown, listenerAsk, stayed, switched, gone }));
+    JSON.stringify({ previewed, joined, marked, again, againPop, hostPop, stayed, listenerPop, switched, gone }));
   // The counts follow each chat's word, and the group goes with the last chat.
   await b.evaluate(`(() => { __inChats.room({ t: "chat-summary", chat: "CCCCCCCCCCCCCCCC", title: "Quiet room", speakers: 1, listeners: 40 }); __inChats.room({ t: "chat-online", n: 56 }); })()`);
   await b.sleep(100);
