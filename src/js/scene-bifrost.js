@@ -10,9 +10,8 @@
 // page that opens here it stands at the tunnel's inner end. Walking back out through the field, Escape and the Leave
 // button all take it back out to the island's gate.
 //
-// An open world's window shows that world itself: its models are built off the graph and photographed once a page (the
-// poker room once for each cave theme it shows), in its own light, after the chamber opens, and the picture hangs at
-// the end of the window's passage. Until then the window shows its row's stand-in.
+// An open world's window shows that world itself: its models are built off the graph and photographed once a page, in
+// its own light, after the chamber opens, and the picture hangs at the end of the window's passage. Until then the window shows its row's stand-in.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -108,7 +107,7 @@
   // the saturation the page's grade adds again (`colour`) and misted a little toward the field's blue. DSB Land is seen
   // from above its falls, down over the turtle to the far stars, in DSB's light (scene-dsb.js: `RENDER`, and the two
   // lamps `buildLand` hangs); the poker room from over the aisle by its mirror, as its own view arrives, down between its
-  // tables in the cave theme the looks name, under its tables' lamps and its room lights (scene-poker.js lights it so).
+  // tables, under its tables' lamps and its room lights (scene-poker.js lights it so).
   const DSB_LIGHT = {
     clear: [0.025, 0.014, 0.06], horizon: [0.11, 0.04, 0.19], zenith: [0.008, 0.006, 0.025], sky: [0.52, 0.43, 0.7], ground: [0.26, 0.17, 0.32],
     sun: [0.8, 0.7, 0.9], light: { x: -0.4, y: 0.8, z: 0.4 }, stars: 1, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 48, bloomStrength: 0.5,
@@ -119,13 +118,32 @@
     clear: [0.1, 0.12, 0.09], sky: null, ground: null, direct: null, directStrength: 0.38, ambientFloor: 0.48, sun: { x: 0.2, y: 1, z: 0.3 },
     shadowCenter: { x: 0, y: 1.5, z: 0 }, shadowExtent: 35, bloomStrength: 0.24, lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 13
   };
-  const pokerLight = (theme) => {
-    POKER_LIGHT.sky = theme.sky; POKER_LIGHT.ground = theme.ground; POKER_LIGHT.direct = theme.direct; POKER_LIGHT.ambientFloor = theme.ambient;
-    POKER_LIGHT.directStrength = theme.directStrength ?? 0.38; POKER_LIGHT.bloomStrength = theme.bloom ?? 0.24;
-    BL.pokerModels.TABLES.forEach((p, i) => POKER_LIGHT.lights.set([p.x, theme.tableY ?? 5.1, p.z, theme.tableRange ?? 14, ...theme.tableLight, 0], i * 8));
-    for (let i = 0; i < 3; i++) POKER_LIGHT.lights.set([0, 6.15, (i - 1) * 24, 13, ...theme.roomLight, 0], (10 + i) * 8);
-    const extra = BL.pokerModels.lights(theme.id); POKER_LIGHT.lights.set(extra, 104); POKER_LIGHT.lightCount = 13 + extra.length / 8;
+  const pokerLight = () => {
+    // The room's own light record (its direction and haze included), as scene-poker.js writes it.
+    const theme = BL.pokerThemes.club;
+    BL.pokerThemes.light(POKER_LIGHT, renderer.kind);
+    BL.pokerModels.TABLES.forEach((p, i) => POKER_LIGHT.lights.set([p.x, theme.tableY, p.z, theme.tableRange, ...theme.tableLight, 0], i * 8));
+    for (let i = 0; i < 3; i++) POKER_LIGHT.lights.set([0, BL.pokerModels.CHANDELIER_LIGHT_Y, (i - 1) * 24, theme.roomRange, ...theme.roomLight, 0], (10 + i) * 8);
+    const room=BL.pokerModels, extra=room.CLUB_LIGHTS, lights=POKER_LIGHT.lights;
+    lights.set(extra,104);
+    let offset=104+extra.length;
+    if(renderer.kind==="webgl2" && renderer.quality==="high"){
+      for(const row of [room.COLONNADE,room.LOUNGE_LIGHTS,room.GAME_LIGHTS]){
+        lights.set(row,offset); offset+=row.length;
+      }
+    }
+    POKER_LIGHT.lightCount=offset/8;
     return POKER_LIGHT;
+  };
+  // The room's models and the cosmos over its glass vault, hung as the room hangs it but without the ship and at
+  // `POKER_SKY_SCALE`, so the stars lie inside the picture's 260 m; built off the graph with the room and dropped with
+  // it (its few placed copies released as the picture's own records are).
+  const POKER_SKY_SCALE = 0.7;
+  const pokerRoom = () => {
+    const room = BL.pokerModels.build().root;
+    addChild(room, BL.pokerTerrace.build(renderer.kind === "canvas2d").root);
+    addChild(room, BL.pokerThemes.hang({ canvas: renderer.kind === "canvas2d", sparse: renderer.kind === "canvas2d", scale: POKER_SKY_SCALE, ship: false }).root);
+    return room;
   };
   const SHOTS = {
     dsb: {
@@ -134,7 +152,7 @@
     },
     poker: {
       width: 360, up: 0.42, eye: { x: 0, y: 8.2, z: 33 }, look: { x: 0, y: 1.2, z: 6 }, colour: 0.83, mist: 0.05, haze: [70, 120, 235],
-      build: (look) => BL.pokerModels.build(look.theme.id).root, opts: (look) => pokerLight(look.theme)
+      build: () => pokerRoom(), opts: () => pokerLight()
     }
   };
 
@@ -171,7 +189,7 @@
   };
   const targets = [];
 
-  // One picture of each open world for the page, kept on `world.windowViews` by its looks' key (DSB Land's as `dsb`).
+  // One picture of each open world for the page, kept on `world.windowViews` by its looks' key (`dsb`, `poker`).
   // Built from the world's own models off the graph, drawn once into the scene canvas and read straight back, as the
   // island photographs itself for the Lightning Factory: the frame is never shown, since the scene draws over it before
   // the browser presents. The models' GPU records are released at once, so nothing of them stays behind.

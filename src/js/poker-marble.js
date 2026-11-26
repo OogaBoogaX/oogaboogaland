@@ -1,8 +1,50 @@
-// The Banana Club's marble kit: veined slabs, turned columns, stepped plinths and brass plaques, flat-coloured with no textures.
+// The Banana Club's marble kit: veined slabs, turned columns, stepped plinths, brass plaques and projected mineral photographs.
 (() => {
   "use strict";
   const BL = window.BL, M = BL.models, hexToRgb = BL.math.hexToRgb;
-  const WHITE = "#ece8e1", VEIN = "#a29c94", SHADE = "#cbc4b8", GOLD = "#c8a45f", CREAM = "#efe3c8", BRASS = "#b8924a";
+  const WHITE = "#ece8e1", VEIN = "#a29c94", SHADE = "#cbc4b8", GOLD = "#b8893b", CREAM = "#efe3c8", BRASS = "#b8924a";
+  // Finished render meshes keep their authored positions and face attributes in typed arrays.
+  // Call only after all carving, colouring and merges are complete.
+  const staticMesh = geometry => BL.compactGeometry
+    ? BL.compactGeometry.pack(geometry, { immutable: true, renderOnly: true, precision: 64 }) : geometry;
+  // Project a mineral photograph down the three local axes, turning the grain between faces.
+  const mineralAtlas = (source, size, whiteGround = false) => {
+    const atlas = M.cached(() => {
+      const canvas = document.createElement("canvas"),
+        ctx = canvas.getContext("2d");
+      canvas.width = 3;
+      canvas.height = 1;
+      ctx.fillStyle = whiteGround ? "#fffefa" : "#eceff1";
+      ctx.fillRect(0, 0, 3, 1);
+      const paper = { canvas, version: 0 },
+        image = new Image();
+      image.onload = () => {
+        canvas.width = size * 3;
+        canvas.height = size;
+        for (let i = 0; i < 3; i++) {
+          ctx.save();
+          ctx.translate(size * (i + 0.5), size * 0.5);
+          ctx.rotate((i * Math.PI) / 2);
+          ctx.drawImage(image, -size / 2, -size / 2, size, size);
+          ctx.restore();
+        }
+        if (whiteGround) {
+          ctx.fillStyle = "rgba(255,255,253,.83)";
+          ctx.fillRect(0, 0, canvas.width, size);
+        }
+        paper.version++;
+      };
+      image.src = source();
+      return paper;
+    });
+    return (geometry, min, max) => {
+      const paper = atlas();
+      geometry.imageSurface = {
+        canvas: paper.canvas, atlas: true, atlasMin: min, atlasMax: max, rect: [0, 0, 1, 1],
+        get version() { return paper.version; }
+      };
+    };
+  };
   const LIFT = 0.004;
   // `lite` (set by the scene from the renderer, before it builds) halves the veins and the turning.
   let lite = false;
@@ -61,7 +103,7 @@
     const segments = lite ? 10 : 20;
     return once(["column", h, r, segments].join(":"), () => M.shaded([
       M.lathe({ segments, color: GOLD, profile: [[0, 0], [r * 1.3, 0], [r * 1.3, 0.12], [r * 1.15, 0.18], [r * 1.08, 0.3], [0, 0.3]] }),
-      M.lathe({ segments, color: WHITE, profile: [[r, 0.3], [r * 0.94, h - 0.34]] }),
+      M.lathe({ segments, color: "#161411", profile: [[r, 0.3], [r * 0.94, h - 0.34]] }),
       M.lathe({ segments, color: GOLD, profile: [[0, h - 0.34], [r * 1.08, h - 0.34], [r * 1.2, h - 0.2], [r * 1.35, h - 0.12], [r * 1.35, h], [0, h]] })
     ]));
   };
@@ -75,5 +117,5 @@
   // A faintly glowing brass plate, bottom edge at y 0 and back at z 0, facing +z.
   const plaque = ({ w = 0.7, h = 0.34 } = {}) => once(["plaque", w, h].join(":"), () =>
     M.bevelBox({ w, h, d: 0.035, color: BRASS, emissive: 0.25, bevel: 0.012, offset: { y: h / 2, z: 0.0175 } }));
-  BL.pokerMarble = Object.freeze({ WHITE, VEIN, SHADE, GOLD, CREAM, BRASS, slab, column, plinth, plaque, setLite });
+  BL.pokerMarble = Object.freeze({ WHITE, VEIN, SHADE, GOLD, CREAM, BRASS, slab, column, plinth, plaque, setLite, staticMesh, mineralAtlas });
 })();

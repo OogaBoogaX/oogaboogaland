@@ -14,7 +14,8 @@
 // css/style-<hash>.css, with the jumbotron's snapshot, which every deploy rebakes, in its own
 // js/jumbotron-data-<hash>.js before the code (`externalizePage`), so the 24 pages share one cached copy. The favicons go out as files too (favicon-32.png,
 // favicon-64.png, favicon.ico, apple-touch-icon.png and its -precomposed twin), so none of those addresses answers 404. `--headers
-// <file>` writes that file as _headers plus one immutable rule per file under js/ and css/: exact paths, so a 404 there
+// <file>` writes that file as _headers plus one immutable rule per file under js/, css/ and audio/ (all named by their
+// content hash): exact paths, so a 404 there
 // (a page from one deploy asking another) is never cached for a year. `npm run build:site` passes both.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -30,7 +31,7 @@ import { catalogPageAttributes } from "./character-catalog-build.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const out = resolve(root, process.argv[2] || "untracked/site");
-const { deferred, block } = await import("./build.mjs");
+const { deferred, block, portableLounge } = await import("./build.mjs");
 
 const context = { window: {} };
 vm.runInNewContext(readFileSync(join(root, "src", "js", "routes.js"), "utf8"), context);
@@ -67,7 +68,11 @@ if (process.argv.includes("--audio-assets")) shell = externalizeAudio(shell, roo
 const pictures = process.argv.includes("--image-assets");
 // A picture module outside every data-defer group stays in the page's own script and is rewritten there.
 const inlinePictures = pictures ? PICTURE_MODULES.filter((src) => ![...deferred.values()].some((sources) => sources.includes(src))) : [];
-shell = externalizeModules(shell, out, deferred, block, writeTerrainWorker(root, out), pictures ? (src, text) => PICTURE_MODULES.includes(src) ? externalizePictures(src, text, out) : text : undefined, inlinePictures, writeMicFilter(root, out));
+const hostedModule = (src, text) => {
+  if (src === portableLounge) return "";
+  return pictures && PICTURE_MODULES.includes(src) ? externalizePictures(src, text, out) : text;
+};
+shell = externalizeModules(shell, out, deferred, block, writeTerrainWorker(root, out), hostedModule, [...inlinePictures, portableLounge], writeMicFilter(root, out));
 if (process.argv.includes("--page-assets")) shell = externalizePage(shell, out, block, ["js/jumbotron-data.js"]);
 if (shell.split("</title>").length !== 2 || shell.split("</head>").length !== 2) throw new Error("oogaboogaland.html: expected one <title> and one </head>");
 
@@ -141,7 +146,7 @@ What happens after: a plain Ooga is merged the day after it is sent and a custom
 `);
 const headers = process.argv.indexOf("--headers");
 if (headers > 0) {
-  const files = ["js", "css"].flatMap((dir) => existsSync(join(out, dir)) ? readdirSync(join(out, dir)).sort().map((file) => `/${dir}/${file}`) : []);
+  const files = ["js", "css", "audio"].flatMap((dir) => existsSync(join(out, dir)) ? readdirSync(join(out, dir)).sort().map((file) => `/${dir}/${file}`) : []);
   // Cloudflare reads at most 100 rules from _headers.
   const rules = readFileSync(resolve(root, process.argv[headers + 1]), "utf8").trimEnd();
   if (files.length + rules.split("\n").filter((line) => line.startsWith("/")).length > 100) throw new Error("_headers: more than 100 rules");

@@ -147,22 +147,21 @@
       let at = 2;
       for (let i = 0; i < clips.length; i++) { triggers[i] = at / duration; at += (clips[i] ? clips[i].duration : 0) + 1; }
     };
+    // The voices alone set the schedule, so the passage is ready once they decode. The music, about five times
+    // their bytes, follows them rather than sharing their bandwidth and starts under the passage when it arrives.
     const preload = async () => {
-      const decoder = context;
+      const decoder = context, failed = () => { if (!disposed) failure = "An entrance audio track could not be decoded."; };
+      const results = await Promise.allSettled(BL.dsbAudioData.voices.map(async (encoded, i) => {
+        const buffer = await decode(decoder, encoded);
+        if (!disposed && buffer && versions[i] === 0) clips[i] = buffer;
+      }));
+      if (results.some((result) => result.status === "rejected")) failed();
+      if (disposed) return;
+      schedule(); ready = true;
       try {
-        const results = await Promise.allSettled([
-          ...BL.dsbAudioData.voices.map(async (encoded, i) => {
-            const buffer = await decode(decoder, encoded);
-            if (!disposed && buffer && versions[i] === 0) clips[i] = buffer;
-          }),
-          (async () => {
-            const buffer = await decode(decoder, BL.dsbAudioData.music);
-            if (!disposed && buffer && musicVersion === 0) startMusic(buffer);
-          })()
-        ]);
-        if (results.some((result) => result.status === "rejected")) throw new Error("Entrance audio unavailable");
-      } catch { if (!disposed) failure = "An entrance audio track could not be decoded."; }
-      if (!disposed) { schedule(); ready = true; }
+        const buffer = await decode(decoder, BL.dsbAudioData.music);
+        if (!disposed && buffer && musicVersion === 0) startMusic(buffer);
+      } catch { failed(); }
     };
     const ensure = () => {
       if (context || disposed || !window.AudioContext || navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
@@ -216,6 +215,9 @@
       if (master) master.gain.setTargetAtTime(muted ? 0 : 0.5, context.currentTime, 0.03);
       syncRadio();
     });
+    // A fetch needs no gesture, so the hosted voices start downloading on arrival and are in hand when the visitor
+    // turns sound on. The music waits for that; a failed warm-up is evicted and fetched again when decode asks.
+    if (BL.dsbAudioData.external) for (const url of BL.dsbAudioData.voices) recording(url, heldRecordings).catch(() => {});
     // A click through the hub has already activated audio; direct visits wait for input.
     ensure();
     return { update, gesture, fired, get radioVolume() { return radioVolume; }, environment: (camera, boat, dt = 1 / 60, source = null) => {

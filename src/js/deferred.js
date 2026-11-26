@@ -5,7 +5,8 @@
 // the hall but a stage cabinet (`carnival-scene`, on that base); Ooga Raid, behind the hall's back door (`raid-scene`,
 // on the same base, whose chip its music plays on); Block Frenzy's scene, trivia and sound (not its rules,
 // models or live wire, which the arcade's hall reads); the poker room (all but its
-// themes, which tint the island's ₿IFRÖST window), loaded by the room and ₿IFRÖST; and Ooga Drop's diver and sound (not its
+// one preset, poker-themes.js, which tints the island's ₿IFRÖST window), loaded by the room and ₿IFRÖST, and each track of its lounge playlist, a group
+// of its own fetched only as it comes up; and Ooga Drop's diver and sound (not its
 // models, whose canopy Ooga Orbit's capsule lands under). Rally's tracks, racers, items, HUD and sound, Mine's HUD, sound
 // and crew, and Orbit's models, HUD and sound load as bases before their scene implementations; their shared model,
 // flight and save modules stay inline. `npm run site` moves each group's modules out of the page into
@@ -26,11 +27,13 @@
     // Each lecture of the Lecture Hall's course, a group of its own (lecture-btc.js names them a to n).
     ...Object.fromEntries([..."abcdefghijklmn"].map((k, i) => [`lecture-btc-${k}`, () => !!(BL.lectures && BL.lectures.get(`btc-${String(i + 1).padStart(2, "0")}`))])),
     // HALLOWEEN: the arcade's ghost hunt, and each track of its playlist.
-    halloween: () => !!BL.halloween, "chats-fixture": () => !!BL.oogaChatFixtures, ...Object.fromEntries(["boss", "colt", "martial", "nightmare", "synthed", "nr"].map((k) => [`halloween-track-${k}`, () => !!(BL.ghostMusic && BL.ghostMusic[k])])) };
+    halloween: () => !!BL.halloween, "chats-fixture": () => !!BL.oogaChatFixtures, ...Object.fromEntries(["boss", "colt", "martial", "nightmare", "synthed", "nr"].map((k) => [`halloween-track-${k}`, () => !!(BL.ghostMusic && BL.ghostMusic[k])])),
+    // The Ember Den's lounge playlist, a group a track (poker-audio.js fetches each as it comes up).
+    ...Object.fromEntries(["lobby", "cool", "venus", "bossa"].map((k) => [`lounge-track-${k}`, () => !!(BL.loungeMusic && BL.loungeMusic[k])])) };
   // Only scene implementation groups depend on a base group, and the Timechain rooms on the Block Party's radio, which
   // the keypad outside loads alone to start it early; no base group depends on a scene shell. The Lightning Jet
   // Hangar, walked into from the Factory and left back into it, builds on the Factory's scene group.
-  const SCENE_BASE = { "arcade-scene": "arcade", "carnival-scene": "arcade", "raid-scene": "arcade", "drop-scene": "drop", "race-scene": "race", "mine-scene": "mine", "orbit-scene": "orbit", "hangar-scene": "factory-scene", timechain: "party-radio", "timechain-genesis": "timechain" };
+  const SCENE_BASE = { "poker-scene": "poker", "arcade-scene": "arcade", "carnival-scene": "arcade", "raid-scene": "arcade", "drop-scene": "drop", "race-scene": "race", "mine-scene": "mine", "orbit-scene": "orbit", "hangar-scene": "factory-scene", timechain: "party-radio", "timechain-genesis": "timechain" };
   const loading = new Map(), attempts = new Map();
   let stale = false, staleHandler = null;
   // A file that answers 404 is gone for good: the site was deployed since this page loaded.
