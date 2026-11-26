@@ -45,6 +45,9 @@
     if (typeof zone !== "string") return zone;
     if (world(zone)) return SURFACE;
     if (Object.hasOwn(ALIASES, zone)) return ALIASES[zone];
+    // Valhodl's areas (zone-map.js `FRAME_SETS`, each reporting from its own middle) are one place a scene: the yard's
+    // `byzantine-keep.y<c>r<r>` the yard's, the halls' `byzantine-keep.h…` the halls'.
+    if (zone.length > 15 && zone.startsWith("byzantine-keep.")) { const c = zone.charCodeAt(15); if (c === 121) return "byzantine-keep"; if (c === 104) return "byzantine-keep.halls"; }
     for (let i = 0; i < GROUPED.length; i++) {
       const g = GROUPED[i];
       if (zone.startsWith(g) && (zone.length === g.length || zone.charCodeAt(g.length) === 46)) return g;

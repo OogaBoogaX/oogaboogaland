@@ -7,8 +7,9 @@
 // where it was first made.
 import { ghostHunt } from "./games/ghost-hunt.js"; // HALLOWEEN
 import { island } from "./games/island.js";
+import { keep } from "./games/keep.js";
 
-export const GAME_KINDS = new Map([[island.id, island]]);
+export const GAME_KINDS = new Map([[island.id, island], [keep.id, keep]]);
 GAME_KINDS.set(ghostHunt.id, ghostHunt); // HALLOWEEN
 
 /** The object name for `kind` at `venue`, or "" when the Worker hosts no such game. */

@@ -629,9 +629,11 @@ export const VOICE_TRACK = "mic";
 /** The voice group of a zone name: its alias's (`BLEND.ALIASES`), else the part before its `.place`. */
 export const zoneGroup = BLEND.group;
 
-/** Whether two zones' players are shown to each other, for what the room relays of them: the same zone, or two of the
- *  main world, all in the island scene's coordinates. */
-export const seenTogether = (a, b) => a === b || BLEND.world(a) && BLEND.world(b);
+/** Whether two zones' players are shown to each other, for what the room relays of them: the same zone, two of the
+ *  main world, all in the island scene's coordinates, or two areas of one Valhodl scene (zone-map.js `FRAME_SETS`: each
+ *  reports from its own middle, but its players see each other across an area's edge; `BLEND.place` folds them). */
+export const seenTogether = (a, b) => a === b || BLEND.world(a) && BLEND.world(b) ||
+  typeof a === "string" && typeof b === "string" && a.startsWith("byzantine-keep") && b.startsWith("byzantine-keep") && BLEND.place(a) === BLEND.place(b);
 
 /** Whether listener `p` (in voice group `group`) and speaker `q` share a place. With neither crossing nor in the main
  * world, a group; else by place, so a crossing's far end never reaches into another place of its group. */

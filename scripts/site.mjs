@@ -27,6 +27,7 @@ import { MAP_ENTRY, stageMap } from "./distribution-map.mjs";
 import { PICTURE_MODULES, externalizeModules, externalizePage, externalizePictures } from "./distribution-modules.mjs";
 import { writeTerrainWorker } from "./distribution-terrain.mjs";
 import { writeMicFilter } from "./distribution-mic.mjs";
+import { writeKeepGeometry } from "./distribution-keep.mjs";
 import { catalogPageAttributes } from "./character-catalog-build.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -72,7 +73,7 @@ const hostedModule = (src, text) => {
   if (src === portableLounge) return "";
   return pictures && PICTURE_MODULES.includes(src) ? externalizePictures(src, text, out) : text;
 };
-shell = externalizeModules(shell, out, deferred, block, writeTerrainWorker(root, out), hostedModule, [...inlinePictures, portableLounge], writeMicFilter(root, out));
+shell = externalizeModules(shell, out, deferred, block, writeTerrainWorker(root, out), hostedModule, [...inlinePictures, portableLounge], writeMicFilter(root, out), writeKeepGeometry(root, out));
 if (process.argv.includes("--page-assets")) shell = externalizePage(shell, out, block, ["js/jumbotron-data.js"]);
 if (shell.split("</title>").length !== 2 || shell.split("</head>").length !== 2) throw new Error("oogaboogaland.html: expected one <title> and one </head>");
 

@@ -261,12 +261,14 @@
     // A character as the registry names it (claims are case-insensitive), which the crew's map is keyed by.
     const canonical = (name) => { const c = BL.characters.get(name); return c ? c.handle : name; };
     const build = (rec) => {
+      // A land's areas report from their own middles (zone-map.js `offsetOf`); this scene's coordinates add it back.
+      const o = BL.zoneMap.offsetOf(rec.poseZone || rec.zone), rx = rec.x + o.x, rz = rec.z + o.z;
       const gorilla = rec.bodyKind === "gorilla" || rec.body.startsWith("gorilla:");
       const decoded = rec.bodyName || (gorilla ? rec.body.slice(8) : rec.body);
       // Claims are case-insensitive; scene maps use the contributor's canonical handle.
       const owner = gorilla && BL.characters.get(decoded), name = owner ? owner.handle : decoded;
       const cave = gorilla
-        ? (createGorilla && createGorilla(name, rec)) || BL.agent.create({ managed: true, groundAt: () => rec.y, x: rec.x, z: rec.z, heading: rec.yaw })
+        ? (createGorilla && createGorilla(name, rec)) || BL.agent.create({ managed: true, groundAt: () => rec.y, x: rx, z: rz, heading: rec.yaw })
         : BL.models.caveman(BL.contributors.traitsFor(name));
       if (!gorilla) {
         BL.crew.preparePresentation(cave);
@@ -285,7 +287,7 @@
         if (cave.parts.dog) {
           // The shared terrain queries read the owner's standing envelope and passenger origin.
           cave.bodyHeight = height; cave.bodyRadius = BL.crew.bodyRadiusOf(cave); cave.hop = 0;
-          cave.riding = { support: null, outside: null, x: rec.x, y: rec.y + cave.baseY, z: rec.z };
+          cave.riding = { support: null, outside: null, x: rx, y: rec.y + cave.baseY, z: rz };
           cave.sleepParts = { headX: cave.parts.head.position.x, headZ: cave.parts.head.position.z };
           pets.attach(cave);
           // Detached from the sightHidden root, and as late to the outline registry as the body it follows.
@@ -295,7 +297,7 @@
       // Its hip over its feet is the body's own (`cave.baseY`), which a worn height moves (character-wardrobe.js).
       const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, get baseY() { return gorilla ? 0 : cave.baseY; }, get height() { return gorilla ? 0 : cave.bodyHeight; }, top: NaN, dTop: 0,
         // The walk's step from the last sample, when it came and how fast it turned since the one before.
-        gaitAt: NaN, gaitPhase: 0, gaitRate: 0, puff: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, ghosted: null, label: "", labelW: 0,
+        gaitAt: NaN, gaitPhase: 0, gaitRate: 0, puff: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rx, y: rec.y, z: rz, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, ghosted: null, label: "", labelW: 0,
         react: "", reactT: 0, beamOut: 0, beamIn: 0, beamSlot: -1, screenX: NaN, plateLeft: NaN, plateTop: NaN, plateW: 0, plateH: 0, plateTextX: NaN, plateBaseline: NaN, plateBarLeft: NaN, plateBarTop: NaN, pickOwner: { kind: "player", id: rec.id, cave, weaponType: "none" } };
       bodies.set(rec.id, entry);
       hideLocal(entry);
@@ -665,10 +667,11 @@
           entry.x = entry.cave.root.position.x; entry.y = entry.cave.root.position.y - entry.baseY; entry.z = entry.cave.root.position.z;
         }
         entry.restPhase = restPhase;
-        const far = Math.hypot(rec.x - entry.x, rec.y - entry.y, rec.z - entry.z) > SNAP;
+        const o = BL.zoneMap.offsetOf(rec.poseZone || rec.zone), rx = rec.x + o.x, rz = rec.z + o.z;
+        const far = Math.hypot(rx - entry.x, rec.y - entry.y, rz - entry.z) > SNAP;
         const t = far ? 1 : k;
-        entry.dx = (rec.x - entry.x) * t;
-        entry.dz = (rec.z - entry.z) * t;
+        entry.dx = (rx - entry.x) * t;
+        entry.dz = (rz - entry.z) * t;
         entry.x += entry.dx;
         entry.cave.hopV = far || !(dt > 0) ? 0 : (rec.y - entry.y) * t / dt;
         entry.y += (rec.y - entry.y) * t;

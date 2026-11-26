@@ -111,3 +111,12 @@ Use two distinct eligible contributor accounts, both driving Oogas in the same v
 Renewal fetches new credentials while the old connections are still active, then rebuilds using those credentials. A failed fetch leaves the call running and retries in 60 seconds; stopping during a fetch cannot resurrect voice. The SFU still uses one publication per account, so this is not overlapping audio sessions or a guarantee of gapless renewal.
 
 Capture `BL.voice.inspect().relayRenewals` before closing the page. It holds the last eight renewals: credential-fetch time, rebuild time, first replacement receive-track event, peer count, mute state and outcome. `firstTrackMs` is measured from the start of rebuilding and stays null when no remote track arrives. A track event and successful signalling do **not** prove audible sound or RTP continuity: measure audible gaps separately on both staging clients and compare with these timings. No credentials, candidates/IP addresses, conversation content, storage or network telemetry are added.
+
+## Valhodl's music (R2)
+
+Valhodl's music is not in git or the staged site: `src/js/keep-music-data.js` names each track (`<name>-<hash>.mp3`), the page fetches `/media/keep/<file>`, and the Worker answers it from the private `KEEP_MUSIC` bucket (`worker/src/lecture-audio.js`), as it answers lecture recordings from theirs.
+
+- Each bucket is made once, before the first deploy that binds it (a deploy fails on a binding to a bucket that does not exist). From `worker/`: `npx wrangler r2 bucket create oogaboogaland-staging-keep-music` and `npx wrangler r2 bucket create oogaboogaland-production-keep-music`.
+- The tracks live in the gitignored `untracked/keep-music/`. `node scripts/keep-music.mjs` lists them; `node scripts/keep-music.mjs --import <name> <file.mp3>` brings one in or replaces one and rewrites its line in the manifest.
+- Before a deploy that names new tracks: `npm --prefix worker run keep-music:staging` (or `keep-music:production`). It checks each file against the hash in its name and skips one the site already serves. `keep-music:local` fills the bucket `npm run dev` uses.
+- A track the bucket does not hold is silence in the land, nothing more. The portable page opened from disk has no music.

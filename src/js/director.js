@@ -11,11 +11,12 @@
   const TEST_DONATIONS = params.get("testdonations") === "1" && ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
   // A game still being built sets `wip: true` on its scene and stays unregistered, so nothing can enter it
   // and its cave seals, unless the page opts in: ?wip=<scene id> opens that game and lands in it, wip=1 opens
-  // every one. No debug needed, so anyone can play a shared link. Its saves are left alone for the day it opens.
+  // every one. No debug needed, so anyone can play a shared link. Its saves are left alone for the day it opens. A scene
+  // that is part of another (`wipOf`) opens with it.
   const WIP = params.get("wip");
   // Rally stays closed to visitors; its retained suite explicitly opts into the maintenance scene.
   const RALLY_TEST = DEBUG && WIP === "race";
-  for (const id of Object.keys(scenes)) if (scenes[id].wip && WIP !== "1" && WIP !== id) delete scenes[id];
+  for (const id of Object.keys(scenes)) if (scenes[id].wip && WIP !== "1" && WIP !== id && WIP !== scenes[id].wipOf) delete scenes[id];
   for (const slot of window.BL.caves.slots) if (slot.scene && !scenes[slot.scene]) Object.assign(slot, { scene: null, status: "dark" });
   const requestedBananas = Number(params.get("bananas"));
   const START_BANANAS = DEBUG && params.has("bananas") && Number.isFinite(requestedBananas) && requestedBananas >= 0

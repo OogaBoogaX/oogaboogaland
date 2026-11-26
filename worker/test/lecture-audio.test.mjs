@@ -1,7 +1,7 @@
 // Lecture recordings from R2 through the Worker (src/lecture-audio.js), with a fake bucket, edge cache and waitUntil.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleLectureAudio, LECTURE_FILE } from "../src/lecture-audio.js";
+import { handleKeepMusic, handleLectureAudio, KEEP_MUSIC_FILE, LECTURE_FILE } from "../src/lecture-audio.js";
 import { readJsonc } from "./cloudflare-host.mjs";
 
 const FILE = "btc-01-8a6f64e92411fdcf.m4a", SITE = "https://oogabooga.land";
@@ -114,6 +114,39 @@ test("rule: both environments bind their own lecture bucket and run the Worker f
     const config = readJsonc(new URL(`../../wrangler.${env}.jsonc`, import.meta.url));
     assert.ok(config.assets.run_worker_first.includes("/media/lectures/*"), env);
     const binding = config.r2_buckets.find((b) => b.binding === "LECTURE_AUDIO");
+    assert.ok(binding, env);
+    names.add(binding.bucket_name);
+  }
+  assert.equal(names.size, 2, "staging and production never share a bucket");
+});
+
+test("rule: Valhodl's music answers only its own hashed names, from its own bucket and folder", async () => {
+  const TRACK = "row-0ee8bbde74a15c57.mp3", path = `/media/keep/${TRACK}`, R2 = bucket(new Map([[`keep-music/${TRACK}`, BYTES]]));
+  const ask = (p, env = { KEEP_MUSIC: R2 }, init = {}) => handleKeepMusic(new Request(SITE + p, init), env, new URL(SITE + p), null, null);
+  for (const bad of ["/media/keep/row.mp3", "/media/keep/row-0ee8bbde74a15c5.mp3", "/media/keep/Row-0ee8bbde74a15c57.mp3", "/media/keep/row-0ee8bbde74a15c57.m4a",
+    "/media/keep/x/row-0ee8bbde74a15c57.mp3", `/media/lectures/${TRACK}`, "/media/keep/"]) assert.equal((await ask(bad)).status, 404, bad);
+  assert.equal(R2.reads.length, 0);
+  assert.ok(KEEP_MUSIC_FILE.test(TRACK));
+  assert.equal((await ask(path, {})).status, 404, "no bucket bound");
+  assert.equal((await ask(path, { LECTURE_AUDIO: R2 })).status, 404, "never the lectures' bucket");
+  assert.equal((await ask(path, undefined, { method: "POST" })).status, 405);
+  const whole = await ask(path);
+  assert.equal(whole.status, 200);
+  assert.equal(whole.headers.get("content-type"), "audio/mpeg");
+  assert.equal(whole.headers.get("cache-control"), "public, max-age=31536000, immutable");
+  assert.equal((await whole.arrayBuffer()).byteLength, 1000);
+  const part = await ask(path, undefined, { headers: { range: "bytes=10-19" } });
+  assert.equal(part.status, 206);
+  assert.equal(part.headers.get("content-range"), "bytes 10-19/1000");
+  assert.deepEqual(R2.reads.at(-1), ["get", `keep-music/${TRACK}`, "bytes=10-19"]);
+});
+
+test("rule: both environments bind their own Valhodl music bucket and run the Worker first for /media/keep/*", () => {
+  const names = new Set();
+  for (const env of ["staging", "production"]) {
+    const config = readJsonc(new URL(`../../wrangler.${env}.jsonc`, import.meta.url));
+    assert.ok(config.assets.run_worker_first.includes("/media/keep/*"), env);
+    const binding = config.r2_buckets.find((b) => b.binding === "KEEP_MUSIC");
     assert.ok(binding, env);
     names.add(binding.bucket_name);
   }

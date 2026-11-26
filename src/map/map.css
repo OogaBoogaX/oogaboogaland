@@ -68,6 +68,7 @@
 .land-bifrost { --land: light-dark(#2480c0, #6bbaee); }
 .land-dsb { --land: light-dark(#399fe3, #4fabe8); }
 .land-ember { --land: light-dark(#2a8fd4, #5fb3ec); }
+.land-keep { --land: light-dark(#3478b4, #7ab6e6); }
 .land-external { --land: light-dark(#877e70, #6b6b6b); }
 .land-factory { --land: light-dark(#1f6fae, #7cc2f0); }
 .land-arcade { --land: light-dark(#2b86cc, #5aaee8); }

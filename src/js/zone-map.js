@@ -8,7 +8,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const ROOT = "outside";
-  const LANDS = { outside: "The Island", repos: "Merge Rock", sphere: "Timechain Exterior", rainforest: "Mempool Rainforest", "rainforest-under": "Mempool Cave", bifrost: "₿IFRÖST", lab: "EntropyLab", factory: "Lightning Factory", arcade: "Ooga Arcade", "block-frenzy": "Block Frenzy", "ghost-arena": "Ghost Hunter's Arena", "arcade-hunt": "Ghost Hunter's Arena", hq: "HQ", "hq-basement": "Basement", "ember-den": "Ember Den", between: "Between lands", none: "Between lands", "scene-transition": "Between lands" };
+  const LANDS = { outside: "The Island", repos: "Merge Rock", sphere: "Timechain Exterior", rainforest: "Mempool Rainforest", "rainforest-under": "Mempool Cave", bifrost: "₿IFRÖST", lab: "EntropyLab", factory: "Lightning Factory", arcade: "Ooga Arcade", "block-frenzy": "Block Frenzy", "ghost-arena": "Ghost Hunter's Arena", "arcade-hunt": "Ghost Hunter's Arena", hq: "HQ", "hq-basement": "Basement", "ember-den": "Ember Den", "byzantine-keep": "Valhodl", between: "Between lands", none: "Between lands", "scene-transition": "Between lands" };
   const landOf = (zone) => {
     if (zone === "factory.hangar") return "Lightning Jet Hangar";
     if (zone === "bifrost.chamber") return "₿IFRÖST chamber";
@@ -26,10 +26,10 @@
   // page loaded earlier still reports (`arcade-hunt`, `arcade.arena`).
   // The land between (the island's bridges and the air off its edge) is listed with anyone between scenes.
   const JOINED = { "arcade.haunt": "arcade.hall", "ghost-arena.haunt": "ghost-arena", "arcade-hunt": "ghost-arena", "arcade.arena": "ghost-arena", between: "none", lab: ROOT, bca: ROOT, factory: ROOT, arcade: ROOT, mirror: ROOT };
-  const groupOf = (zone) => zone === "scene-transition" ? "none" : Object.hasOwn(JOINED, zone) ? JOINED[zone] : zone.startsWith("cave-") ? ROOT : zone.startsWith("scene-") ? "arcade.hall" : zone;
+  const groupOf = (zone) => zone === "scene-transition" ? "none" : keepPlace(zone) ? keepPlace(zone) : Object.hasOwn(JOINED, zone) ? JOINED[zone] : zone.startsWith("cave-") ? ROOT : zone.startsWith("scene-") ? "arcade.hall" : zone;
   // A heading names its own zone where one land holds several, each with coordinates of its own.
   const HEADINGS = {
-    "lab.hall": "EntropyLab hall",
+    "lab.hall": "EntropyLab hall", "byzantine-keep.halls": "Valhodl · The Keep",
     "dsb-transit": "DSB · Arriving", "dsb-studio": "DSB · DSB Studio", "dsb-maxis": "DSB · Maxis Club",
     "dsb-without-rulers": "DSB · Without Rulers", "dsb-proof-of-ink": "DSB · Proof of Ink", "dsb-big-bitcoin": "DSB · Big Bitcoin",
     "dsb-meme-factory": "DSB · Meme Factory", "dsb-stackchain": "DSB · Stackchain Magazine", "dsb-svrn": "DSB · SVRN Society",
@@ -47,10 +47,10 @@
     between: ROOT, lab: ROOT, bca: ROOT, mirror: ROOT, hq: ROOT, factory: ROOT, arcade: ROOT, sphere: ROOT, rainforest: ROOT, bifrost: ROOT, repos: ROOT,
     "hq-basement": "hq", "rainforest-under": "rainforest", "lab.hall": "lab", "factory.hall": "factory", "factory.hangar": "factory.hall", "arcade.hall": "arcade",
     "arcade.haunt": "arcade.hall", "ghost-arena.haunt": "arcade.haunt", "ghost-arena": "ghost-arena.haunt", "arcade-hunt": "ghost-arena", "arcade.arena": "ghost-arena",
-    "bifrost.chamber": "bifrost", "ember-den": "bifrost.chamber", "dsb-outside": "bifrost.chamber", "dsb-transit": "bifrost.chamber"
+    "bifrost.chamber": "bifrost", "ember-den": "bifrost.chamber", "byzantine-keep": "bifrost.chamber", "byzantine-keep.halls": "byzantine-keep", "dsb-outside": "bifrost.chamber", "dsb-transit": "bifrost.chamber"
   };
   // A zone is whatever a page reports, so the tables are read by their own keys alone, never their prototype's.
-  const parentOf = (zone) => Object.hasOwn(PARENTS, zone) ? PARENTS[zone] : (zone.startsWith("cave-") ? ROOT : /^sphere-[0-9]$/.test(zone) ? "sphere"
+  const parentOf = (zone) => Object.hasOwn(PARENTS, zone) ? PARENTS[zone] : keepPlace(zone) && keepPlace(zone) !== zone ? (keepPlace(zone) === "byzantine-keep" ? PARENTS["byzantine-keep"] : "byzantine-keep") : (zone.startsWith("cave-") ? ROOT : /^sphere-[0-9]$/.test(zone) ? "sphere"
     : zone.startsWith("dsb-") ? "dsb-outside" : zone.startsWith("scene-") && zone !== "scene-transition" ? "arcade.hall" : null);
   // Steps up to the island, or -1 for a zone with no way there.
   const depthOf = (zone) => {
@@ -82,7 +82,52 @@
   const arrange = (rows, mine) => rows.sort((a, b) => a.group === b.group
     ? (b.self ? 1 : 0) - (a.self ? 1 : 0) || (a.listener ? 1 : 0) - (b.listener ? 1 : 0) || COLLATE.compare(a.name, b.name) || a.id - b.id
     : a.group === mine ? -1 : b.group === mine ? 1 : COLLATE.compare(heading(a.group), heading(b.group)) || (a.group < b.group ? -1 : 1));
+  // Lands too big for the room's bounds on a position (±160 m about the middle, worker/src/protocol.js `BOUND_XZ`)
+  // report each one from the middle of the area it is in, under that area's zone, and every page adds the area's
+  // middle back (`originOf`). Valhodl's yard (scene-keep.js) is a grid of areas `FRAME_SPAN` across, its castle
+  // island's the bare `byzantine-keep`; its halls (scene-keep-halls.js) are the keep's inside, each tower's inside
+  // (keep-halls-layout.js `TOWER_SPAN` apart from x 200) and the volcano's cave past them. An area is kept until its
+  // walker is `FRAME_HOLD` past its own edge, so nobody flickers between two at a boundary.
+  const FRAME_SPAN = 300, FRAME_HOLD = 4;
+  const FRAME_SETS = (() => {
+    const yard = [];
+    for (let c = 0; c < 9; c++) for (let r = 0; r < 3; r++) {
+      const x = (c - 5) * FRAME_SPAN, z = (r - 1) * FRAME_SPAN;
+      yard.push(Object.freeze({ zone: x === 0 && z === 0 ? "byzantine-keep" : `byzantine-keep.y${c}r${r}`, x, z }));
+    }
+    const halls = [Object.freeze({ zone: "byzantine-keep.halls", x: 0, z: 0 })];
+    for (let i = 0; i < 6; i++) halls.push(Object.freeze({ zone: `byzantine-keep.h${i}`, x: 200 + i * 160, z: 0 }));
+    halls.push(Object.freeze({ zone: "byzantine-keep.hcave", x: 1195, z: 0 }));
+    return Object.freeze({ "keep-yard": Object.freeze(yard), "keep-halls": Object.freeze(halls) });
+  })();
+  const ORIGINS = new Map();
+  for (const set of Object.values(FRAME_SETS)) for (const f of set) ORIGINS.set(f.zone, f);
+  /** The middle a zone's positions are reported from (`{ x, z }`), or null for a zone that reports its own. */
+  const originOf = (zone) => ORIGINS.get(zone) || null;
+  const NO_OFFSET = Object.freeze({ x: 0, z: 0 });
+  /** What to add to a position reported in `zone` for the scene's own coordinates (nothing for most zones). */
+  const offsetOf = (zone) => ORIGINS.get(zone) || NO_OFFSET;
+  /** Whether two zones are areas of one scene (one set of `FRAME_SETS`), so positions in them, each with its area's
+   *  middle added back (`offsetOf`), are in one set of coordinates. */
+  const sharedFrame = (a, b) => {
+    const fa = ORIGINS.get(a), fb = ORIGINS.get(b);
+    return !!fa && !!fb && (keepPlace(a) || a) === (keepPlace(b) || b);
+  };
+  /** The zone of the area in `set` that (x, z) reports from: `current` while it is still within its own area. */
+  const frameZone = (set, x, z, current) => {
+    const list = FRAME_SETS[set], half = set === "keep-halls" ? 80 : FRAME_SPAN / 2, held = ORIGINS.get(current);
+    if (held && list.includes(held) && Math.max(Math.abs(x - held.x), Math.abs(z - held.z)) <= half + FRAME_HOLD) return current;
+    let best = list[0], d = Infinity;
+    for (let i = 0; i < list.length; i++) { const f = list[i], e = Math.max(Math.abs(x - f.x), Math.abs(z - f.z)); if (e < d) { d = e; best = f; } }
+    return best.zone;
+  };
+  // Valhodl's areas, as a place of their own: the yard's are all `byzantine-keep`, the halls' `byzantine-keep.halls`.
+  const keepPlace = (zone) => {
+    if (zone.length < 16 || !zone.startsWith("byzantine-keep.")) return null;
+    const c = zone.charCodeAt(15);
+    return c === 121 ? "byzantine-keep" : c === 104 ? "byzantine-keep.halls" : null;
+  };
   // Every zone the tables name, for the World Map (scripts/world-map.mjs), which places each one or drops it by name.
-  const zones = Object.freeze([...new Set([ROOT, ...Object.keys(LANDS), ...Object.keys(PARENTS), ...Object.keys(HEADINGS)])]);
-  BL.zoneMap = { ROOT, zones, landOf, groupOf, heading, line, parentOf, routeFrom, next, arrange };
+  const zones = Object.freeze([...new Set([ROOT, ...Object.keys(LANDS), ...Object.keys(PARENTS), ...Object.keys(HEADINGS), ...ORIGINS.keys()])]);
+  BL.zoneMap = { ROOT, zones, landOf, groupOf, heading, line, parentOf, routeFrom, next, arrange, FRAME_SETS, originOf, offsetOf, sharedFrame, frameZone, keepPlace };
 })();

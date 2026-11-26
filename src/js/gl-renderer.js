@@ -23,6 +23,8 @@
   const { updateWorld, traverseVisible, boundsOf } = BL.scene;
   // Scenes fill up to POINT_LIGHT_CAPACITY lights in priority order; each tier draws only its first `lights`.
   const POINT_LIGHT_CAPACITY = 32;
+  // The most upright cylinders a render's `relit` gain lights (`relitBodies`), as the shader's arrays hold.
+  const RELIT_MAX = 8;
   const QUALITY = {
     high: { dpr: 1.5, msaa: 2, shadow: 2048, bloom: true, shafts: true, mirror: 1024, mirrorCadence: 1, prepass: true, environment: 128, environmentCadence: 1, lights: 32 },
     medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, shafts: true, mirror: 768, mirrorCadence: 2, prepass: true, environment: 96, environmentCadence: 2, lights: 20 },
@@ -524,6 +526,11 @@ uniform vec3 uGround;
 uniform vec3 uSun;
 uniform float uDirectStrength;
 uniform float uAmbientFloor;
+// The render's relit gain on everything inside its upright cylinders (x, z, radius, bottom; top).
+uniform float uRelit;
+uniform int uRelitCount;
+uniform vec4 uRelitA[8];
+uniform float uRelitTop[8];
 uniform float uDiffuseFloor;
 uniform float uShadowStrength;
 uniform float uShadowFloor;
@@ -1220,6 +1227,12 @@ void main() {
   // Sky rim: a grazing view picks up the sky's fill, which lifts silhouettes off the ground behind them.
   float rim = pow(1.0 - clamp(dot(n, normalize(uEye - vWorld)), 0.0, 1.0), 3.0) * clamp(n.y * 0.5 + 0.6, 0.0, 1.0);
   lightFactor += uSky * rim * 0.22 + uSun * uDirectStrength * rim * 0.1;
+  for (int i = 0; i < 8; i++) {
+    if (i >= uRelitCount) break;
+    vec4 b = uRelitA[i];
+    vec2 d = vWorld.xz - b.xy;
+    if (dot(d, d) < b.z * b.z && vWorld.y > b.w && vWorld.y < uRelitTop[i]) { lightFactor *= uRelit; break; }
+  }
   vec3 lit = base * lightFactor;
   vec3 col = mix(lit, base * 1.15, emissive);
   col = mix(col, vec3(1.0, 0.86, 0.45), vParams.y * 0.4);
@@ -1340,7 +1353,7 @@ void main() {
   const ORDINARY_MESH_FS = derive(MESH_FS, ["flat in vec4 vVoxel;", "uniform vec4 uVoxel;"], [/\bvVoxel\b/g, "uVoxel"]);
   // The camera's depth pre-pass: the mesh shader's cuts and nothing else, the rest compiled away.
   const DEPTH_MESH_FS = ORDINARY_MESH_FS.slice(0, ORDINARY_MESH_FS.indexOf("void main() {")) + "void main() {\n  if (clipped()) discard;\n}";
-  const MESH_UNIFORMS = ["uRigCount", "uRigPass", "uRigMatrices", "uRigParams", "uRigVoxels", "uRigVisibility", "uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uSpotLight", "uFog", "uFogRange", "uFogPierce", "uBlacklight", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uObjectSlab", "uObjectSlab2", "uProjective", "uMatrixGlyphOpacity", "uGlassOpacity", "uGlassGrazing", "uChrome", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass", "uLightBeam", "uLakeWaveCount", "uLakeWaves", "uLakeSurface", "uLakeSuction", "uLakeFlowEnabled", "uLakeFlowU", "uLakeFlowV", "uLakeCharge", "uLakeChargeRise", "uLakeChargeCenter", "uLakeOcclude", "uLakeWaveEnd", "uLakeBodyShape", "uLakeBodyBend", "uDSBSurface", "uDSBDepth", "uDSBEnvironment", "uCanvasSurface", "uCanvasFeed", "uCanvasBlend", "uCanvasPrevious", "uCanvasImage", "uCanvasRect", "uCanvasCurve", "uCanvasBackground", "uCanvasScale", "uCanvasAtlas", "uCanvasAtlasMin", "uCanvasAtlasMax"];
+  const MESH_UNIFORMS = ["uRigCount", "uRigPass", "uRigMatrices", "uRigParams", "uRigVoxels", "uRigVisibility", "uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uRelit", "uRelitCount", "uRelitA", "uRelitTop", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uSpotLight", "uFog", "uFogRange", "uFogPierce", "uBlacklight", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uObjectSlab", "uObjectSlab2", "uProjective", "uMatrixGlyphOpacity", "uGlassOpacity", "uGlassGrazing", "uChrome", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass", "uLightBeam", "uLakeWaveCount", "uLakeWaves", "uLakeSurface", "uLakeSuction", "uLakeFlowEnabled", "uLakeFlowU", "uLakeFlowV", "uLakeCharge", "uLakeChargeRise", "uLakeChargeCenter", "uLakeOcclude", "uLakeWaveEnd", "uLakeBodyShape", "uLakeBodyBend", "uDSBSurface", "uDSBDepth", "uDSBEnvironment", "uCanvasSurface", "uCanvasFeed", "uCanvasBlend", "uCanvasPrevious", "uCanvasImage", "uCanvasRect", "uCanvasCurve", "uCanvasBackground", "uCanvasScale", "uCanvasAtlas", "uCanvasAtlasMin", "uCanvasAtlasMax"];
   const ORDINARY_SHADOW_VS = derive(SHADOW_VS, [RIG_GLSL, ""], ["rigMatrix(mat4(aM0, aM1, aM2, aM3))", "mat4(aM0, aM1, aM2, aM3)"],
     ["layout(location=6) in vec4 aM3;\n\n", "layout(location=6) in vec4 aM3;\n"]);
   const LINE_VS = `#version 300 es
@@ -2235,6 +2248,10 @@ void main() {
     let dsbGPU=null;
     // PROTOTYPE: a scene at sea level can switch off the hub's dropped haze horizon (`hazeDrop: 0`).
     let skyHaze=1;
+    // The render's `relit` gain (1 when unused) and the upright cylinders it lights (`relitBodies`: x, z, radius,
+    // bottom, top for each of `relitCount`, at most RELIT_MAX): what lies inside one has its light multiplied by it.
+    let relitGain = 1, relitCount = 0;
+    const relitA = new Float32Array(RELIT_MAX * 4), relitTop = new Float32Array(RELIT_MAX);
     const canvasSurfaces = new WeakMap();
     let pictureDim = 1, pictureEye = null, pictureTime = 0;
     let canvasSurfaceSerial = 0;
@@ -4632,6 +4649,8 @@ uniform float uDiffuseFloor;`)
       gl.uniform3fv(pg.mesh.u.uSun, direct);
       gl.uniform1f(pg.mesh.u.uDirectStrength, directStrength);
       gl.uniform1f(pg.mesh.u.uAmbientFloor, ambientFloor);
+      gl.uniform1f(pg.mesh.u.uRelit, relitGain); gl.uniform1i(pg.mesh.u.uRelitCount, relitCount);
+      if (relitCount) { gl.uniform4fv(pg.mesh.u.uRelitA, relitA); gl.uniform1fv(pg.mesh.u.uRelitTop, relitTop); }
       gl.uniform1f(pg.mesh.u.uDiffuseFloor, diffuseFloor);
       gl.uniform1f(pg.mesh.u.uShadowStrength, shadowStrength);
       gl.uniform1f(pg.mesh.u.uShadowFloor, shadowFloor);
@@ -5064,6 +5083,12 @@ uniform float uDiffuseFloor;`)
         sea = null
       } = opts;
       skyHaze=opts.hazeDrop===undefined?1:opts.hazeDrop;
+      relitGain = opts.relit === undefined ? 1 : opts.relit;
+      relitCount = relitGain !== 1 && opts.relitBodies ? Math.min(RELIT_MAX, opts.relitCount || 0) : 0;
+      for (let i = 0; i < relitCount; i++) {
+        const b = opts.relitBodies, o = i * 5;
+        relitA[i * 4] = b[o]; relitA[i * 4 + 1] = b[o + 1]; relitA[i * 4 + 2] = b[o + 2]; relitA[i * 4 + 3] = b[o + 3]; relitTop[i] = b[o + 4];
+      }
       if(dsbGPU && dsbGPU.state!==opts.dsbWater){dsbGPU.dispose();dsbGPU=null;}
       if(opts.dsbWater && !dsbGPU)dsbGPU=BL.dsbWater.gpu(gl,opts.dsbWater);
       if(dsbGPU)dsbGPU.bind(programs.mesh);
@@ -5550,6 +5575,8 @@ uniform float uDiffuseFloor;`)
         gl.uniform3fv(mp.u.uSun, direct);
         gl.uniform1f(mp.u.uDirectStrength, directStrength);
         gl.uniform1f(mp.u.uAmbientFloor, ambientFloor);
+        gl.uniform1f(mp.u.uRelit, relitGain); gl.uniform1i(mp.u.uRelitCount, relitCount);
+        if (relitCount) { gl.uniform4fv(mp.u.uRelitA, relitA); gl.uniform1fv(mp.u.uRelitTop, relitTop); }
         gl.uniform1f(mp.u.uDiffuseFloor, diffuseFloor);
         gl.uniform1f(mp.u.uShadowStrength, shadowStrength);
         gl.uniform1f(mp.u.uShadowFloor, shadowFloor);
@@ -5870,5 +5897,5 @@ uniform float uDiffuseFloor;`)
       }
     };
   };
-  BL.glRenderer = { createRenderer, createRig, isSupported, tileBasedGpu, QUALITY, POINT_LIGHT_CAPACITY };
+  BL.glRenderer = { createRenderer, createRig, isSupported, tileBasedGpu, QUALITY, POINT_LIGHT_CAPACITY, RELIT_MAX };
 })();

@@ -267,10 +267,18 @@
   };
   // The open worlds of a visit, each row with its looks now, read once so the windows and their pictures agree.
   const openLooks = () => WINDOWS.filter((row) => row.kind === "travel" && BL.scenes[row.scene]).map((row) => ({ row, look: BM.lookOf(row) }));
-  // A travel window's picture: its world's photograph once there is one, the stand-in until then.
+  // A world's baked picture (`BL.bifrostArt`) as an image asset, one a page.
+  const artAssets = {};
+  const artAsset = (name) => {
+    const art = BL.bifrostArt && BL.bifrostArt[name];
+    if (!art) return null;
+    if (!artAssets[name]) { const image = new Image(); image.src = art.src; artAssets[name] = { width: art.width, height: art.height, load: () => image }; }
+    return artAssets[name];
+  };
+  // A travel window's picture: its world's photograph once there is one (or its baked picture), the stand-in until then.
   const hangPicture = (w) => {
     if (w.picture.owned) return true;
-    const asset = world.windowViews && world.windowViews[w.look.key], image = asset && asset.load();
+    const asset = (w.look.art && artAsset(w.look.art)) || (world.windowViews && world.windowViews[w.look.key]), image = asset && asset.load();
     if (image && image.complete && image.naturalWidth > 0) {
       w.picture.geometry = BM.pictureQuad(asset, BM.passage().picture);
       w.picture.owned = true;
@@ -307,6 +315,7 @@
       const entry = scene.looks[pictureIndex];
       if (!entry) { pictureTries = 0; return; }
       const { row, look } = entry;
+      if (row.lazy) { nextPicture(); return; }
       if (!loaded && !(world.windowViews && world.windowViews[look.key])) {
         const loading = BL.deferred.load(row.scene);
         if (loading) {
@@ -560,7 +569,7 @@
         addChild(node, board);
       }
       addChild(root, node);
-      const w = { row, kind, look: open ? open.look : null, node, neon, ribs: null, rim: null, rims: null, tint: null, charge: null, sparkles: null, sn: Math.sin(f.bearing), c: Math.cos(f.bearing), phase: null, body: null, face: null, picture: null, held: false, light: -1, near: 0, hum: Math.random() * 0.3, transform: null, yaw: 0, crossings: 0 };
+      const w = { row, kind, look: open ? open.look : null, node, neon, ribs: null, rim: null, rims: null, tint: null, charge: null, sparkles: null, sn: Math.sin(f.bearing), c: Math.cos(f.bearing), phase: null, body: null, face: null, picture: null, live: null, held: false, light: -1, near: 0, hum: Math.random() * 0.3, transform: null, yaw: 0, crossings: 0 };
       if (kind === "travel") {
         const passage = BM.passage(), tint = w.look.tint;
         w.rims = Array.from({ length: BM.RIM_STEPS }, (_, k) => BM.portalRim(tint, k));
@@ -574,6 +583,8 @@
         addChild(node, createNode({ geometry: passage.walls }), w.ribs, w.picture);
         w.phase = BL.labPhase.create(node, { x: f.x, z: f.z, ry: f.ry, floorY: 0, room: { w: 2 * WINDOW.halfW, h: WINDOW_TOP, from: 0, to: WINDOW.depth } }, winOpening, -WINDOW.plane, TINT);
         hangPicture(w);
+        // Valhodl's picture comes alive: clouds, lightning, flickering lights and crows (bifrost-valhodl.js).
+        if (w.look.art === "valhodl" && BL.bifrostArt && BL.bifrostArt.valhodl) w.live = BL.bifrostValhodl.create(node, BL.bifrostArt.valhodl, passage.picture, () => thunder(w), renderer.kind === "canvas2d");
       } else {
         const m = BM.mirror(i);
         addChild(node, createNode({ geometry: m.backing }));
@@ -651,7 +662,7 @@
     canvas = ctx.canvas;
     const looks = openLooks();
     // Each window's world starts downloading on arrival, so a step through one (an instant crossing) seldom waits on it.
-    for (let i = 0; i < looks.length; i++) BL.deferred.prefetchScene(looks[i].row.scene);
+    for (let i = 0; i < looks.length; i++) if (!looks[i].row.lazy) BL.deferred.prefetchScene(looks[i].row.scene);
     pictureTries = PICTURE_TRIES;
     pictureWait = PICTURE_DELAY;
     camera = createCamera({ fov: 55, near: 0.3, far: 700 });
@@ -771,7 +782,7 @@
       for (const w of scene.windows) w.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
       // Back from a world, out of its window: standing in front of it, facing the mechanism. In from the island: through
       // the field at the tunnel's end.
-      const from = scene.windows.find((w) => w.kind === "travel" && w.row.scene === ctx.from);
+      const from = scene.windows.find((w) => w.kind === "travel" && (w.row.scene === ctx.from || (w.row.via || []).includes(ctx.from)));
       if (from) standBefore(from, 2.8);
       else if (ctx.from === "hub" && crossing) {
         gateWalk = BL.factoryWindow.portalWalk(pilot, people, camera, clampCamera);
@@ -846,6 +857,12 @@
     const at = against(w, p), d = Math.hypot(Math.max(0, -at.along), Math.max(0, Math.abs(at.across) - WINDOW.halfW));
     const want = clamp((FAR - d) / (FAR - NEAR), 0, 1);
     return want * want * (3 - 2 * want);
+  };
+  // A strike's rumble in Valhodl's window, heard by whoever stands at all near it (as its glow answers them).
+  const thunder = (w) => {
+    if (!scene || leaving) return;
+    const who = avatar ? avatar.root.position : pilot.orbit.target, k = Math.max(nearness(w, who), 0.25);
+    audio.cue("thunder", k);
   };
   // Cross the glass itself, retaining the step's overshoot. The emerging
   // character is inside the destination plane, so holding forward cannot
@@ -1110,6 +1127,7 @@
         L[o + 4] = w.tint[0] * power; L[o + 5] = w.tint[1] * power; L[o + 6] = w.tint[2] * power;
       }
       w.phase.update(dt, elapsed);
+      if (w.live) { if (!w.picture.owned) hangPicture(w); w.live.update(dt, elapsed); }
       w.body.update(dt);
       w.body.time = w.phase.ripples.time;
       w.hum -= dt;

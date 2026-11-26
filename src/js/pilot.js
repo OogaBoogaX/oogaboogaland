@@ -1580,6 +1580,8 @@
     const aimKey = (e) => {
       if (externalControl || menuOpen || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "Tab") {
+        // A scene may take Tab for itself (`tabKey`: Valhodl's weapon wheel), the mouse left captured.
+        if (ctx.tabKey && !e.repeat && ctx.tabKey(e)) { e.preventDefault(); e.stopImmediatePropagation(); return; }
         if (!e.repeat) {
           const captured = armed() && (softAimFocused || !lockCancelled && (lockPending || document.pointerLockElement === canvas));
           freeCursor();

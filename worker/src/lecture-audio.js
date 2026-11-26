@@ -3,14 +3,17 @@
 // the recording's SHA-256 (src/js/lecture-kit.js `timing`), so a published name never changes: the edge and the
 // browser keep it a year. The edge cache, keyed by the path alone, answers ranges (206) and If-None-Match (304) by
 // itself; a miss is answered from R2 with the same range and conditional while the whole file goes into the cache.
+//
+// Valhodl's music (src/js/keep-music-data.js, scripts/keep-music.mjs) is served the same way, from its own bucket:
+// GET or HEAD /media/keep/<name>-<hash>.mp3 answers `keep-music/<name>-<hash>.mp3` in KEEP_MUSIC.
 export const LECTURE_FILE = /^[a-z]+-\d\d-[0-9a-f]{16}\.m4a$/;
-const PREFIX = "/media/lectures/";
+export const KEEP_MUSIC_FILE = /^[a-z]+-[0-9a-f]{16}\.mp3$/;
 const KEEP = "public, max-age=31536000, immutable";
 
 const notFound = () => new Response("not found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
 
-const headersOf = (object) => new Headers({
-  "content-type": "audio/mp4", "cache-control": KEEP, etag: object.httpEtag, "accept-ranges": "bytes",
+const typedHeaders = (object, type) => new Headers({
+  "content-type": type, "cache-control": KEEP, etag: object.httpEtag, "accept-ranges": "bytes",
   "x-content-type-options": "nosniff", "cross-origin-resource-policy": "same-origin"
 });
 
@@ -22,14 +25,16 @@ const spanOf = (range, size) => {
   return { offset, length: range.length ?? size - offset };
 };
 
-export const handleLectureAudio = async (request, env, url, ctx, cache = globalThis.caches?.default) => {
+// One kind of recording: its address `prefix`, the names it answers, its bucket's binding and folder, and its type.
+const media = ({ prefix: PREFIX, pattern, binding, folder, type }) => async (request, env, url, ctx, cache = globalThis.caches?.default) => {
+  const bucket = env[binding], headersOf = (object) => typedHeaders(object, type);
   if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
   const file = url.pathname.slice(PREFIX.length);
-  if (!url.pathname.startsWith(PREFIX) || !LECTURE_FILE.test(file) || !env.LECTURE_AUDIO) return notFound();
-  const key = `lectures/${file}`, cacheKey = `${url.origin}${url.pathname}`;
+  if (!url.pathname.startsWith(PREFIX) || !pattern.test(file) || !bucket) return notFound();
+  const key = `${folder}/${file}`, cacheKey = `${url.origin}${url.pathname}`;
 
   if (request.method === "HEAD") {
-    const object = await env.LECTURE_AUDIO.head(key);
+    const object = await bucket.head(key);
     if (!object) return notFound();
     const headers = headersOf(object);
     headers.set("content-length", String(object.size));
@@ -44,11 +49,11 @@ export const handleLectureAudio = async (request, env, url, ctx, cache = globalT
   const ranged = request.headers.has("range");
   let object;
   try {
-    object = await env.LECTURE_AUDIO.get(key, { range: request.headers, onlyIf: request.headers });
+    object = await bucket.get(key, { range: request.headers, onlyIf: request.headers });
   } catch {
     // A range past the end: R2 refuses it, and so does HTTP.
-    const whole = ranged ? await env.LECTURE_AUDIO.head(key) : null;
-    if (!whole) throw new Error(`lecture audio: R2 refused ${key}`);
+    const whole = ranged ? await bucket.head(key) : null;
+    if (!whole) throw new Error(`media: R2 refused ${key}`);
     return new Response(null, { status: 416, headers: { "content-range": `bytes */${whole.size}`, "cache-control": "no-store" } });
   }
   if (!object) return notFound();
@@ -70,7 +75,7 @@ export const handleLectureAudio = async (request, env, url, ctx, cache = globalT
   // The cache takes only a whole file: a whole answer goes in as it is sent, a range has the whole file read for it.
   if (cache && ctx && ctx.waitUntil) {
     const fill = response.status === 200 ? cache.put(cacheKey, response.clone()) : (async () => {
-      const whole = await env.LECTURE_AUDIO.get(key);
+      const whole = await bucket.get(key);
       if (!whole || !whole.body) return;
       const kept = headersOf(whole);
       kept.set("content-length", String(whole.size));
@@ -80,3 +85,5 @@ export const handleLectureAudio = async (request, env, url, ctx, cache = globalT
   }
   return response;
 };
+export const handleLectureAudio = media({ prefix: "/media/lectures/", pattern: LECTURE_FILE, binding: "LECTURE_AUDIO", folder: "lectures", type: "audio/mp4" });
+export const handleKeepMusic = media({ prefix: "/media/keep/", pattern: KEEP_MUSIC_FILE, binding: "KEEP_MUSIC", folder: "keep-music", type: "audio/mpeg" });

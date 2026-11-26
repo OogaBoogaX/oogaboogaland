@@ -1234,6 +1234,74 @@
   // to the forearm, its length along the thumb's side of the fist and its head (-x in its frame: an axe's or a hockey
   // stick's blade) out along the hand, so it lies in the hand's own plane.
   const SWING_LOW = 1.4, SWING_HIGH = 2.6, SWING_ELBOW = Math.PI / 2;
+  const SWING_BACK = 0.35, SWING_BACK_CHARGE = 0.3, SWING_BACK_ELBOW = 2.6, SWING_THRUST = 0.22, SWING_THRUST_ELBOW = 0;
+  // A `stab` (the Byzantine Keep's dagger): the fist drawn back to the hip, the elbow folded, then driven straight out
+  // ahead at chest height with the arm level and the blade pointing on along it.
+  const STAB_DRAW = -0.3, STAB_DRAW_CHARGE = 0.2, STAB_DRAW_ELBOW = 2.1, STAB_OUT = 2.05, STAB_OUT_ELBOW = 0.12, STAB_TIP = -Math.PI / 2;
+  // A `cast` (the Byzantine Keep's wand) is thrown as a pitcher throws: drawn up, the body leans back and turns its upper
+  // half to the right, the left arm raised straight out at the enemy and the right fist high in the air behind; then
+  // the right arm is thrown forward with the wand pointing straight at the enemy as the body turns to the left and tips
+  // forward, the left arm pulling down to the left and the right foot stepping forward. The head stays on the enemy.
+  // Over its strike (`strike` s) it draws up for its first `lead` and throws through the rest, letting its fireball go
+  // `fire` of the way through the throw (`castFire`, the crew's `onCast`); a held one draws up over `wind` s.
+  // `right` and `left` are each arm's [lift, turn toward the body's left, elbow, the wand tipped on the fist], drawn up
+  // and thrown; `twist`, `tip` (+ forward) and `legR`/`legL` the body's.
+  const CAST = Object.freeze({
+    strike: 0.31, lead: 0.5, fire: 0.42, wind: 0.15,
+    right: [[2.8, 0.45, 0.55, -Math.PI / 2], [1.68, -0.5, 0.05, -Math.PI / 2]],
+    left: [[1.1, 0.8, 0.12], [-0.15, 0.35, 0.95]],
+    twist: [-0.95, 0.55], tip: [-0.3, 0.14], legR: [0.18, -0.62], legL: [-0.05, 0.32],
+  });
+  const CAST_REST_L = math.quat.create(), CAST_L = math.quat.create(), CAST_WIND = new Float64Array(4), CAST_END = new Float64Array(4);
+  // A weapon set to swing as a `spell` (crew `setClub`'s `swing`: the Byzantine Keep's wand) chains four steps as the
+  // sword's combo chains its cuts (COMBO_WINDOW, COMBO_GAP): the cast, the sword's cross slash and its backhand sweep,
+  // and the `charge`: the wand raised to the sky over `raise` s (`right`, `left`: each arm's pose there; `look` the
+  // head's tip up, `tip` the body's lean back), trembling as it charges, thrust forward at `fire` s over `thrust` into
+  // the cast's throw, its pulse let go as the thrust lands (the crew's `onSpell(cave, "blast")`, after `"charge"` as it
+  // starts), held to `hold` s and lowered back to its carry by `time` s; `shake` the tremble's lift and rate.
+  const SPELL = Object.freeze(["cast", "combo", "combo", "charge"]);
+  // A weapon set to swing as `frost` (the Byzantine Keep's sword at its fourth level) chains the same way: the sword's
+  // first three cuts, the spin coiled after the backhand as it is in a combo, and the wand's charge for its fourth.
+  const FROST_CHAIN = Object.freeze(["combo", "combo", "combo", "charge"]);
+  // A weapon set to swing as `staff` (the Byzantine Keep's staff) casts twice, then whirls (the sword's spin taken
+  // round `WHIRL_SPIN` instead, fast) and charges as the wand does.
+  const STAFF_CHAIN = Object.freeze(["cast", "cast", "whirl", "charge"]);
+  const WHIRL_SPIN = Math.PI * 6;
+  const CHARGE = Object.freeze({ raise: 0.2, fire: 0.7, thrust: 0.12, hold: 2.32, time: 2.6, right: [2.95, 0.12, 0.12, -Math.PI / 2], left: [0.45, 0.15, 0.5], look: 0.75, tip: -0.12, shake: [0.05, 38] });
+  // The frost chain's charge holds its thrust while its lightning strikes, 5 s past the thrust.
+  const FROST_CHARGE = Object.freeze({ ...CHARGE, hold: CHARGE.fire + CHARGE.thrust + 5, time: CHARGE.fire + CHARGE.thrust + 5 + (CHARGE.time - CHARGE.hold) });
+  const chargeOf = (cave) => cave.chain === FROST_CHAIN ? FROST_CHARGE : CHARGE;
+  // The fourth cut, the slam: a jump (`hop`, of JUMP_SPEED) with the sword raised over the head in both hands over the
+  // first `lead` of its strike, brought down through the rest to the ground as the body lands.
+  // A weapon set to swing as a `combo` (crew `setClub`'s `swing`: the Byzantine Keep's sword) has three cuts, taken in
+  // turn by strikes that follow one another within COMBO_WINDOW of the last: a cross slash from over the right shoulder
+  // down to the left hip, with a leap forward, a backhand sweep back across level, and a long level sweep with the
+  // arm out as the body, coiled a quarter turn to the right as it draws up, unwinds counterclockwise seen from above, with a
+  // little jump, back to facing ahead (`COMBO_COIL`, `COMBO_SPIN`,
+  // `COMBO_SPIN_HOP`, head and all), which a charged strike also is. A cut
+  // starts no sooner than COMBO_GAP after the last one did. Each is its strike's length and two poses, drawn up and struck through: how far the arm is lifted
+  // from hanging, turned across the body (+ toward the left), its elbow's bend, the blade tipped on the fist (0 square
+  // to the forearm, -pi/2 along it) and the body's turn with the cut. A tap draws up over the first COMBO_LEAD of its strike.
+  const COMBO = Object.freeze([
+    { strike: 0.2, wind: [2.25, -0.55, 1.0, -0.3, -0.4], end: [0.55, 0.95, 0.3, -1.0, Math.PI / 2] },
+    { strike: 0.22, wind: [1.1, 1.15, 1.4, -1.55, Math.PI / 2], end: [1.3, -0.5, 0.1, -1.5, -Math.PI / 2] },
+    { strike: 0.85, quick: 0.55, wind: [1.35, -0.75, 0.5, -1.5, 0], end: [1.4, -0.55, 0.05, -1.55, 0] },
+    { strike: 0.88, lead: 0.55, hop: 1.69, both: true, wind: [2.75, 0.1, 0.8, 0.35, 0], end: [0.7, 0.05, 0.1, -1.0, 0] },
+  ]);
+  const COMBO_FIST = new Float64Array(3);
+  // The head goes with the first two cuts' turn and a little past it (left on the first, right on the second). Through
+  // the slam's jump the head tips down and the feet come up in front (`slamTuck`, 0 to 1), let go as the body comes down.
+  const COMBO_HEAD = 1.25, SLAM_NOD = 0.6, SLAM_LEG_R = -1.35, SLAM_LEG_L = -1.15, SLAM_TUCK_IN = 14, SLAM_TUCK_OUT = 14, SLAM_TUCK_LOW = 1.3;
+  // The slam's jump, as many times gravity going up and coming down: the same 2.1 m in two thirds of the time.
+  const COMBO_RISE = 1.6, COMBO_DROP = 3;
+  const COMBO_WINDOW = 1.1, COMBO_GAP = 0.5, COMBO_SPIN = Math.PI * 2, COMBO_COIL = -Math.PI / 2, COMBO_LEAD = 0.45, COMBO_LEAD_COILED = 0.15, COMBO_HOLD = 0.8, COMBO_UNTURN = 0.25, COMBO_HEAVY = 0.5, COMBO_HOP = 0.55, COMBO_LEAP = 4.2, COMBO_SPIN_HOP = 0.5;
+  const COMBO_A = math.quat.create(), COMBO_B = math.quat.create(), COMBO_WIND = new Float64Array(5);
+  const comboArm = (out, pose) => {
+    math.quat.fromAxisAngle(SWING_TURN, 1, 0, 0, -pose[0]);
+    math.quat.multiply(out, SWING_TURN, SWING_REST);
+    math.quat.fromAxisAngle(SWING_TURN, 0, 1, 0, pose[1]);
+    math.quat.multiply(out, SWING_TURN, out);
+  };
   // The weapon in the fist, as the forearm's frame sees it: the hand's own turn on its forearm, then the weapon across it.
   const SWING_CLUB = math.quat.create(), SWING_TURN = math.quat.create(), SWING_REST = math.quat.create(), SWING_LIVE = math.quat.create();
   math.quat.fromAxisAngle(SWING_TURN, 0, 1, 0, Math.PI / 2);
@@ -1245,12 +1313,13 @@
   math.quat.fromAxisAngle(SIT_BLADE, 0, 1, 0, Math.PI / 2);
   // The arm hanging at rest, as the other one hangs, the turn the swing lifts from.
   math.quat.fromEuler(SWING_REST, -0.2, 0, -0.1);
+  math.quat.fromEuler(CAST_REST_L, -0.2, 0, 0.1);
   // The weapon in the right fist, at its middle, square to the forearm bent by `flex`, the hand turned on its forearm
   // as it hangs, so the weapon stands in the elbow's plane: in the arm's frame, the forearm's bend, then the hand's hold.
-  const restInFist = (cave, flex) => {
+  const restInFist = (cave, flex, tip = 0) => {
     const club = cave.parts.club, e = cave.elbow;
     cave.handTurnR = Math.PI / 2;
-    math.quat.fromAxisAngle(cave.axeRotation, 1, 0, 0, -flex);
+    math.quat.fromAxisAngle(cave.axeRotation, 1, 0, 0, -flex - tip);
     math.quat.multiply(cave.axeRotation, cave.axeRotation, SWING_CLUB);
     club.quaternion = cave.axeRotation;
     setVec(club.position, 0, e.y - e.length * Math.cos(flex), e.z + e.length * Math.sin(flex));
@@ -1279,7 +1348,124 @@
   const swingArm = (cave, wind, stroke, stance) => {
     const parts = cave.parts, w = cave.weapon, arm = parts.armR, fore = parts.forearmR, club = parts.club, e = cave.elbow;
     const carryFlex = -fore.rotation.x, hang = e.relaxed !== undefined ? e.relaxed : e.rest, yaw = (w.aiming ? w.aimYaw : 0) - arm.poseYaw;
-    const lift = lerp(SWING_LOW, SWING_HIGH, w.meleeCharge) * (1 - stroke) * wind;
+    // A weapon set to swing `back` (crew `setClub`'s `swing`) is drawn back over the shoulder, the elbow folded and the
+    // blade tipped back behind it, and driven forward through the cut, the arm out and the blade pointing ahead.
+    const back = cave.clubSwing === "back", combo = cave.clubSwing === "combo" ? COMBO[w.comboStep || 0] : null;
+    if (combo) {
+      // Drawn up to the cut's first pose (a held one easing to the overhead cut's as it charges) and struck through to its second.
+      const b = combo.end, heavy = w.meleeHeld && !(cave.comboSteps > 0 && cave.comboSteps < 3) ? clamp(w.meleeCharge / COMBO_HEAVY, 0, 1) : 0, a = COMBO_WIND;
+      for (let i = 0; i < 5; i++) a[i] = lerp(combo.wind[i], COMBO[2].wind[i], heavy);
+      comboArm(COMBO_A, a); comboArm(COMBO_B, b);
+      math.quat.slerpTo(COMBO_A, COMBO_B, stroke);
+      // The body's twist and spin turn the arm with it (its `poseYaw`); only a shoulder's squeeze past a wall is undone.
+      const own = (w.aiming ? w.aimYaw : 0) - cave.shoulder.yaw;
+      math.quat.fromAxisAngle(SWING_TURN, 0, 1, 0, own);
+      math.quat.multiply(COMBO_A, SWING_TURN, COMBO_A);
+      math.quat.fromEuler(SWING_LIVE, arm.rotation.x, arm.rotation.y + own, arm.rotation.z);
+      math.quat.slerpTo(SWING_LIVE, COMBO_A, wind);
+      cave.reachR.set(SWING_LIVE);
+      arm.quaternion = cave.reachR;
+      const flex = lerp(hang, lerp(a[2], b[2], stroke), wind);
+      fore.rotation.x = -flex;
+      restInFist(cave, flex, lerp(a[3], b[3], stroke) * wind);
+      // The cross slash finishes turned a quarter to the left, the right shoulder to the attack, and the backhand sweep a
+      // quarter to the right, the left shoulder to it; each holds there while the chain may go on (the next cut taking
+      // the body from there), easing back once it can't.
+      const after = w.comboStep < 2 && !w.meleeHeld && w.meleeTime <= MELEE_RECOVER;
+      cave.comboTwist = after ? b[4] * clamp((COMBO_HOLD + COMBO_UNTURN - w.comboAge) / COMBO_UNTURN, 0, 1) : lerp(a[4], b[4], stroke) * (w.comboChained ? 1 : wind * stance);
+      // The third cut's spin: drawn up, the body coils a quarter turn to the right (`COMBO_COIL`), its left shoulder to
+      // the attack, then unwinds counterclockwise through the stroke, a turn and a quarter, back to facing ahead. A
+      // charged strike coils as it charges.
+      const spinning = w.comboStep === 2 && !w.meleeHeld && cave.comboProgress < 1;
+      cave.comboStroke = spinning ? stroke : 0;
+      cave.comboSpin = spinning ? COMBO_COIL * (w.comboCoiled ? 1 : wind) + ((w.whirl ? WHIRL_SPIN : COMBO_SPIN) - COMBO_COIL) * ease.inOutQuad(stroke) : w.meleeHeld && w.comboStep === 2 && w.comboCoiled ? COMBO_COIL : w.meleeHeld ? COMBO_COIL * wind * heavy : 0;
+      // The little jump as the unwinding starts.
+      if (spinning && w.comboHop && stroke > 0) { w.comboHop = false; if (!cave.hop && !cave.hopV) { cave.hopV = JUMP_SPEED * COMBO_SPIN_HOP; cave.jumps = 1; } }
+      if (stance < 1) {
+        const carry = 1 - stance;
+        math.quat.slerpTo(cave.reachR, MELEE_REST_ARM, carry);
+        fore.rotation.x = -lerp(flex, carryFlex, carry);
+        math.quat.slerpTo(cave.axeRotation, MELEE_REST_CLUB, carry);
+        setVec(club.position, lerp(club.position.x, MELEE_REST_GRIP[0], carry), lerp(club.position.y, MELEE_REST_GRIP[1], carry), lerp(club.position.z, MELEE_REST_GRIP[2], carry));
+      }
+      keepDeltoid(cave, stance);
+      // The slam is in both hands: the left reaches the grip under the right fist, wherever the right arm has it.
+      const both = combo.both ? wind * stance : 0;
+      if (both > 0) {
+        const left = parts.armL, foreL = parts.forearmL, wasFlex = foreL.rotation.x;
+        math.quat.rotateVec(COMBO_FIST, cave.reachR, club.position.x, club.position.y, club.position.z);
+        math.quat.fromEuler(SWING_LIVE, left.rotation.x, left.rotation.y, left.rotation.z);
+        if (reachArm(cave, left, foreL, cave.reachL, arm.position.x + COMBO_FIST[0] + 0.035 * cave.traits.height, arm.position.y + COMBO_FIST[1] - 0.02 * cave.traits.height, arm.position.z + COMBO_FIST[2], 0.8, -1, -0.3)) {
+          math.quat.slerpTo(SWING_LIVE, cave.reachL, both);
+          cave.reachL.set(SWING_LIVE);
+          foreL.rotation.x = lerp(wasFlex, foreL.rotation.x, both);
+        }
+      }
+      return;
+    }
+    if (cave.clubSwing === "cast" || cave.clubSwing === "charge") {
+      // The charge: the wand raised to the sky over its `raise`, the head tipped up, trembling harder as the charge
+      // builds, then at `fire` thrust forward over `thrust` into the cast's own throw, pointed straight at the enemy,
+      // its pulse let go as the thrust lands; its `stroke` comes in seconds.
+      const charging = cave.clubSwing === "charge", secs = stroke;
+      let tremble = 0;
+      if (charging) {
+        // The frost chain's stays raised to the sky while its lightning strikes, never thrust.
+        stroke = cave.chain === FROST_CHAIN ? 0 : strikeEase(clamp((secs - CHARGE.fire) / CHARGE.thrust, 0, 1));
+        if (secs < CHARGE.fire) tremble = CHARGE.shake[0] * clamp((secs - CHARGE.raise) / (CHARGE.fire - CHARGE.raise), 0, 1) * Math.sin(secs * CHARGE.shake[1]);
+        // Squared to the front out of the last cut's turn as the wand goes up, and kept so after.
+        const square = ease.inOutQuad(clamp(secs / CHARGE.raise, 0, 1));
+        cave.comboTwist = w.spellTwist * (1 - square);
+        if (square >= 1) w.spellTwist = 0;
+        if (w.chargeArmed && secs >= CHARGE.fire + CHARGE.thrust) { w.chargeArmed = false; cave.spellBlast = true; }
+      }
+      const k = wind * stance, a = CAST_WIND, b = CAST_END, R = CAST.right, Lf = CAST.left, R0 = charging ? CHARGE.right : R[0], L0 = charging ? CHARGE.left : Lf[0];
+      for (let i = 0; i < 4; i++) { a[i] = R0[i]; b[i] = R[1][i]; }
+      a[0] += tremble;
+      comboArm(COMBO_A, a); comboArm(COMBO_B, b);
+      math.quat.slerpTo(COMBO_A, COMBO_B, stroke);
+      const own = (w.aiming ? w.aimYaw : 0) - cave.shoulder.yaw;
+      math.quat.fromAxisAngle(SWING_TURN, 0, 1, 0, own);
+      math.quat.multiply(COMBO_A, SWING_TURN, COMBO_A);
+      math.quat.fromEuler(SWING_LIVE, arm.rotation.x, arm.rotation.y + own, arm.rotation.z);
+      math.quat.slerpTo(SWING_LIVE, COMBO_A, k);
+      cave.reachR.set(SWING_LIVE);
+      arm.quaternion = cave.reachR;
+      const flex = lerp(hang, lerp(a[2], b[2], stroke), k);
+      fore.rotation.x = -flex;
+      restInFist(cave, flex, lerp(a[3], b[3], stroke) * k);
+      if (stance < 1) {
+        const carry = 1 - stance;
+        math.quat.slerpTo(cave.reachR, MELEE_REST_ARM, carry);
+        fore.rotation.x = -lerp(flex, carryFlex, carry);
+        math.quat.slerpTo(cave.axeRotation, MELEE_REST_CLUB, carry);
+        setVec(club.position, lerp(club.position.x, MELEE_REST_GRIP[0], carry), lerp(club.position.y, MELEE_REST_GRIP[1], carry), lerp(club.position.z, MELEE_REST_GRIP[2], carry));
+      }
+      keepDeltoid(cave, stance);
+      // The left arm, from where it hangs now: raised at the enemy, then pulled down to the left.
+      const left = parts.armL, foreL = parts.forearmL, liftL = lerp(L0[0], Lf[1][0], stroke), turnL = lerp(L0[1], Lf[1][1], stroke);
+      math.quat.fromAxisAngle(SWING_TURN, 1, 0, 0, -liftL);
+      math.quat.multiply(CAST_L, SWING_TURN, CAST_REST_L);
+      math.quat.fromAxisAngle(SWING_TURN, 0, 1, 0, turnL + own);
+      math.quat.multiply(CAST_L, SWING_TURN, CAST_L);
+      math.quat.fromEuler(SWING_LIVE, left.rotation.x, left.rotation.y + own, left.rotation.z);
+      math.quat.slerpTo(SWING_LIVE, CAST_L, k);
+      cave.reachL.set(SWING_LIVE);
+      left.quaternion = cave.reachL;
+      cave.castForeL = foreL.rotation.x;
+      foreL.rotation.x = lerp(foreL.rotation.x, -lerp(L0[2], Lf[1][2], stroke), k);
+      cave.castOn = true; cave.castK = k;
+      cave.castTwist = lerp(charging ? 0 : CAST.twist[0], CAST.twist[1], stroke) * k;
+      cave.castTip = lerp(charging ? CHARGE.tip : CAST.tip[0], CAST.tip[1], stroke) * k;
+      cave.castLegR = lerp(charging ? 0 : CAST.legR[0], CAST.legR[1], stroke); cave.castLegL = lerp(charging ? 0 : CAST.legL[0], CAST.legL[1], stroke);
+      cave.spellLook = charging ? k * (1 - stroke) : 0;
+      // The fireball leaves the wand once, as the throw comes through.
+      if (!charging && w.castArmed && !w.meleeHeld && stroke >= CAST.fire) { w.castArmed = false; cave.castFire = true; }
+      return;
+    }
+    const stab = cave.clubSwing === "stab";
+    const lift = stab ? wind * lerp(STAB_DRAW - STAB_DRAW_CHARGE * w.meleeCharge, STAB_OUT, stroke)
+      : back ? wind * ((1 - stroke) * -(SWING_BACK + SWING_BACK_CHARGE * w.meleeCharge) + stroke * SWING_THRUST) : lerp(SWING_LOW, SWING_HIGH, w.meleeCharge) * (1 - stroke) * wind;
     // Ready, the arm as it hangs now, with its walk's sway; swinging, the hanging arm lifted from the shoulder.
     math.quat.fromEuler(SWING_LIVE, arm.rotation.x, arm.rotation.y + yaw, arm.rotation.z);
     math.quat.fromAxisAngle(SWING_TURN, 1, 0, 0, -lift);
@@ -1289,9 +1475,10 @@
     math.quat.slerpTo(SWING_LIVE, cave.reachR, wind);
     cave.reachR.set(SWING_LIVE);
     arm.quaternion = cave.reachR;
-    const flex = lerp(hang, SWING_ELBOW, wind);
+    const flex = lerp(hang, stab ? lerp(STAB_DRAW_ELBOW, STAB_OUT_ELBOW, stroke) : back ? lerp(SWING_BACK_ELBOW, SWING_THRUST_ELBOW, stroke) : SWING_ELBOW, wind);
     fore.rotation.x = -flex;
-    restInFist(cave, flex);
+    // A stab's blade turns down out of the fist to run on along the forearm as it drives out.
+    restInFist(cave, flex, stab ? STAB_TIP * wind : 0);
     // Back to the carry: the arm, the elbow's bend and the weapon ease into it together.
     if (stance < 1) {
       const carry = 1 - stance;
@@ -1812,6 +1999,13 @@
       if (contact !== Infinity) parts.club.position.z = contact;
     }
     parts.club.visible = w.primaryOwned && (slungClub || !drawn);
+    if (!primaryReady) cave.comboTwist = cave.comboSpin = cave.comboStroke = 0;
+    // A cast's pose is laid on afresh each frame it lasts (`swingArm`); its left arm handed back as it was.
+    if (cave.castOn) {
+      cave.castOn = false; cave.castTwist = cave.castTip = cave.castK = cave.spellLook = 0;
+      if (parts.armL.quaternion === cave.reachL) parts.armL.quaternion = null;
+      if (parts.forearmL) parts.forearmL.rotation.x = cave.castForeL;
+    }
     if (primaryReady) {
       if (returningPrimary) {
         math.quat.fromEuler(MELEE_REST_ARM, parts.armR.rotation.x, parts.armR.rotation.y, parts.armR.rotation.z);
@@ -1823,15 +2017,37 @@
         parts.club.quaternion = null;
       }
       let wind = 0, stroke = 0;
+      cave.comboProgress = 1;
       const release = w.meleeStrikeTime + MELEE_RECOVER;
-      if (w.meleeHeld) {
-        wind = ease.inOutQuad(clamp(w.meleeHeldTime / MELEE_WIND, 0, 1));
+      const cast = cave.clubSwing === "cast";
+      if (cave.clubSwing === "charge") {
+        // Raised over its start, held through the charge and the blast, lowered at its end; `stroke` in seconds.
+        if (w.meleeTime > MELEE_RECOVER) {
+          const C = chargeOf(cave);
+          stroke = (release - w.meleeTime) / w.meleeStrikeTime * C.time;
+          wind = ease.inOutQuad(clamp(stroke / C.raise, 0, 1)) * (1 - ease.inOutQuad(clamp((stroke - C.hold) / (C.time - C.hold), 0, 1)));
+        }
+      } else if (w.meleeHeld) {
+        wind = ease.inOutQuad(clamp(w.meleeHeldTime / (cast ? CAST.wind : MELEE_WIND), 0, 1));
+      } else if (cast && w.meleeTime > MELEE_RECOVER) {
+        // A cast draws up over the start of its strike (at once if held), throws, and holds the throw a moment.
+        const u = clamp((release - w.meleeTime) / w.meleeStrikeTime, 0, 1), drawn = w.meleeHeldTime > 0 ? ease.inOutQuad(clamp(w.meleeHeldTime / CAST.wind, 0, 1)) : 0;
+        const lead = CAST.lead * (1 - drawn), end = lead + (1 - lead) * 0.7;
+        wind = lead > 0 ? Math.max(drawn, ease.inOutQuad(clamp(u / lead, 0, 1))) : 1;
+        stroke = strikeEase(clamp((u - lead) / (end - lead), 0, 1));
       } else if (w.meleeTime > release) {
         wind = ease.inOutQuad(clamp(1 - (w.meleeTime - release) / MELEE_WIND, 0, 1));
       } else if (w.meleeTime > MELEE_RECOVER) {
         // Straight down from the wind-up as it was let go (a held cut's), however far it had got.
         stroke = strikeEase((release - w.meleeTime) / w.meleeStrikeTime);
         wind = w.meleeHeldTime > 0 ? ease.inOutQuad(clamp(w.meleeHeldTime / MELEE_WIND, 0, 1)) : 1;
+        if (cave.clubSwing === "combo") {
+          // A tap's cut draws up first, over the start of its strike; one already drawn up strikes at once.
+          const u = (release - w.meleeTime) / w.meleeStrikeTime, own = COMBO[w.comboStep || 0].lead, lead = own || (w.comboCoiled ? COMBO_LEAD_COILED : COMBO_LEAD) * (1 - wind);
+          cave.comboProgress = clamp(u, 0, 1);
+          if (lead > 0) wind = Math.max(wind, ease.inOutQuad(clamp(u / lead, 0, 1)));
+          stroke = strikeEase(clamp((u - lead) / (1 - lead), 0, 1));
+        }
       } else if (w.meleeTime > 0) {
         const recovery = 1 - ease.inOutQuad(1 - w.meleeTime / MELEE_RECOVER);
         wind = recovery;
@@ -2615,6 +2831,16 @@
       if (!cave.build.built) buildSpots.push(cave.build.spot);
       cave.build = null;
     };
+    // The slam's nod (`SLAM_NOD`) laid over whatever pitch the head has: the last one is taken off first, unless the
+    // head has been posed afresh since it went on.
+    const nodHead = (cave, nod) => {
+      const head = cave.parts.head;
+      if (cave.slamNod && head.rotation.x === cave.slamHeadX) head.rotation.x -= cave.slamNod;
+      head.rotation.x += nod;
+      cave.slamNod = nod; cave.slamHeadX = head.rotation.x;
+    };
+    // The head's nod: down through the slam's jump, up to the sky as a spell's charge builds.
+    const headNod = (cave) => SLAM_NOD * (cave.slamTuck || 0) - CHARGE.look * (cave.spellLook || 0);
     const clearHeadLook = (cave) => {
       const head = cave.parts.head;
       if (head.quaternion !== cave.headLookRotation) return;
@@ -3712,18 +3938,102 @@
       selectWeapon(was.held, cave);
       w.selectedSlot = was.selectedSlot;
     };
+    // A place's own weapon in the primary's place (the Byzantine Keep's sword and axe): `club` is its geometry and the
+    // angles it rests and is carried at, and `swing: "back"` for a cut drawn back over the shoulder and driven forward;
+    // null puts the character's own back. Slung and drawn as any club is.
+    const setClub = (cave, club) => {
+      const parts = cave.parts;
+      if (!club && !cave.ownClub) return;
+      if (!cave.ownClub) cave.ownClub = { geometry: parts.club.geometry, rest: cave.clubRest, carry: cave.clubCarry };
+      const use = club || cave.ownClub;
+      parts.club.geometry = use.geometry; cave.clubRest = use.rest; cave.clubCarry = use.carry || use.rest; cave.clubSwing = club ? club.swing : undefined;
+      // A `spell` chains its steps (`SPELL`), each swung as its own kind; it starts on the cast.
+      cave.wandChain = cave.clubSwing === "spell" || cave.clubSwing === "frost" || cave.clubSwing === "staff";
+      cave.chain = cave.clubSwing === "frost" ? FROST_CHAIN : cave.clubSwing === "staff" ? STAFF_CHAIN : SPELL;
+      if (cave.wandChain) cave.clubSwing = cave.chain[0];
+      // `steps`: how many moves of its chain it swings (the first ones, 0 for all), and a held strike goes over to the
+      // spin only once the chain reaches it.
+      cave.comboSteps = club && club.steps || 0;
+      // `pause`: seconds after the chain's last move is done before it can start again (the Keep's level 1).
+      cave.chainPause = club && club.pause || 0;
+      cave.weapon.chainWait = 0;
+      const was = cave.weapon;
+      if (was.chargeArmed && ctx.onSpell && cave === player) ctx.onSpell(cave, "cancel");
+      was.spellStep = cave.chain.length - 1; was.spellAge = COMBO_WINDOW; was.spellBuffer = was.chargeArmed = was.whirl = false; was.spellTwist = 0;
+      cave.comboTwist = cave.comboSpin = cave.comboStroke = 0; cave.comboProgress = 1; cave.weapon.comboHop = cave.weapon.comboCoiled = cave.weapon.comboChained = false; cave.weapon.comboStep = 0; cave.weapon.comboAge = COMBO_WINDOW; cave.weapon.comboBuffer = false;
+      cave.clubSlingProfile = clubSlingProfile(use.geometry); cave.slingRoll = undefined; cave.clubLeanPacked = undefined;
+      if (!club) cave.ownClub = null;
+      poseWeapon(cave);
+    };
+    // A combo's cut on its way: the chain's clock started again, the first cut's leap forward off the ground and the spin's little jump.
+    const comboStruck = (cave) => {
+      const w = cave.weapon;
+      w.comboAge = 0;
+      if (w.comboStep === 0 && cave === player && !cave.hop && !cave.hopV && !cave.camp.seat && !cave.ladder?.plane) {
+        const yaw = cave.root.rotation.y;
+        cave.hopV = JUMP_SPEED * COMBO_HOP; cave.jumps = 1;
+        cave.leap.vx = Math.sin(yaw) * COMBO_LEAP; cave.leap.vz = Math.cos(yaw) * COMBO_LEAP;
+      }
+      // The slam's jump as it starts, high enough that the body comes down as the blade does (even off the end of the
+      // spin's little jump, still coming down).
+      if (COMBO[w.comboStep].hop && cave === player && cave.hop < 0.4 && cave.hopV <= 0 && !cave.jet?.thrust && !cave.camp.seat && !cave.ladder?.plane) { cave.hopV = JUMP_SPEED * COMBO[w.comboStep].hop; cave.jumps = 1; cave.leap.vx = cave.leap.vz = 0; cave.slamming = true; }
+      w.comboHop = w.comboStep === 2 && cave === player && !cave.hop && !cave.hopV && !cave.camp.seat && !cave.ladder?.plane;
+    };
     const swingWeapon = (cave = player, held = false, focused = false) => {
       if (!weaponsEnabled) return false;
       if (!cave || cave.grabbedBy || cave.health.stunned || !cave.weapon.primaryOwned || !cave.weapon.primaryEquipped || cave !== player && (cave.camp.burning || cave.camp.rolling) || cave.camp.seat || cave.bedTravel.mode) return false;
       const w = cave.weapon, arm = cave.parts.armR, club = cave.parts.club;
       if (w.meleeHeld) return false;
+      // The chain's last move done, it waits out its pause before another; a press meanwhile is dropped.
+      if (w.chainWait > 0) return false;
+      if (cave.wandChain) {
+        // A spell's step asked for while the last is on its way waits for it and follows as it ends; none waits on the charge.
+        if (w.meleeTime > MELEE_RECOVER || w.spellAge < COMBO_GAP) { if (cave.clubSwing !== "charge") w.spellBuffer = true; return false; }
+        w.spellStep = w.spellAge < COMBO_WINDOW ? (w.spellStep + 1) % (cave.comboSteps || cave.chain.length) : 0;
+        w.spellAge = 0; w.spellTwist = cave.comboTwist || 0;
+        cave.clubSwing = cave.chain[w.spellStep];
+        // A spell's second and third steps are the sword's first two cuts, the third following on from the second; a
+        // frost chain's first three are the sword's own, its spin coiled from the backhand; the staff's whirl is the
+        // sword's spin taken round fast, uncoiled.
+        w.whirl = cave.clubSwing === "whirl";
+        if (w.whirl) { cave.clubSwing = "combo"; w.comboStep = 2; w.comboCoiled = false; w.comboChained = true; }
+        else if (cave.clubSwing === "combo") {
+          const off = cave.chain === SPELL ? 1 : 0;
+          w.comboStep = w.spellStep - off; w.comboCoiled = !off && w.comboStep === 2; w.comboChained = off ? w.spellStep === 2 : w.comboStep >= 1;
+        }
+        else cave.comboSpin = cave.comboStroke = 0;
+        if (cave.clubSwing === "charge") {
+          w.meleeTarget.node = null;
+          w.meleeReadyTime = 0; w.meleeHeld = false; w.meleeHeldTime = w.meleeCharge = 0;
+          w.meleeStrikeTime = chargeOf(cave).time; w.meleeTime = chargeOf(cave).time + MELEE_RECOVER;
+          w.chargeArmed = true; w.meleeHit = false; w.meleeStop = 1; w.meleePower = meleePower(cave);
+          if (cave === player && BL.net) BL.net.sendSwing();
+          if (cave === player && ctx.onSpell) ctx.onSpell(cave, "charge", CHARGE.fire + CHARGE.thrust);
+          return true;
+        }
+      }
+      const combo = cave.clubSwing === "combo", cast = cave.clubSwing === "cast";
+      // A cut asked for while the last is still on its way waits for it, and follows as it ends.
+      if (combo && !cave.wandChain && (w.meleeTime > MELEE_RECOVER || w.comboAge < COMBO_GAP)) { w.comboBuffer = true; return false; }
+      // A cast is thrown whole before the next.
+      if (cast && w.meleeTime > MELEE_RECOVER) return false;
+      if (combo && !cave.wandChain) {
+        const chained = w.comboAge < COMBO_WINDOW;
+        // The spin straight after the backhand sweep starts already coiled, so it comes sooner.
+        w.comboCoiled = chained && w.comboStep === 1;
+        w.comboChained = chained && w.comboStep < 2;
+        w.comboStep = chained ? (w.comboStep + 1) % (cave.comboSteps || COMBO.length) : 0;
+      }
       w.meleeTarget.node = null;
       if (!held) findMeleeTarget(cave);
       w.meleeReadyTime = 0;
-      w.meleeTime = MELEE_TIME;
       w.meleeHeld = held;
       w.meleeHeldTime = w.meleeCharge = 0;
-      w.meleeStrikeTime = MELEE_STRIKE;
+      w.meleeStrikeTime = combo ? (w.comboCoiled ? COMBO[w.comboStep].quick : COMBO[w.comboStep].strike) : cast ? CAST.strike : MELEE_STRIKE;
+      w.meleeTime = (cast ? 0 : MELEE_WIND) + w.meleeStrikeTime + MELEE_RECOVER;
+      w.castArmed = cast && !held;
+      if (combo && !held) comboStruck(cave);
+      if (cave.chainPause && cave.comboSteps && (cave.wandChain ? w.spellStep : w.comboStep) === cave.comboSteps - 1) w.chainWait = w.meleeTime + cave.chainPause;
       w.meleeHit = false;
       w.meleeStop = 1;
       w.meleePower = meleePower(cave);
@@ -3735,7 +4045,7 @@
       // A strike other players see; a held swing tells them when it is let go (releaseSwing).
       if (!held && cave === player && BL.net) BL.net.sendSwing();
       // The scene hears the driven Ooga's own strikes (a duel's melee, duel.js): `fn(cave, charge)`, 0 to 1, or -1 a bash.
-      if (!held && cave === player && ctx.onSwing) ctx.onSwing(cave, 0);
+      if (!held && cave === player && ctx.onSwing) ctx.onSwing(cave, 0, combo ? w.comboStep : undefined);
       return true;
     };
     const bashWeapon = (cave = player) => {
@@ -3755,13 +4065,28 @@
       if (!weaponsEnabled) cancel = true;
       if (!cave) return false;
       const w = cave.weapon;
+      // A charge cut short comes straight down again, its pulse never let go.
+      if (cancel && w.chargeArmed) {
+        w.chargeArmed = false; w.spellTwist = 0; w.meleeTime = Math.min(w.meleeTime, MELEE_RECOVER);
+        if (cave === player && ctx.onSpell) ctx.onSpell(cave, "cancel");
+      }
       if (!w.meleeHeld) return false;
       w.meleeTarget.node = null;
       if (!cancel) findMeleeTarget(cave);
       w.meleeHeld = false;
-      w.meleeStrikeTime = strikeTime();
+      if (cave.wandChain) w.spellAge = 0;
+      const combo = cave.clubSwing === "combo";
+      // A charged combo cut is the overhead one.
+      if (combo && !cave.wandChain && !cancel && w.meleeCharge >= COMBO_HEAVY && !(cave.comboSteps > 0 && cave.comboSteps < 3)) { if (w.comboStep !== 2) w.comboCoiled = w.comboChained = false; w.comboStep = 2; }
+      const cast = cave.clubSwing === "cast";
+      w.meleeStrikeTime = combo ? (w.comboCoiled && w.comboStep === 2 ? COMBO[2].quick : COMBO[w.comboStep].strike) : cast ? CAST.strike : strikeTime();
       w.meleeTime = cancel ? 0 : w.meleeStrikeTime + MELEE_RECOVER;
+      if (cancel) w.chainWait = 0;
+      w.castArmed = cast && !cancel;
+      // A tap let go within its own frame still draws up before it strikes.
+      if (combo && !cancel) { w.meleeHeldTime = Math.max(w.meleeHeldTime, 1e-4); comboStruck(cave); }
       if (cancel) {
+        w.comboBuffer = false;
         w.meleeReadyTime = 0;
         w.meleePower = 1;
         w.meleeHeldTime = w.meleeCharge = 0;
@@ -3772,7 +4097,7 @@
         hitMeleeTarget(cave);
       }
       if (!cancel && cave === player && BL.net) BL.net.sendSwing();
-      if (!cancel && cave === player && ctx.onSwing) ctx.onSwing(cave, w.meleeCharge);
+      if (!cancel && cave === player && ctx.onSwing) ctx.onSwing(cave, w.meleeCharge, combo ? w.comboStep : undefined);
       return true;
     };
     // Thrusters built into a character sit wherever its own model puts them, so
@@ -5296,13 +5621,22 @@
           clearShoulder(cave);
         return;
       }
-      if (cave.root.quaternion || cave.camp.seat || cave.hop > 0 || cave.hopV > 0 || cave.camp.panic.active) { clearShoulder(cave); return; }
+      if (cave.root.quaternion || cave.camp.seat || cave.hop > 0 || cave.hopV > 0 || cave.camp.panic.active) {
+        clearShoulder(cave);
+        // A combo cut's twist and spin go on in the air (the spin's own jump).
+        const turn = (cave.comboTwist || 0) + (cave.comboSpin || 0) + (cave.castTwist || 0);
+        if (turn && !cave.root.quaternion && !cave.camp.seat) for (let i = 0; i < cave.root.children.length; i++) {
+          const part = cave.root.children[i];
+          part.poseYaw = (cave.comboTwist || 0) * (part === cave.parts.head ? COMBO_HEAD : 1) + (part === cave.parts.head ? 0 : cave.castTwist || 0) + (cave.comboSpin || 0);
+        }
+        return;
+      }
       if (!s.attempted) { s.phase = 0; s.other = s.outside = s.outsideId = null; s.obstacle.node = null; }
       s.yaw = damp(s.yaw, s.attempted ? s.targetYaw : 0, 16, dt);
       if (Math.abs(s.yaw) < 1e-5) s.yaw = 0;
       for (let i = 0; i < cave.root.children.length; i++) {
         const part = cave.root.children[i];
-        part.poseYaw = part === cave.parts.head ? 0 : s.yaw;
+        part.poseYaw = (part === cave.parts.head ? (cave.comboTwist || 0) * COMBO_HEAD : s.yaw + (cave.comboTwist || 0) + (cave.castTwist || 0)) + (cave.comboSpin || 0);
       }
     };
     // Walkers keep swept clearance from scenery and NPCs; players are passable.
@@ -6779,14 +7113,21 @@
         }
       }
       if (!(cave.ladder && cave.ladder.plane) && (cave.hopV > 0 || cave.hop > 0)) {
-        cave.hopV -= WALK.gravity * dt;
+        // The slam's jump (`COMBO`'s `rise` and `drop`) is pulled down harder than any other, up and on the way down.
+        cave.hopV -= WALK.gravity * (cave.slamming ? (cave.hopV > 0 ? COMBO_RISE : COMBO_DROP) : 1) * dt;
         // Fruit halves vertical travel without changing ballistic momentum; leaving restores normal movement at once.
         const verticalScale = inBananas(cave) ? 0.5 : 1;
         cave.hop = Math.max(0, cave.hop + cave.hopV * dt * verticalScale);
         if (cave.hop === 0 && cave.hopV < 0) {
-          cave.hopV = 0;
+          cave.hopV = 0; cave.slamming = false;
           if (cave.jet && cave.jetFuel < JET_LAUNCH_FUEL && jetpackRefills(cave)) cave.jetRecovering = true;
         }
+      }
+      if (cave.slamming && cave.hop === 0 && cave.hopV <= 0) cave.slamming = false;
+      if (cave.slamming || cave.slamTuck) {
+        const up = cave.slamming && (cave.hopV > 0 || cave.hop > SLAM_TUCK_LOW);
+        cave.slamTuck = damp(cave.slamTuck || 0, up ? 1 : 0, up ? SLAM_TUCK_IN : SLAM_TUCK_OUT, dt);
+        if (!up && cave.slamTuck < 1e-3) cave.slamTuck = 0;
       }
       const recovery = cave.avoidance.navigation;
       if (recovery.mode === 4 && cave !== player) {
@@ -7621,7 +7962,10 @@
         return;
       }
       root.rotation.y += Math.atan2(Math.sin(heading - root.rotation.y), Math.cos(heading - root.rotation.y)) * mix;
+      // The slam's nod rides over the look, taken off again before the look eases on.
+      nodHead(player, 0);
       head.rotation.x += (pitch - head.rotation.x) * mix;
+      nodHead(player, headNod(player));
       head.rotation.y = 0;
     };
     // Shift the visible body while its root stays on the exact collision surface.
@@ -8043,6 +8387,15 @@
       w.meleeTime = Math.max(meleeFloor, w.meleeTime - meleeStep);
       w.bashTime = Math.max(0, w.bashTime - dt);
       w.meleeReadyTime = meleeBefore > 0 && w.meleeTime === 0 ? MELEE_READY_HOLD + MELEE_CARRY_BLEND : Math.max(0, w.meleeReadyTime - dt);
+      if (w.chainWait > 0 && !w.meleeHeld) w.chainWait -= dt;
+      if (cave.clubSwing === "combo") {
+        if (!w.meleeHeld) w.comboAge += dt;
+        if (w.comboBuffer && w.meleeTime <= MELEE_RECOVER && w.comboAge >= COMBO_GAP) { w.comboBuffer = false; if (swingWeapon(cave, true)) releaseSwing(cave, false); }
+      }
+      if (cave.wandChain) {
+        if (!w.meleeHeld) w.spellAge += dt;
+        if (w.spellBuffer && w.meleeTime <= MELEE_RECOVER && w.spellAge >= COMBO_GAP) { w.spellBuffer = false; if (swingWeapon(cave, true)) releaseSwing(cave, false); }
+      }
       if (w.meleeHeld) {
         w.meleeHeldTime = Math.min(MELEE_CHARGE_DELAY + MELEE_CHARGE_TIME, w.meleeHeldTime + dt);
         w.meleeCharge = ease.inOutQuad(clamp((w.meleeHeldTime - MELEE_CHARGE_DELAY) / MELEE_CHARGE_TIME, 0, 1));
@@ -8060,6 +8413,27 @@
         if (cave.parts.chuk) poseNunchaku(cave, cave.animation.dt);
         if (cave === player) posePeek(cave, cave.animation.dt);
         poseWeapon(cave);
+        if (cave.slamTuck || cave.slamNod || cave.spellLook) {
+          const k = cave.slamTuck || 0, parts = cave.parts, nod = headNod(cave);
+          parts.legR.rotation.x = lerp(parts.legR.rotation.x, SLAM_LEG_R, k);
+          parts.legL.rotation.x = lerp(parts.legL.rotation.x, SLAM_LEG_L, k);
+          nodHead(cave, nod);
+        }
+        // A cast's lean (`CAST`): the upper body tipped about the hips and the right foot stepping forward.
+        const tip = cave.castTip || 0;
+        if (tip || cave.castTipShown) {
+          const parts = cave.parts;
+          parts.torso.poseTip = parts.head.poseTip = parts.armR.poseTip = parts.armL.poseTip = tip;
+          parts.club.poseTip = parts.club.parent === cave.root ? tip : 0;
+          cave.castTipShown = tip;
+        }
+        if (cave.castK) {
+          const parts = cave.parts, k = cave.castK;
+          parts.legR.rotation.x = lerp(parts.legR.rotation.x, cave.castLegR, k);
+          parts.legL.rotation.x = lerp(parts.legL.rotation.x, cave.castLegL, k);
+        }
+        if (cave.castFire) { cave.castFire = false; if (ctx.onCast) ctx.onCast(cave, cave.weapon.meleeCharge); }
+        if (cave.spellBlast) { cave.spellBlast = false; if (ctx.onSpell && cave === player) ctx.onSpell(cave, "blast"); }
         // A skater rides his board while he runs on the ground: the visitor's own sprint.
         if (cave.modelled && cave.parts.board && cave.parts.board.ride) rideBoard(cave, cave.animation.dt, cave === player && steer.speed > 1.05
           && Math.hypot(p.x - x, p.z - z) > 1e-5 && !cave.camp.seat && !cave.bedTravel.mode && !(cave.ladder && cave.ladder.plane) && !w.aiming && !(cave.jet && cave.jet.thrust)
@@ -8317,7 +8691,7 @@
       get weaponsEnabled() { return weaponsEnabled; },
       cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, refreshStates, resumeFromHost, sleepDiagnostics, refreshRosterRow, updateFan, rush, pokeCave, idleSay, drawDrops,
       throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, soot, dropRoll, damage, stun, fillAmmo, setAmmo, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, cutJet, thrust, holdRocketJump, update, pause, dispose, stats,
-      actorClear, outsideSupportAt, builtInJetpack, toggleTint, twirl, pushPose, toggleWeapon, selectWeapon, configureWeapon, parkWeapons, unparkWeapons, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, aimTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
+      actorClear, outsideSupportAt, builtInJetpack, toggleTint, twirl, pushPose, toggleWeapon, selectWeapon, configureWeapon, parkWeapons, unparkWeapons, setClub, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, aimTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
       get sleeping() { return !!(player && player.bedTravel.manual && player.state === "sleeping"); },
       // The driven Ooga's steering as last set, the world direction in `x` and `z`; live, not a copy.
       get steering() { return steer; },

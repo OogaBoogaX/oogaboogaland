@@ -1464,5 +1464,5 @@
     }
     const geometry=merge(...bits);studioCache.set(kind,geometry);return geometry;
   };
-  BL.dressing = { U, PALETTE, KIT, loosePiece, LIGHT_RGB, COIL_LIGHT, studio, set, coilRig, motes, palm, palmTrunk, islet, nodes, flock, fleet };
+  BL.dressing = { LAB_LOGO: LAB_BANNER, U, PALETTE, KIT, loosePiece, LIGHT_RGB, COIL_LIGHT, studio, set, coilRig, motes, palm, palmTrunk, islet, nodes, flock, fleet };
 })();
