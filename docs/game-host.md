@@ -38,7 +38,7 @@ A kind, in `games.js`:
 | `limits` | `sockets` an instance takes, `chars` a message may be |
 | `buckets`, `bucketOf(t)` | each message type's token bucket (`rate` a second, `burst`) |
 | `parse(message)` | a page's message as the kind reads it: false closes the socket, null ignores the message |
-| `create(now, env)` | one instance's game (`env`, the Worker's bindings, for a kind that reads a feed): `join`, `leave`, `message` (true when the state should go out now), `step(now)` (true on a change), `running`, `state`, `motion(frame, now)`, `save` (null once it has run down), `restore(data, now)` |
+| `create(now, env)` | one instance's game (`env`, the Worker's bindings, for a kind that reads a feed): `join`, `leave`, `message` (true when the state should go out now), `step(now)` (true on a change), `running`, `state`, `motion(frame, now)`, `save` (null once it has run down), `restore(data, now)`, and optionally `nextTickIn(now)` (ms to its next tick, in place of `tickMs`; at most two ticks) |
 
 ## The route
 
@@ -63,7 +63,9 @@ A kind, in `games.js`:
 - **Messages.** A page sends JSON text of at most `limits.chars`. Anything else, or anything `parse` refuses, closes
   the socket with 4400. Each message type spends its own bucket (protocol.js `takeToken`).
 - **The tick.** A setTimeout chain runs only while the game says it runs, at most four of its fixed steps a call. An
-  idle instance has no timer and hibernates, billed only while awake.
+  idle instance has no timer and hibernates, billed only while awake. It comes every `tickMs`, unless the game asks
+  for its next one (`nextTickIn`): the island's world does, so each frame goes out just as its world finishes a step;
+  the ghost hunt does not, and ticks as it always has.
 - **What goes out.** Every tick sends the motion frame. The whole state (`{ t: "state", now, s }`) goes every
   `stateEvery` ticks and at once on a change; a page joining gets `welcome { you, kind, now, tickMs }` and the state
   at once.

@@ -40,7 +40,8 @@ const echo = {
 };
 const KINDS = new Map([[echo.id, echo], [ghostHunt.id, ghostHunt], [island.id, island]]);
 
-const harness = ({ stored = new Map(), env = {} } = {}) => {
+// `late` is how many ms after its time each timer fires, as an object's timer does under load.
+const harness = ({ stored = new Map(), env = {}, late = () => 0 } = {}) => {
   const clock = { now: 1.7e12 };
   const timers = [], accepted = [];
   const socket = () => ({
@@ -63,7 +64,7 @@ const harness = ({ stored = new Map(), env = {} } = {}) => {
   const context = { ...protocol, kindOf, BL: globalThis.BL, WebSocketPair, Response, WebSocketRequestResponsePair: class {}, Date: Clock,
     DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } },
     Map, Set, Object, JSON, Promise, ArrayBuffer, DataView, Math, String, Number,
-    setTimeout: (fn, ms) => { timers.push({ fn, at: clock.now + ms }); return timers.length; }, clearTimeout: () => {} };
+    setTimeout: (fn, ms) => { timers.push({ fn, at: clock.now + ms + late(), ms }); return timers.length; }, clearTimeout: () => {} };
   runInNewContext(source, context);
   let ready = null;
   const alarm = { at: null };
@@ -154,6 +155,15 @@ test("the tick runs only while the game runs: motion every tick, the state every
   h.run(500);
   assert.equal(h.timers.length, 0, "stopped, it keeps no timer");
   assert.equal(h.stored.has("game"), false, "and keeps no record");
+});
+
+test("a game that does not ask for its next tick (the ghost hunt among them) ticks every tickMs, however late its timer fires", async () => {
+  const h = harness({ late: () => 17 });
+  const a = (await h.join(1)).ws;
+  await h.send(a, { t: "run" });
+  h.run(1000);
+  assert.ok(h.timers.length === 1 && h.timers[0].ms === 50, "echo's 50 ms, every time");
+  assert.equal("nextTickIn" in ghostHunt.create(1.7e12), false, "the hunt keeps every tickMs");
 });
 
 test("a record left behind (a restart nobody came back to) is swept once it is past resuming", async () => {
@@ -380,6 +390,26 @@ test("the island's world runs while a page follows it: a row for every Ooga, qui
   h.run(5000);
   assert.equal(ws.bins.length, sent, "nobody following, nothing runs");
   assert.equal(h.timers.filter((t) => t.at > h.clock.now).length, 0, "and no timer is left");
+});
+
+// Regression: the island's ticks came every 100 ms from whenever the last ran, up to a step after the world's last step
+// and late as the object's timer pleased, so its frames stood for moments 50, 100 or 150 ms apart and up to a step
+// before they went out: a page had to wait that unevenness out, 260 ms behind instead of under 200.
+test("the island's ticks come as its world finishes a step: frames two steps apart, each sent just after the moment it stands for", async () => {
+  let seed = 3;
+  const h = harness({ late: () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32) * 30 });
+  const { ws } = await h.join(1, "island:main:v1");
+  h.run(30000);
+  const frame = WIRE.frame(), sent = ws.bins.map((b) => (WIRE.decode(b, frame), [frame.serverMs, frame.gameMs])).slice(2);
+  assert.ok(sent.length > 10, `frames (${sent.length})`);
+  for (let i = 1; i < sent.length; i++) {
+    const gap = sent[i][1] - sent[i - 1][1];
+    assert.ok(Math.abs(gap / 100 - Math.round(gap / 100)) < 1e-6 && gap > 0, `a whole number of ticks apart (${gap} ms)`);
+  }
+  // The world's clock starts at 0, so each frame's server time less its world time is a constant plus how far past
+  // its moment it went out.
+  const lags = sent.map(([serverMs, gameMs]) => serverMs - gameMs), spread = Math.max(...lags) - Math.min(...lags);
+  assert.ok(spread <= 32, `sent within the timer's lateness of the moment each stands for (${spread.toFixed(1)} ms spread)`);
 });
 
 test("the island's states and caves come from Oogatron's stats, as a page's crew reads them", () => {
