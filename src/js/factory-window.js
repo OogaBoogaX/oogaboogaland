@@ -383,7 +383,7 @@
   const stopPast = (dist, view = null) => Math.max(ARRIVE, (view && view.view !== "first-person" ? view.distance : dist) * Math.cos(view ? view.pitch : LET_GO_PITCH) + CLEAR_BACK);
   const eyes = (pilot, camera) => {
     const IN_EYES = 1, GOING_BACK = 2, from = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, to = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
-    let mode = 0, cave = null, heading = 0, glide = 1, fromFov = 0, head = null, headWas = false, returnView = null, focused = false;
+    let mode = 0, cave = null, heading = 0, glide = 1, fromFov = 0, head = null, returnView = null, focused = false;
     const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
     const eyePose = (out) => {
       const p = cave.root.position, ahead = EYE_AHEAD * cave.traits.height;
@@ -404,8 +404,8 @@
       return e;
     };
     const hideHead = (on) => {
-      if (on && !head) { head = cave.parts.head; headWas = head.cameraHidden; head.cameraHidden = true; }
-      else if (!on && head) { head.cameraHidden = headWas; head = null; }
+      if (on && !head) { head = cave.parts.head; BL.scene.hideFromCamera(head, hideHead, true); }
+      else if (!on && head) { BL.scene.hideFromCamera(head, hideHead, false); head = null; }
     };
     const enter = (walker, way) => {
       returnView = pilot.viewState(); focused = pilot.captureControl({}).focused;

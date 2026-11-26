@@ -32356,6 +32356,21 @@ const sphereCombatHead = { name: "timechain combat head", why: "regression: an O
   record("timechain combat head: walked through the doorway in combat and back out, the Ooga's head shows at the shoulder and after leaving combat",
     before.aiming && before.view === "shoulder" && inside && out && back.view !== "first-person" && !back.hidden && !carried.aiming && carried.view !== "first-person" && !carried.hidden, JSON.stringify({ before, back, carried }));
 } };
+const heldViewHead = { name: "held view head", why: "regression: a view moved after the pilot judged the head (the moon portrait booth, a held pilot under a tour or a doorway's walk) drew the first-person Ooga with its head hidden", run: async (b) => {
+  const read = `__ooga.pilot.player.parts.head.cameraHidden`;
+  const seen = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, cam = B.camera, a = P.player, r = {};
+    P.enterClose(); B.advance(2, 1 / 60); r.first = ${read};
+    P.setExternalControl(true); B.advance(0.1, 1 / 60);
+    const p = a.root.position; Object.assign(cam.position, { x: p.x + 4, y: p.y + 1.5, z: p.z + 4 }); Object.assign(cam.target, { x: p.x, y: p.y + 1, z: p.z });
+    B.advance(1 / 60, 1 / 60); r.held = ${read};
+    P.setExternalControl(false); B.advance(2, 1 / 60); r.back = ${read};
+    P.exitClose(false); B.advance(2, 1 / 60); r.out = ${read};
+    return r;
+  })()`);
+  record("held view head: a first-person Ooga's head hides, shows the frame a held view moves off it, hides again back in first person and shows out of it",
+    seen.first && !seen.held && seen.back && !seen.out, JSON.stringify(seen));
+} };
 const sphereAccount = { name: "timechain account", why: "regression: account Retry must keep the owned Ooga at the keypad; an unanswered account still offers a solo visit without guessing", run: async (b) => {
   await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; BL.net.state.resolved = false; ${sphereStand("0.7", "13.8")} })()`);
   await b.key(" ");
@@ -32422,7 +32437,7 @@ const sphereAccount = { name: "timechain account", why: "regression: account Ret
       && retry.before.selected && retry.after.selected && retry.before.held && retry.after.held && retry.before.mode === retry.after.mode && retry.after.lens === "eyes"
       && released.state === "idle" && released.selected === "portlandhodl" && released.refusal === null && released.near < 2, JSON.stringify({ retry, released }));
 } };
-scene("hub", { label: "timechain doorway", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: { motion: true }, steps: [sphereApproach, sphereThreshold, sphereKeypad, sphereCrossing, sphereCombatHead, sphereBridgeKeypad, sphereAccount, trip("hub")] });
+scene("hub", { label: "timechain doorway", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: { motion: true }, steps: [sphereApproach, sphereThreshold, sphereKeypad, sphereCrossing, sphereCombatHead, sphereBridgeKeypad, sphereAccount, heldViewHead, trip("hub")] });
 // The released hub (phones under 8 GB): the walk-out rebuilds the hub behind the room's held frame.
 scene("hub", { label: "timechain doorway release", query: "solo=1&character=portlandhodl&view=timechain&pos=0&hubcache=release", opts: { motion: true }, steps: [sphereApproach, sphereCrossing] });
 scene("hub", { label: "timechain doorway canvas2d", exclusive: true, query: "solo=1&character=portlandhodl&view=timechain&pos=0&canvas2d=1", opts: { motion: true }, steps: [sphereApproach, sphereCrossing] });
@@ -51561,6 +51576,17 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   record("birds-eye north: a portal rebase mid north-up ease continues the exact trajectory without a camera jump", northRebase.cases === 15 && northRebase.failures === 0, JSON.stringify(northRebase));
   const cutaway = await cutawayBoundsProof();
   record("cutaway visibility: active apertures reject remote meshes without vertex scans and retain cells, blends, children, global and rotated local cuts", Object.entries(cutaway).every(([key, value]) => key === "bytes" ? value === 160 : value), JSON.stringify(cutaway));
+  const heads = (() => {
+    const context = { window: {} };
+    for (const name of ["math", "scene"]) runInNewContext(readFileSync(join(root, `src/js/${name}.js`), "utf8"), context);
+    const { createNode, hideFromCamera } = context.window.BL.scene, a = {}, b = {}, n = createNode(), base = createNode({ cameraHidden: true }), seen = [];
+    hideFromCamera(n, a, true); hideFromCamera(n, b, true); hideFromCamera(n, a, false); seen.push(n.cameraHidden); hideFromCamera(n, b, false); seen.push(n.cameraHidden);
+    hideFromCamera(n, a, true); hideFromCamera(n, a, true); hideFromCamera(n, b, true); hideFromCamera(n, b, false); seen.push(n.cameraHidden); hideFromCamera(n, a, false); seen.push(n.cameraHidden);
+    hideFromCamera(n, b, false); seen.push(n.cameraHidden);
+    hideFromCamera(base, a, true); hideFromCamera(base, a, false); seen.push(base.cameraHidden);
+    return seen;
+  })();
+  record("camera hiding: a head held by two owners stays hidden until both let go, in either order, and shows as it was before", heads.join() === "true,false,true,false,false,true", heads.join());
   const storage = await visibilityStorageProof({ compact: true, deferred: true });
   record("visibility storage: exact source doubles and signed zero survive queries, demand and bounded screen BVHs", storage.lazyContours && storage.exact && storage.unchanged && storage.bounded && storage.tightBacking && storage.storage && storage.demand && storage.nearBounds && storage.nearCases > 100 && storage.boundaryHits > 0 && storage.disposed && storage.values > 600, JSON.stringify(storage));
   record("visibility lifecycle: shared bakes survive removal and replacement; hidden transforms, clips and geometry restore exact queries", storage.lifecycle, JSON.stringify(storage));
