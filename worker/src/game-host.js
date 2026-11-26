@@ -8,7 +8,9 @@
 // false/null convention for unreadable and unwanted messages. Pages send JSON text; nothing else is read.
 //
 // The tick: a setTimeout chain that runs only while the kind says it runs (`running`), each call a `step` the kind
-// keeps to its own fixed steps, so an idle instance has no timer and can hibernate (billed only while awake). Every tick
+// keeps to its own fixed steps, so an idle instance has no timer and can hibernate (billed only while awake). It comes
+// every `tickMs`, unless the game asks for its next one itself (`nextTickIn(now)`, ms, at most two ticks away): the
+// island's world does, so each frame goes out as its world finishes a step; the ghost hunt does not. Every tick
 // it sends the kind's motion (game-wire.js bytes, when the kind writes one) to every socket; every `stateEvery` ticks,
 // and at once whenever something changed, its state as JSON text (`{ t: "state", now, s }`), which a page joining gets
 // at once too. While the game runs it saves the kind's record every `SAVE_MS` and on every change, so an instance
@@ -192,8 +194,10 @@ export class GameHost extends DurableObject {
 
   schedule() {
     if (this.timer || !this.game || !this.game.running(Date.now())) return;
-    this.tickDue = Date.now() + this.kind.tickMs;
-    this.timer = setTimeout(() => this.tick(), this.kind.tickMs);
+    const asked = this.game.nextTickIn ? this.game.nextTickIn(Date.now()) : NaN;
+    const ms = asked > 0 ? Math.min(asked, 2 * this.kind.tickMs) : this.kind.tickMs;
+    this.tickDue = Date.now() + ms;
+    this.timer = setTimeout(() => this.tick(), ms);
   }
 
   tick() {

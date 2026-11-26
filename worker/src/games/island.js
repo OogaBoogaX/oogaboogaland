@@ -12,6 +12,10 @@
 // The banana pile's size (its ring, reload fan and where workers turn up) comes from bananapayserver, read through the
 // DONATIONS binding every few minutes while the world runs (`readPile`).
 //
+// The tick comes as the world finishes its second step since the last (`nextTickIn`), not every 100 ms from whenever
+// the last ran: the object's timer runs late, and a tick that came up to a step after the world's last step sent rows
+// that stood for an earlier moment than the tick's, by a different amount each time, which a page had to wait out.
+//
 // Out: every tick, the motion frame of game-wire.js, a row an Ooga (island-sim.js `motion`; nothing when no Ooga has
 // moved or changed since the last, but at least every `KEEP_MS`); the state, the cast's names in row order, at once to
 // a page joining and every `stateEvery` ticks. The world runs only while a page follows it, and keeps no record: a
@@ -27,6 +31,8 @@ import { oogatron, readContributorSnapshot } from "../contributor-policy.js";
 import CAST_ROWS from "../characters.gen.json" with { type: "json" };
 
 const SIM = globalThis.BL.islandSim, LAYOUT = globalThis.BL.islandLayout, IDENTITIES = globalThis.BL.contributorIdentities;
+// Ticks come `TICK_MS` apart, each `TICK_SLACK_MS` after the world finishes a step (`nextTickIn`).
+const TICK_MS = 100, TICK_SLACK_MS = 2;
 const REFRESH_MS = 60000, RETRY_MS = 15000, KEEP_MS = 2000, STEP_MAX_MS = 1000, ACTIVITY_MS = 1000, MAX_REPOS = 64;
 const ENTROPY = "oogaboogax/entropylab";
 const PILE_MS = 5 * 60000, PILE_RETRY_MS = 60000, PILE_WAIT_MS = 5000, HOUR_MS = 3600e3;
@@ -164,6 +170,7 @@ const create = (now, env) => {
       last = at;
       return false;
     },
+    nextTickIn: () => TICK_MS - (sim.clock - sim.t) * 1000 + TICK_SLACK_MS,
     state: () => ({ v: 1, cast: sim.oogas.map((o) => o.name) }),
     motion(frame, at) {
       if (sim.stir === sentStir && at - sentAt < KEEP_MS) return false;
@@ -177,7 +184,7 @@ const create = (now, env) => {
 };
 
 export const island = {
-  id: "island", code: SIM.KIND, version: 1, venues: ["main"], tickMs: 100, stateEvery: 50,
+  id: "island", code: SIM.KIND, version: 1, venues: ["main"], tickMs: TICK_MS, stateEvery: 50,
   limits: { sockets: 160, chars: 64 },
   buckets: { any: { rate: 1, burst: 4 } },
   bucketOf: () => "any",
