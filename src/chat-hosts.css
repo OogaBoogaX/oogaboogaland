@@ -18,15 +18,49 @@
 /* The visitor's own chat, gone straight back to: an amber edge and its host line in amber. */
 .hc-chat-mine { border-color: rgba(216, 137, 43, 0.55); }
 .hc-chat-mine .hc-chat-row-host { color: var(--accent-text); }
-.hc-chat-row > .cloud-portrait { --face: 36px; flex: none; width: 36px; height: 36px; }
-.hc-chat-row-text { display: grid; flex: 1; min-width: 0; gap: 2px; font-size: 11px; color: rgba(243, 239, 228, 0.78); }
-.hc-chat-row-title { color: var(--paper); font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+/* The chat the visitor is in, at the head of the list while they browse it: Ooga Chat's purple (its speakers' ring and
+   the visitor's own dot), its edge doubled and a soft glow, its line saying so; pressing it goes back into the chat. */
+.hc-chat-here { border-color: #b18aff; box-shadow: inset 0 0 0 1px #b18aff, 0 0 12px rgba(177, 138, 255, 0.3); background: rgba(177, 138, 255, 0.1); }
+.hc-chat-here .hc-chat-row-host { color: #d4bfff; font-weight: 700; }
+.hc-chat-here .hc-chat-row-host::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #b18aff; vertical-align: 1px; animation: hc-here 1.6s ease-in-out infinite; }
+@keyframes hc-here { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .hc-chat-here .hc-chat-row-host::before { animation: none; } }
+/* A preview opened from inside another chat: what joining does there, and for its host the ways to step down first. */
+.hc-switch-line { margin: 0; color: var(--accent-text); font-size: 12px; line-height: 1.4; }
+.hc-switch-host { flex-direction: column; }
+.hc-switch-host[hidden], .hc-switch-line[hidden] { display: none; }
+/* A row is a grid: the host's face down the left, the title with the land's tag in the top right corner beside it (a
+   title too long for the room left ends in "…", its whole self in the row's own words), then the host and the counts. */
+.hc-chat-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; column-gap: 10px; row-gap: 2px; align-items: start; }
+.hc-chat-row > .cloud-portrait { --face: 36px; grid-row: 1 / span 3; align-self: center; width: 36px; height: 36px; }
+.hc-chat-row-text { display: contents; font-size: 11px; color: rgba(243, 239, 228, 0.78); }
+.hc-chat-row-title { grid-column: 2; grid-row: 1; min-width: 0; overflow: hidden; color: var(--paper); font-size: 12px; font-weight: 700; white-space: nowrap; text-overflow: ellipsis; }
+.hc-chat-row > .panel-chip { grid-column: 3; grid-row: 1; align-self: start; }
+.hc-chat-row-host, .hc-chat-row-count { grid-column: 2 / 4; font-size: 11px; color: rgba(243, 239, 228, 0.78); }
 .hc-chats-status { margin: 0; color: rgba(243, 239, 228, 0.7); font-size: 11px; }
 .hc-chats-status .link[hidden] { display: none; }
 .hc-room-bar { flex: none; font-size: 12px; font-weight: 700; color: var(--paper); }
+/* In a chat the bar stands in the panel title's line (chat-hosts.js), the carved name giving way to it, and the
+   visitor's name leaves the footer: their own tile says who they are. */
+.panel-title > .hc-room-bar { flex: 1 1 auto; min-width: 0; }
+.panel-title:has(> .hc-room-bar:not([hidden])) > :is(h2, h3) { display: none; }
+.panel[data-space="on"] .cloud-foot-name, .panel:has(.hc-chat-here) .cloud-foot-name { display: none; }
 .hc-dock { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
 .hc-chat-notice { flex: none; margin: 0; color: var(--accent-text); font-size: 11px; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6); }
 .hc-chat-notice:empty { display: none; }
+/* A notice floats, taking no room: over the top of the roster (its host stands in the panel's flow at no height, the
+   panel's gap taken back), or over the island view while there is one (chat-hosts.js moves it there), a dark plate
+   between the view's corner buttons; each line fades in and out over the six seconds it stands (SHOWN_MS). */
+.hc-notice-host { position: relative; z-index: 3; flex: none; height: 0; margin-top: -10px; }
+:is(.hc-notice-host, .iv-stage) > .hc-chat-notice {
+  position: absolute; z-index: 3; top: 8px; left: 50%; box-sizing: border-box; width: max-content; max-width: calc(100% - 24px);
+  transform: translateX(-50%); padding: 6px 10px; border-radius: 6px; background: rgba(20, 14, 8, 0.86); color: var(--paper);
+  font-size: 12px; line-height: 1.35; text-align: center; overflow-wrap: anywhere; pointer-events: none;
+}
+.iv-stage > .hc-chat-notice { max-width: calc(100% - 104px); }
+.hc-chat-notice.hc-flash { animation: hc-flash 6s ease forwards; }
+@keyframes hc-flash { 0% { opacity: 0; } 5% { opacity: 1; } 88% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .hc-chat-notice.hc-flash { animation: none; } }
 .hc-invite { display: grid; flex: none; gap: 6px; padding: 10px 12px; color: var(--paper); font-size: 11px; }
 .hc-invite:focus { outline: none; }
 .hc-invite strong { color: var(--accent-text); font-size: 12px; }
@@ -162,16 +196,17 @@
 .iv-full-host .iv-stage { flex: 1 1 auto; aspect-ratio: auto; max-height: none; min-height: 0; }
 html.iv-full .hc-room-strip { display: none; }
 @media (max-aspect-ratio: 1 / 1) { .iv-full-host { right: 0; bottom: auto; height: 55dvh; } }
-/* In a chat on a narrow screen the footer keeps to two rows rather than spilling past the panel's foot: the visitor's
-   name with the links (Leave, Sign out), then the buttons on one row, each as wide as its words (Unmute, Join Voice,
-   Go there or Go back, Request to speak, End chat). Any note a button carries goes under them. */
+/* In a chat on a narrow screen the footer is one row: the buttons, each as wide as its words (Unmute, Join Voice,
+   Request to speak, End chat), then the links (Leave chat); any note a button carries goes under them. Back to chats
+   is its arrow alone, its words kept for assistive technology. */
 @media (max-width: 479px) {
-  .panel[data-space="on"] .cloud-foot { gap: 6px 8px; }
+  .panel[data-space="on"] .cloud-foot { flex-wrap: wrap; gap: 6px 8px; }
   .panel[data-space="on"] .cloud-foot-actions { display: contents; }
-  .panel[data-space="on"] .cloud-foot .link { order: 1; }
-  .panel[data-space="on"] .cloud-foot::after { content: ""; order: 1; flex-basis: 100%; }
-  .panel[data-space="on"] .cloud-foot .foot-button { order: 2; flex: 1 1 auto; min-width: 0; padding: 0 6px; letter-spacing: 0.04em; }
-  .panel[data-space="on"] .cloud-foot > :not(.cloud-foot-name, .cloud-foot-actions) { order: 3; }
+  .panel[data-space="on"] .cloud-foot .foot-button { order: 1; flex: 1 1 auto; min-width: 0; padding: 0 6px; letter-spacing: 0.04em; }
+  .panel[data-space="on"] .cloud-foot .link { order: 2; flex: none; }
+  .panel[data-space="on"] .cloud-foot > :not(.cloud-foot-name, .cloud-foot-actions) { order: 3; flex-basis: 100%; }
+  .panel-title > .hc-room-bar .hc-room-back { flex: none; font-size: 0; }
+  .panel-title > .hc-room-bar .hc-room-back::before { content: "‹"; font-size: 22px; line-height: 1; }
 }
 
 /* The Requests panel in the panel's flow under the chat's bar (chat-hosts.js `dock`): it pushes the roster down, never
@@ -181,12 +216,9 @@ html.iv-full .hc-room-strip { display: none; }
 
 /* Review fixes (desktop and phone). The invite and co-host offer cards are slabs but never stretch to fill the panel. */
 .panel > .hc-invite { flex: none; align-content: start; }
-/* A chat's counts keep on one line; under 400px the land's tag goes under the counts, so the title keeps its width. */
+/* A chat's counts keep on one line. */
 .hc-chat-row-count { white-space: nowrap; }
 @media (max-width: 399px) {
-  .hc-chat-row { flex-wrap: wrap; }
-  .hc-chat-row-text { flex-basis: calc(100% - 46px); }
-  .hc-chat-row > .panel-chip { margin-left: 46px; }
   /* The preview's ways in, stacked full width with the amber one first. */
   .hc-preview .hc-start-go { flex-direction: column-reverse; }
   .hc-preview .hc-start-go .foot-button { width: 100%; }

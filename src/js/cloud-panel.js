@@ -290,7 +290,7 @@
     if (!on) return;
     const s = calls.state, room = s.room, v = s.voice, me = calls.identity();
     panel.dataset.space = room ? "on" : "list";
-    set(zoneChip, "textContent", room ? BL.chatHosts.ZONE_NAMES[room.zone] || "" : "");
+    if (room) BL.chatHosts.tagged(zoneChip, room.zone); else { set(zoneChip, "textContent", ""); zoneChip.title = ""; }
     hosts.update({ session: me ? { identity: me } : null, room, voice: v, device: { online: navigator.onLine !== false }, audience: s.audience });
     // The status line: the chat's socket, then what voice last said, then an empty chat.
     const words = !room ? "" : STATUS_CHAT[s.audience.status] || (s.audience.status === "live" && !s.audience.list.length ? "Nobody is here yet." : v.notice || "");

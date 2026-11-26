@@ -18149,6 +18149,21 @@ const oogaChatAppChecks = async () => {
         // The fixture's two samples join and ask about 2 and 3.2 s after the chat opens.
         for (let t = 0; t < 8000 && (await chatNow(b)).chip !== "Requests 2"; t += 200) await b.sleep(200);
         run.hosting = await chatNow(b);
+        // Back to chats keeps the chat: the list over it, the chat leading in purple as the host's own, still connected;
+        // another chat's preview offers its host only ending theirs (no co-host yet) or Stay; the green row goes back in.
+        await click(b, ".hc-room-back");
+        await b.sleep(400);
+        run.browsing = await b.evaluate(`(() => { const rows = [...document.querySelectorAll(".hc-chat-row")].filter((e) => e.offsetParent);
+          return { space: document.querySelector(".oc-chat").dataset.space, first: rows[0]?.className || "", line: rows[0]?.querySelector(".hc-chat-row-host")?.textContent || "", others: rows.length - 1 }; })()`);
+        await b.evaluate(`[...document.querySelectorAll(".hc-chat-row")].find((e) => e.offsetParent && !e.classList.contains("hc-chat-here"))?.click()`);
+        await b.sleep(500);
+        run.browseSwitch = await b.evaluate(`(() => ({ line: document.querySelector(".hc-switch-line:not([hidden])")?.textContent || "",
+          buttons: [...document.querySelectorAll("dialog.hc-preview[open] .hc-start-go button")].filter((e) => !e.hidden).map((e) => e.textContent).join() }))()`);
+        await pressText(b, "dialog.hc-preview button", "Stay");
+        await b.sleep(200);
+        await click(b, ".hc-chat-here");
+        await b.sleep(400);
+        run.browseBack = await chatNow(b);
         await click(b, ".hc-requests");
         await b.sleep(300);
         run.queue = await chatNow(b);
@@ -18266,7 +18281,10 @@ const oogaChatAppChecks = async () => {
       hostMuted: r.hostMuted.foot.startsWith("Unmute") && r.hostMuted.notice === "A host muted you",
       left: r.left.space === "list",
       dialog: r.dialog.open && r.dialog.title === "sample-contributor's chat" && r.dialog.zones === "none:true,main:false,dsb:false" && r.arrowed === "none:false,main:true,dsb:false",
-      hostRules: r.hosting.leaveShown === 0 && r.hosting.backShown === 0 && !r.hosting.foot.includes("Leave Voice") && r.full.leaveShown === 1
+      browse: r.browsing.space === "list" && /hc-chat-here/.test(r.browsing.first) && r.browsing.line === "You're in this chat · hosting" && r.browsing.others >= 1
+        && r.browseSwitch.line === "You host sample-contributor's chat. End it first, or add a co-host to hand it to." && r.browseSwitch.buttons === "End chat and join,Stay"
+        && r.browseBack.space === "on" && r.browseBack.title === "sample-contributor's chat",
+      hostRules: r.hosting.leaveShown === 0 && r.hosting.backShown === 1 && !r.hosting.foot.includes("Leave Voice") && r.full.leaveShown === 1
         && r.hostLeave.length >= 2 && r.hostLeave.slice(0, -1).every((t) => /^Make .+ host and leave$/.test(t)) && r.hostLeave.at(-1) === "Cancel"
         && /reconnecting/.test(r.leaveDropped.head) && r.leaveDropped.off === "Make sample-pebble host and leave" && r.leaveDropped.why === "Reconnecting…" && r.leaveDropped.amber === 0
         && r.leaveBack.off === "" && r.leaveBack.amber === 1,
@@ -18287,7 +18305,7 @@ const oogaChatAppChecks = async () => {
       signedOut: r.signedOut.space === "off" && !r.signedOut.preview && r.signedOut.rows.length === 0 && r.signedOut.list.hidden && r.signedOut.list.kept === 0 && r.signedOut.list.signin,
       fits: Object.values(r).every((m) => typeof m !== "object" || !m.wide)
     }]));
-    record("Ooga Chat page hosted chats: signing in lists the live chats and joins none, and the other panels' account rows offer Unmute and Join voice only once in a chat; a listener's request is approved, its invite card takes the focus and Start speaking lands muted, and a host's mute mutes them and says so; a chat's preview shows its stage before joining, and joining as a speaker asks on a closed stage and speaks at once on an open one; a contributor starts a chat from the dialog (as its host, no Leave Voice here or in the account rows, and no Leave chat or Back to chats until a co-host can take the chat over, then Leave chat choosing who, a co-host whose connection dropped listed but not offered until back), approves a request from the queue, opens the stage (approving the one still waiting), mutes a speaker from their tile's menu, offers co-hosting (accepted, made a speaker, the three slots filled so Make co-host is dimmed with its reason, an offer withdrawn, one turned down), removes someone and lets them back, and ends the chat; signing out closes an open preview and takes the list and its chats away; a co-host offer's card is accepted onto the stage, comes back as the co-host leaves voice and is accepted again; the roster runs host, co-hosts, speakers, requests, then listeners, every chat speaker ringed as on a cloud but those walking the chat's island, and the Requests chip stands right of the zone tag; at 1024 and 390 pixels with every pop-up on screen",
+    record("Ooga Chat page hosted chats: signing in lists the live chats and joins none, and the other panels' account rows offer Unmute and Join voice only once in a chat; a listener's request is approved, its invite card takes the focus and Start speaking lands muted, and a host's mute mutes them and says so; a chat's preview shows its stage before joining, and joining as a speaker asks on a closed stage and speaks at once on an open one; a contributor starts a chat from the dialog (as its host, no Leave Voice here or in the account rows, and no Leave chat until a co-host can take the chat over, then Leave chat choosing who; Back to chats keeping the chat, which leads the list in purple and goes back in, another chat's preview offering its host only ending theirs or Stay; a co-host whose connection dropped listed but not offered until back), approves a request from the queue, opens the stage (approving the one still waiting), mutes a speaker from their tile's menu, offers co-hosting (accepted, made a speaker, the three slots filled so Make co-host is dimmed with its reason, an offer withdrawn, one turned down), removes someone and lets them back, and ends the chat; signing out closes an open preview and takes the list and its chats away; a co-host offer's card is accepted onto the stage, comes back as the co-host leaves voice and is accepted again; the roster runs host, co-hosts, speakers, requests, then listeners, every chat speaker ringed as on a cloud but those walking the chat's island, and the Requests chip stands right of the zone tag; at 1024 and 390 pixels with every pop-up on screen",
       Object.values(hostedOk).every((w) => Object.values(w).every(Boolean)), JSON.stringify({ hostedOk, hostedRuns }));
 
     // The island view (island-view.js; docs/ooga-chat-hosts.md, "The island view"), at 1024 and 390: Sample Oak's chat
@@ -18423,9 +18441,18 @@ const oogaChatAppChecks = async () => {
       await b.sleep(2500);
       mine = { ...listed, preview: await b.evaluate(`!!document.querySelector("dialog.hc-preview[open]")`), end: await b.evaluate(`!!document.querySelector(".hc-end")?.offsetParent`),
         title: await b.evaluate(`document.querySelector(".hc-room-title")?.textContent || ""`) };
+      // Back, another chat, End chat and join: the server closes the host's chat before it answers, and the join follows.
+      await click(b, ".hc-room-back");
+      await b.sleep(400);
+      await b.evaluate(`[...document.querySelectorAll(".hc-chat-row")].find((e) => e.offsetParent && /Sample Oak/.test(e.textContent))?.click()`);
+      await b.sleep(500);
+      await pressText(b, "dialog.hc-preview button", "End chat and join");
+      for (let t = 0; t < 6000 && await b.evaluate(`document.querySelector(".hc-room-title")?.textContent`) !== "Sample Oak's chat"; t += 200) await b.sleep(200);
+      mine.joined = await b.evaluate(`({ title: document.querySelector(".hc-room-title")?.textContent || "", space: document.querySelector(".oc-chat").dataset.space })`);
     } finally { b.close(); }
-    record("Ooga Chat host: their own chat leads the list as Hosted by you with no Start a chat, and goes straight back on stage as host with no preview",
-      mine.first && mine.host === "Hosted by you" && !mine.start && !mine.preview && mine.end && mine.title === "sample-contributor's chat", JSON.stringify(mine));
+    record("Ooga Chat host: their own chat leads the list as Hosted by you with no Start a chat, and goes straight back on stage as host with no preview; End chat and join from another chat's preview ends it and joins that one",
+      mine.first && mine.host === "Hosted by you" && !mine.start && !mine.preview && mine.end && mine.title === "sample-contributor's chat"
+        && mine.joined.title === "Sample Oak's chat" && mine.joined.space === "on", JSON.stringify(mine));
   } finally {
     server.close();
     rmSync(out, { recursive: true, force: true });
