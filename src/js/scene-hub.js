@@ -166,7 +166,7 @@
   const TIMECHAIN_OUTER_PERIOD = 180;
   const DRESSED = new WeakMap();
   const DRESSING_LAMPS = BL.dressing.LIGHT_RGB.map(([r, g, b]) => ({ r, g, b, radius: 5.5, glow: 0.9, hide: false }));
-  const dressingLights = [];
+  const dressingLights = [], copyDressingLights = [];
   const PILE_POST_DEGREES = [315, 78, 195], pilePosts = [];
   const PILE_POST_NIGHT_BOOST = 0.25, PILE_POST_NIGHT_REACH = 2;
   const PILE_SCALE = 0.45;
@@ -344,8 +344,9 @@
   // every cave mouth but HQ's ramps, which stay open down to HQ and its basement, is sealed with the stone face a dark
   // mouth wears (`copyBarred`, through `crossesSealedCave`); the doors that change scene refuse with SEALED. Only the
   // main island stands: the Mempool island, Merge Rock, the Timechain Sphere's islet and ₿IFRÖST's islet go with their
-  // bridges, Heimdall, the Oogatron, the OBL cave's mirror, the signs over the sealed mouths, every cave's banners, the islets
-  // out at sea and the gulls and sails round the island (`copyOffMap`, hidden
+  // bridges, Heimdall, the Oogatron, the OBL cave's mirror, the signs over the sealed mouths, every cave's banners, lanterns,
+  // lamp strings and the pieces outside it (the lab's dice and chalkboard and the like, the loose ones' physics resting), ₿IFRÖST's arch, the plaza's library (the hill it was cut into whole again, `libraryPlugNode`), the islets out at sea and the gulls and sails round the island
+  // (`copyOffMap`, hidden
   // in `copyMask`, so they neither draw nor stand anywhere to walk on or bump into: a walker off a bridgehead falls to
   // the water and comes back by the pile), their lamps take no light (`copyOff`), and none of them runs: the Mempool
   // island's weather, water, wildlife and paintings, Merge Rock's turn, glow and idle carving, the Sphere's doorway,
@@ -432,6 +433,7 @@
     updatePoolEffectsActivity();
     lampSelValid = false;
     copySeal(on);
+    if (libraryPlugNode) libraryPlugNode.visible = on;
     layoutClouds(on);
     solids.sync(); totemSolids.sync();
   };
@@ -1531,7 +1533,9 @@
     if (baked) return baked;
     const theme = THEMES[slot.theme];
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
-    // The banners are a set of their own, so a chat's copy can take them down (`dressMouth`).
+    // Everything that stands outside the cave, the banners, lantern posts, strings of lamps and the theme's own
+    // pieces, is a set of its own (`lit`), so a chat's copy can take it down with its lights (`dressMouth`); the rim's
+    // vines, a dark mouth's boards and what stands inside stay with the mouth.
     const set = BL.dressing.set(), flags = BL.dressing.set(), ground = [], rig = {};
     // Floor props stay on the apron; banners stand on the raised rock shoulders behind the lamps.
     const stand = (kind, lx, lz, turns = 0, variant = 0, lift = 0, into = set) => {
@@ -1544,20 +1548,21 @@
       if (kind === "coil" || kind === "gauge") rig[kind] = [lx, y + lift, lz, turns];
       if (!lift) ground.push(lx, lz);
     };
-    stand("lanternPost", -CAVE_LANTERN_X, CAVE_LANTERN_Z, 0, theme.glass);
-    stand("lanternPost", CAVE_LANTERN_X, CAVE_LANTERN_Z, 2, theme.glass);
+    stand("lanternPost", -CAVE_LANTERN_X, CAVE_LANTERN_Z, 0, theme.glass, 0, flags);
+    stand("lanternPost", CAVE_LANTERN_X, CAVE_LANTERN_Z, 2, theme.glass, 0, flags);
     for (const piece of theme.pieces) {
       if (piece[0] === "banner") throw new Error(`${m.id}: use theme.banners for cave standards`);
-      stand(...piece);
+      const [kind, lx, lz, turns = 0, variant = 0, lift = 0] = piece;
+      stand(kind, lx, lz, turns, variant, lift, flags);
     }
     for (const [side, variant] of theme.banners || []) {
       checkCaveBanner(m, side);
       stand("banner", side * CAVE_BANNER_X, CAVE_BANNER_Z, 0, variant, 0, flags);
     }
     const [lamp, variant, at] = theme.string;
-    set.cable(-3.05, 3.42, CAVE_LIGHT_Z, 3.05, 3.42, CAVE_LIGHT_Z, 0.3, at || [0.1, 0.24, 0.38, 0.5, 0.62, 0.76, 0.9], lamp, variant);
-    set.cable(-3.65, 3.18, -0.22, -3.05, 3.42, CAVE_LIGHT_Z, 0.08);
-    set.cable(3.65, 3.18, -0.22, 3.05, 3.42, CAVE_LIGHT_Z, 0.08);
+    flags.cable(-3.05, 3.42, CAVE_LIGHT_Z, 3.05, 3.42, CAVE_LIGHT_Z, 0.3, at || [0.1, 0.24, 0.38, 0.5, 0.62, 0.76, 0.9], lamp, variant);
+    flags.cable(-3.65, 3.18, -0.22, -3.05, 3.42, CAVE_LIGHT_Z, 0.08);
+    flags.cable(3.65, 3.18, -0.22, 3.05, 3.42, CAVE_LIGHT_Z, 0.08);
     set.put("vine", -3.0, 3.5, CAVE_LIGHT_Z, 0, 0);
     set.put("vine", 2.6, 3.5, CAVE_LIGHT_Z, 0, 1);
     // A dark cave's rock stands flush with the rim's face, so the planks go on in front of both.
@@ -1565,10 +1570,10 @@
     // Inside the mouth the floor is the cave's own, level with the doorway.
     for (const [kind, lx, lz, turns = 0, variant = 0, lift = 0] of theme.inside || []) set.put(kind, lx, lift, lz, turns, variant);
     for (const [ax, bx, az, bz, y, lamps, lamp = "hanging"] of theme.ceiling || []) {
-      set.cable(ax, y, az, ax, y, bz, 0.15, lamps, lamp, theme.glass);
-      set.cable(bx, y, az, bx, y, bz, 0.15, lamps, lamp, theme.glass);
+      flags.cable(ax, y, az, ax, y, bz, 0.15, lamps, lamp, theme.glass);
+      flags.cable(bx, y, az, bx, y, bz, 0.15, lamps, lamp, theme.glass);
     }
-    baked = { ...set.build(), ground, rig, banners: theme.banners && theme.banners.length ? flags.build() : null };
+    baked = { ...set.build(), ground, rig, lit: flags.build() };
     byIsland.set(slot.id, baked);
     return baked;
   };
@@ -1695,7 +1700,7 @@
       const lx = CHALKBOARD_X + ca * px + sa * pz;
       const lz = CHALKBOARD_Z - sa * px + ca * pz;
       return { x: m.x + cr * lx + sr * lz, y: m.floorY + y + py, z: m.z - sr * lx + cr * lz };
-    });
+    }, true);
     chalkboard.attach(boardGroup, 0, 0, 0);
     claim(wx, wz, 1.2 * CHALKBOARD_SCALE);
   };
@@ -1719,8 +1724,9 @@
     const body = world.addPiece({ node, bounds: b, x: px, y: py, z: pz, yaw: m.ry + piece.turns * Math.PI / 2, tag: piece.kind });
     // Still a piece to hover and poke, picked where the ray meets its box as it lies now.
     addTarget(parts[0], { kind: "piece", piece: piece.kind, variant: piece.variant, node: parts[0], x: px, y: py, z: pz, next: 0, weaponType: "none", body,
-      pickRay: (ray) => physics && physics.raycast(ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, camera.far, PHYSICS_HIT) && PHYSICS_HIT.body === body ? PHYSICS_HIT.t : NaN },
+      pickRay: (ray) => !copyOn && physics && physics.raycast(ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, camera.far, PHYSICS_HIT) && PHYSICS_HIT.body === body ? PHYSICS_HIT.t : NaN },
       { radius: Math.max(0.35, world.radius(body)) });
+    return node;
   };
   const PHYSICS_HIT = { body: -1, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 };
   const PHYSICS_AT = { x: 0, y: 0, z: 0 };
@@ -1733,7 +1739,8 @@
   const PHYSICS_HOME_AFTER = 15;
   let physicsPlayerX = NaN, physicsPlayerZ = NaN;
   const updatePhysics = (dt) => {
-    if (!physics || !physics.count) return;
+    // A chat's copy has none of the mouths' pieces: they stand hidden where they were until the trip ends.
+    if (!physics || !physics.count || copyOn) return;
     // Signed in under another page's host, the props are that page's to simulate and are played back here (prop-sync.js).
     if (propSync && propSync.update(dt)) { physicsPlayerX = physicsPlayerZ = NaN; return; }
     physics.clearActors();
@@ -1750,16 +1757,18 @@
     if (propSync) propSync.publish(dt);
   };
   // A round's first loose prop stops it and is knocked along it; the driven Ooga's blow knocks what is in front of it.
-  const physicsShot = (from, to) => { if (physics && !(propSync && propSync.shot(from, to))) physics.shot(from, to); };
+  const physicsShot = (from, to) => { if (physics && !copyOn && !(propSync && propSync.shot(from, to))) physics.shot(from, to); };
   const physicsSwing = (cave, charge) => {
-    if (!physics || cave !== pilot.player) return;
+    if (!physics || copyOn || cave !== pilot.player) return;
     const p = cave.root.position;
     if (!propSync || !propSync.blow(p.x, p.y - cave.baseY, p.z, cave.bodyHeight, cave.root.rotation.y, charge)) physics.blow(p.x, p.y - cave.baseY, p.z, cave.bodyHeight, cave.root.rotation.y, charge);
   };
   const dressMouth = (slot, m, group) => {
     // The Canvas 2D fallback keeps the plain island, but the writable board remains available.
     if (renderer.kind === "canvas2d" && slot.theme === "lab") {
+      const at = group.children.length;
       placeChalkboard(m, group);
+      for (let i = at; i < group.children.length; i++) copyOffMap.push(group.children[i]);
       return;
     }
     if (renderer.kind === "canvas2d" || !THEMES[slot.theme]) return;
@@ -1769,17 +1778,23 @@
     for (let i = 0; i < lit.length; i += 4) dressingLights.push(m.x + cr * lit[i] + sr * lit[i + 2], m.floorY + lit[i + 1], m.z - sr * lit[i] + cr * lit[i + 2], lit[i + 3]);
     const toWorld = (lx, ly, lz, kind) => lz < 0.3 && kind !== "banner" ? null : { x: m.x + cr * lx + sr * lz, y: m.floorY + ly, z: m.z - sr * lx + cr * lz };
     addPieceTargets(baked.picks, toWorld);
-    // The banners, which a chat's copy takes down with their lights and pick targets.
-    if (baked.banners) {
-      const from = group.children.length, lit = lamps.length;
-      addDressing(baked.banners, group, m.x, m.floorY + 2.4, m.z, `${slot.id}:banners`, false);
+    // What stands outside the cave, which a chat's copy takes down with its lights and targets: the banners, lantern
+    // posts and strings of lamps, the theme's pieces (the loose ones too, whose physics rests meanwhile), the
+    // Lightning Factory's coil and the lab's chalkboard.
+    {
+      const from = group.children.length, was = lamps.length, light = baked.lit.lights;
+      addDressing(baked.lit, group, m.x, m.floorY + 2.4, m.z, `${slot.id}:lit`, false);
       for (let i = from; i < group.children.length; i++) copyOffMap.push(group.children[i]);
-      for (let i = lit; i < lamps.length; i++) lamps[i].copyOff = true;
-      addPieceTargets(baked.banners.picks, toWorld, true);
+      for (let i = was; i < lamps.length; i++) lamps[i].copyOff = true;
+      for (let i = 0; i < light.length; i += 4) copyDressingLights.push(m.x + cr * light[i] + sr * light[i + 2], m.floorY + light[i + 1], m.z - sr * light[i] + cr * light[i + 2], light[i + 3]);
+      addPieceTargets(baked.lit.picks, toWorld, true);
+      for (const piece of baked.lit.loose) copyOffMap.push(addLoosePiece(piece, m));
+      const at = group.children.length;
+      if (baked.rig.coil) buildCoilCharge(group, baked.rig, m);
+      if (slot.theme === "lab") placeChalkboard(m, group);
+      for (let i = at; i < group.children.length; i++) copyOffMap.push(group.children[i]);
     }
     for (const piece of baked.loose) addLoosePiece(piece, m);
-    if (baked.rig.coil) buildCoilCharge(group, baked.rig, m);
-    if (slot.theme === "lab") placeChalkboard(m, group);
     // Headquarters and a sealed cave that is coming soon still hang their name over the door.
     if (slot.status !== "open" && slot.status !== "mirror" && slot.name) {
       const sign = createNode({ position: { x: 0, y: CAVE_SIGN_Y, z: CAVE_SIGN_Z }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot), false, true) });
@@ -1830,7 +1845,15 @@
       lamp.nightOnly = dressingLights[i + 3] !== BL.dressing.COIL_LIGHT;
       if (!lamp.nightOnly && coilCharge) coilCharge.lamp = lamp;
     }
-    dressingLights.length = 0;
+    // The lanterns' and lamp strings' own, which a chat's copy puts out.
+    for (let i = 0; i < copyDressingLights.length; i += 4) {
+      const lamp = addLamp({ glow: 0, flare: 0, visible: true }, DRESSING_LAMPS[copyDressingLights[i + 3]], copyDressingLights[i], copyDressingLights[i + 1], copyDressingLights[i + 2], true, (i / 4) % 5, `dressing-lit:${i / 4}`);
+      // The coil's light (its pieces are the theme's, so here now) burns with its charge, not the clock.
+      lamp.nightOnly = copyDressingLights[i + 3] !== BL.dressing.COIL_LIGHT;
+      if (!lamp.nightOnly && coilCharge) coilCharge.lamp = lamp;
+      lamp.copyOff = true;
+    }
+    dressingLights.length = copyDressingLights.length = 0;
   };
   // Keep all three posts in both renderers.
   const buildPilePosts = () => {
@@ -1919,13 +1942,16 @@
     const cos = Math.cos(LIBRARY.ry), sin = Math.sin(LIBRARY.ry);
     const node = place(hubModels.libraryNook(), LIBRARY.x, LIBRARY.z, LIBRARY.ry, LIBRARY.floor);
     solids.add(node);
+    // A chat's copy takes the library down, its lamps out and its shelves' targets with it.
+    copyOffMap.push(node);
     claim(LIBRARY.x, LIBRARY.z, LIBRARY.reach);
     // Matching lanterns on both jambs, their warm light coming up with the island's other lanterns.
     const lampY = 2.8, lampZ = 0.21;
     for (const lampX of [-2.595, 2.595]) {
       const lampNode = createNode({ geometry: hubModels.libraryLamp(), position: { x: lampX, y: lampY, z: lampZ } });
       addChild(node, lampNode);
-      addLamp(lampNode, LAMP.lantern, LIBRARY.x + cos * lampX + sin * lampZ, LIBRARY.floor + lampY - 0.34, LIBRARY.z - sin * lampX + cos * lampZ, true, 0, "library").nightOnly = true;
+      const lamp = addLamp(lampNode, LAMP.lantern, LIBRARY.x + cos * lampX + sin * lampZ, LIBRARY.floor + lampY - 0.34, LIBRARY.z - sin * lampX + cos * lampZ, true, 0, "library");
+      lamp.nightOnly = lamp.copyOff = true;
     }
     // The lower two rows share the first book, the next two the second; the top row opens the whitepaper link panel.
     // Picks cover the books and scrolls at their new shallow face without swallowing adjacent rows.
@@ -1935,10 +1961,60 @@
         const lz = -0.28;
         const pick = createNode({ position: { x: LIBRARY.x + cos * lx + sin * lz, y: LIBRARY.floor + ly, z: LIBRARY.z - sin * lx + cos * lz }, geometry: PICK_GEOMETRY });
         BL.scene.updateWorld(pick);
+        copyOffMap.push(pick);
         addTarget(pick, { kind: "book", index, priority: 2, node: pick, x: pick.position.x, y: pick.position.y, z: pick.position.z, weaponType: "none" }, { radius: 0.33 });
       }
     }
+    buildLibraryPlug();
     return node;
+  };
+  // A chat's copy has no library, and the hill it was cut into stands whole again (`libraryPlugNode`): the nook's
+  // cells filled back with rock, each the colour of the hill's own cell at that height a little way out beside the cut,
+  // so its strata and its turf run on across, and none where the hill beside stands no higher. Made once an island from
+  // the island's own queries, shown and stood on only in the copy (`copyMode`; a hidden solid stops nobody).
+  const LIBRARY_PLUGS = new WeakMap();
+  let libraryPlugNode = null;
+  const libraryPlugGeometry = () => {
+    if (LIBRARY_PLUGS.has(island)) return LIBRARY_PLUGS.get(island);
+    const [U, ox, oy, oz] = island.sightGrid, PALETTE = BL.terrain.PALETTE, cos = Math.cos(LIBRARY.ry), sin = Math.sin(LIBRARY.ry);
+    const half = LIBRARY.width / 2, out = half + 2.5 * U, reach = Math.hypot(half, LIBRARY.depth + LIBRARY.entry) + 2 * U;
+    const gx0 = Math.floor((LIBRARY.x - reach - ox) / U), gz0 = Math.floor((LIBRARY.z - reach - oz) / U);
+    const gy0 = Math.floor((LIBRARY.floor - U - oy) / U), gy1 = Math.ceil((LIBRARY.floor + LIBRARY.height + U - oy) / U);
+    const n = Math.ceil(2 * reach / U) + 2, grid = BL.terrain.makeGrid(n, gy1 - gy0 + 1, n);
+    const beside = (lx, lz, y) => island.rockMaterialAt(LIBRARY.x + cos * lx + sin * lz, y, LIBRARY.z - sin * lx + cos * lz);
+    // The cut's own dark stone (its floor, and the walls and roof a step round it) is covered too, as the hill.
+    const dark = [PALETTE[7], PALETTE[9]];
+    let cells = 0;
+    for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) {
+      const x = ox + (gx0 + i + 0.5) * U, z = oz + (gz0 + k + 0.5) * U, dx = x - LIBRARY.x, dz = z - LIBRARY.z;
+      const lx = cos * dx - sin * dz, lz = sin * dx + cos * dz;
+      if (Math.abs(lx) > half + U || lz > LIBRARY.entry + U || lz < -LIBRARY.depth - U) continue;
+      const cut = Math.abs(lx) <= half && lz <= LIBRARY.entry && lz >= -LIBRARY.depth, side = lx < 0 ? -out : out;
+      for (let j = 0; j < grid.sy; j++) {
+        const y = oy + (gy0 + j + 0.5) * U;
+        if (island.solidAt(x, y, z) ? !dark.includes(island.rockMaterialAt(x, y, z)) : !cut) continue;
+        // Where the hill beside is air at that height: the rock straight behind the nook, and under the hill (behind its
+        // face) plain stone, so no cell of the cut is left open.
+        const rock = beside(side, lz, y) || beside(-side, lz, y) || (lz < 0 ? beside(lx, -LIBRARY.depth - 2.5 * U, y) || PALETTE[5] : null);
+        if (!rock) continue;
+        const index = PALETTE.indexOf(rock);
+        grid.set(i, j, k, index > 0 ? index : 5);
+        cells++;
+      }
+    }
+    const geometry = cells ? BL.terrain.gridGeometry(grid, { unit: U, palette: PALETTE, origin: { x: ox + gx0 * U, y: oy + gy0 * U, z: oz + gz0 * U } }) : null;
+    LIBRARY_PLUGS.set(island, geometry);
+    return geometry;
+  };
+  const buildLibraryPlug = () => {
+    const geometry = libraryPlugGeometry();
+    if (!geometry) return;
+    // A few millimetres proud of the hill about the nook's middle, so where it covers the cut's dark stone it is the
+    // nearer of two faces in one plane.
+    const k = 1.002, cx = LIBRARY.x, cy = LIBRARY.floor + LIBRARY.height / 2, cz = LIBRARY.z;
+    libraryPlugNode = createNode({ geometry, visible: copyOn, position: { x: cx * (1 - k), y: cy * (1 - k), z: cz * (1 - k) }, scale: { x: k, y: k, z: k } });
+    addChild(root, libraryPlugNode);
+    solids.add(libraryPlugNode);
   };
   // Palms: single palms spread evenly across the meadow, from beside the pile's ring out to the cliffs, and groves
   // of one to three on the cliff tops. Each is its own node on one of three shared geometries, so the wind bends
@@ -3205,7 +3281,7 @@
     placed.push(...nodes);
     const P = gate.position, cos = Math.cos(gate.rotation.y), sin = Math.sin(gate.rotation.y);
     const world = ([x, y, z]) => ({ x: P.x + x * cos + z * sin, y: P.y + y, z: P.z + z * cos - x * sin });
-    return { node: nodes[3], spark: world(arch.spark), pool: world(arch.pool) };
+    return { node: nodes[3], nodes, spark: world(arch.spark), pool: world(arch.pool) };
   };
   // ₿IFRÖST's islet off the north rim, while its chamber is open (a `wip` scene is unregistered unless the page opts in):
   // the crystal bridge out from ₿IFRÖST's arch at the top of the north pass, the islet and its gate, whose field takes a
@@ -3838,7 +3914,7 @@
       solids.supportAt(x, z, from, rise, PLAYER_RADIUS),
       ALTAR_HEIGHT <= from + rise && Math.hypot(x, z) < altar.platformRadius + PLAYER_RADIUS ? ALTAR_HEIGHT : -Infinity,
       cloudPileSurface(x, z, from, rise, PLAYER_RADIUS), cloudHopper.supportAt(x, z, from, rise));
-    return Math.max(cloudHopper ? cloudHopper.supportAt(x, z, from, rise) : -Infinity, physics ? physics.supportAt(x, z, from, rise) : -Infinity, island.supportAt(x, z, y, STEP_MAX, ABYSS_FLOOR, PLAYER_RADIUS), bedSupportAt(x, z, from, STEP_MAX, PLAYER_RADIUS), propSupportAt(x, z, from, rise, player, ignoreClanker, passTraffic), waterSupportAt(x, z, from, rise, player));
+    return Math.max(cloudHopper ? cloudHopper.supportAt(x, z, from, rise) : -Infinity, physics && !copyOn ? physics.supportAt(x, z, from, rise) : -Infinity, island.supportAt(x, z, y, STEP_MAX, ABYSS_FLOOR, PLAYER_RADIUS), bedSupportAt(x, z, from, STEP_MAX, PLAYER_RADIUS), propSupportAt(x, z, from, rise, player, ignoreClanker, passTraffic), waterSupportAt(x, z, from, rise, player));
   };
   const abyssAt = (x, z, y, actor = pilot?.player) => playerSupportAt(x, z, y, y, actor) === ABYSS_FLOOR;
   const visualSupportAt = (x, z, y) => {
@@ -5640,13 +5716,14 @@
   };
   // Ooga Chat speakers on clouds (#659), in a hosted chat's copy of the island alone: three to a bench cloud (main-cloud-1
   // to 3 on the first, 4 to 6 on the second, and so on), each sitting on its own third of it along the cloud's long axis, the
-  // outer two drawn SEAT_SPREAD of the way in toward the middle one, centred front to back on the cloud's top there (a
-  // cloud's +z faces the island), facing the banana pile; none while the clouds are put away (game mode, Cloud Hopper),
-  // and the purple glow under each one seated.
+  // first of the three in the middle third and the other two each in the middle of its side third (SEAT_ORDER, the
+  // thirds' order along the axis), centred front to back on the cloud's top there (a cloud's +z faces the island), facing
+  // the banana pile; none while the clouds are put away (game mode, Cloud Hopper), and the purple glow under each one
+  // seated. The island view's 3D bake reads the seats in this same order (scripts/island-scene.mjs).
   // A seat's place on a cloud's mesh is measured once a mesh, from its upward faces (a merged face's corners can lie
   // far from a seat): along the long axis as above, midway between the top's front and back edges there, on the highest
   // upward face over that point.
-  const SPEAKER_SWING = 0.5, SEAT_REACH = 0.5, SEAT_SPREAD = 0.7, SEAT_TOP = 0.6;
+  const SPEAKER_SWING = 0.5, SEAT_REACH = 0.5, SEAT_TOP = 0.6, SEAT_ORDER = [1, 0, 2];
   const cloudThirds = new Map();
   const thirdsOf = (geometry) => {
     let thirds = cloudThirds.get(geometry);
@@ -5665,8 +5742,8 @@
       const ny = (v[c + 2] - v[a + 2]) * (v[d] - v[a]) - (v[c] - v[a]) * (v[d + 2] - v[a + 2]);
       if (ny > 0) tops.push([x0, x1, z0, z1, y0]);
     }
-    thirds = [0, 1, 2].map((k) => {
-      const x = mid + (k - 1) * span * SEAT_SPREAD;
+    thirds = SEAT_ORDER.map((k) => {
+      const x = mid + (k - 1) * span;
       let peak = -Infinity, front = -Infinity, back = Infinity, top = -Infinity;
       for (const t of tops) if (t[0] <= x + SEAT_REACH && t[1] >= x - SEAT_REACH && t[4] > peak) peak = t[4];
       for (const t of tops) if (t[0] <= x + SEAT_REACH && t[1] >= x - SEAT_REACH && t[4] >= peak - SEAT_TOP) { front = Math.max(front, t[3]); back = Math.min(back, t[2]); }
@@ -6409,9 +6486,10 @@
   const WAKE_ACTION = { kind: "wake" }, ROLL_ACTION = { kind: "roll" }, STAND_ACTION = { kind: "stand" };
   const CHALK_ACTION = { kind: "chalkboard" };
   // Whether a body 1.1 m over feet at (x, z) stands where it may write on the chalkboard: in front, within reach.
+  // A chat's copy has no chalkboard.
   const nearChalkboard = (x, y, z) => {
     const b = chalkboardClearance;
-    if (!b) return false;
+    if (!b || copyOn) return false;
     const dx = x - b.x, dz = z - b.z;
     return dx * dx + dz * dz < CHALKBOARD_REACH * CHALKBOARD_REACH && dx * b.frontX + dz * b.frontZ > 0
       && Math.abs(y - 1.1 - b.y) < CHALKBOARD_RISE;
@@ -11789,6 +11867,8 @@
     TICKER_AT.y = gate.position.y + (arch ? arch.top + 1 : 6);
     GATE_VIEW.target.y = gate.position.y + (arch ? arch.middle : 2.5);
     const archLamp = arch ? dressArch(gate, arch) : null;
+    // A chat's copy takes ₿IFRÖST's arch down too, stone and dressing (`dressArch` hands on its own nodes).
+    if (arch) copyOffMap.push(gate, ...archLamp.nodes);
     fireRigs = [];
     firePitRig = null;
     yield* pause(slice);
@@ -11831,17 +11911,16 @@
     yield* pause(slice);
     repoIsland = yield* buildRepoIsland(slice);
     cloudRememberNodes(cloudNodeStart);
-    // A chat's copy keeps the main island alone: these islands and their bridges go, with their lamps but ₿IFRÖST's arch's,
-    // which stands on the main island over the north pass.
+    // A chat's copy keeps the main island alone: these islands and their bridges go, with their lamps and ₿IFRÖST's arch's.
     for (let i = cloudNodeStart; i < root.children.length; i++) copyOffMap.push(root.children[i]);
-    for (let i = islandLamps; i < lamps.length; i++) if (!archLamp || lamps[i].node !== archLamp.node) lamps[i].copyOff = true;
+    for (let i = islandLamps; i < lamps.length; i++) lamps[i].copyOff = true;
     const firePos = buildFire();
     yield* pause(slice);
     fire = lamps[lamps.length - 1];
     fire.centerLight = true;
     // The arch's lanterns pool warm light on its stone, ranked right after the fire so every tier keeps the fires first;
     // its glass glows with the islet's lamps.
-    if (archLamp) addLamp({ glow: 0, flare: 0, visible: true }, LAMP.arch, archLamp.pool.x, archLamp.pool.y, archLamp.pool.z, true, 1, "bifrost:arch");
+    if (archLamp) addLamp({ glow: 0, flare: 0, visible: true }, LAMP.arch, archLamp.pool.x, archLamp.pool.y, archLamp.pool.z, true, 1, "bifrost:arch").copyOff = true;
     // The Oogatron arches gently over the path at the top of the south stairs.
     {
       const jx = 0, jz = 28.5, jScale = 2.6;
@@ -13115,7 +13194,7 @@
     magazineState = weather = footsteps = petReactions = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
     doorIsland = doorZones = null;
-    island = chalkboardDressing = chalkboardClearance = null;
+    island = chalkboardDressing = chalkboardClearance = libraryPlugNode = null;
     guideSegmentClear.boxGrid = POOL_SEAMS[0].boxGrid = POOL_SEAMS[1].boxGrid = null;
     return { targets: count };
   };

@@ -43,9 +43,19 @@
 /* In a chat the bar stands in the panel title's line (chat-hosts.js), the carved name giving way to it, and the
    visitor's name leaves the footer: their own tile says who they are. */
 .panel-title > .hc-room-bar { flex: 1 1 auto; min-width: 0; }
+/* There Back to chats is its arrow alone (its words kept for assistive technology) and the title keeps to one line,
+   cut short with its whole self in its title, so the chips and buttons beside it never squeeze it into a column. */
+.panel-title > .hc-room-bar .hc-room-back { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 20px; font-size: 0; }
+@media (pointer: coarse) { .panel .panel-title > .hc-room-bar .hc-room-back { min-width: 34px; min-height: 30px; padding: 0; } }
+/* The arrow drawn, not a "‹" glyph (which sits low, at the letters' x-height): a chevron centred on the title's
+   capitals. */
+.panel-title > .hc-room-bar .hc-room-back::before { content: ""; width: 7px; height: 7px; border-bottom: 2px solid currentColor; border-left: 2px solid currentColor; transform: translate(1.5px, -1px) rotate(45deg); }
+.panel-title > .hc-room-bar .hc-room-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; overflow-wrap: normal; }
 .panel-title:has(> .hc-room-bar:not([hidden])) > :is(h2, h3) { display: none; }
 .panel[data-space="on"] .cloud-foot-name, .panel:has(.hc-chat-here) .cloud-foot-name { display: none; }
 .hc-dock { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+/* Empty, it takes no row, so the panel's gap under the title is not doubled. */
+.hc-dock:empty { display: none; }
 .hc-chat-notice { flex: none; margin: 0; color: var(--accent-text); font-size: 11px; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6); }
 .hc-chat-notice:empty { display: none; }
 /* A notice floats, taking no room: over the top of the roster (its host stands in the panel's flow at no height, the
@@ -145,17 +155,19 @@
 .hc-room-strip { flex: 0 1 auto; min-height: 96px; display: flex; flex-direction: column; }
 .hc-room-strip[hidden], .iv[hidden] { display: none; }
 .iv { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; gap: 4px; }
-/* The fold button in the chat's title, a framed island lit while the view is open: folded, the strip is gone and the
+/* The fold button in the chat's title, a framed island on a filled chip with no border (so the title's row stays
+   short), amber while the view is open: folded, the strip is gone and the
    roster takes its place. The view meets the roster with no gap (the panel's own 10px is taken back) and no line between:
    who walks there is said to screen readers alone. */
 .iv-fold {
-  flex: none; display: grid; place-items: center; width: 28px; height: 24px; padding: 0; border: 1px solid rgba(243, 239, 228, 0.25);
-  border-radius: 6px; background: transparent; color: rgba(243, 239, 228, 0.6); cursor: pointer;
+  flex: none; display: grid; place-items: center; width: 30px; height: 22px; padding: 0; border: 0;
+  border-radius: 6px; background: rgba(243, 239, 228, 0.14); color: rgba(243, 239, 228, 0.75); cursor: pointer;
 }
 .iv-fold[hidden] { display: none; }
-.iv-fold[aria-pressed="true"] { color: var(--accent-text); border-color: rgba(216, 137, 43, 0.5); }
+.iv-fold[aria-pressed="true"] { color: #ffd59a; background: rgba(216, 137, 43, 0.38); }
 .iv-fold svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; }
-.iv-fold:hover { background: rgba(243, 239, 228, 0.08); }
+.iv-fold:hover { background: rgba(243, 239, 228, 0.24); }
+.iv-fold[aria-pressed="true"]:hover { background: rgba(216, 137, 43, 0.52); }
 .iv-fold:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 .iv-stage[hidden] { display: none; }
 .hc-room-strip:has(> .iv[data-folded="true"]) { display: none; }
@@ -163,7 +175,7 @@
 .hc-room-strip .iv-stage { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .hc-room-strip:not([hidden]):not(:has(> .iv[data-folded="true"])) + .cloud-roster { border-top-left-radius: 0; border-top-right-radius: 0; }
 .iv-note { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-@media (pointer: coarse) { .iv-fold { width: 40px; height: 32px; } }
+@media (pointer: coarse) { .iv-fold { width: 38px; height: 26px; } }
 .panel[data-space="on"] > .cloud-roster { min-height: 104px; }
 .iv-stage {
   position: relative; flex: 0 1 auto; width: 100%; aspect-ratio: 4 / 3; min-height: 96px; max-height: 200px; overflow: hidden;
@@ -171,6 +183,14 @@
 }
 .iv-map, .iv-gl { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .iv-stage[data-live="on"] .iv-map { background: transparent; }
+/* Until the view has something to show (island-view.js `waiting`): dark, with a ring turning in its middle. */
+.iv-stage[data-wait] { background: #07080b; }
+.iv-stage[data-wait]::after {
+  content: ""; position: absolute; top: 50%; left: 50%; width: 28px; height: 28px; margin: -16px 0 0 -16px;
+  border: 3px solid rgba(243, 239, 228, 0.18); border-top-color: #b18aff; border-radius: 50%; animation: iv-wait 0.9s linear infinite;
+}
+@keyframes iv-wait { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) { .iv-stage[data-wait]::after { animation-duration: 2.4s; } }
 /* The 3D view takes the drag, the pinch and the wheel itself. */
 .iv-stage[data-live="on"] { touch-action: none; cursor: grab; }
 .iv-stage[data-live="on"]:active { cursor: grabbing; }
@@ -179,34 +199,52 @@
   background: var(--stone); color: var(--paper); font: inherit; font-size: 11px; font-weight: 700; cursor: pointer;
 }
 .iv-reset { left: 6px; }
-.iv-full-button { right: 6px; display: grid; place-items: center; width: 32px; padding: 0; }
+/* Full screen's button keeps tight round its icon, the same 24px square at every width, in the strip and in full screen. */
+.iv-full-button { right: 6px; display: grid; place-items: center; width: 24px; height: 24px; min-height: 0; padding: 0; border-width: 0; border-radius: 5px; }
 .iv-full-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: square; }
 .iv-reset[hidden], .iv-full-button[hidden] { display: none; }
-.iv-reset:hover, .iv-full-button:hover { background: var(--stone-lt); }
+/* Over the view they stay faint, a dark glass the view shows through, and firm up under the pointer or focus. */
+.iv-reset, .iv-full-button { border-color: transparent; background: rgba(12, 10, 8, 0.32); color: rgba(243, 239, 228, 0.82); backdrop-filter: blur(2px); }
+.iv-reset:hover, .iv-full-button:hover, .iv-reset:focus-visible, .iv-full-button:focus-visible { background: rgba(12, 10, 8, 0.62); color: var(--paper); }
 .iv-reset:focus-visible, .iv-full-button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 /* Go there over the island, in its lower left corner. */
 .iv-stage > .hc-go { position: absolute; left: 6px; bottom: 6px; min-height: 28px; padding: 0 10px; font-size: 11px; }
 .iv-stage > .hc-go[hidden] { display: none; }
-@media (max-width: 399px) { .iv-reset, .iv-full-button, .iv-stage > .hc-go { min-height: 44px; } .iv-full-button { width: 44px; } .iv-stage { max-height: 180px; } }
+@media (max-width: 399px) { .iv-reset, .iv-stage > .hc-go { min-height: 44px; } .iv-stage { max-height: 180px; } }
 /* Full screen (island-view.js `fullscreen`): the view in a layer over the page, its panel's empty strip folded away, and
    the page's own panel placed beside it by the page (Ooga Chat's ooga-chat.css). A screen taller than it is wide puts
    the view over the panel. */
 .iv-full-host { position: fixed; z-index: 40; top: 0; bottom: 0; left: 0; right: var(--iv-side, min(420px, 42vw)); display: flex; background: var(--bg, #14100c); }
-.iv-full-host > .iv { flex: 1 1 auto; padding: 8px; }
-.iv-full-host .iv-stage { flex: 1 1 auto; aspect-ratio: auto; max-height: none; min-height: 0; }
+.iv-full-host > .iv { flex: 1 1 auto; padding: 0; }
+/* The split's handle, an unmarked strip centred on the line between the view and the chat's panel, over both
+   (island-view.js): dragged, or moved with the arrows, to give the view more or less of the screen. Nothing shows until
+   a pointer is over it (its cursor changes and a thin purple line lies over the seam), it has the keyboard's focus or it is being dragged. */
+.iv-split { position: fixed; z-index: 42; top: 0; bottom: 0; right: calc(var(--iv-side, min(420px, 42vw)) - 7px); width: 14px; cursor: col-resize; touch-action: none; }
+.iv-split::after { content: ""; position: absolute; top: 0; bottom: 0; left: 6px; width: 2px; background: transparent; transition: background-color 120ms; }
+.iv-split:hover::after, .iv-split:focus-visible::after, .iv-split[data-drag]::after { background: #b18aff; }
+.iv-split:focus-visible { outline: none; }
+@media (max-aspect-ratio: 1 / 1) {
+  .iv-split { top: calc(var(--iv-split, 55dvh) - 11px); right: 0; bottom: auto; left: 0; width: auto; height: 22px; cursor: row-resize; }
+  .iv-split::after { top: 10px; right: 0; bottom: auto; left: 0; width: auto; height: 2px; }
+}
+@media (prefers-reduced-motion: reduce) { .iv-split::after { transition: none; } }
+/* The view fills its side to the edges, square and with no border, meeting the panel beside or under it with no gap. */
+.iv-full-host .iv-stage { flex: 1 1 auto; aspect-ratio: auto; max-height: none; min-height: 0; border-width: 0; border-radius: 0; box-shadow: none; }
 html.iv-full .hc-room-strip { display: none; }
-@media (max-aspect-ratio: 1 / 1) { .iv-full-host { right: 0; bottom: auto; height: 55dvh; } }
+/* On a screen taller than it is wide (a phone held upright) the view runs edge to edge across the top. */
+@media (max-aspect-ratio: 1 / 1) { .iv-full-host { right: 0; bottom: auto; height: var(--iv-split, 55dvh); } }
+/* In a chat the island view and the roster of faces run out to the panel's sides (its 14px padding taken back), square,
+   meeting with no gap, at every width: the island's panel here, Ooga Chat's in ooga-chat.css (8px on a phone). */
+.panel[data-space="on"] > :is(.hc-room-strip, .cloud-roster) { margin-right: -14px; margin-left: -14px; border-right-width: 0; border-left-width: 0; border-radius: 0; }
+.panel[data-space="on"] > .hc-room-strip .iv-stage { border-right-width: 0; border-left-width: 0; border-radius: 0; }
 /* In a chat on a narrow screen the footer is one row: the buttons, each as wide as its words (Unmute, Join Voice,
-   Request to speak, End chat), then the links (Leave chat); any note a button carries goes under them. Back to chats
-   is its arrow alone, its words kept for assistive technology. */
+   Request to speak, End chat), then the links (Leave chat); any note a button carries goes under them. */
 @media (max-width: 479px) {
   .panel[data-space="on"] .cloud-foot { flex-wrap: wrap; gap: 6px 8px; }
   .panel[data-space="on"] .cloud-foot-actions { display: contents; }
   .panel[data-space="on"] .cloud-foot .foot-button { order: 1; flex: 1 1 auto; min-width: 0; padding: 0 6px; letter-spacing: 0.04em; }
   .panel[data-space="on"] .cloud-foot .link { order: 2; flex: none; }
   .panel[data-space="on"] .cloud-foot > :not(.cloud-foot-name, .cloud-foot-actions) { order: 3; flex-basis: 100%; }
-  .panel-title > .hc-room-bar .hc-room-back { flex: none; font-size: 0; }
-  .panel-title > .hc-room-bar .hc-room-back::before { content: "‹"; font-size: 22px; line-height: 1; }
 }
 
 /* The Requests panel in the panel's flow under the chat's bar (chat-hosts.js `dock`): it pushes the roster down, never
