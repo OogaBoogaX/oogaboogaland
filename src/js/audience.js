@@ -58,10 +58,10 @@
   };
   const sortKey = (r) => `${r.role}|${r.source}|${r.contributions}|${r.self}|${r.name}`;
   // The footer's controls, from the room's word on the visitor (`you.speak`) and this page's own voice session
-  // (voice.js stats): a listener sees a disabled Unmute and Join Voice, enabled only when the room says eligible; a
-  // speaker sees Mute or Unmute and Leave Voice. Pending or denied never enables Join Voice. On the island `active`
+  // (voice.js stats): a listener sees a disabled Unmute and Join voice, enabled only when the room says eligible; a
+  // speaker sees Mute or Unmute and Leave voice. Pending or denied never enables Join voice. On the island `active`
   // means its own voice, which this page's stats know first: out of voice it is the room's word not yet caught up, so
-  // it never holds Join Voice off. `reason` is what this
+  // it never holds Join voice off. `reason` is what this
   // browser lacks for voice, if anything. A disabled mute button always reads Unmute; `mic` is its colour (`live` green
   // on Mute, `muted` red on Unmute, "" while disabled).
   const footer = (you, voice, reason = "") => {
@@ -70,10 +70,10 @@
       const disabled = !voice.publishing && !voice.returning, muted = !!(voice.muted || voice.returning);
       return {
         mute: { text: disabled || muted ? "Unmute" : "Mute", disabled, pressed: !!voice.muted, mic: disabled ? "" : muted ? "muted" : "live" },
-        voice: { text: "Leave Voice", action: "leave", disabled: false }
+        voice: { text: "Leave voice", action: "leave", disabled: false }
       };
     }
-    return { mute: { text: "Unmute", disabled: true, pressed: false, mic: "" }, voice: { text: "Join Voice", action: "join", disabled: !you || you.speak !== "eligible" && you.speak !== "active" || !!reason } };
+    return { mute: { text: "Unmute", disabled: true, pressed: false, mic: "" }, voice: { text: "Join voice", action: "join", disabled: !you || you.speak !== "eligible" && you.speak !== "active" || !!reason } };
   };
 
   const create = ({ send = () => false } = {}) => {

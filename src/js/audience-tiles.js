@@ -49,13 +49,18 @@
       popped.hidden = true;
       popped.setAttribute("aria-hidden", "true");
       react.append(hand, popped);
-      face.append(portrait, react);
+      // An open request's badge (chat-hosts.css `.cloud-badge`, shown by the tile's `data-request`): an outlined microphone
+      // for one who asked or was invited to speak, an outlined star for a co-host offer. The tile's label says it in words.
+      const badge = make("span", "cloud-badge");
+      badge.setAttribute("aria-hidden", "true");
+      badge.innerHTML = '<svg viewBox="0 0 24 24"><path class="badge-mic" d="M12 3.5a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-5 0V6A2.5 2.5 0 0 1 12 3.5zM7 11a5 5 0 0 0 10 0M12 16v3.5"/><path class="badge-star" d="M12 3.8l2.4 5 5.4.6-4 3.7 1.1 5.4L12 15.8l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z"/></svg>';
+      face.append(portrait, react, badge);
       name.append(text);
       role.append(voice, word);
       li.dataset.id = id;
       li.tabIndex = -1;
       li.append(face, name, role);
-      return { li, portrait, react, hand, text, voice, word, item: null, img: null, url: null, popped, reacting: null, mark: 0 };
+      return { li, portrait, react, hand, text, voice, word, item: null, img: null, url: null, popped, reacting: null, mark: 0, lv: -1 };
     };
     const ooga = (entry) => entry.portrait.replaceChildren(BL.nativeIcons.svg("roster"));
     const cancel = (entry) => {
@@ -142,6 +147,15 @@
         paint(entry);
       }
     };
+    // The speakers' voice marks' levels (style.css `--lv`), from the page's meter read (`level(id)`, 0 to 1), each written
+    // only when it moves by a step a tile can show.
+    const levels = (level) => {
+      for (const [id, entry] of tiles) {
+        if (entry.voice.hidden) continue;
+        const v = Math.round(level(id) * 20) / 20;
+        if (entry.lv !== v) { entry.lv = v; entry.voice.style.setProperty("--lv", String(v)); }
+      }
+    };
     const prune = (keep) => {
       for (const [id, entry] of tiles) if (!keep(id)) drop(id, entry);
     };
@@ -194,7 +208,7 @@
       list.removeEventListener("focusin", onFocus);
       clear();
     };
-    return { draw, repaint, prune, pop, clear, dispose, get count() { return tiles.size; } };
+    return { draw, repaint, levels, prune, pop, clear, dispose, get count() { return tiles.size; } };
   };
   BL.audienceTiles = { create };
 })();

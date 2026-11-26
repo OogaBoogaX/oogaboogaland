@@ -96,16 +96,20 @@
   // The button's press opens each sound's level (sound-panel.js); M mutes.
   const soundPanel = window.BL.soundPanel.create({ button: soundButton });
   showSound();
-  // Reserve M before scene capture listeners and transition holds; editable fields keep it for typing.
+  // Reserve M before scene capture listeners and transition holds; editable fields keep it for typing. In a hosted chat
+  // (chat-call.js) the island's voice is stopped and the chat's own controller holds the microphone, so M is a speaker's
+  // there, as the chat footer's Unmute is.
   const onVoiceMuteKey = (e) => {
-    const voice = window.BL.voice;
-    if (e.key.toLowerCase() !== "m" || e.metaKey || e.ctrlKey || e.altKey || !voice.stats.enabled && !voice.stats.joining && !voice.stats.returning) return;
+    const voice = window.BL.voice, call = window.BL.chatCall;
+    const chatMic = !!(call && call.room && call.state.voice.role === "speaker");
+    if (e.key.toLowerCase() !== "m" || e.metaKey || e.ctrlKey || e.altKey || !chatMic && !voice.stats.enabled && !voice.stats.joining && !voice.stats.returning) return;
     if (e.target && (e.target.isContentEditable || e.target.closest && e.target.closest("input, textarea, select"))) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     if (e.repeat) return;
+    if (chatMic) call.media.mute();
     // Back from an earlier session the microphone is still closed, so M opens it as Unmute does.
-    if (voice.stats.returning) voice.toggle();
+    else if (voice.stats.returning) voice.toggle();
     else voice.setMuted(!voice.stats.muted);
   };
   window.addEventListener("keydown", onVoiceMuteKey, true);
@@ -918,6 +922,7 @@
   // The roster's host dot and voice marks follow the room and voice, on whichever scene's roster is up.
   const unsubscribeRosterMarks = net.subscribeRoster(window.BL.hud.showVoices);
   const unsubscribeVoiceMarks = window.BL.voice.subscribe(window.BL.hud.showVoices);
+  const unsubscribeVoiceLevels = window.BL.voice.subscribeLevels(window.BL.hud.showLevels);
   const unsubscribeMic = window.BL.voice.subscribe(showMic);
   const accountReady = !params.has("nosim") && params.get("net") !== "0" ? net.start() : Promise.resolve();
   // A tab opened in the background waits for its first look before it holds any socket.
@@ -1227,6 +1232,7 @@
     unsubscribeVoice();
     unsubscribeRosterMarks();
     unsubscribeVoiceMarks();
+    unsubscribeVoiceLevels();
     unsubscribeMic();
     window.BL.voice.dispose();
     window.BL.highscores.dispose();

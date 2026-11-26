@@ -1,7 +1,7 @@
 // The sheet's tab icons as pixel paths, shared by the island's panel tabs and the Ooga Chat app (src/ooga-chat/), so
 // neither redraws them. `svg(name)` returns a fresh element; an element carrying `data-native-icon="<name>"` gets one
 // prepended by `fill(root)` (hud.js fills the island's tabs at load). `cloud` is Ooga Chat's mark, which its build also
-// draws as the app's favicons and icons (scripts/ooga-chat.mjs), and `dsb` DSB Land's destination mark; `voice()` is the roster's voice mark, which hud.js and Ooga Chat both draw, and `link()` with `LINK_WORDS` the voice link's.
+// draws as the app's favicons and icons (scripts/ooga-chat.mjs), and `dsb` DSB Land's destination mark; `voice()` is the roster's voice mark (the microphone, `mic`, and `drawMic` on a canvas), which hud.js and Ooga Chat both draw, and `link()` with `LINK_WORDS` the voice link's.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -46,26 +46,40 @@
       ["#526b3c", "m15 23-3 8h6zm6 4-3 8h6z"],
       ["#69b6c5", "m8 39 22 6 22-7v2l-22 7-22-6z"]]]
   };
-  // The roster's voice mark, a 9x9 pixel speaker in currentColor; a stylesheet shows the parts each state needs.
-  const VOICE_PARTS = [
-    ["voice-speaker", "M0 3h2v3H0zM2 2h1v5H2zM3 1h1v7H3z"],
-    ["voice-near", "M5 3h1v3H5z"],
-    ["voice-far", "M7 2h1v5H7z"],
-    ["voice-cross", "M5 3h1v1H5zM7 3h1v1H7zM6 4h1v1H6zM5 5h1v1H5zM7 5h1v1H7z"],
-    ["voice-slash", "M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 3h1v1H3zM4 4h1v1H4zM5 5h1v1H5zM6 6h1v1H6zM7 7h1v1H7zM8 8h1v1H8z"]
-  ];
-  const voice = () => {
-    const el = document.createElementNS(NS, "svg");
-    el.setAttribute("viewBox", "0 0 9 9");
-    el.setAttribute("aria-hidden", "true");
-    for (const [part, d] of VOICE_PARTS) {
-      const path = document.createElementNS(NS, "path");
-      path.setAttribute("class", part);
-      path.setAttribute("d", d);
-      path.setAttribute("fill", "currentColor");
-      el.append(path);
+  // The roster's voice mark, the microphone (`mic`, below) in currentColor; a stylesheet shows the parts each state needs:
+  // hollow in voice, filling with the voice's level while speaking, crossed out when muted or silenced here.
+  const voice = () => mic();
+  // The same microphone on a canvas (the nameplates over Oogas, remote-players.js and island-view.js): `size` pixels square
+  // at `x`, `y` in `color`, its capsule filled from the bottom by `level` (0 to 1), and crossed out when `muted`, its slash
+  // edged in `edge` as the names are. Its paths are made once; nothing is allocated a draw.
+  let micPaths = null;
+  const drawMic = (ctx, x, y, size, color, muted, level, edge) => {
+    if (!micPaths) micPaths = { head: new Path2D("M9 5.5a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0z"), stand: new Path2D("M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5v3M8.5 21.2h7"), slash: new Path2D("M4 3l16 18") };
+    const k = size / 24;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(k, k);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 2;
+    ctx.fillStyle = ctx.strokeStyle = color;
+    if (level > 0 && !muted) {
+      ctx.save();
+      ctx.clip(micPaths.head);
+      ctx.fillRect(9, 2.5 + 11 * (1 - level), 6, 11 * level);
+      ctx.restore();
     }
-    return el;
+    ctx.stroke(micPaths.head);
+    ctx.stroke(micPaths.stand);
+    if (muted) {
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = 5;
+      ctx.stroke(micPaths.slash);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke(micPaths.slash);
+    }
+    ctx.restore();
   };
   const svg = (name) => {
     const icon = ICONS[name];
@@ -107,5 +121,45 @@
     asked: (name) => `Waiting for ${name} to link back: click to cancel`,
     linked: (name) => `Voices linked with ${name}: click to unlink`,
   });
-  BL.nativeIcons = { svg, fill, voice, link, LINK_WORDS, names: Object.keys(ICONS), ICONS, VOICE_PARTS };
+  // The microphone, drawn smooth in currentColor on a 24-unit grid: a capsule, its yoke and stand. `mic-level` fills the
+  // capsule from the bottom by the CSS variable `--lv` (0 to 1, a voice's level); `mic-gap` (a cut in the microphone,
+  // through a mask of its own, so it is clean on any background) and `mic-slash` cross it out. A stylesheet shows the
+  // parts each state needs. Every icon names its own mask and clip, so any number stand on a page.
+  let micIds = 0;
+  const part = (tag, attrs) => { const el = document.createElementNS(NS, tag); for (const k in attrs) el.setAttribute(k, attrs[k]); return el; };
+  const MIC_HEAD = { x: "9", y: "2.5", width: "6", height: "11", rx: "3" };
+  const mic = () => {
+    const n = ++micIds, el = part("svg", { class: "mic-icon", viewBox: "0 0 24 24", "aria-hidden": "true" });
+    const cut = part("mask", { id: `mic-cut-${n}`, maskUnits: "userSpaceOnUse", x: "0", y: "0", width: "24", height: "24" });
+    cut.append(part("rect", { width: "24", height: "24", fill: "#fff" }), part("path", { class: "mic-gap", d: "M4 3l16 18", stroke: "#000", "stroke-width": "5", "stroke-linecap": "round" }));
+    const head = part("clipPath", { id: `mic-head-${n}` });
+    head.append(part("rect", MIC_HEAD));
+    const body = part("g", { class: "mic-body", mask: `url(#mic-cut-${n})` });
+    body.append(part("rect", { class: "mic-level", ...MIC_HEAD, rx: "0", height: "11", fill: "currentColor", "clip-path": `url(#mic-head-${n})` }),
+      part("rect", { class: "mic-capsule", ...MIC_HEAD, fill: "none", stroke: "currentColor", "stroke-width": "2" }),
+      part("path", { class: "mic-stand", d: "M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5v3M8.5 21.2h7", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round" }));
+    const defs = part("defs", {});
+    defs.append(cut, head);
+    el.append(defs, body, part("path", { class: "mic-slash", d: "M4 3l16 18", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round" }));
+    return el;
+  };
+  // A microphone button's words beside its microphone (style.css `.foot-button > .mic-icon`, shown by `data-mic`): the
+  // first call puts the icon in, then only the words change, so the panels set a label as they set text.
+  const label = (button, text) => {
+    let words = button.querySelector(":scope > .mic-label");
+    if (!words) {
+      words = document.createElement("span");
+      words.className = "mic-label";
+      button.replaceChildren(mic(), words);
+    }
+    if (words.textContent !== text) words.textContent = text;
+  };
+  // A voice's shown level from one meter reading (its RMS): the raw level against a loud voice's (LEVEL_FULL), so a soft
+  // microphone shows soft, rising at once and falling LEVEL_FALL of the way down each reading, so words never step.
+  const LEVEL_FULL = 0.2, LEVEL_FALL = 0.45;
+  const shapeLevel = (shown, rms) => {
+    const raw = Math.min(1, rms / LEVEL_FULL), next = raw >= shown ? raw : shown + (raw - shown) * LEVEL_FALL;
+    return next < 0.01 ? 0 : next;
+  };
+  BL.nativeIcons = { svg, fill, voice, link, mic, label, drawMic, shapeLevel, LINK_WORDS, names: Object.keys(ICONS), ICONS };
 })();

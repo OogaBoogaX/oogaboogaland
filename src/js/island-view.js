@@ -17,7 +17,7 @@
 // own full screen where it has one. Its fold button (`fold`, stood in the chat's title by the page; `onFold`, `folded`) folds the
 // view away, this browser's choice (localStorage `ooga-island-view-folded`): nothing drawn and no places asked for until
 // it is opened again. Who walks there and who sits on the clouds is a line for screen readers (`.iv-note`). Reads nothing at load but window.BL.
-// `create({ picture, faceOf(row), loadLive(), liveAllowed(), scenery, fullscreen })` returns `{ node, stage, update({
+// `create({ picture, faceOf(row), loadLive(), liveAllowed(), scenery, fullscreen, level(id, self) })` (`level` a speaker's voice level, 0 to 1, for the plates' microphones) returns `{ node, stage, update({
 // place, rows, talking, speaking, self, active }), walk(msg), looks(msg), clouds(msg), hz, mode, dispose() }`: `place` whether the chat has an
 // island to show, `rows` the chat's roster rows (the walkers are those with `walking`), `talking` the ids heard
 // speaking and `speaking` the visitor's own meter, `self` the visitor's id, `active` whether the strip can be seen now.
@@ -33,8 +33,8 @@
   const NAME_SIZE = 13, NAME_LINE = NAME_SIZE * 1.3, NAME_SPACING = "0.39px", NAME_PAD_X = 5, NAME_PAD_Y = 3, NAME_BOTTOM = 2;
   const DOT_D = 8, DOT_GAP = 6, ICON_GAP = 4, PLATE_EDGE = 4, CLOUD_DOT = "#b18aff", PLATE_REF = 600, PLATE_MIN = 0.5;
   const NAME_STROKE = "rgba(20, 14, 8, 0.85)", NAME_FILL = "#f3efe4", ICON_IDLE = "#a6a6a2", ICON_SPEAKING = "#22c55e", ICON_MUTED = "#e5533d";
-  // x, y, w, h runs on the voice mark's 9x9 grid, as the roster's draws it.
-  const SPEAKER = [0, 3, 2, 3, 2, 2, 1, 5, 3, 1, 1, 7], WAVES = [5, 3, 1, 3, 7, 2, 1, 5], CROSS = [5, 3, 1, 1, 7, 3, 1, 1, 6, 4, 1, 1, 5, 5, 1, 1, 7, 5, 1, 1];
+  // The voice mark's size on a plate, its microphone's square in CSS pixels at full size.
+  const MIC = 12;
   // Where a world point falls on the picture: `view` is island-view-data.js's (`w`, `h`, `matrix`), `out` gets `x`, `y`.
   const project = (view, x, y, z, out) => {
     const m = view.matrix, w = m[3] * x + m[7] * y + m[11] * z + m[15];
@@ -134,7 +134,7 @@
   // browser's choice.
   const FOLD_MARK = "M1.5 3h13v10h-13zM2 12l4-4.5 3 3 2-2 3.5 3.5", FOLD_KEY = "ooga-island-view-folded";
   const foldedSaved = () => { try { return localStorage.getItem(FOLD_KEY) === "1"; } catch { return false; } };
-  const create = ({ picture, faceOf, loadLive = null, liveAllowed = () => true, scenery = "art", fullscreen = false, onFold = null }) => {
+  const create = ({ picture, faceOf, loadLive = null, liveAllowed = () => true, scenery = "art", fullscreen = false, onFold = null, level = null }) => {
     const view = BL.islandViewData.main, state = walks();
     // The picture's sea past the inner 4:3 the matrix maps to, each side (scripts/island-view.mjs `PAD`).
     const PAD_X = view.pad ? view.pad[0] : 0, PAD_Y = view.pad ? view.pad[1] : 0;
@@ -225,7 +225,6 @@
       if (plateN < MAX * 2) { const o = plateN++ * 4; platesAt[o] = left; platesAt[o + 1] = top; platesAt[o + 2] = left + boxW; platesAt[o + 3] = top + boxH; }
       return top;
     };
-    const runs = (cells, x, y, k) => { for (let i = 0; i < cells.length; i += 4) g.fillRect(x + cells[i] * k, y + cells[i + 1] * k, cells[i + 2] * k, cells[i + 3] * k); };
     // The plates' size follows the view's (`PLATE_REF`, the square root of its area at which they stand full size, never
     // larger), down to half that on the smallest strip: the name, its dot, the gaps and the voice mark all alike.
     // `plateK` is that share, in steps of a twentieth so the font is made again only when it moves.
@@ -249,10 +248,9 @@
       p.dotX = left + padX + dotD / 2; p.dotY = mid;
       g.beginPath(); g.arc(p.dotX, mid, dotD / 2, 0, Math.PI * 2);
       g.lineWidth = 1.5 * k; g.stroke(); g.fillStyle = dot; g.fill();
-      const ix = textX + w + ICON_GAP * k, iy = mid - 4.5 * k;
-      g.fillStyle = p.muted ? ICON_MUTED : p.talking ? ICON_SPEAKING : ICON_IDLE;
-      runs(SPEAKER, ix, iy, k);
-      runs(p.muted ? CROSS : WAVES, ix, iy, k);
+      // The voice mark, the roster's microphone (native-icons.js `drawMic`), filled with the speaker's level while talking.
+      const size = MIC * k, lv = p.talking && !p.muted ? level ? level(p.id, p.self) : 1 : 0;
+      BL.nativeIcons.drawMic(g, textX + w + ICON_GAP * k, mid - size / 2, size, p.muted ? ICON_MUTED : p.talking ? ICON_SPEAKING : ICON_IDLE, p.muted, lv, NAME_STROKE);
     };
     const drawPlates = () => {
       if (!mono) {
@@ -502,6 +500,14 @@
       else split.wide = Math.max(280, Math.min(innerWidth * 0.7, innerWidth - x));
       applySplit();
     };
+    // Its grabber (chat-hosts.css) shows for a few seconds each time full screen opens, so the split is found, then
+    // fades, and comes back while it is touched or dragged.
+    const HINT_MS = 2600;
+    let hintTimer = 0;
+    const hint = (on) => {
+      clearTimeout(hintTimer);
+      if (on) { handle.dataset.hint = ""; hintTimer = setTimeout(() => { delete handle.dataset.hint; }, HINT_MS); } else delete handle.dataset.hint;
+    };
     handle.addEventListener("pointerdown", (e) => { dragging = true; handle.dataset.drag = ""; handle.setPointerCapture(e.pointerId); e.preventDefault(); });
     handle.addEventListener("pointermove", (e) => { if (dragging) dragTo(e.clientX, e.clientY); });
     const drop = () => {
@@ -534,6 +540,7 @@
         host.append(node);
         document.body.append(handle);
         applySplit();
+        hint(true);
         doc.classList.add("iv-full");
         if (doc.requestFullscreen && !document.fullscreenElement) doc.requestFullscreen().then(() => { browserFull = true; }, () => {});
       } else {
@@ -541,6 +548,7 @@
         if (marker) { marker.replaceWith(node); marker = null; }
         host?.remove(); host = null;
         handle.remove();
+        hint(false);
         dragging = false;
         delete handle.dataset.drag;
         if (browserFull && document.fullscreenElement) document.exitFullscreen().catch(() => {});
@@ -601,9 +609,10 @@
         if (row.role !== "speaker") continue;
         const text = row.display || row.login || "";
         let p = plates.get(row.id);
-        if (!p) plates.set(row.id, p = { text: "", w: -1, talking: false, muted: false, seen: 0, dotX: NaN, dotY: NaN });
+        if (!p) plates.set(row.id, p = { id: row.id, self: false, text: "", w: -1, talking: false, muted: false, seen: 0, dotX: NaN, dotY: NaN });
         if (p.text !== text) { p.text = text; p.w = -1; }
-        p.talking = row.id === next.self ? !!next.speaking : next.talking.includes(row.id);
+        p.self = row.id === next.self;
+        p.talking = p.self ? !!next.speaking : next.talking.includes(row.id);
         p.muted = !!row.muted;
         p.seen = rows;
       }

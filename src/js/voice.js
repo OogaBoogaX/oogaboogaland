@@ -292,7 +292,7 @@
     const source = audio.createMediaStreamSource(stream), analyser = audio.createAnalyser();
     analyser.fftSize = SAMPLES;
     source.connect(analyser);
-    return { source, analyser, quiet: 0, speaking: false, tap: null };
+    return { source, analyser, quiet: 0, speaking: false, tap: null, level: 0 };
   };
   // The visitor's own meter, on a copy of the microphone's track that the alone and outdoor holds never disable.
   const ownMeter = (stream) => {
@@ -353,6 +353,8 @@
     for (let i = 0; i < SAMPLES; i++) sum += samples[i] * samples[i];
     const level = Math.sqrt(sum / SAMPLES);
     if (m === micMeter) stats.micLevel = level;
+    m.level = BL.nativeIcons.shapeLevel(m.level, level);
+    if (m.level) levelsOn = true;
     const loud = level > SPEAK_ON;
     m.quiet = loud ? 0 : m.quiet + 1;
     const speaking = loud || m.speaking && m.quiet < SPEAK_HOLD;
@@ -428,9 +430,15 @@
     s.near = want > near ? Math.min(want, near + NEAR_STEP) : Math.max(want, near - NEAR_STEP);
     setLevel(s, cutoff);
   };
+  // The voice marks' levels (`level`, `ownLevel`): each meter's shown level, and `subscribeLevels` heard after every read
+  // while any level is up and once more as the last falls to nothing, so a mark empties.
+  const levelSubs = new Set();
+  let levelsOn = false, levelsWere = false;
+  const tellLevels = (fn) => fn();
   const poll = () => {
     syncPreferences();
     changed = false;
+    levelsOn = false;
     readMeter(micMeter);
     subs.forEach(listenSub);
     subs.forEach(nearSub);
@@ -440,6 +448,8 @@
       changed = true;
     }
     if (changed || stats.preflight) emit();
+    if (levelsOn || levelsWere) levelSubs.forEach(tellLevels);
+    levelsWere = levelsOn;
   };
 
   const PLAY_BLOCKED = "Press Enable sound to hear voices";
@@ -1396,6 +1406,10 @@
     const s = subs.get(id);
     return !!(s && s.meter && s.meter.speaking);
   };
+  // Its shown level, 0 to 1 (native-icons.js `shapeLevel`), and the visitor's own while they speak.
+  const level = (id) => { const s = subs.get(id); return s && s.meter ? s.meter.level : 0; };
+  const ownLevel = () => micMeter && stats.speaking ? micMeter.level : 0;
+  const subscribeLevels = (fn) => { levelSubs.add(fn); return () => levelSubs.delete(fn); };
 
   // Preferences are available before joining voice: no context, microphone or network operation is needed.
   const setPreference = (player, muted, volume) => {
@@ -1456,5 +1470,5 @@
     playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none", relay: relayConfig !== ICE, bare,
     relayRenewals: relayRenewals.map(sample => ({ ...sample })) });
 
-  BL.voice = { support, probe, ICE_BLOCKED, warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setPlayersLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, resumed, stop, setPeers, setOutdoor, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, setRadius, setKeyFilter, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
+  BL.voice = { support, probe, ICE_BLOCKED, warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setPlayersLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, resumed, stop, setPeers, setOutdoor, subscribe, dispose, inspect, speaking, level, ownLevel, subscribeLevels, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, setRadius, setKeyFilter, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();

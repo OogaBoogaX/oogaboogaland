@@ -11,7 +11,7 @@
 // checked before the SFU call and again after it, so a zone, lease or publication that changed while it was in flight
 // keeps nothing it should not: those tracks are closed through the durable cleanup queue before any reply.
 // A speaker publishes one track, the microphone alone (never playback, a mix or a loopback), on its own session, only
-// under its pending or active lease of the same generation. A publication retired (Leave Voice, a lease ending, a zone
+// under its pending or active lease of the same generation. A publication retired (Leave voice, a lease ending, a zone
 // change, a revocation, the island taking the identity) is removed from the catalog at once, every subscription to it
 // is closed at the SFU, and its publisher's session closed, all through the queue, retried by the alarm until it
 // succeeds or an hour passes, after every client has gone too. Per connection: `media:<connId>` in storage (sessions
@@ -362,7 +362,7 @@ export const createMediaBroker = (aud) => {
       const recover = body && body.recover === true;
       if (recover && aud.roles) aud.holdQuiet(conn.connId);
       const lease = aud.model.endLease(conn.connId);
-      // Leave Voice, on the speaker's own word: a hosted chat's place on the stage goes with it. A recovery keeps it held.
+      // Leave voice, on the speaker's own word: a hosted chat's place on the stage goes with it. A recovery keeps it held.
       if (lease && aud.roles) aud.stageLeft(conn.id, !recover);
       await retirePublication(conn.connId);
       aud.save(conn.connId);

@@ -1179,15 +1179,23 @@ body[data-active-scene="block"] .mode-hud {
 .cloud-foot { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px; }
 .cloud-foot-name { min-width: 0; color: var(--paper); font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
 .cloud-foot-name:empty { display: none; }
+.cloud-foot-name[data-source="island"]::before {
+  content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--ok);
+  box-shadow: 0 0 5px rgba(34, 197, 94, 0.55); vertical-align: 1px;
+}
 .cloud-foot-name[data-source="chat"]::before {
   content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #b18aff; vertical-align: 1px;
 }
+/* The voice buttons, then the visitor's name with Sign out beside it on a line of its own under them, as every account row
+   has it, in a chat too. */
+.cloud-foot-who { display: inline-flex; flex: 1 1 100%; align-items: center; justify-content: center; gap: 10px; min-width: 0; }
+.cloud-foot-who:not(:has(> :not([hidden]):not(:empty))) { display: none; }
 .cloud-foot-actions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
 .cloud-foot-actions .foot-button { white-space: nowrap; }
 /* Every panel's voice buttons, the island's and Ooga Chat's, at one width, the widest's, so no footer shifts: Mute or
-   Unmute (shown and off until in voice) beside Join or Leave Voice (and Joining…, Leaving…), wider only for a longer
+   Unmute (shown and off until in voice) beside Join or Leave voice (and Joining…, Leaving…), wider only for a longer
    reason (Reconnecting voice). */
-.cloud-mute, .cloud-voice, .account-mute, .account-voice, .account-leave { min-width: 100px; padding: 0 8px; }
+.cloud-mute, .cloud-voice, .account-mute, .account-voice, .account-leave, .account-end { min-width: 100px; padding: 0 8px; }
 .cloud-foot-actions [hidden] { display: none; }
 /* The voice switch prompt (voice-handoff.js), the island's and Ooga Chat's alike: a planked card floating under the
    banner, over the panels, that takes no focus by itself; Not now beside the amber Switch here. */
@@ -1754,12 +1762,13 @@ body[data-active-scene="block"] .mode-hud {
   background: none;
   color: var(--muted);
   cursor: pointer;
+  /* Grey to green comes on fairly quickly as a voice starts and lets go slowly, so pauses between words never blink. */
+  transition: color 0.9s ease-in-out;
 }
 
 .roster-voice svg {
   width: 12px;
   height: 12px;
-  shape-rendering: crispEdges;
 }
 
 .roster-voice:disabled {
@@ -1803,24 +1812,22 @@ body[data-active-scene="block"] .mode-hud {
 
 .roster-voice[data-voice="speaking"] {
   color: var(--ok);
+  transition-duration: 0.4s;
+  transition-timing-function: ease-out;
 }
 
 .roster-voice[data-voice="muted"] {
   color: var(--danger);
 }
 
-.roster-voice .voice-far,
-.roster-voice .voice-cross,
-.roster-voice .voice-slash,
-.roster-voice[data-voice="muted"] .voice-near {
-  display: none;
-}
-
-.roster-voice[data-voice="speaking"] .voice-far,
-.roster-voice[data-voice="muted"] .voice-cross,
-.roster-voice[aria-pressed="true"] .voice-slash {
-  display: inline;
-}
+/* The microphone (native-icons.js `mic`): hollow in voice; speaking, its capsule fills from the bottom with the voice's
+   level (`--lv`, written by the page each meter read, eased between reads, full where no level is known); crossed out
+   when muted or silenced here. */
+.roster-voice .mic-level { transform: scaleY(0); transition: transform 0.15s linear; }
+.roster-voice[data-voice="speaking"] .mic-level { transform: scaleY(var(--lv, 1)); }
+.roster-voice .mic-gap,
+.roster-voice .mic-slash { display: none; }
+.roster-voice:is([data-voice="muted"], [aria-pressed="true"]) :is(.mic-gap, .mic-slash) { display: inline; }
 
 .roster-voice[aria-pressed="true"] {
   opacity: 0.55;
@@ -1829,6 +1836,10 @@ body[data-active-scene="block"] .mode-hud {
 /* A voice this visitor cannot hear where they stand (another zone, or past the hearing range), in Online Oogas. */
 .roster-voice[data-far="true"] {
   opacity: 0.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .roster-voice, .roster-voice .mic-level { transition: none; }
 }
 
 @media (pointer: coarse) {
@@ -2114,8 +2125,9 @@ body[data-active-scene="block"] .mode-hud {
 
 /* Reactions (reactions.js), on X Spaces' pattern in its dark mode: a near-black card, the ten emoji, a divider and the
    raised hand pinned past it, over the account row of every panel that has one, on the island and in Ooga Chat's app
-   alike. The ten stand in one row where the panel is wide enough for them (the bar's own width, a container query)
-   and in two rows of five beside the hand where not. The card stops at 560px, centred, so a wide drawer's ten
+   alike. The ten stand in one row where the panel is wide enough for them (the bar's own width, a container query);
+   where not, in one row that scrolls sideways beside the hand, narrower cells on the narrowest, its edge fading under a
+   chevron while more lie past it (reaction-bar.js). The card stops at 560px, centred, so a wide drawer's ten
    stay together. A long press opens the picker floating over the screen, in the same dark. Emoji are the
    system's own colour glyphs. */
 .reactions {
@@ -2126,6 +2138,11 @@ body[data-active-scene="block"] .mode-hud {
   gap: 8px;
   margin-top: 8px;
 }
+
+/* In a panel's foot the card stands as close as Ooga Chat's own panels put it, in every panel of both apps: 8px off the
+   panel's sides (through the island panel's 14px padding) and 6px from the list over it (the foot's own trim, above) and
+   the account row under it. */
+.panel-foot > .reactions { margin: 0 -6px; }
 
 .reactions[hidden] { display: none; }
 
@@ -2139,16 +2156,19 @@ body[data-active-scene="block"] .mode-hud {
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 10px 16px;
+  gap: 6px 16px;
 }
 
+/* An island panel's foot with the account in it stands 6px from the list over it and from the panel's edge under it, as
+   in Ooga Chat's panels, through the island panel's 10px gap and bottom padding. */
+.sheet-content > .panel > .panel-foot:has(> .account, > .cloud-foot) { margin-block: -4px; }
 .panel-foot > * { flex: 1 1 100%; min-width: 0; }
 .panel-foot > .account { flex: 1 1 100%; width: auto; }
 
 @container panel-foot (min-width: 960px) {
   .panel-foot > * { flex: 0 1 auto; margin-top: 8px; }
   .panel-foot > .account { flex: 0 1 auto; }
-  .panel-foot > .reactions { flex-basis: 560px; }
+  .panel-foot > .reactions { flex-basis: 560px; margin: 8px 0 0; }
 }
 
 .reaction-bar {
@@ -2160,7 +2180,7 @@ body[data-active-scene="block"] .mode-hud {
   margin-inline: auto;
   gap: 6px;
   padding: 8px 10px;
-  border-radius: 22px;
+  border-radius: 6px;
   border: 1px solid rgba(243, 239, 228, 0.1);
   background: var(--slab-dark);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 4px 14px rgba(0, 0, 0, 0.45);
@@ -2169,16 +2189,45 @@ body[data-active-scene="block"] .mode-hud {
   -webkit-user-select: none;
 }
 
+.reaction-scroll { position: relative; flex: 1; min-width: 0; }
+
 .reaction-grid {
+  --reaction-cell: 44px;
   display: grid;
-  flex: 1;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 2px 4px;
+  grid-auto-flow: column;
+  grid-auto-columns: var(--reaction-cell);
+  gap: 0 2px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+
+.reaction-grid::-webkit-scrollbar { display: none; }
+.reaction-grid > .reaction { height: var(--reaction-cell); scroll-snap-align: start; }
+
+@container reactions (max-width: 359px) {
+  .reaction-grid { --reaction-cell: 38px; }
+  .reaction-grid > .reaction { font-size: 22px; }
 }
 
 @container reactions (min-width: 460px) {
-  .reaction-grid { grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 0 2px; }
+  .reaction-grid { --reaction-cell: 38px; grid-auto-flow: row; grid-template-columns: repeat(10, minmax(0, 1fr)); overflow: visible; scroll-snap-type: none; }
 }
+
+@media (pointer: coarse) {
+  @container reactions (min-width: 460px) { .reaction-grid { --reaction-cell: 44px; } }
+}
+
+/* The chevron over the row's right edge, which fades into the card under it. */
+.reaction-more {
+  position: absolute; top: 0; right: 0; bottom: 0; display: grid; place-items: center end; width: 40px; padding: 0 2px 0 0; border: 0;
+  background: linear-gradient(90deg, transparent, var(--slab-dark) 62%); color: rgba(243, 239, 228, 0.8); cursor: pointer;
+}
+.reaction-more[hidden] { display: none; }
+.reaction-more svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.reaction-more:is(:hover, :focus-visible) { color: var(--paper); }
+.reaction-more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
 
 /* Square, centred in its cell, so the hover, press and focus rings are circles however wide the cell is. */
 .reaction {
@@ -2638,10 +2687,13 @@ body[data-active-scene="block"] .mode-hud {
   min-width: 0;
 }
 
+/* The name with Sign out beside it, on a line of its own under the voice buttons, in a chat too. */
 .account-who {
   display: inline-flex;
+  flex: 1 1 100%;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -2704,7 +2756,7 @@ body[data-active-scene="block"] .mode-hud {
 .foot-button.virtual-hover,
 .foot-button:focus-visible { background: linear-gradient(#b8844a, var(--plank)); outline: none; }
 .foot-button:focus-visible { box-shadow: 0 2px 0 var(--nail), 0 0 0 2px var(--accent); }
-/* A button that can do nothing yet (Unmute before Join Voice, Join Voice where voice isn't open) reads as off, as the
+/* A button that can do nothing yet (Unmute before Join voice, Join voice where voice isn't open) reads as off, as the
    panels' other buttons do, and a hover leaves it as it is. */
 .foot-button:disabled { opacity: 0.5; cursor: default; background: linear-gradient(var(--plank), var(--wood)); }
 
@@ -2723,10 +2775,24 @@ body[data-active-scene="block"] .mode-hud {
 .foot-button[aria-pressed="true"]:not([data-mic]),
 .foot-button[data-mic="live"]:not(:disabled) { border-color: rgba(34, 197, 94, 0.75); }
 .foot-button[data-mic="muted"]:not(:disabled) { border-color: rgba(239, 68, 68, 0.8); }
+/* The microphone itself before the words (native-icons.js `label`, the voice mark's microphone): crossed while muted or
+   not yet open, live while it is, tinted with the edge where enabled. */
+.foot-button[data-mic]:not([hidden]) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.foot-button > .mic-icon { flex: none; width: 14px; height: 14px; }
+/* The microphone's level fills its capsule from the bottom (native-icons.js `mic`, `--lv`; shown by the voice mark's rules). */
+.mic-icon .mic-level { transform-box: fill-box; transform-origin: 50% 100%; }
+.foot-button > .mic-icon .mic-level { display: none; }
+.foot-button[data-mic="live"] > .mic-icon :is(.mic-gap, .mic-slash) { display: none; }
+.foot-button[data-mic="live"]:not(:disabled) > .mic-icon { color: #9ff0b8; }
+.foot-button[data-mic="muted"]:not(:disabled) > .mic-icon { color: #ffb4a6; }
 
 @media (pointer: coarse) {
   .foot-button { min-height: 40px; }
   .account .link { min-height: 40px; }
+  /* On a phone the name's line sits as tight under the buttons and over the panel's edge as with a mouse: Sign out is
+     tapped through the 6px gaps round it (::after), reaching neither the buttons nor past the panel's foot. */
+  .account-who > .link, .cloud-foot-who > .link { min-height: 0; position: relative; }
+  .account-who > .link::after, .cloud-foot-who > .link::after { content: ""; position: absolute; inset: -6px -8px; }
 }
 
 .bottom-hud,

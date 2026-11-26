@@ -1,5 +1,5 @@
 // The emoji bar, the island's and Ooga Chat's alike (#655, #656), on X Spaces' pattern: a dark card of ten emoji (one row
-// where the panel is wide enough, else two rows of five: style.css `.reactions`) and, past a divider, the raised hand
+// where the panel is wide enough, else one row that scrolls under an edge chevron: style.css `.reactions`) and, past a divider, the raised hand
 // pinned beside them. Nothing here reads anything at load but window.BL (the policy and emoji-data.js), so Ooga Chat
 // shares it; `create(net)` makes one set of bars over one connection, the island's net.js (reactions.js) or a page's
 // own of the same shape: `state` ({ me, reactions, room,
@@ -78,7 +78,28 @@
       divider.className = "reaction-divider"; divider.setAttribute("aria-hidden", "true");
       hand.dataset.slot = String(PERSISTENT);
       hand.type = "button"; hand.className = "reaction reaction-hand"; hand.setAttribute("aria-pressed", "false");
-      card.append(grid, divider, hand);
+      // Where the bar is too narrow for the ten in a row (style.css: one row that scrolls), the row fades into the
+      // card's edge under a chevron while more lie to its right: a press scrolls on, a wheel scrolls it sideways.
+      const scroller = document.createElement("div"), more = document.createElement("button");
+      scroller.className = "reaction-scroll";
+      more.type = "button"; more.className = "reaction-more"; more.hidden = true;
+      more.setAttribute("aria-label", "More reactions");
+      more.title = "More reactions";
+      more.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
+      scroller.append(grid, more);
+      const overflow = () => grid.scrollWidth - grid.clientWidth;
+      const syncMore = () => { const hide = overflow() - grid.scrollLeft < 4; if (more.hidden !== hide) more.hidden = hide; };
+      grid.addEventListener("scroll", syncMore, { passive: true });
+      if (typeof ResizeObserver === "function") new ResizeObserver(syncMore).observe(grid);
+      more.addEventListener("click", () => {
+        grid.scrollBy({ left: grid.clientWidth * 0.8, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      });
+      grid.addEventListener("wheel", (e) => {
+        if (overflow() < 4 || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+        e.preventDefault();
+        grid.scrollLeft += e.deltaY;
+      }, { passive: false });
+      card.append(scroller, divider, hand);
       host.append(card);
       const bar = { host, card, buttons, hand, handAllowed };
       bars.push(bar);

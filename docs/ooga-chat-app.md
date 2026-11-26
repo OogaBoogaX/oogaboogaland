@@ -42,7 +42,7 @@ is unchanged and never stages the app.
 | `src/ooga-chat/ooga-chat-views.js` | `BL.oogaChatViews`: the Ooga Chat tab (sign-in, or the island's Ooga Chat panel: the zones, the roster and its footer), the stand-in for a tab whose chunk is on its way (`deferred`), the stand-in for a panel not built yet, and the kit the chunks' views build with. Every view is the island's own panel in its markup (#656) |
 | `src/ooga-chat/ooga-chat-bananas.js` | in the `bananas` chunk: the Bananas tab's view |
 | `src/ooga-chat/ooga-chat-panels.js` | in the `panels` chunk: Contributing Oogas, Online Oogas and The Commons, with the island's account row at their foot |
-| `src/js/chat-hosts.js`, `src/chat-hosts.css`, `src/ooga-chat/ooga-chat-hosts.js` | the `hosts` chunk, with its own stylesheet: hosted chats ([ooga-chat-hosts.md](ooga-chat-hosts.md)) where the bootstrap lists `features.chats`. The views and their look are shared with the island's cloud tab (`chat-hosts.js`, `chat-hosts.css`): the Chats list, the Start a chat dialog, and in a chat its bar, Requests chip and queue, invite card, tile menu, the footer's Request to speak, End chat and Leave, and one polite notice line. `ooga-chat-hosts.js` hands them the app's chats, voice and face sheet and links the stylesheet |
+| `src/js/chat-hosts.js`, `src/chat-hosts.css`, `src/ooga-chat/ooga-chat-hosts.js` | the `hosts` chunk, with its own stylesheet: hosted chats ([ooga-chat-hosts.md](ooga-chat-hosts.md)) where the bootstrap lists `features.chats`. The views and their look are shared with the island's cloud tab (`chat-hosts.js`, `chat-hosts.css`): the Chats list, the Start a chat dialog, and in a chat its bar, Requests bell and queue, invite card, tile menu, the footer's Request to speak, End chat and Leave, and one polite notice line. `ooga-chat-hosts.js` hands them the app's chats, voice and face sheet and links the stylesheet |
 | `src/ooga-chat/ooga-chat-http.js` | `BL.oogaChatHttp`: the production adapter |
 | `src/ooga-chat/ooga-chat-media.js` | `BL.oogaChatMedia`: voice (#654), one controller apart from the views: hearing the zone through the server's media operations and speaking from it (Voice, below) |
 | `src/ooga-chat/ooga-chat-faces.js` | `BL.oogaChatFaces`: the bundled fallback index for `art/ooga-faces.png`, by handle, with a default face. Generated with the sheet by `npm run ooga-chat:faces` (`scripts/ooga-chat-faces.mjs`, the island's own renderer in the suite's Chrome), never edited |
@@ -211,7 +211,7 @@ server checks the capability again at every privileged operation.
 
 **Account lifecycle** (`BL.oogaChatAuth.create({ adapter, media, now, timers, onChange })`). `auth` is:
 
-| `auth` | When | Join Voice | Contributor tabs |
+| `auth` | When | Join voice | Contributor tabs |
 |---|---|---|---|
 | `checking` | before the first answer | no | no |
 | `signed-out` | no session | (Continue with GitHub) | no |
@@ -229,10 +229,10 @@ reads "can't check your sign-in" with Try again, so an expired login and an outa
 working through both.
 
 **The voice seam** is the voice controller (`ooga-chat-media.js`, Voice below). `available` is whether this deployment
-lets contributors speak (the bootstrap's `speak` and an audience path) in a browser that can; without it Join Voice
+lets contributors speak (the bootstrap's `speak` and an audience path) in a browser that can; without it Join voice
 stays off ("Voice opens here soon", or that the browser can't). The account controller calls `release` first whenever
 the account stops being the one that may speak: sign-out (before the logout request), another principal, an expired
-session, a capability lost or gone stale, a failed check. Join Voice asks `gates` again at the click.
+session, a capability lost or gone stale, a failed check. Join voice asks `gates` again at the click.
 
 **Signing out** stops capture, clears the session from the page and returns to Ooga Chat's sign-in at once, then posts
 `paths.logout`. If the server does not confirm, the page stays signed out and says so with Try again; the server ends
@@ -325,8 +325,8 @@ above them where not, as the design has it: the ten reactions any signed-in acco
 live, the hand only an active speaker raises (disabled, never hidden, for a listener), the picker on a long press. Then
 the island's Ooga Chat panel's account controls, the name over the buttons: the name (a purple dot
 only while speaking from Ooga Chat), the microphone (always first, 84px wide whatever it says: a disabled Unmute for a
-listener, explaining voice must be joined first; Mute or Unmute for a speaker), Join Voice for a listener the server
-allows to speak (Leave Voice for a speaker), and Sign out. A disabled button says why on itself. The voice controller's state says who is a speaker: only the
+listener, explaining voice must be joined first; Mute or Unmute for a speaker), Join voice for a listener the server
+allows to speak (Leave voice for a speaker), and Sign out. A disabled button says why on itself. The voice controller's state says who is a speaker: only the
 server's acknowledged lease makes one. While joining the button reads Joining… and while leaving Leaving…, both off.
 
 **Account row.** The island's (`hud.js` `showAccount`), at the foot of Contributing Oogas, Online Oogas and The
@@ -356,14 +356,14 @@ element of its own. A browser that holds playback until a gesture sets `blocked`
 hear this zone.", and the next tap or key plays every voice. A receiver that fails opens again, backing off from 1 s to
 30 s six times, then the space says it can't hear the zone with Try again. A listener never asks for a microphone.
 
-**Speaking.** Join Voice, for an account `you.speak` says is `eligible`, asks for the microphone first, inside the
+**Speaking.** Join voice, for an account `you.speak` says is `eligible`, asks for the microphone first, inside the
 click, and turns its track off before anything can carry it; then asks the feed for a lease (`setRole: speaker`, whose
 `result` names the lease's generation, `you.lease`); then `publish/open`, `publish/offer` (one sendonly audio track)
 and, once connected, `publish/ready`. Only that acknowledgement makes a speaker, muted. A denied, missing or busy
 microphone, a refusal (`speaker_capacity`, `source_in_use`, `capability_required`) or a failed connection returns to
 listening with nothing held, the lease given back with `publish/close`, and says why in the space's status line.
 Mute and Unmute (the footer, the visitor's own circle, M) flip the track at once and tell the server (`setMic`).
-Leave Voice stops and releases the microphone, then `publish/close`, and keeps listening. A `you` that no longer says
+Leave voice stops and releases the microphone, then `publish/close`, and keeps listening. A `you` that no longer says
 `pending` or `active` (an expiry, a revocation, the island's own voice taking the identity) stops capture at once.
 
 **Changes.** Another zone ends speaking (capture stops before the join, which ends the lease at the server) and drops
@@ -378,7 +378,7 @@ relay. A credentials request that failed is asked again by the next connection (
 minute), and every voice call's body is read inside the call's 12 s bound. WebKit on an IPv6-only mobile network
 reaches only the first IPv4 address a connection sends to, the STUN server when one is listed
 ([WebKit 330921](https://bugs.webkit.org/show_bug.cgi?id=330921)), so a connection that never comes up is tried next
-without the STUN server, as on the island (Voice in `docs/auth-and-presence.md`): Join Voice makes its publish once
+without the STUN server, as on the island (Voice in `docs/auth-and-presence.md`): Join voice makes its publish once
 more that way on the same microphone and lease, a receive connection on its next try, and the way that last worked is
 kept in localStorage (`voice-bare` under the app's prefix). `media.stats` says which (`bare`) and whether a relay is in
 hand (`relay`).
@@ -404,8 +404,8 @@ that goes to another app, a network change, a microphone another app takes.
   it. The same account in the same zone, no more than 60 s (`RETURN_MS`) after it was left, speaks again as after a
   dropped socket: it asks for the microphone, `setRole` with `replaces`, and lands as it left, the microphone open
   again if the word says it was open (`open`), muted otherwise, with the same words. A microphone the browser no
-  longer allows, or a refusal, listens: "Voice reconnected. Join Voice to speak again."
-  Leave Voice, a lease the server ended, signing out, another tab and a later return leave no word and stay listeners.
+  longer allows, or a refusal, listens: "Voice reconnected. Join voice to speak again."
+  Leave voice, a lease the server ended, signing out, another tab and a later return leave no word and stay listeners.
 - *A dead socket.* A socket the page was away from can read open long after it died. When the page is shown again or
   back online (`feed.wake`), or after 75 s of silence, the feed asks for a pong, and with no frame in 4 s closes the
   socket itself and opens another at once.
@@ -420,7 +420,7 @@ that goes to another app, a network change, a microphone another app takes.
   after a failed try ends with the connection it failed under.
 - *A failed publishing connection.* The lease is given back and asked for again the same way.
 - *An unsure answer.* A session check the server itself answers `unknown` (the island could not be asked for a while)
-  closes Join Voice and leaves a lease already held, as a stale window or a failed check does.
+  closes Join voice and leaves a lease already held, as a stale window or a failed check does.
 - *A microphone the browser takes away* (another app, a call: the track's `ended`). The visitor stays a speaker, muted,
   with nothing captured: "Your microphone was interrupted. Unmute to speak again." Unmute, a click, captures it again
   onto the same publication (`replaceTrack`).
@@ -435,7 +435,7 @@ while it is not here: `island` (the island's voice) or `app` (another Ooga Chat 
 audience connection finds it asks once (`voice-handoff.js`, the island's own card): "Voice is on another device", with
 Switch here and Not now. Switch here, inside its click, joins with `setRole`'s `takeover`: the other page's lease ends
 (its `you` carries `reason: "moved"`, and it says "Voice moved to your other device."), or the island's page leaves
-voice. Not now changes nothing, and the visitor goes on listening. Join Voice pressed while the voice is elsewhere asks
+voice. Not now changes nothing, and the visitor goes on listening. Join voice pressed while the voice is elsewhere asks
 the same question. A voice that goes elsewhere later, while this page is open, asks nothing.
 
 **Not yet.** A peer's voice mark does not yet mute that voice for this visitor alone; a follow-up. iOS routes playback
@@ -489,8 +489,8 @@ for a fresh snapshot after a gap.
   path (the island's panel leaves it out: the room names Ooga Chat's own paths, which only its edge serves);
   `contributions` a count for ordering only, never proof of anything; `self` marks the visitor. A row that breaks any
   of this is dropped, not guessed at.
-- **You.** `you.speak` is the room's word on the visitor: `eligible` (may Join Voice), `pending`, `denied`, `active`
-  or `none`. Only `eligible` enables Join Voice; pending or denied never briefly enables publishing.
+- **You.** `you.speak` is the room's word on the visitor: `eligible` (may Join voice), `pending`, `denied`, `active`
+  or `none`. Only `eligible` enables Join voice; pending or denied never briefly enables publishing.
 - **Reactions.** `react` is a transient emoji for one row, shown in that row's column for its own lifetime over any
   hand. It changes no revision.
 
@@ -501,7 +501,7 @@ and hand changes never reorder.
 **The island's panel.** The cloud tab is last, after The Commons. A Main Island tag in the title's corner (the panel
 shows that zone alone for now, wherever the visitor's Ooga stands), one
 scrolling roster of circles, speakers then listeners (`audience-tiles.js`, the app's own), the emoji bar, and a footer of the visitor's name, a fixed-width Mute or Unmute,
-Join or Leave Voice and Sign out, all through the island's existing voice session. A speaker's portrait is ringed
+Join or Leave voice and Sign out, all through the island's existing voice session. A speaker's portrait is ringed
 green (`#22c55e`) from the island or purple (`#b18aff`) from Ooga Chat; listeners have no ring. Listeners appear only in this panel, never as characters in the world. Bridging the outdoor voice and the
 app speakers' playback is #661. Cloud speakers in the world (#659): with the island's and the edge's `cloud` on, the
 room sends every page the `clouds` list (`{ id, character, zone, seat, lease, mic, hand, login, display }`, net.js
@@ -529,7 +529,7 @@ total and a source mute, listeners with a duplicate and a long name, then a join
 resync over and a leave, one every 4 s), `empty`, `crowd` (300 listeners), `reconnecting` (drops after 6 s and comes
 back in a new epoch), `full` and `none` (no audience address).
 `&voice=` picks how voice answers, through a fake broker and fake WebRTC that never open a microphone or play
-anything: `ok` (the default: every speaker of the zone pulled, and Join Voice lands a muted speaker), `denied` (the
+anything: `ok` (the default: every speaker of the zone pulled, and Join voice lands a muted speaker), `denied` (the
 microphone refused), `blocked` (playback held until a gesture), `refused` (the zone's speakers full), `off` (a
 deployment that doesn't let anyone speak) and `elsewhere` (the account's voice is on the island, on another device,
 until the visitor takes it with the prompt's Switch here). `BL.oogaChatFixtures.rtc.stats` counts captures, live tracks and playing
@@ -645,7 +645,7 @@ any shell file cannot be kept, leaving the previous version in place. It holds n
 cached for another account to see, and sign-out has no cache to clear. Each version's cache is
 `ooga-chat-<build>`; taking over deletes every older one, and nothing else.
 
-**Offline** shows the shell with "You're offline. Ooga Chat reconnects when you're back.", sign-in and Join Voice
+**Offline** shows the shell with "You're offline. Ooga Chat reconnects when you're back.", sign-in and Join voice
 off, and the list marked reconnecting rather than live: no saved state claims a current list, a speaker seat, a raised
 hand, live audio or a valid session. Back online, the session and capabilities are checked again, the audience feed
 rejoins and sends a fresh snapshot, and voice returns only through the voice client's own lifecycle, never unmuted by

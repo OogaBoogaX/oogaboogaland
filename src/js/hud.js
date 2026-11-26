@@ -113,8 +113,6 @@
   const { lettering: signLettering, letter: letterSign } = BL.signGlyphs;
   for (const el of document.querySelectorAll("[data-sign]")) letterSign(el);
   BL.nativeIcons.fill(document);
-  // The roster's voice mark, a 9x9 pixel speaker shared with Ooga Chat; the stylesheet shows the parts each state needs.
-  const voiceIcon = BL.nativeIcons.voice();
   // Icons are rasterized once into an offscreen canvas.
   const ICON_PX = 48;
   const renderIcon = (item) => {
@@ -1747,8 +1745,14 @@
       else if (b === el.modeDestination) BL.destinationMap.open();
       else if (b === el.mode) pressMode();
       else if (b.dataset.action === "account-login") BL.net.login();
-      else if (b.dataset.action === "account-logout") BL.net.logout();
+      else if (b.dataset.action === "account-logout") BL.cloudPanel?.signOutFrom ? BL.cloudPanel.signOutFrom(b, () => BL.net.logout()) : BL.net.logout();
       else if (b.dataset.action === "account-rejoin") BL.net.rejoin();
+      // In a hosted chat the row is the chat's footer (`showAccount`): its microphone, its stage and its way out.
+      else if (BL.chatCall?.room && b.dataset.action === "account-mute") BL.chatCall.media.mute();
+      else if (BL.chatCall?.room && b.dataset.action === "account-voice") BL.chatCall.media.join();
+      else if (BL.chatCall?.room && b.dataset.action === "account-voice-leave") BL.chatCall.media.leave();
+      else if (b.dataset.action === "account-chat-end") BL.cloudPanel?.endChat(b);
+      else if (b.dataset.action === "account-chat-leave") BL.cloudPanel?.leaveChat(b);
       else if (b.dataset.action === "account-voice" || b.dataset.action === "account-mute") BL.voice.toggle();
       else if (b.dataset.action === "account-voice-leave") BL.voice.leave();
       else actionHandler && actionHandler(b.dataset.action);
@@ -2053,8 +2057,9 @@
     if (!recipe.open) recipe.showModal();
   };
   const showAccount = (state) => {
-    const { backend, me, room } = state, online = BL.cloudPanel ? BL.cloudPanel.online(state) : state.online;
-    const live = !!me && room === "live", words = live ? `${online} online` : ROOM_WORDS[room] || "";
+    // The name carries no count of who is online (the Online Oogas tab's title says it): only the room's own trouble.
+    const { backend, me, room } = state;
+    const live = !!me && room === "live", words = live ? "" : ROOM_WORDS[room] || "";
     const top = accountTop(), topTip = me ? `Signed in as ${me.display} · Sign out` : "Sign in with GitHub · needs your own Ooga";
     if (top.hidden !== !backend) top.hidden = !backend;
     if (top.title !== topTip) {
@@ -2068,14 +2073,37 @@
     writeAccount("account-name", "hidden", !me);
     writeAccount("account-login", "hidden", !!me);
     writeAccount("account-logout", "hidden", !me);
-    // The studio, where a signed-in player chooses what their own Ooga wears (scene-studio.js), where the Worker keeps it.
-    const own = me && state.equipment ? BL.net.ownCharacter?.() : null;
-    writeAccount("account-look", "hidden", !own);
-    // From the site's root: a routed address (/lightning) outranks `?scene=`.
-    if (own) writeAccount("account-look", "href", new URL(`/?scene=studio&character=${encodeURIComponent(own.handle)}`, location.href).href);
     writeAccount("account-room", "textContent", words);
     writeAccount("account-room", "hidden", !me || !words);
     writeAccount("account-rejoin", "hidden", !me || !ROOM_WORDS[room]);
+    // In a hosted chat every tab's buttons are the chat's, as Ooga Chat's tabs have them (ooga-chat-panels.js): the
+    // chat's microphone, Join voice or Leave voice on its stage, then End chat for its host or Leave chat for anyone
+    // else; the name and Sign out stay under them.
+    const calls = BL.chatCall, chat = me && calls && calls.room || null;
+    writeAccount("account-chat-end", "hidden", !chat || chat.you?.rank !== "host");
+    writeAccount("account-chat-leave", "hidden", !chat || chat.you?.rank === "host");
+    for (const row of fieldsFor("account")) if (row.dataset.chat !== String(!!chat)) row.dataset.chat = String(!!chat);
+    if (chat) {
+      const v = calls.state.voice, you = chat.you || {}, speaker = v.role === "speaker", host = you.rank === "host";
+      const may = speaker || v.busy || you.speak === "eligible" || !!v.elsewhere;
+      writeAccount("account-mute", "hidden", !may);
+      writeAccount("account-mute", "disabled", !speaker || v.busy);
+      writeAccount("account-mute", "title", "");
+      for (const el of fieldsFor("account-mute")) BL.nativeIcons.label(el, speaker && !v.muted ? "Mute" : "Unmute");
+      const mic = speaker && !v.busy ? v.muted ? "muted" : "live" : "", pressed = String(speaker && v.muted);
+      for (const button of fieldsFor("account-mute")) {
+        if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
+        if (button.dataset.mic !== mic) button.dataset.mic = mic;
+      }
+      writeAccount("account-voice", "hidden", speaker || !may);
+      writeAccount("account-voice", "textContent", v.busy ? "Joining…" : "Join voice");
+      writeAccount("account-voice", "disabled", v.busy);
+      writeAccount("account-voice", "title", "");
+      // A host stays on the stage while hosting (chat-hosts.js): Mute, never Leave voice.
+      writeAccount("account-voice-leave", "hidden", !speaker || host);
+      for (const row of fieldsFor("account")) if (row.dataset.live !== String(live)) row.dataset.live = String(live);
+      return;
+    }
     const voice = BL.voice.stats;
     const iceBlocked = voice.error === BL.voice.ICE_BLOCKED;
     const voiceFailure = iceBlocked ? voice.error : voice.returning ? voice.micError : voice.enabled ? "" : voice.error || voice.micError;
@@ -2090,7 +2118,8 @@
     const copy = !!state.copy;
     writeAccount("account-mute", "hidden", !live || copy);
     writeAccount("account-mute", "disabled", !micOn);
-    writeAccount("account-mute", "textContent", micOn && voice.reconnecting ? "Reconnecting voice" : failed ? `Voice: ${voiceFailure}` : asMic && !voice.muted ? "Mute" : "Unmute");
+    const muteWords = micOn && voice.reconnecting ? "Reconnecting voice" : failed ? `Voice: ${voiceFailure}` : asMic && !voice.muted ? "Mute" : "Unmute";
+    for (const el of fieldsFor("account-mute")) BL.nativeIcons.label(el, muteWords);
     writeAccount("account-voice", "hidden", !live || inVoice || copy);
     writeAccount("account-voice", "textContent", reason ? reason : voice.joining ? "Joining…" : voiceFailure ? `Voice: ${voiceFailure}` : "Join voice");
     writeAccount("account-voice", "disabled", !!reason);
@@ -2193,6 +2222,7 @@
     for (const row of liveRows.values()) {
       row.nextLook = row.nextLogin = "";
       row.nextHost = row.nextOnline = row.nextSelf = false;
+      row.voiceId = 0;
     }
     const net = BL.net.state, voice = BL.voice.stats;
     const signedIn = !!net.me, accountChanged = signedIn !== liveSignedIn;
@@ -2205,6 +2235,7 @@
         if (voice.enabled || voice.returning) {
           self.nextLook = voice.muted ? "muted" : voice.speaking ? "speaking" : "on";
           self.nextSelf = true;
+          self.voiceId = -1;
         }
         if (net.hostId === net.selfId) self.nextHost = true;
       }
@@ -2214,6 +2245,7 @@
         if (rec.voice) {
           row.nextLook = rec.muted ? "muted" : BL.voice.speaking(rec.id) ? "speaking" : "on";
           row.nextLogin = rec.login;
+          row.voiceId = rec.id;
         }
         if (rec.id === net.hostId) row.nextHost = true;
       }
@@ -2223,6 +2255,16 @@
       if (row.netOnline === row.nextOnline && !accountChanged) continue;
       row.netOnline = row.nextOnline;
       liveOnline(row);
+    }
+  };
+  // A speaking mark fills with its voice's level on each meter read (voice.js `subscribeLevels`, which the director
+  // hands this; style.css `--lv`): the visitor's own (`voiceId` -1) from their microphone, anyone else's from their voice.
+  const showLevels = () => {
+    if (!liveRows) return;
+    for (const row of liveRows.values()) {
+      if (!row.voiceId) continue;
+      const v = Math.round((row.voiceId < 0 ? BL.voice.ownLevel() : BL.voice.level(row.voiceId)) * 20) / 20;
+      if (row.lv !== v) { row.lv = v; row.voice.style.setProperty("--lv", String(v)); }
     }
   };
   // A game's Ooga list (`rows`, name to button, each button in its own <li>) held to one Ooga, a signed-in
@@ -2296,5 +2338,5 @@
     const clear = () => { for (const r of pool) r.li.remove(); pool.length = 0; };
     return { set, clear };
   };
-  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, faceScores, signLettering, showAccount, openRecipe: showRecipe, showMic, showVoices, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor, voiceIcon, voiceWords };
+  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, faceScores, signLettering, showAccount, openRecipe: showRecipe, showMic, showVoices, showLevels, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor, voiceWords };
 })();

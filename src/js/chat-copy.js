@@ -50,7 +50,7 @@
     if (!hooks) return "Go there from Main Island";
     return hooks.refusal() || "";
   };
-  // The footer's button: Go there, or Go back while in the copy (Going…, greyed, while a beam runs), for a speaker in a Main
+  // The island view's button: Join on island (chat-hosts.js `joinWords`, by the chat's land), or Go back while in the copy (Going…, greyed, while a beam runs), for a speaker in a Main
   // Island chat on the island page.
   const button = (room) => {
     if (!room || room.zone !== "main" || !active() && !speaker(room)) return null;
@@ -60,7 +60,7 @@
       return { label: busy ? "Going…" : "Go back", words: "Go back from the chat's island", disabled: busy, title: busy ? "On the way…" : "Back to where your Ooga stood" };
     }
     const refused = refusal(room);
-    return { label: "Go there", words: "Go to the chat's island", disabled: !!refused, title: refused || "Walk your Ooga into the chat's own island" };
+    return { label: BL.chatHosts.joinWords(room.zone), words: "Go to the chat's island", disabled: !!refused, title: refused || "Walk your Ooga into the chat's own island" };
   };
   const toast = (text) => { if (text && BL.hud) BL.hud.toast(text); };
   const go = (id) => {
