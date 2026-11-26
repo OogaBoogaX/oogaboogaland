@@ -37077,7 +37077,7 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
   // then the visitor's Ooga walks to the chair and lifts the guest overhead, its rule seat freed. The guest rides over
   // the visitor's head as it moves. A throw at a pane of the +x side's lower tier (the camera held from outside the
   // pilot, as the capture tool holds it, and aimed along the pane until the aim says a throw goes) shatters that pane,
-  // takes the guest into space and off the graph, leaves the seat free in the panel, and the glass is whole again
+  // takes the guest past the window and off the graph, leaves the seat free in the panel, and the glass is whole again
   // within its heal time. A second guest lifted and put down leaves nothing posed, walks out through the mirror and a
   // guest comes back in through it a minute later. A third lifted and left on the way to the island (the director's
   // debug leave contract) comes back to a room with nothing carried, flying or broken. The credits board opens with
@@ -37184,7 +37184,7 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
   record("rule: every table plays among its own computer opponents, two to five a table, and one the visitor never touched has dealt hands", npcs.tables.ok, JSON.stringify(npcs.tables));
   record("rule: Ask Ooga To Move shows on a computer opponent's seat and not on an empty one; pressed mid-hand it waits for the hand's end, then the guest is lifted and its seat is free", npcs.ask.ok, JSON.stringify(npcs.ask));
   record("rule: the lifted guest rides over the visitor's head, squirming, and moves with them", npcs.carry.ok, JSON.stringify(npcs.carry));
-  record("rule: a throw at a side pane shatters it, sends the guest off into space and off the graph, leaves its seat free in the panel, and the glass is whole again within its heal time", !!npcs.thrown?.ok, JSON.stringify({ aim: npcs.aim, thrown: npcs.thrown }));
+  record("rule: a throw at a side pane shatters it, lets the guest fall and removes it from the graph, leaves its seat free in the panel, and the glass is whole again within its heal time", !!npcs.thrown?.ok, JSON.stringify({ aim: npcs.aim, thrown: npcs.thrown }));
   record("rule: Put down leaves nothing posed, the guest walks out through the mirror, and a guest comes back in through it a minute later", npcs.putDown.ok, JSON.stringify(npcs.putDown));
   record("rule: the music credits board opens with the lounge playlist's four credits, a page each", npcs.credits.ok, JSON.stringify(npcs.credits));
   record("regression: Space during the lift does nothing: the guest goes on up and no table view opens", npcs.spaceLift.lifting && npcs.spaceLift.npc && !npcs.spaceLift.panel, JSON.stringify(npcs.spaceLift));
@@ -37247,12 +37247,18 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
     // The driven Ooga a frame after sitting, then a frame after Walk the floor: its left leg's swing (0 standing still,
     // the crew's standing gait), its left arm and its feet over its standing height. Return to the table seats it again for the rest of the step.
     const pose = () => { B.advance(1 / 30, 1 / 30); return { leg: cave.parts.legL.rotation.x, arm: cave.parts.armL.rotation.x, x: cave.root.position.x, z: cave.root.position.z, lift: cave.root.position.y - cave.baseY, hip: cave.root.position.y }; };
-    const sat = pose(); click("walk"); const stood = pose(); click("return");
+    const sat = pose(); click("walk");
+    const modal=document.querySelector(".poker-leave"),held=()=>P.session.tables[0].snapshot().seats.some(p=>p?.id==="local-player");
+    const offered=modal.open && held(); modal.querySelector('[data-poker="stay"]').click();
+    const stayed=!modal.open && held() && document.body.hasAttribute("data-poker-table-view");
+    click("walk");modal.querySelector('[data-poker="confirm-leave"]').click(); const stood=pose(), released=!held();
+    P.select(1);click("join"); const switched=P.session.tables[1].snapshot().seats.some(p=>p?.id==="local-player");click("stand");
+    P.select(0);click("join");
     // Seated, the root (the hip) stands at the room's own sitting height for this Ooga's size (pokerModels.sitY), and the
     // position it sends identifies its chair at the selected table, so other pages seat it.
     const Pr = BL.pokerPresence, hipAt = BL.pokerModels.sitY(cave.traits.height);
     const seat = P.session.tables[0].snapshot().seats.findIndex(p => p?.id === "local-player");
-    const sitting = { sat, stood, chair: Pr.CHAIR_Y, hipAt, ok: sat.leg === -1.35 && sat.arm === -0.9 && Math.abs(sat.hip - hipAt) < 1e-9 && seat >= 0 && Pr.seatAt(BL.pokerModels.TABLES, BL.pokerModels.SEATS, sat.x, sat.lift, sat.z) === seat && stood.leg === 0 && Math.abs(stood.lift) < 1e-3 && document.body.hasAttribute("data-poker-seated") };
+    const sitting = { sat, stood, chair: Pr.CHAIR_Y, hipAt, ok: offered && stayed && released && switched && sat.leg === -1.35 && sat.arm === -0.9 && Math.abs(sat.hip - hipAt) < 1e-9 && seat >= 0 && Pr.seatAt(BL.pokerModels.TABLES, BL.pokerModels.SEATS, sat.x, sat.lift, sat.z) === seat && stood.leg === 0 && Math.abs(stood.lift) < 1e-3 && document.body.hasAttribute("data-poker-seated") };
     for (let i = 0; i < 4; i++) click("bots");
     // Each seat's figure as drawn: a bot's name, "none" for a bot with no figure up, "shown" for anything else drawn.
     const C = BL.pokerCrowdModels, t0 = P.session.tables[0], walking = new Set(C.castFor(Math.floor(Date.now() / 86400000), Infinity).map(m => m.traits.name));
@@ -37476,11 +37482,13 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
       // floor from the keyboard (a click with no pointerdown) takes the menu with the view, and it is shut when the view reopens.
       press(head); const opened = shows(menu); esc(); frame();
       const once = { menu: shows(menu), view: viewing() }; esc(); frame();
-      const second = { view: viewing() }; click("return"); frame();
+      const confirmWalk=()=>document.querySelector('.poker-leave [data-poker="confirm-leave"]').click();
+      const prompt=document.querySelector(".poker-leave").open; confirmWalk(); frame();
+      const second = { view: viewing(),prompt }; P.select(4);click("join");frame();
       press(head); const reopened = shows(menu); down(document.querySelector('[data-poker="title"]')); const outside = { menu: shows(menu), view: viewing() };
-      press(head); const again = shows(menu); click("walk"); frame(); const walkedOut = { menu: !menu.hidden }; click("return"); frame();
+      press(head); const again = shows(menu); click("walk");confirmWalk();frame(); const walkedOut = { menu: !menu.hidden }; P.select(4);click("join");frame();
       const returned = { menu: !menu.hidden, view: viewing() };
-      out.escape = { opened, once, second, reopened, outside, again, walkedOut, returned, ok: opened && !once.menu && once.view && !second.view && reopened && !outside.menu && outside.view
+      out.escape = { opened, once, second, reopened, outside, again, walkedOut, returned, ok: opened && !once.menu && once.view && second.prompt && !second.view && reopened && !outside.menu && outside.view
         && again && !walkedOut.menu && !returned.menu && returned.view };
       N.sendReaction = e => { P.react(0, e); return true; };
       pick("clap"); frame();
@@ -37495,9 +37503,8 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
       B.advance(E.SHOW_TIME, 1 / 30);
       // Standing mid-gesture (Walk the floor) drops the emote and leaves no arm turned.
       pick("salute"); B.advance(0.5, 1 / 30); const saluting = arms(cave);
-      click("walk"); frame(); const walked = { seats: seatsNow(), arms: arms(cave) };
+      click("walk");confirmWalk();frame(); const walked = { seats: seatsNow(), arms: arms(cave) };
       out.stood = { saluting, walked, ok: saluting.ry !== 0 && walked.seats.every(e => e === "") && walked.arms.ly === 0 && walked.arms.ry === 0 };
-      click("return"); click("stand"); frame();
       // The remotes: seats taken by their names first (synced by the practice timer), then live as the scene reads it.
       P.select(1); t1.join("emote-guest-1", near.display, false, J); t2.join("emote-guest-2", far.display, false, J); B.advance(0.9, 1 / 30);
       P.session.live = { deadline: null, connection: "live", busy: false, fairness: null, action() {}, dispose() {} };
@@ -37813,6 +37820,33 @@ scene("poker", { label: "salons", query: "character=portlandhodl", steps: [{ nam
     return encoded && !studio.open && !save.href && Math.hypot(p.x-feet.x,p.z-feet.z)<.02;
   })()`);
   record("poker terrace: a moon portrait can be saved and leaving the camera restores the walker",portrait);
+  const floor = await b.evaluate(`(() => {
+    const D = BL.scenes.poker.debug, P = D.poker, M = BL.pokerModels, cave = D.pilot.player;
+    const prompt = document.querySelector('[data-poker="approach"]'), table = M.TABLES[2];
+    const at = (x,z) => { D.pilot.navigate({position:{x,y:0,z},yaw:0,pitch:.18,dist:4}); __ooga.advance(.1,1/30); };
+    const focused = () => !document.querySelector('[data-poker="focus"]').hidden;
+    at(29,2); const pack = !!cave.jet && !document.getElementById("jetpack-hud").hidden;
+    BL.scenes.poker.onKey(new KeyboardEvent("keydown",{key:"j"})); const off = !cave.jet;
+    document.getElementById("jetpack-hud").click(); const back = !!cave.jet;
+    const throttle = !D.pilot.action(); __ooga.advance(.1,1/30);
+    const climbed = cave.root.position.y > cave.baseY+.1;
+    at(0,12); const indoors = !cave.jet && document.getElementById("jetpack-hud").hidden;
+    D.pilot.action(); const aisle = !focused() && prompt.hidden;
+    const chair = M.SEATS.reduce((top,s) => s.z > top.z ? s : top);
+    const near = () => at(table.x+chair.x, table.z+chair.z+cave.bodyRadius+.75);
+    near(); const offered = !prompt.hidden && prompt.textContent.includes("LIGHTNING");
+    D.pilot.action(); const jumped = !focused() && cave.hopV > 0;
+    at(0,12); near(); prompt.querySelector('[data-poker-action="pass-table"]').click(); __ooga.advance(.1,1/30);
+    const passed = prompt.hidden && !focused();
+    at(0,12); near(); prompt.querySelector('[data-poker-action="open-nearby"]').click();
+    const confirmed = focused() && P.selected === 2 && !P.session.tables[2].snapshot().seats.some(s=>s?.id==="local-player");
+    P.action("walk");
+    return {pack,off,back,throttle,climbed,indoors,aisle,offered,jumped,passed,confirmed};
+  })()`);
+  record("poker terrace: the visitor can equip, launch, and return indoors with the jetpack stowed",floor.pack && floor.off && floor.back && floor.throttle && floor.climbed && floor.indoors,JSON.stringify(floor));
+  await b.key(" ");
+  const walking=await b.evaluate(`document.activeElement===document.getElementById("scene") && document.querySelector('[data-poker="focus"]').hidden`);
+  record("poker floor: Action jumps past tables, and a chair offers its own table only on confirmation",floor.aisle && floor.offered && floor.jumped && floor.passed && floor.confirmed && walking,JSON.stringify({floor,walking}));
 } }] });
 scene("poker", { label: "canvas2d", query: "canvas2d=1", steps: [{ name: "poker canvas2d", why: "rule: the floor and table controls work on the fallback renderer", run: async b => {
   await b.evaluate(`document.querySelector('[data-intro="poker"] .game-intro-go').click()`);
@@ -37852,7 +37886,105 @@ scene("poker", { label: "canvas2d", query: "canvas2d=1", steps: [{ name: "poker 
   })()`);
   record("rule: on Canvas 2D a fold runs its toss through the scene's prop calls", lite.ok, JSON.stringify(lite));
 } }] });
-scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="poker"]', required: ["#joy-move", "#joy-look", '[data-poker-action="quick"]'] }), { name: "poker phone actions", why: "rule: seated touch players can read private cards and access legal actions without horizontal overflow", run: async b => {
+const pokerEraHudStep = { name: "poker seated era HUDs", why: "playthrough: inspect all ten table themes and use the mobile seat and bet sheets", run: async b => {
+  const looks = await b.evaluate(`(async () => {
+    const P=BL.scenes.poker.debug.poker, el=document.getElementById("poker"), optionsPane=el.querySelector('[data-table-pane="options"]');
+    const click=selector=>el.querySelector(selector).click(), sheet=el.querySelector(".poker-sheet"), art=el.querySelector(".poker-felt");
+    const close=()=>click('[data-poker="close-sheet"]'), notes=[], styles=[], surfaces=new Set();
+    const tools=kind=>{if(!sheet.open)click('[data-poker="tools"]');click('[data-sheet="'+kind+'"]');};
+    el.querySelector(".game-intro-go").click();
+    for(let i=0;i<10;i++){
+      if(i)click('[data-poker-action="walk"]');
+      click(".panel-edge");click('[data-watch="'+i+'"]');
+      await art.decode();
+      const table=P.session.tables[i], before=table.version;
+      tools("history");
+      const tabs=Array.from(sheet.querySelectorAll(".poker-sheet-nav button"), b=>b.dataset.sheet);
+      if(!sheet.open || tabs.join(",")!=="history,options" || before!==table.version || art.naturalWidth<900 || P.selected!==i) notes.push(i+1);
+      surfaces.add(art.currentSrc);styles.push(el.dataset.pokerEra);close();
+    }
+    tools("history"); const history=sheet.open && !!sheet.querySelector('[data-poker="log"]').getClientRects().length;close();
+    tools("options"); const options=sheet.open && !!optionsPane.getClientRects().length && !optionsPane.querySelector("select");close();
+    click('[data-seat="1"]');const seat=sheet.open && !optionsPane.getClientRects().length; close();
+    return { notes, looks:new Set(styles).size, pictures:surfaces.size, history,options,seat };
+  })()`);
+  record("poker HUD: all ten table themes offer Hand history and Options and return to play without placing a wager",!looks.notes.length && looks.looks===10 && looks.pictures===10 && looks.history && looks.options && looks.seat,JSON.stringify(looks));
+  await b.send("Emulation.setDeviceMetricsOverride",{width:844,height:390,deviceScaleFactor:1,mobile:true});
+  const bet=await b.evaluate(`(() => {
+    const P=BL.scenes.poker.debug.poker, t=P.session.tables[2], el=document.getElementById("poker"), sheet=el.querySelector(".poker-sheet");
+    const call = () => {const s=t.snapshot(); t.act(s.seats[s.turn].id,"call");};
+    while(t.playing)call();
+    P.select(2); P.action("join");
+    if(t.snapshot().seats.filter(Boolean).length<3)P.action("bots");
+    P.action("start");
+    for(let i=0;i<30;i++){const s=t.snapshot("local-player");if(s.phase==="flop" && s.legal)break;call();}
+    P.action("auto",false);
+    const version=t.version, open=el.querySelector('[data-sheet="bet"]');
+    const r=open.getBoundingClientRect(), target=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+    if(target!==open || r.width<44 || r.height<44)return {unreachable:true,rect:r.toJSON()};
+    open.click(); if(!sheet.open || !sheet.contains(el.querySelector('[data-poker="raise"]')))return {opened:false};
+    sheet.querySelector('[data-poker-size="half"]').click();
+    const amount=Number(sheet.querySelector('[data-poker="amount"]').value);
+    sheet.querySelector('[data-poker="close-sheet"]').click(); const cancelled=!sheet.open && t.version===version;
+    open.click();
+    const sizing = sheet.querySelector(".poker-sizing"), rect = sheet.getBoundingClientRect();
+    sheet.dispatchEvent(new PointerEvent("pointerdown",{bubbles:true,clientX:rect.left-1,clientY:rect.top-1}));
+    const restored = !sheet.open && !sheet.contains(sizing) && el.contains(sizing) && t.version === version;
+    open.click();sheet.querySelector('[data-poker="raise"]').click();
+    return {cancelled,restored,paid:t.snapshot("local-player").seats.find(p=>p?.id==="local-player").roundBet,amount,closed:!sheet.open};
+  })()`);
+  record("poker HUD: a mobile half-pot wager can be cancelled, then submitted for exactly the displayed amount",bet.cancelled && bet.restored && bet.closed && bet.amount>0 && bet.paid===bet.amount,JSON.stringify(bet));
+  await b.send("Emulation.setTouchEmulationEnabled",{enabled:false});
+  await b.send("Emulation.setDeviceMetricsOverride",{width:1440,height:900,deviceScaleFactor:1,mobile:false});
+  const opener = await b.evaluate(`(() => {
+    const r = document.querySelector('[data-poker="tools"]').getBoundingClientRect();
+    return [r.x+r.width/2,r.y+r.height/2];
+  })()`);
+  await b.click(...opener);
+  const tools = await b.evaluate(`(() => {
+    const sheet = document.querySelector(".poker-sheet");
+    const history = sheet.open && !!sheet.querySelector('[data-poker="log"]').offsetWidth;
+    sheet.querySelector('[data-sheet="options"]').click();
+    return history && !!sheet.querySelector('[data-poker-option="sound"]').offsetWidth && !sheet.querySelector('[data-table-pane="options"] select') && !sheet.querySelector('[data-poker="log"]').offsetWidth;
+  })()`);
+  await b.send("Input.dispatchKeyEvent",{type:"keyDown",key:"Escape",code:"Escape",windowsVirtualKeyCode:27});
+  await b.send("Input.dispatchKeyEvent",{type:"keyUp",key:"Escape",code:"Escape",windowsVirtualKeyCode:27});
+  const returned = await b.evaluate('!document.querySelector(".poker-sheet").open && !document.querySelector(".poker-leave").open && document.activeElement.dataset.poker==="tools"');
+  record("poker HUD: desktop tools show one panel at a time and Escape returns focus to the hand",tools && returned,JSON.stringify({tools,returned}));
+  await b.click(...opener);
+  await b.click(1,1);
+  const toolsClosed = await b.evaluate('!document.querySelector(".poker-sheet").open');
+  const leaving = await b.evaluate(`(() => {
+    document.querySelector('[data-poker-action="walk"]').click();
+    return document.querySelector(".poker-leave").open;
+  })()`);
+  await b.click(1,1);
+  const stayed = await b.evaluate(`(() => {
+    const p = BL.scenes.poker.debug.poker;
+    return !document.querySelector(".poker-leave").open && document.body.hasAttribute("data-poker-table-view")
+      && p.session.tables[p.selected].snapshot().seats.some(seat => seat?.id === "local-player");
+  })()`);
+  record("poker HUD: pressing the backdrop dismisses table tools and cancels departure while keeping the seat",toolsClosed && leaving && stayed,JSON.stringify({toolsClosed,leaving,stayed}));
+} };
+scene("poker", { opts: PHONE_SIZE, steps: [pokerEraHudStep] });
+scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="poker"]', required: ["#joy-move", "#joy-look", "#poker .panel-edge"] }), { name: "poker phone actions", why: "rule: seated touch players can read private cards and access legal actions without horizontal overflow", run: async b => {
+  for (const [width,height] of [[844,390],[390,844]]) {
+    await b.send("Emulation.setDeviceMetricsOverride",{width,height,deviceScaleFactor:1,mobile:true});
+    await b.evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+    const pad=await b.evaluate(`(() => {
+      const button=document.querySelector("#poker .panel-edge"), r=button.getBoundingClientRect(), j=document.querySelector("#joy-look").getBoundingClientRect();
+      return {compact:r.height===44 && r.width>=44 && r.width<110,clear:r.bottom<=j.top || r.left>=j.right || r.right<=j.left,
+        x:j.x+j.width/2,y:j.y+j.height/2,buttonX:r.x+r.width/2,buttonY:r.y+r.height/2};
+    })()`);
+    await b.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{x:pad.x,y:pad.y}]});
+    await b.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[{x:pad.x+18,y:pad.y-8}]});
+    const looking=await b.evaluate('document.getElementById("joy-look").classList.contains("live")');
+    await b.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+    await b.click(pad.buttonX,pad.buttonY);
+    const opened=await b.evaluate('document.querySelector("#poker .panel-edge").getAttribute("aria-expanded")==="true" && getComputedStyle(document.getElementById("poker-panel")).visibility==="visible"');
+    record("poker floor: compact Tables opens and leaves the look stick draggable at "+width+"×"+height,pad.compact && pad.clear && looking && opened,JSON.stringify({pad,looking,opened}));
+    if(width===844)await b.evaluate('document.querySelector("#poker-panel .panel-fold").click()');
+  }
   const r = await b.evaluate(`(() => { const P = BL.scenes.poker.debug.poker; document.querySelector('[data-poker-action="quick"]').click(); const panel = document.querySelector('[data-poker="focus"]'), r = panel.getBoundingClientRect(); return { fits: !panel.hidden && r.left >= 0 && r.right <= innerWidth && panel.scrollWidth <= panel.clientWidth + 1, seats: document.querySelectorAll(".poker-seats button").length, cards: document.querySelectorAll(".poker-hand .poker-card").length }; })()`);
   record("poker phone: nine seat choices and two private cards fit the panel", r.fits && r.seats === 9 && r.cards === 2, JSON.stringify(r));
   // The room faked only as far as the scene reads it for the Emote button (`reactions`, `room`), restored after. Open,
@@ -43370,7 +43502,7 @@ const pokerCarryChecks = (BL) => {
     for (const file of ["math.js", "poker-carry.js"]) runInNewContext(readFileSync(join(root, "src/js", file), "utf8"), own);
     const C = own.window.BL.pokerCarry, aim = C.createAim();
     const glazing = G.build(false);
-    for (const n of glazing.root.children) if (n.geometry === G.parts(false).shard || (n.geometry && n.geometry.glassOpacity)) { const p = fresh(), s = fresh(); Object.assign(p, n.position); Object.assign(s, n.scale); n.position = p; n.scale = s; }
+    for (const n of glazing.root.children) if (glazing.shardNodes.includes(n) || !n.geometry || n.geometry.glassOpacity) { const p = fresh(), s = fresh(); Object.assign(p, n.position); Object.assign(s, n.scale); n.position = p; n.scale = s; }
     const plain = (h) => { const p = () => ({ rotation: fresh(), position: fresh() }); return { parts: { armL: p(), armR: p(), legL: p(), legR: p(), head: p(), torso: p() }, traits: { height: h }, root: { position: fresh(), rotation: fresh() } }; };
     const a = plain(1), b = plain(0.9), ts = Array.from({ length: 256 }, (_, i) => i / 255 + 0.0001); ts.push({}); ts.pop();
     const steps = [C.FIXED, {}]; steps.pop(); const dt = steps[0];
@@ -43441,7 +43573,7 @@ const pokerCarryChecks = (BL) => {
   // Rule: a throw from over a carrier at the promenade (5 m inside the glass, walls all round) toward a lower pane
   // follows the planned arc: it crosses the glass inside that pane's rectangle clear of its sill, transom, posts and
   // mullions, stays under the head while inside, passes over the balustrade and terrace outside, and is removed past
-  // the removal distance, its twinkle then running out. A low aim that would hit the balustrade is refused.
+  // the removal distance as the fall continues. A low aim that would hit the balustrade is refused.
   const flight = C.createFlight(), carried = C.createCarried(), throws = [];
   for (const wall of ["+x", "-x", "+z", "-z"]) {
     const p = panes.filter(q => q.wall === wall && q.tier === 0 && q.halfW > 2 && !(wall === "+z" && Math.abs(q.cx) < 6))[1], q = spotOn(p, 0.62), o = intoHall(p, 5);
@@ -43460,13 +43592,13 @@ const pokerCarryChecks = (BL) => {
         if (out < 0 && flight.y > G.HEAD - C.BODY_CLEAR) inside = false;
         if (out >= p.rail.dist && !railSeen) { railSeen = true; if (flight.y - C.BODY_CLEAR <= p.rail.top) railOk = false; }
         if (out > 0 && out < G.TERRACE.out - G.SIDE_X && flight.y - C.BODY_CLEAR < G.TERRACE.top) railOk = false;
-        if (flight.gone && removedAt < 0) removedAt = Math.hypot(flight.x - flight.ox, flight.y - flight.oy, flight.z - flight.oz);
+        if (flight.done && removedAt < 0) removedAt = Math.hypot(flight.x - flight.ox, flight.y - flight.oy, flight.z - flight.oz);
       }
       const along = flight.cx * p.ux + flight.cz * p.uz, ca = p.cx * p.ux + p.cz * p.uz;
       const inPane = flight.crossed && flight.cy - p.y0 >= C.BODY_CLEAR && p.y1 - flight.cy >= C.BODY_CLEAR && Math.abs(along - ca) <= p.halfW - p.edge - C.BODY_CLEAR + 1e-9 &&
         p.members.every(m => Math.abs(along - m) >= p.memberHalf + C.BODY_CLEAR - 1e-9) && Math.hypot(flight.cx - q.x, flight.cy - q.y, flight.cz - q.z) < 0.03;
-      Object.assign(res, { inPane, inside, railOk, railSeen, removed: removedAt >= C.REMOVE_DIST && removedAt < C.REMOVE_DIST + 1, done: flight.done, star: flight.star, steps });
-      res.ok = inPane && inside && railOk && railSeen && res.removed && flight.done && flight.star === 0;
+      Object.assign(res, { inPane, inside, railOk, railSeen, removed: removedAt >= C.REMOVE_DIST && removedAt < C.REMOVE_DIST + 1, done: flight.done, falling:flight.vy < -C.GRAVITY && flight.y < flight.cy, steps });
+      res.ok = inPane && inside && railOk && railSeen && res.removed && flight.done && res.falling;
     }
     throws.push(res);
   }
@@ -43477,13 +43609,26 @@ const pokerCarryChecks = (BL) => {
   record("poker carry: a throw from the promenade crosses each wall's pane inside its glass, clears the frame, balustrade and terrace, and is removed past the removal distance; a low aim is refused",
     throws.every(t => t.ok) && low === "low", JSON.stringify({ throws: throws.filter(t => !t.ok), low }));
 
+  // The broad east terrace catches a guest that would fall into open space on the opposite side.
+  const landings = [];
+  for (const sign of [1, -1]) {
+    const p = panes.find(q => q.wall === (sign > 0 ? "+x" : "-x") && q.tier === 0 && near(q.cz, 12.75));
+    C.throwInit(flight, { x: sign * 20, y: 2.4, z: 11.7 }, { x: sign, y: .21, z: 0 }, .45, p, 5, G.supportAt, 1.1);
+    for (let step = 0; !flight.done && step < 2000; step++) C.throwStep(flight, C.FIXED);
+    landings.push({ done: flight.done, crossed: flight.crossed, touched: flight.touched, rest: flight.groundTime, y: flight.y });
+  }
+  record("poker carry: the east terrace catches and settles a guest while a throw past the west deck keeps falling",
+    landings.every(f => f.done && f.crossed) && landings[0].touched && landings[0].rest >= 2 && landings[0].y > G.TERRACE.top &&
+    !landings[1].touched && landings[1].y < -5, JSON.stringify(landings));
+
   // Rule: shatter hides exactly that pane and spawns at most a pane's share of shards; a second and third shatter keep
   // the open panes at the cap (the oldest healed at once) and the shards inside the pool; the pane stays open until
   // HEAL_AFTER, is growing back half way through the heal, and after HEAL_AFTER + HEAL_TIME of updates every pane is
   // intact at its own size with every shard back in the pool. The hole is counted: hidden panes are exactly the open ones.
   const nodesOf = r => { const o = [], s = [r]; while (s.length) { const n = s.pop(); o.push(n); for (const c of n.children) s.push(c); } return o; };
   // The panes in the order the glazing stands them, which is their ids' order.
-  const paneNodes = b => b.root.children.filter(n => n.geometry && (n.geometry.glass || n.geometry.glassOpacity));
+  const originals = new Map([full,lite].map(b=>[b,b.root.children.filter(n=>b.glass.includes(n.geometry))]));
+  const paneNodes = b => originals.get(b);
   const scales = paneNodes(full).map(n => [n.scale.y, n.scale.z]);
   const hidden = b => paneNodes(b).filter(n => n.visible === false).length;
   const id1 = panes.find(p => p.wall === "+x" && p.tier === 0 && near(p.cz, 12.75)).id, id2 = panes.find(p => p.wall === "-z" && p.tier === 1).id, id3 = panes.find(p => p.wall === "-x" && p.tier === 0).id;
@@ -43503,16 +43648,16 @@ const pokerCarryChecks = (BL) => {
     if (Math.abs(t - (G.HEAL_AFTER + G.HEAL_TIME / 2)) < 0.02 && n.visible && n.scale.y > 0.1 * scales[id3][0] && n.scale.y < 0.9 * scales[id3][0]) growing = true;
   }
   const healed = panes.every(p => full.intact(p.id)) && paneNodes(full).every((n, i) => n.visible !== false && n.scale.y === scales[i][0] && n.scale.z === scales[i][1]) && full.shards() === 0 && full.broken() === 0;
-  const shardNodes = nodesOf(full.root).filter(n => n.geometry === G.parts(false).shard), pooled = shardNodes.length === G.SHARD_CAP && shardNodes.every(n => n.visible === false);
+  const shardNodes = full.shardNodes, pooled = shardNodes.length === G.SHARD_CAP && shardNodes.every(n => n.visible === false);
   record("poker carry: a pane shatters alone into at most its share of pooled shards, at most two stay open, each open until HEAL_AFTER, growing back, all whole and pooled within 6 s",
     shattered && one.hidden === 1 && !one.intact1 && one.others && one.shards > 0 && one.shards <= G.SHARDS_PER && !one.again && !one.bad &&
     two.broken === 2 && two.hidden === 2 && two.shards <= G.SHARD_CAP && three.broken === 2 && three.hidden === 2 && three.shards <= G.SHARD_CAP && three.first && three.firstSize &&
     openUntil && growing && maxShards <= G.SHARD_CAP && healed && pooled, JSON.stringify({ one, two, three, openUntil, growing, maxShards, healed, pooled: shardNodes.length }));
   // Rule: the lite set (Canvas 2D) hides the pane and brings it back, with no shard at all.
-  const liteId = lp.find(p => p.wall === "+x" && p.tier === 0).id, liteShards = nodesOf(lite.root).filter(n => n.geometry === G.parts(false).shard).length;
-  const liteBroke = lite.shatter(liteId, { x: G.SIDE_X, y: 2, z: 3 }, { x: 1, y: 0, z: 0 }), liteHidden = hidden(lite) === 1 && lite.shards() === 0;
+  const liteId = lp.find(p => p.wall === "+x" && p.tier === 0).id, liteShards = lite.shardNodes.length;
+  const liteBroke = lite.shatter(liteId, { x: G.SIDE_X, y: 2, z: 3 }, { x: 1, y: 0, z: 0 }), liteHidden = hidden(lite) === 1 && lite.shards() === 12;
   for (let t = 0; t < G.HEAL_AFTER + G.HEAL_TIME + 0.2; t += 1 / 60) lite.update(1 / 60);
-  record("poker carry: the lite glazing hides a shattered pane and brings it back, with no shards", liteBroke && liteHidden && liteShards === 0 && hidden(lite) === 0 && lite.intact(liteId) && lite.broken() === 0,
+  record("poker carry: the lite glazing uses twelve falling fragments per break and restores the pane", liteBroke && liteHidden && lite.shards() === 0 && liteShards === 2*12 && hidden(lite) === 0 && lite.intact(liteId) && lite.broken() === 0,
     JSON.stringify({ liteBroke, liteHidden, liteShards }));
 
   full.dispose(); lite.dispose();
@@ -51539,6 +51684,13 @@ const pokerUnitChecks = async BL => {
   pokerVaultChecks(BL);
   pokerGlazingChecks(BL);
   pokerAquariumChecks(BL);
+  // Every visitor sees the stained-glass light peak at the same UTC minute throughout the year.
+  for (const month of [0, 6]) {
+    const peak = Date.UTC(2026, month, 15, 16, 30);
+    const samples = [-30, -15, 0, 59 / 60, 16, 31, 150].map(minutes => BL.pokerBirthSky.light(peak + minutes * 60000));
+    record("poker: stained-glass light peaks at 16:30 UTC in " + (month ? "summer" : "winter"),
+      samples.every((value, i) => value === [0, .5, 1, 1, .5, 0, 0][i]), JSON.stringify(samples));
+  }
   pokerEveningChecks(BL);
   pokerTellPropChecks(BL);
   pokerPresenceChecks();

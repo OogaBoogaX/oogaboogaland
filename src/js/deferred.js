@@ -27,7 +27,7 @@
   const BL = window.BL = window.BL || {};
   const TIMEOUT_MS = 20000, CHECK_MS = 60000;
   // How each group shows it has arrived: the module that runs last in it.
-  const PRESENT = { wardrobe: () => !!BL.equipmentWardrobe?.seeded, "cloud-hopper": () => !!BL.cloudHopper, "terrain-cache": () => !!BL.terrainCache, "lab-wallpaper": () => !!BL.labWallpaper?.src, canvas: () => !!BL.canvasRenderer, timechain: () => !!BL.timechainInterior, "timechain-genesis": () => !!BL.timechainGenesis, "party-radio": () => !!BL.timechainPartyRadio, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio,
+  const PRESENT = { "hat-archives": () => !!BL.characterEquipment?.seeded, wardrobe: () => !!BL.equipmentWardrobe?.seeded, "cloud-hopper": () => !!BL.cloudHopper, "terrain-cache": () => !!BL.terrainCache, "lab-wallpaper": () => !!BL.labWallpaper?.src, canvas: () => !!BL.canvasRenderer, timechain: () => !!BL.timechainInterior, "timechain-genesis": () => !!BL.timechainGenesis, "party-radio": () => !!BL.timechainPartyRadio, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio,
     "block-viewer": () => !!BL.blockViewer, race: () => !!BL.raceAudio, mine: () => !!BL.mineCrew, orbit: () => !!BL.rocketAudio,
     // Each lecture of the Lecture Hall's course, a group of its own (lecture-btc.js names them a to n).
     ...Object.fromEntries([..."abcdefghijklmn"].map((k, i) => [`lecture-btc-${k}`, () => !!(BL.lectures && BL.lectures.get(`btc-${String(i + 1).padStart(2, "0")}`))])),

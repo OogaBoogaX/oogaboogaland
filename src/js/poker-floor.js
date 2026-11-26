@@ -330,7 +330,7 @@
   // The gloss sheet: the hall's floor inside its walls less the sculpture’s plinth, in its node's xy plane
   // facing +z (the node lays it face up, so its y runs along the room's -z).
   const glossGeometry = () => once("gloss", () => {
-    const geo = { verts: [], faces: [], lines: [], castShadow: false, reflector: true, gloss: GLOSS };
+    const geo = { verts: [], faces: [], lines: [], castShadow: false, reflector: true, gloss: GLOSS, trimReflectionInstances: true };
     const add = pts => {
       let area = 0;
       for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; area += a[0] * b[1] - b[0] * a[1]; }

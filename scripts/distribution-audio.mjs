@@ -27,3 +27,15 @@ export function externalizeAudio(html, root, out) {
   return html.replace(script[0], () => `<script>${updated}</script>`)
     .replace(oldPolicy, `script-src 'sha256-${hash(updated, "base64")}'`);
 }
+
+// Keep the deferred playlist descriptors small. The hosted recording is byte-identical to its reviewed AAC source.
+export function externalizeLoungeTrack(src, text, out) {
+  const key = /^js\/lounge-track-([a-z]+)\.js$/.exec(src)[1];
+  const context = { window: {} };
+  vm.runInNewContext(text, context);
+  const bytes = Buffer.from(context.window.BL.loungeMusic[key], "base64");
+  if (bytes.toString("ascii", 4, 8) !== "ftyp") throw new Error("Invalid lounge recording: " + key);
+  const name = `lounge-${key}-${hash(bytes, "hex").slice(0, 16)}.m4a`;
+  writeFileSync(join(out, "audio", name), bytes);
+  return `(window.BL.loungeMusic ||= {}).${key} = "/audio/${name}";`;
+}

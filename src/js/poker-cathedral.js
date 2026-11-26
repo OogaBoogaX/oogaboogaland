@@ -146,10 +146,10 @@
     g.imageSurface=sheet(2*radius,2*radius,pixels,pixels,paint,e,read).imageSurface;return g;
   };
   const ring=(c,r,color,w)=>{c.beginPath();c.arc(0,0,r,0,tau);c.strokeStyle=color;c.lineWidth=w;c.stroke();};
-  // The rose over the hearth is a sky map (poker-birth-sky.js), its sun carrying the noon light.
+  // The rose over the hearth is a sky map (poker-birth-sky.js), its sun carrying the morning light.
   const ROSE_RADIUS=1.55;
   const roseGlass=M.cached(()=>BL.pokerBirthSky.window(ROSE_RADIUS));
-  // The light: a gold boss over the window's sun, swelling each day at noon (`update`).
+  // The light: a gold boss over the window's sun, swelling with the morning light (`update`).
   const roseSun=M.cached(()=>{
     const r=BL.pokerBirthSky.sunOn(ROSE_RADIUS).r*1.08,g=M.geometry(),centre=M.pushVert(g,0,0,0),edge=[];
     for(let i=0;i<32;i++)edge.push(M.pushVert(g,r*Math.cos(i*tau/32),r*Math.sin(i*tau/32),0));
@@ -440,7 +440,7 @@
     }
   };
   // The shrine tree behind the fireside record is a cherry, for Traverse City, the cherry capital: blossom pinks for
-  // the orange, petals drifting from its limbs, and its blossom brightest with the noon light (poker-birth-sky.js).
+  // the orange, petals drifting from its limbs, and its blossom brightest with the morning light (poker-birth-sky.js).
   const CHERRY_BAY=3,PETALS=22;
   const BLOSSOM=["#b84f7a","#d06a92","#e588ab","#f2a5c2","#f8bfd3","#fbd5e2","#ffe9f0"].map(c=>BL.math.hexToRgb(c));
   const petal=M.cached(()=>{

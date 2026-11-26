@@ -49,19 +49,21 @@
   // hand (2), else 0: such a seat's card is the Ask Ooga To Move button. Optional: without it no seat offers it.
   const create = (action, select, faceFor, emote, hud, npcAt = null) => {
     const el = document.getElementById("poker"), lobby = document.getElementById("poker-panel"), edge = el.querySelector(".panel-edge");
-    const by = name => el.querySelector(`[data-poker="${name}"]`);
+    const fields = Object.create(null);
+    for (const node of el.querySelectorAll("[data-poker]")) fields[node.dataset.poker] ??= node;
+    const by = name => fields[name];
     const focus = by("focus"), seatRoot = el.querySelector(".poker-seats"), rows = [], seats = [];
+    const era = BL.pokerTableHud.create(el), themes = BL.pokerTableHud.tables;
     const board = by("board"), hand = by("hand"), status = by("status"), notice = by("notice"), floorNotice = by("floor-notice");
     const amount = by("amount"), slider = by("slider"), controls = by("controls"), raiseButton = by("raise");
     const presets = Array.from(el.querySelectorAll("[data-poker-size]"));
     const auto = el.querySelector('[data-poker-option="auto"]'), sound = el.querySelector('[data-poker-option="sound"]');
     const history = Array.from({ length: 10 }, () => []), recorded = new Int32Array(10);
     const soundChannel = BL.sound.channel("poker");
-    let snapshot = null, lastIndex = -1, lastHand = -1, turnKey = "", focused = false, paused = false, audio = null, lastClock = "", lastHistory = "";
+    let snapshot = null, lastIndex = -1, lastHand = -1, turnKey = "", focused = false, paused = false, audio = null, lastClock = null, lastHistory = "";
     let live = null;
     let filter = "all", viewBusy = false, lastLog = "", viewerId = null;
     const filterButtons = Array.from(el.querySelectorAll("[data-poker-filter]"));
-    const tableSelect = by("table-select"), tableOptions = [];
     const dealer = el.querySelector(".poker-dealer"), endDeal = () => { dealTimer = 0; dealer.removeAttribute("data-dealing"); };
     let dealTimer = 0;
     const make = (tag, className, parent) => { const n = document.createElement(tag); if (className) n.className = className; if (parent) parent.appendChild(n); return n; };
@@ -70,12 +72,11 @@
       const title = make("strong", "", b), info = make("span", "", b), state = make("small", "", b);
       const dots = make("div", "poker-seat-dots", b); dots.setAttribute("aria-hidden", "true");
       for (let j = 0; j < R.SEATS; j++) make("i", "", dots);
-      title.textContent = String(i + 1).padStart(2, "0"); rows.push({ b, info, state, dots, open: true, playing: false });
-      const option = make("option", "", tableSelect); option.value = String(i); option.textContent = `Table ${i + 1}`; tableOptions.push(option);
+      title.textContent = String(i + 1).padStart(2, "0") + " · " + themes[i][0]; rows.push({ b, info, state, dots, open: true, playing: false });
     }
     for (let i = 0; i < R.SEATS; i++) {
       const wrapper = make("div", "poker-seat", seatRoot), b = make("button", "poker-seat-button", wrapper);
-      b.type = "button"; b.dataset.seat = i;
+      b.type = "button"; b.dataset.seat = i; b.dataset.seatNumber = i + 1;
       // The seated character's face, painted only when the character at the seat changes.
       const face = make("canvas", "poker-face", b); face.width = face.height = 96; face.hidden = true; face.setAttribute("aria-hidden", "true");
       const badge = make("span", "poker-position", b), name = make("strong", "poker-player", b), stack = make("span", "poker-stack", b), last = make("small", "poker-last-action", b);
@@ -138,7 +139,14 @@
         if (n.dataset.card === key) continue;
         n.dataset.card = key; n.className = key === "empty" ? "poker-card poker-card-slot" : "poker-card";
         n.setAttribute("role", "img"); n.setAttribute("aria-label", key === "empty" ? "Community card not dealt" : BL.pokerCards.label(c));
-        n.replaceChildren(); if (key !== "empty") n.appendChild(BL.pokerCards.svg(c));
+        n.replaceChildren();
+        delete n.dataset.face; delete n.dataset.rank; delete n.dataset.suit; delete n.dataset.red;
+        if (key !== "empty") n.appendChild(BL.pokerCards.svg(c));
+        if (Number.isInteger(c)) {
+          const face = R.cardName(c).replace(/^T/, "10");
+          n.dataset.face = face; n.dataset.rank = face.slice(0, -1); n.dataset.suit = face.slice(-1);
+          n.dataset.red = String(c >= 13 && c < 39);
+        }
       }
     };
     const cue = kind => {
@@ -172,15 +180,118 @@
       by("lobby-count").textContent = `${count} ${count === 1 ? "table" : "tables"}`;
       for (const b of filterButtons) b.setAttribute("aria-pressed", String(b.dataset.pokerFilter === filter));
     };
+    let lobbySnapshots = null, lobbyIndex = -1, lobbyViewer = null, lobbyBlocked = false;
+    const drawLobby = () => {
+      if (!lobbySnapshots || focused || lobby.dataset.folded === "true") return;
+      let changed = false;
+      lobbySnapshots.forEach((table, i) => {
+        const selected = i === lobbyIndex, disabled = lobbyBlocked || !!lobbyViewer && !selected;
+        const row = rows[i], mine = !!lobbyViewer && selected;
+        if (row.table === table && row.selected === selected && row.mine === mine && row.disabled === disabled) return;
+        row.table = table; row.selected = selected; row.mine = mine; row.disabled = disabled;
+        changed = true;
+        const occupied = table.seats.filter(Boolean).length;
+        row.open = occupied < R.SEATS && ["waiting", "showdown"].includes(table.phase) && (!live || ["idle", "complete", "aborted"].includes(table.fairPhase));
+        row.playing = !["waiting", "showdown"].includes(table.phase) || !!live && !["idle", "complete", "aborted"].includes(table.fairPhase);
+        row.info.textContent = `${occupied} / ${R.SEATS}`; row.state.textContent = row.open ? occupied ? "Join between hands" : "Start a table" : row.playing ? `${streetName[table.phase] === "Waiting for players" ? "Preparing hand" : streetName[table.phase]} · Watch` : "Table full · Watch";
+        row.b.classList.toggle("selected", selected); row.b.classList.toggle("your-table", mine); row.b.disabled = disabled;
+        for (let j = 0; j < R.SEATS; j++) row.dots.children[j].classList.toggle("occupied", !!table.seats[j]);
+        row.b.setAttribute("aria-label", `Table ${i + 1}, ${themes[i][0]}, ${occupied} of ${R.SEATS} seats, ${row.state.textContent}`);
+      });
+      if (changed) filterRows();
+    };
+    const phone = matchMedia("(max-width: 720px), (pointer: coarse) and (max-width: 960px) and (max-height: 520px)"), sheet = el.querySelector(".poker-sheet");
+    const compactLobby = matchMedia("(max-width: 720px), (pointer: coarse)");
+    const sheetTitle = sheet.querySelector("h3"), content = sheet.querySelector(".poker-sheet-content");
+    const betOpener = el.querySelector('[data-sheet="bet"]'), moved = [];
+    const toolsNav = sheet.querySelector(".poker-sheet-nav"), panes = Array.from(sheet.querySelectorAll("[data-table-pane]"));
+    let sheetKind = "", inspectedSeat = -1, sheetVersion = -1;
+    const take = node => {
+      const marker = document.createComment("table sheet");
+      node.before(marker); moved.push([node, marker]); content.appendChild(node);
+    };
+    const closeSheet = () => {
+      if (sheet.open) sheet.close();
+      for (const [node, marker] of moved) marker.replaceWith(node);
+      moved.length = 0; content.replaceChildren(); sheetKind = ""; inspectedSeat = -1;
+    };
+    const cancelSheet = e => { e.preventDefault(); closeSheet(); };
+    const seatButtons = () => {
+      closeSheet();
+      if (!focused && compactLobby.matches) { lobby.dataset.folded = "true"; edge.setAttribute("aria-expanded","false"); }
+      for (const node of seats) node.b.disabled = !phone.matches && !node.available;
+    };
+    sheet.addEventListener("cancel", cancelSheet);
+    phone.addEventListener("change", seatButtons);
+    const openSheet = (kind, seat = -1) => {
+      if (!focused) return;
+      const tool = panes.some(pane => pane.dataset.tablePane === kind);
+      // Switching tools inside the dialog preserves its original focus-return target.
+      if (!tool || !sheet.open || toolsNav.hidden) closeSheet();
+      toolsNav.hidden = !tool;
+      for (const pane of panes) pane.hidden = pane.dataset.tablePane !== kind;
+      for (const tab of toolsNav.children) tab.setAttribute("aria-pressed", String(tab.dataset.sheet === kind));
+      sheetKind = kind; inspectedSeat = seat; sheetVersion = snapshot.version;
+      if (kind === "bet") {
+        if (controls.hidden || raiseButton.disabled) { closeSheet(); return; }
+        sheetTitle.textContent = snapshot.currentBet ? "Size your raise" : "Size your bet";
+        take(el.querySelector(".poker-sizing")); take(by("bet-help")); take(raiseButton);
+      } else if (kind === "seat") {
+        const node = seats[seat];
+        sheetTitle.textContent = snapshot.seats[seat]?.name || `Seat ${seat + 1}`;
+        make("p","",content).textContent = [node.badge.textContent, node.stack.textContent + (snapshot.seats[seat] ? " chips" : ""),node.last.textContent].filter(Boolean).join(" · ");
+        if (node.available) {
+          const choose = make("button","poker-primary",content); choose.type="button"; choose.dataset.chooseSeat=seat;
+          choose.textContent = node.npc ? "Ask Ooga to move" : "Take this seat";
+        }
+      } else {
+        sheetTitle.textContent = "Table tools";
+      }
+      by("sheet-turn").hidden = !tool || el.dataset.yourTurn !== "true";
+      if (!sheet.open) sheet.showModal();
+      if (kind === "history") by("log").scrollTop = by("log").scrollHeight;
+    };
+    const leaveDialog = el.querySelector(".poker-leave"), leaveDetail = el.querySelector("#poker-leave-detail");
+    if (hud) {
+      hud.dismissOutside(sheet, closeSheet);
+      hud.dismissOutside(leaveDialog, () => leaveDialog.close());
+    }
+    let leaveHand = -1;
+    const requestWalk = () => {
+      closeEmoteMenu();
+      if (!viewerId) { action("walk"); return; }
+      if (leaveDialog.open) return;
+      leaveHand = snapshot.hand;
+      el.querySelector("#poker-leave-title").textContent = "Leave " + themes[lastIndex][0] + "?";
+      const active = live ? !["idle","complete","aborted"].includes(snapshot.fairPhase) : !["waiting","showdown"].includes(snapshot.phase);
+      leaveDetail.textContent = active ? (live ? "Your next available turn folds. Keep this tab connected until the hand settles and your seat is released." : "Your remaining playable hand folds. The practice hand settles and your seat opens immediately.") + " Chips already all in stay in the pot." : "Your seat will open and you can join another table.";
+      leaveDialog.showModal(); by("stay").focus();
+    };
     const onClick = e => {
       const b = e.target.closest("button"); if (!b || b.disabled || !el.contains(b)) return;
-      if (b.dataset.poker === "emote") { pressOnEmote = false; if (!closeEmoteMenu()) openEmoteMenu(); }
+      if (b.dataset.fold === "poker-panel") {
+        const folded = lobby.dataset.folded === "true";
+        edge.setAttribute("aria-expanded", String(!folded));
+        if (!folded) drawLobby();
+        (folded ? edge : lobby.querySelector(".panel-fold")).focus({preventScroll:true});
+      } else if (b.dataset.poker === "stay") leaveDialog.close();
+      else if (b.dataset.poker === "confirm-leave" && leaveDialog.open) {
+        leaveDialog.close(); if (viewerId && snapshot.hand === leaveHand) action("depart");
+      } else if (b.dataset.pokerAction === "walk") requestWalk();
+      else if (b.dataset.poker === "tools") openSheet("history");
+      else if (b.dataset.poker === "close-sheet") closeSheet();
+      else if (b.dataset.sheet) openSheet(b.dataset.sheet);
+      else if (b.dataset.chooseSeat !== undefined) {
+        const seat = inspectedSeat, version = sheetVersion;
+        if (seat >= 0 && seats[seat].available && version === snapshot.version) { closeSheet(); action(seats[seat].npc ? "ask" : "seat", seat, version); }
+      } else if (b.dataset.seat !== undefined && phone.matches) openSheet("seat", Number(b.dataset.seat));
+      else if (b.dataset.poker === "emote") { pressOnEmote = false; if (!closeEmoteMenu()) openEmoteMenu(); }
       else if (b.dataset.emote) pickEmote(b.dataset.emote);
       else if (b.dataset.watch !== undefined) select(Number(b.dataset.watch));
       else if (b.dataset.pokerFilter) { filter = b.dataset.pokerFilter; filterRows(); }
       else if (b.dataset.seat !== undefined) action(b.dataset.npc ? "ask" : "seat", Number(b.dataset.seat));
       else if (b.dataset.pokerSize) setAmount(betAmount(snapshot, b.dataset.pokerSize), b.dataset.pokerSize);
-      else if (b.dataset.pokerAction) { noticeText(""); action(b.dataset.pokerAction, Number(amount.value), snapshot?.version); }
+      else if (b.dataset.pokerAction) { noticeText(""); const version = sheetKind === "bet" ? sheetVersion : snapshot?.version; if (sheetKind === "bet") closeSheet(); action(b.dataset.pokerAction, Number(amount.value), version); }
     };
     const onInput = e => { if (e.target === slider) setAmount(slider.value); };
     const onChange = e => {
@@ -189,8 +300,7 @@
         if (!file) return;
         if (file.size > 12 * 1024 * 1024) { noticeText("This record is too large."); return; }
         file.text().then(text => action("verify-file", JSON.parse(text))).catch(() => noticeText("That file is not a valid hand record."));
-      } else if (e.target === tableSelect) select(Number(tableSelect.value));
-      else if (e.target === amount) setAmount(amount.value);
+      } else if (e.target === amount) setAmount(amount.value);
       else if (e.target === auto) action("auto", auto.checked);
       else if (e.target === sound && sound.checked) {
         try {
@@ -203,47 +313,44 @@
     };
     el.addEventListener("click", onClick); el.addEventListener("input", onInput); el.addEventListener("change", onChange);
     const setFocused = value => {
-      // Focus goes back to the table's row only when leaving a table view; on arrival it stays with the page, or Space
-      // would press the row instead of the act key.
+      // Returning to the floor gives Space back to the walker.
       const leaving = focused && !value;
       focused = !!value; focus.hidden = !focused; lobby.hidden = edge.hidden = focused;
       // The emote menu goes with the table view, however it was left (Walk the floor from the keyboard presses nothing outside it).
-      if (!focused) closeEmoteMenu();
+      if (!focused) { if (leaveDialog.open) leaveDialog.close(); closeEmoteMenu(); closeSheet(); }
+      else if (snapshot && lastIndex >= 0) era.update(lastIndex,true);
       el.dataset.tableView = String(focused);
       if (focused) { document.body.dataset.pokerTableView = "true"; by("title").focus({ preventScroll: true }); }
-      else { document.body.removeAttribute("data-poker-table-view"); lobby.removeAttribute("data-folded"); if (leaving && lastIndex >= 0) rows[lastIndex].b.focus({ preventScroll: true }); }
+      else { document.body.removeAttribute("data-poker-table-view"); lobby.dataset.folded = String(compactLobby.matches); edge.setAttribute("aria-expanded", String(!compactLobby.matches)); drawLobby(); if (leaving) document.getElementById("scene").focus({ preventScroll: true }); }
     };
     const update = (index, snapshots, viewer, pendingStand, isPaused, autoDeal) => {
       const previous = snapshot, switched = index !== lastIndex;
       const s = snapshot = snapshots[index], ownIndex = s.seats.findIndex(p => p?.id === viewer), own = s.seats[ownIndex], legal = s.legal;
+      if (sheet.open && (switched || (sheetKind === "bet" || sheetKind === "seat") && (sheetVersion !== s.version || viewBusy || live?.busy || live && live.connection !== "live" || isPaused || pendingStand))) closeSheet();
+      era.update(index,focused);
+      if (leaveDialog.open && (switched || !own || leaveHand !== s.hand)) leaveDialog.close();
       viewerId = viewer;
       by("voice-label").textContent = `Table ${index + 1} voice · spectators welcome`;
       const blocked = viewBusy || !!live && (live.busy || live.connection !== "live");
       paused = isPaused; const idle = (s.phase === "waiting" || s.phase === "showdown") && (!live || ["idle", "complete", "aborted"].includes(s.fairPhase)), fresh = switched || s.hand !== lastHand;
       snapshots.forEach((table, i) => {
-        const row = rows[i], occupied = table.seats.filter(Boolean).length;
-        row.open = occupied < R.SEATS && ["waiting", "showdown"].includes(table.phase) && (!live || ["idle", "complete", "aborted"].includes(table.fairPhase));
-        row.playing = !["waiting", "showdown"].includes(table.phase) || !!live && !["idle", "complete", "aborted"].includes(table.fairPhase);
-        row.info.textContent = `${occupied} / ${R.SEATS}`; row.state.textContent = row.open ? occupied ? "Join between hands" : "Start a table" : row.playing ? `${streetName[table.phase] === "Waiting for players" ? "Preparing hand" : streetName[table.phase]} · Watch` : "Table full · Watch";
-        row.b.classList.toggle("selected", i === index); row.b.classList.toggle("your-table", !!viewer && i === index); row.b.disabled = blocked || !!viewer && i !== index;
-        for (let j = 0; j < R.SEATS; j++) row.dots.children[j].classList.toggle("occupied", !!table.seats[j]);
-        tableOptions[i].disabled = !!viewer && i !== index;
-        row.b.setAttribute("aria-label", `Table ${i + 1}, ${occupied} of ${R.SEATS} seats, ${row.state.textContent}`);
         if (table.result && table.hand !== recorded[i]) {
           recorded[i] = table.hand;
           history[i].unshift(`Hand #${table.hand} · ${resultText(table)} · Board: ${table.board.map(R.cardName).join(" ") || "no community cards"}`);
           if (history[i].length > 12) history[i].pop();
         }
       });
-      filterRows(); tableSelect.value = String(index); tableSelect.disabled = blocked;
-      by("title").textContent = `Table ${String(index + 1).padStart(2, "0")}`;
+      lobbySnapshots = snapshots; lobbyIndex = index; lobbyViewer = viewer; lobbyBlocked = blocked;
+      drawLobby();
+      by("title").textContent = `${themes[index][0]}`;
+      by("edition").textContent = `Table ${String(index + 1).padStart(2,"0")} · Banana Club`;
       status.textContent = "No-limit Hold’em · blinds 5 / 10";
       by("hand-number").textContent = s.hand ? `#${s.hand}` : "Not dealt";
       by("seat-count").textContent = `${s.seats.filter(Boolean).length} / ${R.SEATS} seated`;
       by("private-label").textContent = own ? "YOUR HAND" : "WATCHING THE TABLE";
-      by("return").hidden = !viewer;
+      by("return").hidden = !viewer; by("return").disabled = pendingStand;
       by("return-label").textContent = `Your seat · Table ${String(index + 1).padStart(2, "0")}`;
-      by("floor-turn").textContent = blocked ? live?.connection === "failed" ? "Reconnect to recover your seat" : "Waiting for the table to confirm…" : legal ? "Your turn — return to act" : own?.folded ? "You folded · the hand continues" : own?.stack === 0 && own.inHand ? "All in · waiting for the result" : idle ? "Ready for the next hand" : "Your seat is waiting for you";
+      by("floor-turn").textContent = pendingStand ? "Leaving when the live hand settles" : blocked ? live?.connection === "failed" ? "Reconnect to recover your seat" : "Waiting for the table to confirm…" : legal ? "Your turn — return to act" : own?.folded ? "You folded · the hand continues" : own?.stack === 0 && own.inHand ? "All in · waiting for the result" : idle ? "Ready for the next hand" : "Your seat is waiting for you";
       el.dataset.yourTurn = String(!!legal && !paused && !pendingStand && !blocked);
       by("pot-label").textContent = s.result ? "LAST POT" : "TOTAL POT";
       by("pot").textContent = chips(s.result ? s.lastPot : s.pot);
@@ -263,12 +370,13 @@
         node.wrapper.dataset.position = position(i, ownIndex);
         node.wrapper.classList.toggle("turn", !paused && i === s.turn);
         node.wrapper.classList.toggle("yours", i === ownIndex);
+        node.name.classList.toggle("self-named", i === ownIndex && p?.name === "You");
         node.wrapper.classList.toggle("folded", !!p?.folded);
         node.wrapper.classList.toggle("winner", winner);
         node.wrapper.classList.toggle("empty", !p);
         const f = faceFor(i, p);
         if ((f ? f.key : "") !== node.faceKey) { node.faceKey = f ? f.key : ""; node.face.hidden = !f; if (f) f.paint(node.face); }
-        node.name.textContent = p ? `${p.name}${p.bot ? " · Bot" : ""}` : `Seat ${i + 1}`;
+        node.name.textContent = p ? `${p.name}${p.bot && !/^Bot \d+$/.test(p.name) ? " · Bot" : ""}` : `Seat ${i + 1}`;
         node.stack.textContent = p ? chips(p.stack) : idle && !viewer ? "Sit here" : "Open";
         node.last.textContent = !p ? "" : winner ? `+${chips(s.result.awards[i])} collected` : p.folded ? "Folded" : p.inHand && !p.stack ? "All in" : p.lastAction || (i === s.turn ? "Thinking" : "");
         node.badge.textContent = p && s.hand ? [i === s.dealer ? "D" : "", i === s.smallBlind ? "SB" : "", i === s.bigBlind ? "BB" : ""].filter(Boolean).join(" · ") : "";
@@ -277,10 +385,11 @@
         if (npc !== node.npc) {
           node.npc = npc; node.ask.hidden = !npc; node.ask.textContent = npc === 2 ? "Moves after this hand" : npc ? "Ask Ooga To Move" : "";
           node.wrapper.classList.toggle("npc", !!npc);
-          if (npc) node.b.dataset.npc = "1"; else delete node.b.dataset.npc;
+          if (npc) node.b.dataset.npc = String(npc); else delete node.b.dataset.npc;
         }
-        node.b.disabled = npc ? npc === 2 || blocked : !!p || !!viewer || !idle || paused || blocked;
-        node.b.setAttribute("aria-label", npc ? `Ask ${p ? p.name : "the guest at seat " + (i + 1)} to move${npc === 2 ? ", after this hand" : ""}` : p ? `${p.name}, ${chips(p.stack)} chips${i === s.turn ? ", acting now" : ""}${p.lastAction ? ", " + p.lastAction : ""}` : `Take seat ${i + 1}`);
+        node.available = npc ? npc !== 2 && !blocked : !p && !viewer && idle && !paused && !blocked;
+        node.b.disabled = !phone.matches && !node.available;
+        node.b.setAttribute("aria-label", phone.matches ? `Seat ${i+1} · ${p?.name || "Open"} · Details` : npc ? `Ask ${p ? p.name : "the guest at seat " + (i + 1)} to move${npc === 2 ? ", after this hand" : ""}` : p ? `${p.name}, ${chips(p.stack)} chips${i === s.turn ? ", acting now" : ""}${p.lastAction ? ", " + p.lastAction : ""}` : `Take seat ${i + 1}`);
         cards(node.cards, p?.inHand && !p.folded && i !== ownIndex ? p.cards : [], false, fresh);
         node.bet.textContent = p?.roundBet ? chips(p.roundBet) : ""; node.bet.hidden = !p?.roundBet;
       }
@@ -299,7 +408,8 @@
       if (legal) {
         by("fold").disabled = by("call").disabled = blocked;
         by("call").textContent = legal.check ? "Check" : `Call ${chips(legal.call)}${legal.call === own.stack ? " · All in" : ""}`;
-        raiseButton.disabled = amount.disabled = slider.disabled = !legal.canRaise || blocked;
+        betOpener.textContent = s.currentBet ? "Raise…" : "Bet…";
+        betOpener.disabled = raiseButton.disabled = amount.disabled = slider.disabled = !legal.canRaise || blocked;
         for (const b of presets) b.disabled = !legal.canRaise || blocked;
         amount.min = slider.min = String(Math.min(legal.min, legal.max)); amount.max = slider.max = String(legal.max);
         by("range").textContent = s.currentBet ? "Raise to" : "Bet";
@@ -309,6 +419,8 @@
       const turnText = paused ? "Demo paused · resume when ready" : pendingStand ? "Walking · your remaining turns check or fold" : legal ? `Your turn · ${legal.check ? "check for free or bet" : chips(legal.call) + " to call"}` : idle ? own?.stack === 0 ? "Out of chips? Your refill is free." : s.result ? "Hand complete" : "Take a seat, add bots, deal a hand" : own?.folded ? "You folded · watching the hand" : own?.inHand && !own.stack ? "You’re all in · waiting for the result" : `${s.seats[s.turn]?.name || "Dealer"} to act`;
       const turnLabel = blocked ? live?.connection === "failed" ? "Connection stopped" : live?.connection === "reconnecting" ? "Reconnecting to your table…" : live?.busy ? "Sending your move…" : "Connecting to live tables…" : live && !["idle", "complete", "betting"].includes(s.fairPhase) ? fairName[s.fairPhase] || "Preparing the hand" : live && idle && !s.result ? own ? "Ready when you are" : "There’s a seat for you" : turnText;
       if (by("turn").textContent !== turnLabel) by("turn").textContent = turnLabel;
+      if (by("sheet-turn-label").textContent !== turnLabel) by("sheet-turn-label").textContent = turnLabel;
+      by("sheet-turn").hidden = toolsNav.hidden || el.dataset.yourTurn !== "true";
       by("turn").classList.toggle("is-yours", !!legal && !paused && !blocked);
       by("turn-help").textContent = blocked ? live?.connection === "failed" ? "Reconnect to recover your seat on this device." : "Your next action unlocks when the table confirms this one." : legal ? legal.check ? "Checking keeps you in the hand for free." : "Call to match the bet, choose a raise, or fold this hand." : pendingStand ? "Your seat releases when this hand ends." : idle ? !own ? "Take any open seat. Everyone starts with 1,000 free chips." : s.seats.filter(p => p && p.stack > 0).length < 2 ? live ? "One more player is needed. Anyone seated can deal." : "Add opponents, then deal when you’re ready." : "Deal when the table is ready. Nobody owns the table." : own?.folded ? "You can watch or walk. Live players must stay connected." : !own ? "Watch this hand. Seats open when it finishes." : "Stay connected. You’ll be told when it’s your turn.";
       by("result").hidden = !s.result; by("result").textContent = resultText(s);
@@ -330,11 +442,16 @@
         else if (legal && !previous.legal) cue("turn");
         else if (s.hand !== lastHand || s.board.length !== previous.board.length) cue("deal");
       }
-      turnKey = key; lastHand = s.hand; lastIndex = index; lastClock = "";
+      turnKey = key; lastHand = s.hand; lastIndex = index; lastClock = null;
     };
     const countdown = (seconds, enabled) => {
-      const text = live ? seconds < 0 ? "" : seconds === 0 ? "Waiting for table update" : `Table timer · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` : paused ? "Practice paused" : enabled && snapshot?.result ? `Next hand in ${seconds}s` : "No turn timer";
-      if (text !== lastClock) { by("countdown").textContent = text; lastClock = text; }
+      const text = live ? seconds < 0 ? "" : seconds === 0 ? "Waiting for table update" : `Table timer · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` : paused ? "Practice paused" : enabled && snapshot?.result ? `Next hand in ${seconds}s` : "";
+      if (text !== lastClock) {
+        by("countdown").textContent = text;
+        by("sheet-clock").textContent = live && text ? " · " + text : "";
+        lastClock = text;
+      }
+      by("countdown").hidden = !text;
       by("countdown").classList.toggle("urgent", !!live && seconds >= 0 && seconds <= 15);
     };
     const setLive = value => {
@@ -358,7 +475,6 @@
       by("bots").hidden = by("pause").hidden = !!live; auto.parentElement.hidden = !!live;
       el.querySelector('[data-poker-action="quick"]').hidden = !!live;
       if (live) {
-        by("countdown").textContent = "";
         by("fair-status").textContent = `${fairName[live.phase] || "Connecting"}${live.total ? ` · ${live.checked}/${live.total} shuffles checked` : ""}`;
         by("proof-root").textContent = live.root ? "Record fingerprint: " + live.root : "";
         by("verify").disabled = by("export").disabled = !live.exportable || live.busy || connection !== "live";
@@ -379,7 +495,9 @@
     const nowPlaying = text => { nowLine.hidden = text === null; if (text !== null && nowLine.textContent !== text) nowLine.textContent = text; };
     // The dealer's face, painted once a visit from the room's own gorilla (every table's dealer looks the same).
     const setDealer = agent => BL.hud.renderFaceIcon(by("dealer-face"), null, agent, 144);
-    return { update, countdown, setFocused, setLive, setDealer, setEmoteAvailable, closeEmoteMenu, showEmote, carry, nowPlaying, setConnecting(value) { viewBusy = !!value; setLive(live); }, notice: noticeText, get focused() { return focused; }, dispose() {
+    return { update, countdown, requestWalk, setFocused, setLive, setDealer, setEmoteAvailable, closeEmoteMenu, showEmote, carry, nowPlaying, setConnecting(value) { viewBusy = !!value; setLive(live); }, notice: noticeText, get focused() { return focused; }, dispose() {
+      if (leaveDialog.open) leaveDialog.close(); closeSheet(); phone.removeEventListener("change",seatButtons); sheet.removeEventListener("cancel",cancelSheet);
+      delete el.dataset.pokerEra;
       carry(null); nowPlaying(null);
       clearTimeout(dealTimer); endDeal();
       closeEmoteMenu(); for (let i = 0; i < seats.length; i++) showEmote(i, "");
@@ -387,7 +505,7 @@
       if (hud) window.removeEventListener("pointerdown", notePress, true);
       el.removeEventListener("click", onClick); el.removeEventListener("input", onInput); el.removeEventListener("change", onChange);
       by("tables").replaceChildren(); seatRoot.replaceChildren(); board.replaceChildren(); hand.replaceChildren(); potRoot.replaceChildren(); by("history").replaceChildren();
-      tableSelect.replaceChildren(); el.removeAttribute("data-your-turn"); el.removeAttribute("data-connection");
+      el.removeAttribute("data-your-turn"); el.removeAttribute("data-connection");
       sound.checked = false; setFocused(false); soundChannel.release(); if (audio) { audio.close().catch(() => {}); audio = null; }
     } };
   };

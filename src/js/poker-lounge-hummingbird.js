@@ -82,7 +82,7 @@
       [x,r.h*.49,5],[x,5,z],[1.5,2.5,z],[-x,6,z],[-4,2.9,1.8],
       [1.9,1.8,seat-2.1],[2.65,1.64,seat-2.45],[x,8,-z],[1,r.h*.69,-z],[3,3.1,.1]];
     // The larkspur is the bird's favourite stop: stops 3 to 7 are its blooms, the air between them and the perch on
-    // its stem. When the noon light rises each day (poker-birth-sky.js) a bird elsewhere flies
+    // its stem. When the morning light rises each day (poker-birth-sky.js) a bird elsewhere flies
     // straight to the first bloom (`detour`) and works the plant from there, once a day.
     const BLOOM=3,LAST=7;
     let index=0,age=0,flight=false,duration=3.8,time=0,beat=0,detour=-1,visited=false;
