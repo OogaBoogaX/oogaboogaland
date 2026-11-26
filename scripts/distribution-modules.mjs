@@ -10,6 +10,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 const hash = (text, encoding) => createHash("sha256").update(text, "utf8").digest(encoding);
+// Groups the portable page leaves out (scripts/build.mjs never inlines them): the Ember Den's four lounge recordings
+// (about 18 MB), which would carry the single file past GitHub's 50 MB warning. The hosted pages still serve each as
+// its own same-origin file; the portable page carries its own smaller mono encodings.
+export const hostedOnly = (group) => group.startsWith("lounge-track-");
 export function externalizeModules(html, out, deferred, block, terrainWorker = null, transform = (src, text) => text, inline = [], micFilter = null) {
   const script = html.match(/<script>([\s\S]*?)<\/script>/);
   if (!script) throw new Error("distribution: no inline script");
@@ -21,6 +25,8 @@ export function externalizeModules(html, out, deferred, block, terrainWorker = n
   for (const [group, sources] of deferred) {
     const parts = sources.map((src) => {
       const text = block(src);
+      // A hosted-only group is not in the portable page at all: its bundle comes from the source.
+      if (hostedOnly(group)) { if (body.includes(text)) throw new Error(`distribution: ${src} is hosted only but is in the page`); return transform(src, text); }
       if (body.split(text).length !== 2) throw new Error(`distribution: ${src} is not in the page exactly once`);
       body = body.split(text).join("");
       return transform(src, text);
@@ -89,7 +95,8 @@ export function externalizePage(html, out, block, data = []) {
 // page carries only the address, and the picture is fetched only when a menu or a title card shows it.
 export const PICTURE_MODULES = ["js/without-rulers-data.js", "js/stackchain-art.js", "js/proof-of-ink-data.js", "js/meme-factory-data.js",
   "js/cloud-hopper-art.js",
-  "js/island-view-art.js",
+  "js/island-view-art.js", "js/poker-timeline-art.js", "js/poker-minneapolis-art.js", "js/poker-desert-throw-art.js", "js/poker-family-glass-art.js",
+  "js/poker-moon-map.js", "js/poker-ice-map.js", "js/poker-hearth-map.js",
   "js/ghost-herald-data.js", // HALLOWEEN: the herald's views; goes with the ghost hunt.
 ];
 export function externalizePictures(src, text, out) {

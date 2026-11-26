@@ -9318,6 +9318,8 @@ body[data-active-scene="dsb"] #destination-hud:disabled { opacity: 1; cursor: de
 }
 
 /* While a game's title card is up its board and panels wait behind it, and come back when it closes. */
+body[data-lounge-exterior] #overlay,
+body[data-lounge-exterior] #poker-panel,
 .race:has(> [data-intro]:not([hidden])) .garage,
 .race:has(> [data-intro]:not([hidden])) .panel-edge,
 #poker:has(> [data-intro]:not([hidden])) .poker-panel,
@@ -11002,9 +11004,23 @@ body[data-raid-mirror] #overlay {
   --pk-halo: #45654f; --pk-rail: #d3c5a5; --pk-feltLight: #3b7963; --pk-feltDark: #164332; --pk-felt: #317459;
   --pk-line: #dfbe7766; --pk-soft: #dfbe7722; --pk-glow: #dfbe7755;
   --pk-surfaceSoft: #243e33aa; --pk-haloSoft: #45654f77; --pk-haloGlass: #45654ff2; --pk-deepGlass: #142820f7;
+  --pk-haloVeil: #45654f8c; --pk-deepVeil: #142820d9;
   pointer-events: none; color: var(--pk-text);
 }
 #poker .poker-panel, #poker .panel-edge, #poker .game-intro, #poker .poker-focus { pointer-events: auto; }
+/* Ask Ooga To Move: the line on a computer opponent's seat card, and the bar while the visitor's Ooga carries a guest
+   overhead (what the aim says, the keys, Throw and Put down), low in the middle of the floor view, clear of the sticks. */
+.poker-ask { display: block; margin-top: 5px; padding: 3px 4px; font-size: 9px; font-weight: 700; letter-spacing: 0.04em; line-height: 1.2; color: var(--pk-ink); background: var(--pk-accent); border-radius: 6px; overflow-wrap: anywhere; }
+#poker .poker-seat.npc .poker-seat-button:not(:disabled) { cursor: pointer; }
+#poker .poker-seat.npc .poker-seat-button:not(:disabled):hover .poker-ask { background: var(--pk-bright); }
+#poker .poker-carry { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 22px); transform: translateX(-50%); z-index: 6; width: min(360px, calc(100vw - 32px)); box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--pk-line); border-radius: 12px; background: var(--pk-deepGlass); box-shadow: 0 8px 22px #0007; pointer-events: auto; text-align: center; }
+.poker-carry-hint { margin: 0; font-size: 14px; font-weight: 750; color: var(--pk-bright); }
+.poker-carry-keys { margin: 4px 0 8px; font-size: 9.5px; color: var(--pk-muted); }
+.poker-carry-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+@media (pointer: coarse) { #poker .poker-carry { bottom: calc(env(safe-area-inset-bottom, 0px) + 150px); } }
+/* The lounge playlist's "now playing" line: a small pill under the header for a few seconds; a tap opens the credits. */
+#poker .poker-now { position: fixed; left: 50%; top: 66px; transform: translateX(-50%); z-index: 6; max-width: calc(100vw - 32px); min-height: 36px; padding: 5px 14px; font-size: 11px; color: var(--pk-bright); background: var(--pk-deepGlass); border: 1px solid var(--pk-line); border-radius: 16px; pointer-events: auto; overflow-wrap: anywhere; animation: poker-now-in 0.4s ease-out both; }
+@keyframes poker-now-in { from { opacity: 0; translate: 0 -6px; } }
 #poker [hidden] { display: none !important; }
 #poker button { color: var(--pk-text); background: var(--pk-surface); border: 1px solid var(--pk-line); font-family: inherit; min-height: 44px; white-space: normal; border-radius: 9px; box-shadow: none; }
 #poker button:focus-visible, #poker input:focus-visible, #poker summary:focus-visible, #poker select:focus-visible { outline: 3px solid var(--pk-bright); outline-offset: 3px; }
@@ -11224,7 +11240,6 @@ body[data-raid-mirror] #overlay {
 .poker-notice:not(:empty) { padding: 8px 10px; border-left: 2px solid var(--pk-accent); background: var(--pk-soft); }
 .poker-history ol { padding-left: 18px; }
 .poker-history li { padding: 6px 0; }
-.poker-theme-note { font-size: 11px; color: var(--pk-muted); }
 body[data-poker-seated="true"] #joy-move, body[data-poker-seated="true"] #joy-look, body[data-poker-seated="true"] #act,
 body[data-poker-table-view="true"] #joy-move, body[data-poker-table-view="true"] #joy-look, body[data-poker-table-view="true"] #act { visibility: hidden; }
 @keyframes poker-deal { from { opacity: 0; translate: 0 -9px; } to { opacity: 1; translate: 0 0; } }
@@ -11312,48 +11327,13 @@ body[data-poker-table-view="true"] #joy-move, body[data-poker-table-view="true"]
 @media (min-width: 721px) and (max-height: 780px) { .poker-focus { inset-block: 65px 6px; padding-top: 12px; } .poker-arena { height: 330px; margin-block: 26px 32px; } .poker-dealer { --bust: 32px; --face: 40px; } .poker-card { flex-basis: 52px; width: 52px; } .poker-pot { margin: 2px 0 0; } }
 @media (prefers-reduced-motion: reduce) { .poker-card, .poker-dealer[data-dealing] :is(.poker-dealer-face, svg), .poker-seat-emote { animation: none; } .poker-dealer[data-dealing]::after { display: none; } }
 
-/* Five saved room looks. Cards and chip denominations keep their familiar ink. */
-.poker-theme-picker { padding: 10px 0 12px; border-block: 1px solid var(--pk-line); margin: 12px 0; }
-.poker-theme-picker > label, .poker-theme-inline { display: flex; align-items: center; gap: 10px; color: var(--pk-muted); font-size: 11px; }
+/* The panel's selects. */
 #poker select { color: var(--pk-text); background: var(--pk-deep); border: 1px solid var(--pk-line); border-radius: 6px; padding: 7px 9px; min-height: 44px; min-width: 0; font: inherit; }
 #poker select:focus-visible { outline: 3px solid var(--pk-accent); outline-offset: 2px; }
-.poker-theme-picker select { flex: 1; }
-.poker-theme-choices { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; margin-top: 10px; }
-#poker .poker-theme-choice { padding: 5px 2px; display: grid; gap: 5px; justify-items: center; background: var(--pk-deep); border: 1px solid transparent; box-shadow: none; min-height: 60px; font-size: 9px; color: var(--pk-muted); }
-#poker .poker-theme-choice[aria-pressed="true"] { border-color: var(--pk-accent); color: var(--pk-bright); box-shadow: 0 0 0 1px var(--pk-line); }
-#poker .poker-theme-choice:hover { background: var(--pk-surface); }
-.poker-theme-swatch { display: block; position: relative; width: 36px; height: 29px; border-radius: 6px; overflow: hidden; background: linear-gradient(135deg, #315b46, #162c23); border: 1px solid #dbd9bd55; }
-.poker-theme-swatch::before, .poker-theme-swatch::after { content: ""; position: absolute; }
-.poker-theme-swatch[data-theme-swatch="gatsby"] { background: linear-gradient(120deg, transparent 40%, #a29c9499 43%, transparent 47%), linear-gradient(135deg, #f1ede6, #cbc4b8); }
-.poker-theme-swatch[data-theme-swatch="gatsby"]::before { inset: 6px 4px -10px; border: 2px solid #c8a45f; border-radius: 50%; background: repeating-conic-gradient(from 0deg, #b8924a 0deg 3deg, transparent 3deg 23deg); }
-.poker-theme-swatch[data-theme-swatch="crystal"] { background: linear-gradient(125deg, #644e86, #20334d); }
-.poker-theme-swatch[data-theme-swatch="crystal"]::before { inset: 3px 15px 2px 4px; background: linear-gradient(90deg, #63a9cb, #a6f4f1); clip-path: polygon(50% 0, 100% 30%, 80% 100%, 20% 100%, 0 30%); }
-.poker-theme-swatch[data-theme-swatch="crystal"]::after { inset: 8px 3px 2px 21px; background: #b9a0ee; clip-path: polygon(50% 0, 100% 40%, 80% 100%, 10% 100%, 0 35%); }
-.poker-theme-swatch[data-theme-swatch="ember"] { background: linear-gradient(125deg, #84503e, #342726); }
-.poker-theme-swatch[data-theme-swatch="ember"]::before { inset: 0 9px; background: #ffb05f; clip-path: polygon(25% 0, 50% 0, 75% 32%, 40% 54%, 90% 100%, 50% 100%, 5% 50%, 40% 30%); }
-.poker-theme-swatch[data-theme-swatch="jungle"] { background: linear-gradient(135deg, #6b784a, #283e28); }
-.poker-theme-swatch[data-theme-swatch="jungle"]::before { inset: 6px 7px 0; border: 4px solid #c0bd8d; border-bottom: 0; border-radius: 5px 5px 0 0; }
-.poker-theme-swatch[data-theme-swatch="jungle"]::after { inset: 0 5px 11px 23px; border-left: 4px solid #91ca65; border-radius: 50%; }
-.poker-theme-swatch[data-theme-swatch="moonstone"] { background: linear-gradient(125deg, #8582a6, #3b3c5a); }
-.poker-theme-swatch[data-theme-swatch="moonstone"]::before { width: 20px; height: 20px; left: 6px; top: 4px; background: #e0e8fa; border-radius: 50%; }
-.poker-theme-swatch[data-theme-swatch="moonstone"]::after { width: 17px; height: 17px; left: 13px; top: 2px; background: #5e6080; border-radius: 50%; }
-.poker-theme-picker > p { min-height: 34px; margin: 9px 0 0; font-size: 10px; line-height: 1.6; color: var(--pk-muted); }
-.poker-theme-inline { flex-wrap: wrap; margin-bottom: 8px; }
-.poker-theme-inline select { width: 175px; }
-.poker-theme-inline span { flex: 1; min-width: 180px; color: var(--pk-muted); font-size: 10px; }
-#poker:not([data-theme="gatsby"]) .poker-focus { background: radial-gradient(ellipse at 5% 10%, var(--pk-haloSoft), transparent 36%), radial-gradient(ellipse at 95% 40%, var(--pk-soft), transparent 28%), radial-gradient(ellipse at 50% 38%, var(--pk-haloVeil), var(--pk-deepVeil) 78%); }
-#poker:not([data-theme="gatsby"]) .poker-arena::before,
-#poker:not([data-theme="gatsby"]) .poker-arena::after { content: ""; position: absolute; z-index: -1; left: -2px; top: 0; width: 14%; height: 94%; background: linear-gradient(100deg, var(--pk-haloSoft), var(--pk-soft), transparent); clip-path: polygon(0 0, 75% 2%, 65% 14%, 98% 23%, 68% 38%, 100% 52%, 58% 69%, 86% 89%, 0 100%); pointer-events: none; }
-#poker:not([data-theme="gatsby"]) .poker-arena::after { left: auto; right: -2px; transform: scaleX(-1); }
-#poker[data-theme="crystal"] .poker-felt { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--pk-bright) 5%, transparent) 0 1px, transparent 1px 4px), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--pk-bright) 5%, transparent) 0 1px, transparent 1px 4px), linear-gradient(115deg, transparent 44%, #abecf20b 45%, transparent 47%), radial-gradient(ellipse at 50% 25%, var(--pk-feltLight), var(--pk-felt) 70%, var(--pk-feltDark)); }
-#poker[data-theme="ember"] .poker-felt { box-shadow: 0 0 0 2px #664331, 0 0 0 6px var(--pk-accent), 0 0 24px #ef7f3633, 0 18px 28px #0006, inset 0 0 0 3px var(--pk-accent), inset 0 0 20px #0006; }
-#poker[data-theme="jungle"] .poker-felt::after { border-style: dashed; border-width: 2px; }
-#poker[data-theme="moonstone"] .poker-felt { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--pk-bright) 5%, transparent) 0 1px, transparent 1px 4px), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--pk-bright) 5%, transparent) 0 1px, transparent 1px 4px), radial-gradient(ellipse at 50% 10%, #dbd9ff22, transparent 60%), radial-gradient(ellipse at 50% 25%, var(--pk-feltLight), var(--pk-felt) 70%, var(--pk-feltDark)); }
 @media (max-width: 720px) {
-  .poker-theme-inline { gap: 7px; } .poker-theme-inline span { flex-basis: 100%; font-size: 10px; }
   /* On a phone the table fills the screen and legibility wins: the backdrop stays solid, and the surfaces on it keep
      the phone's old padding and rules so the fitted layout holds. */
-  .poker-focus, #poker:not([data-theme="gatsby"]) .poker-focus { background: var(--pk-deepGlass); }
+  .poker-focus { background: var(--pk-deepGlass); }
   .poker-table-head { padding: 0; }
   .poker-status-strip { padding-inline: 0; border-width: 1px 0; border-radius: 0; }
   .poker-rail { padding: 16px 0 0; border-width: 1px 0 0; border-radius: 0; }
@@ -14036,3 +14016,30 @@ body[data-active-scene] #cave-directory-button { min-height: 44px; }
 .wp-reader .wpr-site { color: var(--gn-teal-text); }
 .wp-reader .wpr-about { height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--gn-teal); background: var(--gn-panel); color: var(--gn-teal-text); font: inherit; font-size: 11px; letter-spacing: 0.08em; cursor: pointer; white-space: nowrap; }
 .wp-reader .wpr-about:hover { background: color-mix(in srgb, var(--gn-teal) 18%, transparent); }
+
+.den-eyepiece[open] { inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; box-sizing: border-box; margin: 0; border: 0; padding: 0; background: radial-gradient(circle closest-side, transparent 88%, #513e27 89%, #191719 90%, #08090b 94%); color: #f7e9ce; touch-action: none; cursor: crosshair; }
+.den-eyepiece::backdrop { background: transparent; }
+.den-optics { position: absolute; bottom: max(12px,env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; width: max-content; max-width: 95%; padding: 8px 12px; background: #17151bf2; border: 1px solid #856845; border-radius: 8px; cursor: default; font: 14px/1.3 system-ui,sans-serif; }
+.den-optics p { width: 100%; text-align: center; margin: 0 0 3px; }
+.den-optics output { min-width: 3em; text-align: center; font-variant-numeric: tabular-nums; }
+.den-optics button { min-height: 40px; min-width: 40px; border: 1px solid #997e59; background: #30282a; color: #fff2d7; padding: 0 .65em; border-radius: 4px; cursor: pointer; }
+body:has(.den-eyepiece[open]) #stage > :not(#scene) { visibility: hidden; }
+
+.den-portrait[open] { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; box-sizing: border-box; margin: 0; padding: 0; border: 0; background: transparent; color: #fff2d7; }
+.den-portrait::backdrop { background: transparent; }
+.den-portrait a:not([hidden]) { display: inline-flex; align-items: center; min-height: 40px; padding: 0 .7em; color: #ffdea0; }
+body:has(.den-portrait[open]) #stage > :not(#scene) { visibility: hidden; }
+
+body:has(.lounge-heirloom[open]) #stage > :not(#scene) { visibility: hidden; }
+.lounge-heirloom { max-height: 80vh; overflow: auto; }
+.lounge-heirloom > :is(button, select, input, label) { display: block; margin: .6em 0; }
+.lounge-heirloom :is(button, select, input) { max-width: 100%; font: inherit; }
+.lounge-heirloom button { padding: .45em .8em; cursor: pointer; }
+.lounge-heirloom label input { display: block; margin-top: .4em; }
+@media (min-width: 900px) {
+  .lounge-heirloom { margin-right: 1.5rem; }
+}
+
+.lounge-heirloom:has(.lounge-landscape) { width: min(94vw, 1080px); max-width: 94vw; margin: auto; }
+.lounge-landscape { display: block; width: 100%; height: auto; max-height: 58dvh; object-fit: contain; }
+

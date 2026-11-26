@@ -1,9 +1,5 @@
-// The Banana Club's eight marble statues along the long walls, each on a plinth with a brass plaque, and the one board
-// their placards are read on. Every statue is the same stylised figure: one invented Ooga (`STATUE_NAME`, a name no
-// GitHub login can hold) cloned from `models.caveman`, dressed in a toga, posed by part rotations and baked with what
-// it holds into ONE geometry in marble tones, so all eight share one plain face and are told apart only by pose and
-// attribute. The seventh wears a hood whose opening is an empty dark recess, and no face. Statues never move, so each
-// is baked once (per lite set) and cached. The text on the placards is the `FIGURES` table alone.
+// Seven marble figures and a looking glass on the Ember Den's eight gallery plinths.
+// The board draws each placard from FIGURES; both renderers use the same gallery and frame.
 (() => {
   "use strict";
   const BL = window.BL, M = BL.models, S = BL.scene, K = BL.pokerMarble, { hexToRgb, mulberry32, fnv1a } = BL.math;
@@ -15,7 +11,7 @@
     { id: "dai", name: "Wei Dai", attribute: "a coin marked b", lines: ["B-money, 1998.", "It is the whitepaper's very first citation."] },
     { id: "szabo", name: "Nick Szabo", attribute: "a gold bar", lines: ["Bit gold: designed 1998, published 2005.", "Chained proofs of work."] },
     { id: "finney", name: "Hal Finney", attribute: "a tablet marked 170", lines: ["Reusable proofs of work, 2004.", "First to write back that the paper seemed promising.", "Received 10 bitcoin in block 170, 12 January 2009."] },
-    { id: "satoshi", name: "Satoshi Nakamoto", attribute: "a scroll", lines: ["Signed the whitepaper under a pen name.", "Mined the genesis block on 3 January 2009.", "To this day, nobody knows who that is."] },
+    { id: "satoshi", name: "Satoshi Nakamoto", attribute: "a looking glass", lines: ["Signed the whitepaper under a pen name.", "Mined the genesis block on 3 January 2009.", "To this day, nobody knows who that is."] },
     { id: "hanyecz", name: "Laszlo Hanyecz", attribute: "two pizza boxes", lines: ["Paid 10,000 bitcoin for two pizzas in 2010.", "22 May is Bitcoin Pizza Day."] }
   ].map(f => Object.freeze({ ...f, lines: Object.freeze(f.lines.slice()) })));
   // Four a side, walking from the mirror toward the bar, each facing the room's centre line (a node's yaw turns +z to
@@ -23,16 +19,16 @@
   const SLOTS = Object.freeze([[-22.3, 18], [22.3, 18], [-22.3, 6], [22.3, 6], [-22.3, -6], [22.3, -6], [-22.3, -18], [22.3, -18]]
     .map(([x, z]) => Object.freeze({ x, z, yaw: Math.atan2(-x, 0) })));
   // The plinth, and the footprint a walk block must cover: `reach` is how far any statue's baked geometry stands in
-  // front of its slot's centre toward the room, `side` how far to either side, both measured from the eight bakes
-  // (1.032 and 0.761 m, on both sets) and rounded up to 0.05 m. The suite checks them against the bakes.
+  // front of its slot's centre toward the room, `side` how far to either side, measured across the figures and frame
+  // (1.032 and 0.774 m, on both sets) and rounded up to 0.05 m. The suite checks them against the bakes.
   const PLINTH = Object.freeze({ w: 1.2, h: 0.9, reach: 1.05, side: 0.8 });
   // The figure is built at a height of one and baked at `SCALE`: a little over life size on its plinth.
   const SCALE = 1.3;
-  const STONE = K.WHITE, FOLD = K.SHADE, RECESS = "#2a2622";
+  const STONE = K.WHITE, FOLD = K.SHADE;
 
   // ---- the figure ------------------------------------------------------------------------------------------------
 
-  // One invented figure for all eight, so the head and face are the same blocks every time. Its traits are made
+  // One invented figure for the seven statues, so the head and face are the same blocks every time. Its traits are made
   // fresh for each build (the build draws from `rand`), never hashed from a person's name.
   const STATUE_NAME = "statue/ember-den";
   const DRESS = Object.freeze({
@@ -118,18 +114,14 @@
     // A tablet marked 170, cradled against the body, its face toward the room.
     () => M.merge(box(0.2, 0.27, 0.03, STONE, 0, 0.08, 0.05), box(0.21, 0.02, 0.035, FOLD, 0, 0.215, 0.05),
       ...glyphs("170", 0.018, 0.006, FOLD, 0, 0.085, 0.067)),
-    // A rolled scroll with a turned knob at each end, a short sheet hanging from it.
-    (seg) => {
-      const roll = M.turnedZ(M.lathe({ segments: seg, color: STONE, profile: [[0, -0.12], [0.012, -0.12], [0.012, -0.11], [0.03, -0.105], [0.03, 0.105], [0.012, 0.11], [0.012, 0.12], [0, 0.12]] }), Math.PI / 2);
-      return M.merge(M.moved(roll, 0, 0, 0.05), box(0.19, 0.12, 0.006, FOLD, 0, -0.07, 0.075));
-    },
+    null, // The looking glass occupies this slot.
     // Two pizza boxes, one on the other, carried in both hands.
     () => M.merge(box(0.27, 0.035, 0.27, STONE, 0, 0.02, 0.06), box(0.27, 0.035, 0.27, STONE, 0.01, 0.057, 0.055),
       box(0.28, 0.004, 0.004, FOLD, 0, 0.038, 0.195), box(0.28, 0.004, 0.004, FOLD, 0.01, 0.075, 0.19))
   ];
   // Each figure's pose by part rotations (arms: x forward or up, z out; forearms: x bent forward; head: x bowed, y
   // turned; legs: x forward), how it holds its piece (`hold`: "right", "left", "both" or "pair" for one in each
-  // hand), and the seventh's hood.
+  // hand).
   const POSES = [
     { armR: [-0.55, -0.12], foreR: -1.05, armL: [0.05, 0.14], foreL: -0.2, head: [0.12, -0.25], legs: [0.06, -0.14], hold: "right" },
     { armR: [0.04, -0.12], foreR: -0.25, armL: [-0.25, 0.02], foreL: -1.75, head: [0.06, 0.15], legs: [-0.12, 0.05], hold: "left" },
@@ -137,7 +129,7 @@
     { armR: [-1.05, -0.08], foreR: -0.35, armL: [0.03, 0.12], foreL: -0.15, head: [0.16, -0.12], legs: [0.04, -0.12], hold: "right" },
     { armR: [-0.35, 0], foreR: -1.15, armL: [-0.35, 0], foreL: -1.15, head: [0.22, 0], legs: [-0.08, 0.08], hold: "both", apart: 0.13 },
     { armR: [-0.55, 0.2], foreR: -0.95, armL: [-0.2, 0.12], foreL: -1.6, head: [0.18, 0.3], legs: [0.08, -0.1], hold: "left" },
-    { armR: [-0.35, -0.05], foreR: -1.2, armL: [0.02, 0.08], foreL: -0.15, head: [0.2, 0], legs: [-0.05, 0.1], hold: "right", hood: true },
+    null,
     { armR: [-0.45, 0], foreR: -1.0, armL: [-0.45, 0], foreL: -1.0, head: [0.12, -0.1], legs: [0.1, -0.06], hold: "both", apart: 0.17 }
   ];
 
@@ -154,20 +146,6 @@
     }
     return M.merge(...parts);
   };
-  // A hood over where the head would be: crown, back and sides round the head's bounds, a peak behind, and inside the
-  // opening only a dark recess. No head is drawn under it.
-  const hood = (b) => {
-    const m = 0.035, t = 0.03, x0 = b.min[0] - m, x1 = b.max[0] + m, y0 = b.min[1] - 0.03, y1 = b.max[1] + m, z0 = b.min[2] - m, z1 = b.max[2] + m * 1.6;
-    const w = x1 - x0, h = y1 - y0, d = z1 - z0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2;
-    return M.merge(
-      box(w, t, d, STONE, cx, y1 - t / 2, cz), box(w, h, t, STONE, cx, cy, z0 + t / 2),
-      box(t, h, d, STONE, x0 + t / 2, cy, cz), box(t, h, d, STONE, x1 - t / 2, cy, cz),
-      // The rim round the opening, a fold over the brow and the cheeks.
-      box(w, 0.05, 0.03, FOLD, cx, y1 - 0.04, z1 - 0.015), box(0.035, h - 0.05, 0.03, FOLD, x0 + 0.03, cy - 0.025, z1 - 0.015), box(0.035, h - 0.05, 0.03, FOLD, x1 - 0.03, cy - 0.025, z1 - 0.015),
-      box(w - 2 * t, h - t, 0.01, RECESS, cx, cy - t / 2, z0 + d * 0.45),
-      M.moved(M.turnedX(box(w * 0.5, h * 0.5, 0.08, STONE), -0.5), cx, y1 - h * 0.25, z0 - 0.02));
-  };
-  // A toga's skirt falling from the hip to the shins, in shallow folds, and a mantle's edge over the left shoulder.
   const skirt = (lite) => {
     const segments = lite ? 8 : 14, HIP = M.BODY.hip, geo = M.lathe({ segments, color: (t) => t < 0.5 ? STONE : FOLD, profile: [[0, -HIP + 0.16], [0.31, -HIP + 0.16], [0.28, -HIP * 0.4], [0.25, 0], [0.23, 0.1]] });
     // Every other facet stands proud: the folds.
@@ -246,7 +224,7 @@
       S.updateWorld(root);
     }
     const headBounds = S.boundsOf(fig.headOpen), seg = lite ? 8 : 14;
-    if (pose.hood) { p.head.geometry = null; add(p.head, hood(headBounds)); } else add(p.head, wreath(headBounds, lite));
+    add(p.head, wreath(headBounds, lite));
     add(root, skirt(lite));
     add(p.torso, sash(S.boundsOf(p.torso.geometry)));
     // The piece held, at its grip in the figure's frame, upright and toward the room.
@@ -289,19 +267,88 @@
     names.set(index, geo);
     return geo;
   };
+  // A small plate with one word carved on it as the names are (the bar's "Music" plaque), cached by its text.
+  const MUSIC_PLATE = Object.freeze({ w: 0.42, h: 0.16, d: 0.035 });
+  const wordPlate = (text) => {
+    const key = "word:" + text;
+    if (names.has(key)) return names.get(key);
+    const geo = M.merge(K.plaque(MUSIC_PLATE), ...glyphs(text, NAME_CELL, NAME_PROUD, BRONZE, 0, MUSIC_PLATE.h / 2, MUSIC_PLATE.d + NAME_PROUD / 2));
+    names.set(key, geo);
+    return geo;
+  };
+  // A full-length bevelled glass on a low marble foot. Each octagonal moulding has its
+  // own depth, so the polished brass catches light on both sides of the dark enamel.
+  const MIRROR_SLOT = 6, MIRROR_Y = 1.62, MIRROR_Z = .113, FOOT_H = .36;
+  const outline = (w, h, cut) => [[-w+cut,-h],[w-cut,-h],[w,-h+cut],[w,h-cut],
+    [w-cut,h],[-w+cut,h],[-w,h-cut],[-w,-h+cut]];
+  const mirrorKit = M.cached(() => {
+    const frame = [], w = .60, h = 1.08, cut = .145;
+    const shell = (extra, depth, z, color, emission = 0) =>
+      M.moved(M.prism(outline(w+extra,h+extra,cut+extra*.58),depth,color,emission),0,0,z);
+    frame.push(shell(.174,.16,-.056,"#3b3029"),shell(.159,.044,.031,"#9c743c",.16),
+      shell(.14,.034,.057,"#e9c680",.23),shell(.125,.024,.077,"#1b302b",.22),
+      shell(.032,.018,.092,"#cfaa68",.30),shell(.014,.009,.101,"#f4deac",.25));
+    // Fluted bronze uprights seat the frame on the foot; a fan crowns its upper bevel.
+    for(const sign of [-1,1]){
+      frame.push(box(.11,.29,.20,"#785d37",sign*.49,-1.16,-.02));
+      for(let k=0;k<3;k++) frame.push(box(.012,.24,.025,"#d8b57a",sign*(.456+k*.031),-1.16,.085));
+      for(let k=1;k<=4;k++) frame.push(M.beam(sign*.022,1.221,.033,sign*k*.076,1.351-k*.019,.033,.025,"#ccaa68"));
+    }
+    frame.push(M.moved(M.prism([[0,-.043],[.032,0],[0,.053],[-.032,0]],.035,"#93ceac",.55),0,1.306,.037));
+    const glass = M.geometry(), edge = outline(w,h,cut);
+    M.face(glass,edge.map(([x,y])=>M.pushVert(glass,x,y,0)),hexToRgb("#a4b8ad"),{emissive:.20});
+    glass.reflector=true;glass.reflectEveryFrame=true;glass.castShadow=false;
+    return { frame:K.staticMesh(M.merge(...frame)), glass };
+  });
+  // Twin trails descend from the crown, follow the clipped corners, and meet at the sill.
+  // Use the Hub's original eight glyph meshes and its head/trail shading on both renderers.
+  const codeBorder = frame => {
+    const w=.679,h=1.159,cut=.191;
+    const path=[[0,h],[w-cut,h],[w,h-cut],[w,-h+cut],[w-cut,-h],[0,-h]];
+    const ends=[0];
+    for(let i=1;i<path.length;i++) ends.push(ends[i-1]+Math.hypot(path[i][0]-path[i-1][0],path[i][1]-path[i-1][1]));
+    const length=ends[ends.length-1], marks=[], count=29;
+    for(const side of [-1,1]) for(let j=0;j<count;j++){
+      if(j%8===6 || j%8===7)continue;
+      const n=node(BL.hubModels.matrixGlyph((j*5+(side<0?3:0))%8));
+      n.sightHidden=true;n.position.z=.120;n.scale.x=n.scale.y=.67;n.scale.z=.7;
+      n.glow=.45+(j%8)*.11;n.tip=j%8===5?1:0;
+      S.addChild(frame,n); marks.push({n,side,offset:length*(j+(side<0?.48:0))/count});
+    }
+    let last=-1;
+    const update=(time,calm)=>{
+      const phase=calm?0:time*.19%length;
+      if(last===phase)return;
+      last=phase;
+      for(const {n,side,offset} of marks){
+        const d=(phase+offset)%length;
+        let i=1;while(d>ends[i])i++;
+        const a=path[i-1],b=path[i],u=(d-ends[i-1])/(ends[i]-ends[i-1]);
+        n.position.x=side*(a[0]+u*(b[0]-a[0]));n.position.y=a[1]+u*(b[1]-a[1]);
+      }
+    };
+    update(0,true);return update;
+  };
   const build = (lite) => {
     const root = S.createNode(), plaques = [];
+    let mirror, update;
     for (let i = 0; i < FIGURES.length; i++) {
       const s = SLOTS[i], group = S.createNode({ position: { x: s.x, y: 0, z: s.z }, rotation: { x: 0, y: s.yaw, z: 0 } });
-      const plaque = node(K.plaque(PLATE), 0, PLAQUE_Y, PLAQUE_Z);
+      const plaque = node(K.plaque(PLATE), 0, i === MIRROR_SLOT ? .012 : PLAQUE_Y, i === MIRROR_SLOT ? PLINTH.w / 2 : PLAQUE_Z);
       S.addChild(plaque, node(nameGeometry(i)));
-      S.addChild(group, node(K.plinth(PLINTH)), node(statueGeometry(i, !!lite), 0, PLINTH.h, 0), plaque);
+      if (i === MIRROR_SLOT) {
+        const kit=mirrorKit(), frame=node(kit.frame,0,MIRROR_Y,0);
+        mirror=node(kit.glass,0,0,MIRROR_Z);
+        S.addChild(frame,mirror);update=codeBorder(frame);
+        S.addChild(group,node(K.plinth({w:PLINTH.w,h:FOOT_H})),frame,plaque);
+      } else S.addChild(group, node(K.plinth(PLINTH)), node(statueGeometry(i, !!lite), 0, PLINTH.h, 0), plaque);
       S.addChild(root, group);
       plaques.push(Object.freeze({ node: plaque, index: i }));
     }
     return {
-      root, plaques: Object.freeze(plaques),
+      root, mirror, update, plaques: Object.freeze(plaques),
       dispose() {
+        mirror.reflectedActor = null;
         if (root.parent) S.removeChild(root.parent, root);
         while (root.children.length) S.removeChild(root, root.children[root.children.length - 1]);
       }
@@ -365,5 +412,5 @@
   };
   const boardOf = () => board || (board = makeBoard());
 
-  BL.pokerStatues = Object.freeze({ FIGURES, SLOTS, PLINTH, build, board: boardOf, tip });
+  BL.pokerStatues = Object.freeze({ FIGURES, SLOTS, PLINTH, MUSIC_PLATE, build, board: boardOf, tip, wordPlate });
 })();

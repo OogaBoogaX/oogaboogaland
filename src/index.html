@@ -1998,8 +1998,7 @@
         <div class="poker-filters" role="group" aria-label="Filter tables"><button type="button" data-poker-filter="all" aria-pressed="true">All tables</button><button type="button" data-poker-filter="open" aria-pressed="false">Open seats</button><button type="button" data-poker-filter="playing" aria-pressed="false">In play</button></div>
         <div class="poker-tables" data-poker="tables" aria-label="Ten poker tables"></div>
         <p class="poker-empty-list" data-poker="empty-list" hidden>No tables match. Try All tables.</p>
-        <details class="poker-lobby-options"><summary>Room style &amp; connection options</summary>
-          <div class="poker-theme-picker"><label>Cave theme <select data-poker-theme-select aria-label="Poker floor theme"></select></label><div class="poker-theme-choices" data-poker="theme-choices" aria-label="Choose a cave theme"></div><p data-poker="theme-description"></p></div>
+        <details class="poker-lobby-options"><summary>Connection options</summary>
           <label class="poker-nickname">Local service name <input data-poker="nickname" maxlength="32" value="Ooga" autocomplete="off"></label>
           <p>Signed-in tables use your Ooga name. Recovery is saved on this device.</p>
           <button type="button" data-poker="forget" data-poker-action="forget" hidden>Forget recovery on this device</button>
@@ -2009,9 +2008,15 @@
         <button class="poker-exit" type="button" data-poker-action="exit">Return to ₿IFRÖST</button>
       </aside>
       <button class="panel-edge" type="button" data-fold="poker-panel">Tables</button>
+      <div class="poker-carry" data-poker="carry" role="group" aria-label="Carrying a guest" hidden>
+        <p class="poker-carry-hint" data-poker="carry-hint" role="status" aria-live="polite"></p>
+        <p class="poker-carry-keys" data-poker="carry-keys"></p>
+        <div class="poker-carry-actions"><button type="button" class="poker-primary" data-poker-action="throw">Throw</button><button type="button" data-poker-action="put-down">Put down</button></div>
+      </div>
+      <button type="button" class="poker-now" data-poker="now-playing" data-poker-action="credits" aria-label="Now playing. Open the music credits" hidden></button>
       <section class="poker-focus" data-poker="focus" hidden aria-label="Poker table">
         <header class="poker-table-head">
-          <div><p class="poker-kicker">THE EMBER DEN <span aria-hidden="true">/</span> <span data-poker="theme-name">THE BANANA CLUB</span></p><div class="poker-table-title"><h3 data-poker="title" tabindex="-1">Table 01</h3><span class="poker-mode-badge" data-poker="mode-badge">PRACTICE</span></div><p data-poker="status">No-limit Hold’em · blinds 5 / 10</p></div>
+          <div><p class="poker-kicker">THE EMBER DEN <span aria-hidden="true">/</span> <span>BANANA CLUB</span></p><div class="poker-table-title"><h3 data-poker="title" tabindex="-1">Table 01</h3><span class="poker-mode-badge" data-poker="mode-badge">PRACTICE</span></div><p data-poker="status">No-limit Hold’em · blinds 5 / 10</p></div>
           <div class="poker-table-tools"><span class="poker-free">FREE PLAY</span><label class="poker-table-switch">Table <select data-poker="table-select" aria-label="Watch another table"></select></label><button class="poker-emote-button" type="button" data-poker="emote" aria-expanded="false" hidden>Emote</button><button type="button" data-poker-action="walk">Walk the floor</button><div class="poker-emote-menu" data-poker="emote-menu" role="group" aria-label="Emotes" hidden></div></div>
         </header>
         <div class="poker-status-strip"><span class="poker-connection" data-poker="connection">Practice · on your device</span><span data-poker="voice-label">Table voice</span><span class="poker-timer" data-poker="countdown" aria-label="Hand timing"></span><button type="button" data-poker="reconnect" data-poker-action="reconnect" hidden>Reconnect</button><button class="poker-emote-button" type="button" data-poker="emote" aria-expanded="false" hidden>Emote</button></div>
@@ -2049,7 +2054,6 @@
             <div class="poker-activity"><h4>This hand</h4><div class="poker-log" data-poker="log" aria-label="Public action history">Take a seat to get started.</div></div>
             <div class="poker-table-footer">
               <details open><summary>Table options</summary><div class="poker-preferences"><label><input type="checkbox" data-poker-option="auto" checked>Auto deal in practice</label><label><input type="checkbox" data-poker-option="sound">Table sounds</label></div><div class="poker-buttons"><button type="button" data-poker="pause" data-poker-action="pause" aria-pressed="false">Pause practice</button><button type="button" data-poker="stand" data-poker-action="stand" hidden>Leave seat</button></div></details>
-              <details><summary>Room style</summary><label class="poker-theme-inline">Cave theme <select data-poker-theme-select aria-label="Table theme"></select></label><p class="poker-theme-note" data-poker="theme-note"></p></details>
               <details class="poker-history"><summary>Recent hands</summary><ol data-poker="history"></ol></details>
               <details class="poker-fairness" data-poker="fairness" hidden><summary>Shuffle &amp; hand verification</summary><p data-poker="fair-status"></p><p class="poker-proof-root" data-poker="proof-root"></p><div class="poker-buttons"><button type="button" data-poker="verify" data-poker-action="verify">Verify hand</button><button type="button" data-poker="export" data-poker-action="export">Download record</button></div><label>Check a saved record <input type="file" data-poker="audit-file" accept=".json,application/json"></label><p>Experimental, unaudited protocol. Proof checks cannot rule out collusion, compromised devices or deliberate disconnections. Folded cards stay private.</p></details>
               <details class="poker-rules"><summary>How to play</summary><p>Make the best five-card hand from your two private cards and the five community cards. Check when no bet is owed, call to match, raise to increase the bet, or fold to leave this hand.</p><p>The bet amount is your total for this round. Presets only choose an amount. All-ins create side pots; ties split pots. Banana chips are free, have no cash value and cannot be bought, transferred or redeemed. No rake.</p><p>Walk the floor keeps your seat. Return to the table to act. In practice, Leave seat during a hand checks or folds your remaining turns and releases the seat afterward. Live players must stay connected after folding and leave between hands.</p><p>Live contributions and betting turns have a 90-second deadline. If it expires, the hand cancels and committed chips return. Signed-in recovery works on the same browser and device: reconnect before the deadline. Anonymous local-service keys are lost on reload. Use Forget recovery after standing to remove saved keys.</p><p>Voice follows the table you watch. Walking returns to floor voice. Spectators can join table conversations; private cards remain hidden.</p></details>
@@ -2483,6 +2487,7 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
   <script src="js/room-acoustics.js"></script>
   <script src="js/math.js"></script>
   <script src="js/daylight.js"></script>
+  <script src="js/sky-catalog.js"></script>
   <script src="js/scene.js"></script>
   <script src="js/compact-geometry.js"></script>
   <script src="js/mirror-ripples.js"></script>
@@ -2927,15 +2932,69 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
   <script src="js/poker-marble.js" data-defer="poker"></script>
   <script src="js/poker-fountain.js" data-defer="poker"></script>
   <script src="js/poker-statues.js" data-defer="poker"></script>
+  <script src="js/poker-floor.js" data-defer="poker"></script>
+  <script src="js/cosmos.js" data-defer="poker"></script>
+  <script src="js/poker-vault.js" data-defer="poker"></script>
+  <script src="js/poker-lounge-door.js" data-defer="poker"></script>
+  <script src="js/poker-glazing.js" data-defer="poker"></script>
+  <script src="js/poker-games.js" data-defer="poker"></script>
+  <script src="js/poker-ice-map.js" data-defer="poker"></script>
+  <script src="js/poker-ice.js" data-defer="poker"></script>
+  <script src="js/poker-club.js" data-defer="poker"></script>
+  <script src="js/poker-photo.js" data-defer="poker"></script>
+  <script src="js/poker-terrace.js" data-defer="poker"></script>
+  <script src="js/poker-telescope.js" data-defer="poker"></script>
+  <script src="js/poker-damask-map.js" data-defer="poker"></script>
+  <script src="js/poker-fireside-record.js" data-defer="poker"></script>
+  <script src="js/poker-minneapolis-art.js" data-defer="poker"></script>
+  <script src="js/poker-shrine-trees.js" data-defer="poker"></script>
+  <script src="js/poker-paradise-birds.js" data-defer="poker"></script>
+  <script src="js/poker-glass-material.js" data-defer="poker"></script>
+  <script src="js/poker-birth-sky.js" data-defer="poker"></script>
+  <script src="js/poker-cathedral.js" data-defer="poker"></script>
+  <script src="js/poker-desert-garden.js" data-defer="poker"></script>
+  <script src="js/poker-lounge-cats.js" data-defer="poker"></script>
+  <script src="js/poker-lounge-hummingbird.js" data-defer="poker"></script>
+  <script src="js/poker-lounge-family.js" data-defer="poker"></script>
+  <script src="js/poker-lounge-heirlooms.js" data-defer="poker"></script>
+  <script src="js/poker-speakeasy.js" data-defer="poker"></script>
+  <script src="js/poker-hearth-map.js" data-defer="poker"></script>
+  <script src="js/poker-hearth.js" data-defer="poker"></script>
+  <script src="js/poker-timeline-art.js" data-defer="poker"></script>
+  <script src="js/poker-family-glass-art.js" data-defer="poker"></script>
+  <script src="js/poker-timeline-glass.js" data-defer="poker"></script>
+  <script src="js/poker-desert-throw-art.js" data-defer="poker"></script>
+  <script src="js/poker-lounge-stone.js" data-defer="poker"></script>
+  <script src="js/poker-lounge-grass.js" data-defer="poker"></script>
+  <script src="js/poker-lounge-exterior.js" data-defer="poker"></script>
+  <script src="js/poker-salons.js" data-defer="poker"></script>
+  <script src="js/poker-moon-map.js" data-defer="poker"></script>
+  <script src="js/poker-bull.js" data-defer="poker"></script>
+  <script src="js/poker-hourglass.js" data-defer="poker"></script>
+  <script src="js/poker-black-hole.js" data-defer="poker"></script>
+  <script src="js/poker-market.js" data-defer="poker"></script>
+  <script src="js/poker-bandstand.js" data-defer="poker"></script>
+  <script src="js/poker-blue-whale.js" data-defer="poker"></script>
+  <script src="js/poker-onyx-map.js" data-defer="poker"></script>
+  <script src="js/poker-whale-breach.js" data-defer="poker"></script>
+  <script src="js/poker-aquarium.js" data-defer="poker"></script>
+  <script src="js/poker-hall.js" data-defer="poker"></script>
+  <script src="js/poker-satoshi.js" data-defer="poker"></script>
+  <script src="js/poker-era-tables.js" data-defer="poker"></script>
   <script src="js/poker-models.js" data-defer="poker"></script>
   <script src="js/poker-presence.js" data-defer="poker"></script>
   <script src="js/poker-emotes.js" data-defer="poker"></script>
+  <script src="js/poker-carry.js" data-defer="poker"></script>
   <script src="js/poker-tells.js" data-defer="poker"></script>
   <script src="js/poker-crowd-models.js" data-defer="poker"></script>
   <script src="js/poker-crowd.js" data-defer="poker"></script>
   <script src="js/poker-audio.js" data-defer="poker"></script>
   <script src="js/poker-hud.js" data-defer="poker"></script>
-  <script src="js/scene-poker.js"></script>
+  <script src="js/lounge-track-lobby.js" data-defer="lounge-track-lobby"></script>
+  <script src="js/lounge-track-cool.js" data-defer="lounge-track-cool"></script>
+  <script src="js/lounge-track-venus.js" data-defer="lounge-track-venus"></script>
+  <script src="js/lounge-track-bossa.js" data-defer="lounge-track-bossa"></script>
+  <script src="js/scene-poker.js" data-defer="poker-scene"></script>
   <!-- HALLOWEEN: only the herald is present at entry; the hunt loads when a player starts or joins. -->
   <script src="js/ghost-herald-data.js" data-defer="arcade-scene"></script>
   <script src="js/ghost-entry.js" data-defer="arcade-scene"></script>

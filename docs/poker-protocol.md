@@ -2,7 +2,7 @@
 
 This is working source for an experimental mental-poker service and client,
 not a cryptographic audit or production security certification. It extends the
-existing ten-table floor; five cave themes, suited gorilla dealers, nine seats
+existing ten-table floor; Banana Club's glass hall, suited gorilla dealers, nine seats
 per table and walkable spectator aisles remain. All chips are free, disposable
 play points. No rake, purchase, transfer, redemption, wallet, Spark integration
 or outside-settlement feature is included.
@@ -24,7 +24,7 @@ machine demonstrate functionality, not independent trust domains.
 **Walk the floor** allows walking without disconnecting a seated player. Stay
 connected after folding to help open community cards. Stand between hands before
 exiting. Spectators receive no private hole cards. Seated avatars show occupancy;
-the hosted Ooga floor also shares walking positions and table voice. The standalone Node demo does not provide Ooga login or voice.
+the hosted Ooga floor also shares walking positions and table voice. For one release after the Ooga-scale chairs, a seated position from an older page (soles at 0.45 m on the old 6 by 4.2 m chair ring) is still read as that chair, while every page sends only the new height. The standalone Node demo does not provide Ooga login or voice.
 
 Each required protocol contribution or betting turn has a 90-second deadline
 from the last accepted table event. A repeated request does not reset it.

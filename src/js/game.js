@@ -31,7 +31,16 @@
     list.unshift(handle);
     if (list.length > RECENT_HANDLES) list.length = RECENT_HANDLES;
   };
-  const defaults = () => ({ handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, raid: { best: null, cheats: [], start: 0 }, cloudHopper: { unlocked: 1, last: 0, players: [] }, block: { wins: 0, games: 0, best: 0, mined: 0, home: 0, splats: 0, splatted: 0, mvps: 0 }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, machines: {}, tickets: 0, prizes: [] } });
+  // A club night runs until six local time, including across a daylight-saving change.
+  const denMorning = now => {
+    const d=new Date(now); d.setHours(6,0,0,0);
+    if(d.getTime()>now)d.setDate(d.getDate()-1);
+    return d.getTime();
+  };
+  const validWin = (w,morning,now) => w && Number.isSafeInteger(w.at) && w.at>=morning && w.at<=now &&
+    Number.isSafeInteger(w.amount) && w.amount>=100 && Number.isInteger(w.table) && w.table>=0 && w.table<10 &&
+    typeof w.name==="string" && w.name.length>0 && w.name.length<=32;
+  const defaults = () => ({ emberDen: { visits: 0, lounge: false, pass: false, bigWin: false, wins: [] }, handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, raid: { best: null, cheats: [], start: 0 }, cloudHopper: { unlocked: 1, last: 0, players: [] }, block: { wins: 0, games: 0, best: 0, mined: 0, home: 0, splats: 0, splatted: 0, mvps: 0 }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, machines: {}, tickets: 0, prizes: [] } });
   // Ooga Arcade's carnival bests, each capped past the most its game can score (nine doubled 100s; the round games
   // run on), the retro cabinets' bests (`retro-games.js`, capped past any run), the ticket balance, and the prizes
   // (`ARCADE_PRIZES` ids) redeemed at the counter.
@@ -77,6 +86,15 @@
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return state;
       const parsed = JSON.parse(raw);
+      const den = parsed.emberDen;
+      if (den && typeof den === "object") {
+        if(Array.isArray(den.wins)){
+          const now=Date.now(), morning=denMorning(now);
+          state.emberDen.wins=den.wins.slice(0,3).filter(w=>validWin(w,morning,now)).sort((a,b)=>b.amount-a.amount);
+        }
+        if (Number.isSafeInteger(den.visits)) state.emberDen.visits = Math.min(21, Math.max(0, den.visits));
+        for (const key of ["lounge", "pass", "bigWin"]) state.emberDen[key] = den[key] === true;
+      }
       if (isString(parsed.handle, HANDLE_MAX)) state.handle = parsed.handle;
       if (isString(parsed.message, MESSAGE_MAX)) state.message = parsed.message;
       for (const key of ["handFed", "totalSats", "donations", "lastTip"]) {
@@ -443,7 +461,28 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    const api = { state, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordBlock, recordMine, recordRaid, raidUnlocked, setRaidCheat, setRaidStart, settleRaid, recordCloudHopper, playCloudHopper, cloudHopperBest, cloudHopperPlayer, recordArcade, arcadeBest, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
+    const expireDenWins = (now=Date.now()) => {
+      const wins=state.emberDen.wins, morning=denMorning(now);
+      if(!wins.some(w=>w.at<morning))return false;
+      state.emberDen.wins=wins.filter(w=>w.at>=morning);save(state);return true;
+    };
+    const recordDenWin = (name,amount,table) => {
+      const at=Date.now(), win={name:String(name||"").trim().slice(0,32),amount,table,at};
+      if(!validWin(win,denMorning(at),at))return false;
+      expireDenWins(at);
+      const wins=state.emberDen.wins;
+      if(wins.length===3 && wins[2].amount>=amount)return false;
+      state.emberDen.wins=[...wins,win].sort((a,b)=>b.amount-a.amount).slice(0,3);
+      save(state);return true;
+    };
+    const recordDen = key => {
+      const den = state.emberDen;
+      if (key === "visit") { if (den.visits === 21) return; den.visits++; }
+      else if (key === "lounge" || key === "pass" || key === "bigWin") { if (den[key]) return; den[key] = true; }
+      else return;
+      save(state);
+    };
+    const api = { state, recordDen, recordDenWin, expireDenWins, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordBlock, recordMine, recordRaid, raidUnlocked, setRaidCheat, setRaidStart, settleRaid, recordCloudHopper, playCloudHopper, cloudHopperBest, cloudHopperPlayer, recordArcade, arcadeBest, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
     return api;
   };
   BL.game = { create, RAID_CHEATS, RAID_LOOKS, RAID_STAGES, raidCheated, ARCADE_KINDS: Object.keys(ARCADE_MAX), SATS_PER_BANANA, bananasFor, formatLarge, formatThree, formatFeeRate };
