@@ -11,7 +11,7 @@
 // `update`, `intact` and `reset` break one into pooled shards and heal it within six seconds (see HEAL_AFTER).
 (() => {
   "use strict";
-  const BL = window.BL, M = BL.models, S = BL.scene, K = BL.pokerMarble, V = BL.pokerVault, BM = BL.bifrostModels, hexToRgb = BL.math.hexToRgb, Q = BL.math.quat, TAU_G = Math.PI * 2;
+  const BL = window.BL, M = BL.models, S = BL.scene, K = BL.pokerMarble, V = BL.pokerVault, BM = BL.bifrostModels, hexToRgb = BL.math.hexToRgb, Q = BL.math.quat;
   // The glass planes: the long sides at x +-SIDE_X (under the cornice, whose outer face is at 24.45), the ends at
   // z +-END_Z, outside the arrival mirror's backing (which reaches z 36.9). The glass runs from SILL_TOP to HEAD.
   const WALL_Z = 36.5, SIDE_X = 24.42, END_Z = 36.97, SILL_TOP = 0.68, HEAD = V.SPRING, TRANSOM_Y = 3.3;
@@ -233,12 +233,49 @@
     for (const s of [-1, 1]) parts.push(M.beam(s * 0.8, BOARD_TOP - 0.03, BOARD_Z, s * 0.8, HEAD + 0.02, BOARD_Z, 0.026, GOLD), box(0.09, 0.03, 0.09, PALE_GOLD, s * 0.8, HEAD - 0.015, BOARD_Z));
     return M.merge(...parts);
   });
-  // A shard of a shattered pane: a glinting sliver, both faces, glowing (so it reads lit against the night and needs
-  // no light), casting no shadow. The full set's pool of SHARD_CAP shares it; the lite set has none.
+  // One tessellation per detail level. Clip each seed's region at the perpendicular bisectors of
+  // its neighbours. The resulting convex pieces tile the opening exactly in pane coordinates.
+  const fractureSets = new Map();
+  const fractureSet = lite => {
+    if (fractureSets.has(lite)) return fractureSets.get(lite);
+    const cols = lite ? 3 : 7, rows = lite ? 4 : 9, random = BL.math.mulberry32(8103);
+    const cells = Array.from({length:cols*rows}, (_, i) => ({
+      x:(i % cols + .08 + .84 * random()) / cols, y:(Math.floor(i / cols) + .08 + .84 * random()) / rows
+    }));
+    for (const cell of cells) {
+      let polygon = [[0,0],[1,0],[1,1],[0,1]];
+      for (const other of cells) {
+        if (other === cell) continue;
+        const nx = other.x - cell.x, ny = other.y - cell.y, d = (other.x+cell.x)*nx/2 + (other.y+cell.y)*ny/2;
+        const clipped = [];
+        for (let i=0;i<polygon.length;i++) {
+          const a=polygon[i], b=polygon[(i+1)%polygon.length];
+          const da=a[0]*nx+a[1]*ny-d, db=b[0]*nx+b[1]*ny-d;
+          if (da<=0) clipped.push(a);
+          if ((da<0)!==(db<0)) { const f=da/(da-db); clipped.push([a[0]+f*(b[0]-a[0]),a[1]+f*(b[1]-a[1])]); }
+        }
+        polygon=clipped;
+      }
+      const g=M.merge(), front=[], back=[], lip=[];
+      for (const v of polygon) {
+        const x=v[0]-cell.x, y=v[1]-cell.y;
+        front.push(M.pushVert(g,x*.977,y*.977,.005));
+        lip.push(M.pushVert(g,x,y,0)); back.push(M.pushVert(g,x*.985,y*.985,-.005));
+      }
+      M.face(g,front,rgb("#a6c7cd")); M.face(g,back.slice().reverse(),rgb("#a6c7cd"));
+      for(let i=0;i<front.length;i++) {
+        const j=(i+1)%front.length;
+        M.face(g,[front[i],lip[i],lip[j],front[j]],rgb("#e7faff"),{emissive:.33});
+        M.face(g,[lip[i],back[i],back[j],lip[j]],rgb("#62aca9"));
+      }
+      V.glaze(g,.85); g.glassOpacity=.32; cell.geometry=g;
+    }
+    fractureSets.set(lite,cells); return cells;
+  };
+  // A small group of diced fragments ejected at contact. Shared by the whole particle pool.
   const shard = () => once("shard", () => {
-    const geo = M.merge(), ids = [[0, 0.17, 0], [-0.075, -0.09, 0.012], [0.06, -0.06, -0.01]].map(p => M.pushVert(geo, p[0], p[1], p[2]));
-    M.face(geo, ids, rgb("#d6efff"), { emissive: 0.7 }); M.face(geo, [ids[0], ids[2], ids[1]], rgb("#d6efff"), { emissive: 0.7 });
-    return noShadow(geo);
+    const g = M.bevelBox({ w:.065,h:.049,d:.022,color:"#b0d1d7",bevel:.006 });
+    return V.glaze(g,.92);
   });
   // Every geometry of one set, for the room's record and the checks.
   const parts = (lite = false) => ({ pane: pane(), paneLow: paneLow(), side: side(lite), eastSide: side(lite, true), eastTerrace: terraceSide(lite, true), end: end(lite), bookEnd:end(lite,true), bookTerrace:terraceEnd(lite,true), terraceSide: terraceSide(lite), terraceEnd: terraceEnd(lite), abacus: abacus(),
@@ -300,16 +337,12 @@
     slab(-BOOK_X+BOOK_HALF,barGlass.right,0,HEAD,barGlass.z-.02,barGlass.z+.02),
     slab(-6.75, 6.75, 4.6, 8.2, -36.6, -36.1)].map(b => Object.freeze(b)));
   const blockers = () => BLOCKERS;
-  // A shattered pane: it vanishes into SHARDS_PER shards flying outward and tumbling (SHARD_LIFE), the bay stands open
-  // until HEAL_AFTER, then over HEAL_TIME the glass grows back up from its foot (the sill or the transom), a row of
-  // glints riding its rising edge, until it is whole at its own size. At most MAX_BROKEN panes are open at once: a
-  // further shatter heals the oldest at once. The lite set hides the pane and brings it back, with no shards.
-  const HEAL_AFTER = 3, HEAL_TIME = 2.5, SHARD_LIFE = 1.6, SHARDS_PER = 20, MAX_BROKEN = 2, SHARD_CAP = SHARDS_PER * MAX_BROKEN, SHARD_G = 2, SHARD_FADE = 0.4;
+  const HEAL_AFTER = 3, HEAL_TIME = 2.5, SHARD_LIFE = 2.9, SHARDS_PER = 88, MAX_BROKEN = 2, SHARD_CAP = SHARDS_PER * MAX_BROKEN;
+  const supportAt = (x,z) => Math.abs(x)<=TERRACE.out && Math.abs(z)<=TERRACE.endOut || BL.pokerTerrace?.contains(x,z) ? TERRACE.top : -Infinity;
   const hash = (seed, k) => { const s = Math.sin(seed * 127.1 + k * 311.7) * 43758.5453; return s - Math.floor(s); };
   // A shard's tumble: q turned by the world-frame angular velocity w[i..i+2] over dt, as quat.integrate does, reading the
-  // rates from an array so no number is boxed between calls (and with no Math.hypot, which allocates on V8 here). The
-  // glints turn at GLINT_SPIN.
-  const GLINT_SPIN = Float32Array.from([0, 9, 4]);
+  // rates from an array so no number is boxed between calls (and with no Math.hypot, which allocates on V8 here).
+
   const turn = (q, w, i, dt) => {
     const hx = w[i] * dt / 2, hy = w[i + 1] * dt / 2, hz = w[i + 2] * dt / 2, x = q[0], y = q[1], z = q[2], s = q[3];
     q[0] = x + hy * z - hz * y + hx * s; q[1] = y + hz * x - hx * z + hy * s; q[2] = z + hx * y - hy * x + hz * s; q[3] = s - hx * x - hy * y - hz * z;
@@ -345,94 +378,108 @@
     }
     for (const [x, z] of CUPS) put(p.cup, x, 0, z).glow = 1;
     put(p.portal, 0, 0, 0);
-    // The shard pool, hidden until a pane shatters: SHARDS_PER to each of the MAX_BROKEN slots. A shard's motion, ten
-    // floats (position, velocity, spin, size), lives in `motion`; a slot's pane and the time since it broke in `slotPane`
-    // and `slotTime` (-1 and 0 when free).
-    const shards = [];
-    if (p.shard) for (let i = 0; i < SHARD_CAP; i++) { const n = put(p.shard, 0, 0, 0); n.quaternion = Q.create(); n.visible = false; shards.push(n); }
-    const motion = new Float32Array(SHARD_CAP * 10), slotPane = new Int16Array(MAX_BROKEN).fill(-1), slotTime = new Float64Array(MAX_BROKEN), slotOf = new Int8Array(list.length).fill(-1);
-    let seq = 0;
-    const hideShards = s => { if (shards.length) for (let j = 0; j < SHARDS_PER; j++) shards[s * SHARDS_PER + j].visible = false; };
-    // A slot's pane whole again: its node shown at its own size, its shards back in the pool.
-    const heal = s => {
-      const id = slotPane[s], d = list[id], n = paneNodes[id];
-      n.visible = true; n.scale.y = d.y1 - d.y0;
-      hideShards(s); slotOf[id] = -1; slotPane[s] = -1; slotTime[s] = 0;
+    const cells=fractureSet(lite), perPane=lite ? cells.length : SHARDS_PER;
+    const shards=[], slots=[], ages=new Float64Array(MAX_BROKEN), slotOf=new Int8Array(list.length).fill(-1);
+    // Position, velocity, angular velocity, three local scales and release time. No allocations on a hit or frame.
+    const stride=13, motion=new Float64Array(MAX_BROKEN*perPane*stride);
+    for (let s=0;s<MAX_BROKEN;s++) {
+      const sides=[put(null,0,0,0),put(null,0,0,0)];
+      slots.push({id:-1,left:0,right:0,sides});
+      for(let j=0;j<perPane;j++){const n=put(null,0,0,0);n.quaternion=Q.create();n.visible=false;shards.push(n);}
+    }
+    const pieceOfPane = (node,d,left,right,height) => {
+      const middle=(left+right)/2;
+      node.position.x=d.cx+d.ux*middle; node.position.y=d.y0; node.position.z=d.cz+d.uz*middle;
+      node.rotation.y=d.ry; node.scale.z=right-left; node.scale.y=height;
     };
-    const intact = id => slotOf[id] < 0;
-    // Shatters pane `id` (struck at `point`, the throw heading `dir`, either may be null; `seed` fixes the shards, else
-    // the build's own count does): false if there is no such pane or it is already open.
-    const shatter = (id, point, dir, seed) => {
-      if (!(id >= 0 && id < list.length) || slotOf[id] >= 0) return false;
-      let s = -1;
-      for (let k = 0; k < MAX_BROKEN; k++) if (slotPane[k] < 0) { s = k; break; }
-      if (s < 0) { s = 0; for (let k = 1; k < MAX_BROKEN; k++) if (slotTime[k] > slotTime[s]) s = k; heal(s); }
-      const d = list[id];
-      slotPane[s] = id; slotTime[s] = 0; slotOf[id] = s; paneNodes[id].visible = false;
-      const sd = seed === undefined ? ++seq : seed;
-      const ix = point ? point.x : d.cx, iy = point ? point.y : d.cy, iz = point ? point.z : d.cz;
-      const hx = dir ? dir.x : d.nx, hy = dir ? dir.y : 0, hz = dir ? dir.z : d.nz;
-      for (let j = 0; j < shards.length / MAX_BROKEN; j++) {
-        const i = s * SHARDS_PER + j, m = i * 10, h = j * 11, pull = 0.35 * hash(sd, h + 3);
-        const along = (2 * hash(sd, h + 1) - 1) * d.halfW * 0.95, up = d.y0 + hash(sd, h + 2) * (d.y1 - d.y0);
-        const x = d.cx + d.ux * along, y = up, z = d.cz + d.uz * along;
-        motion[m] = x + (ix - x) * pull; motion[m + 1] = y + (iy - y) * pull; motion[m + 2] = z + (iz - z) * pull;
-        const ox = motion[m] - ix, oy = motion[m + 1] - iy, oz = motion[m + 2] - iz, ol = Math.sqrt(ox * ox + oy * oy + oz * oz) || 1, push = 2.5 + 3 * hash(sd, h + 4), spread = 1.5 * hash(sd, h + 6);
-        motion[m + 3] = hx * push + d.nx * (1 + 2 * hash(sd, h + 5)) + ox / ol * spread;
-        motion[m + 4] = hy * push + oy / ol * spread + (hash(sd, h + 7) - 0.3);
-        motion[m + 5] = hz * push + d.nz * (1 + 2 * hash(sd, h + 5)) + oz / ol * spread;
-        motion[m + 6] = 20 * (hash(sd, h + 8) - 0.5); motion[m + 7] = 20 * (hash(sd, h + 9) - 0.5); motion[m + 8] = 20 * (hash(sd, h + 10) - 0.5);
-        motion[m + 9] = 0.6 + 0.9 * hash(sd, h + 0);
-        const n = shards[i];
-        n.position.x = motion[m]; n.position.y = motion[m + 1]; n.position.z = motion[m + 2];
-        Q.fromEuler(n.quaternion, TAU_G * hash(sd, h + 8), TAU_G * hash(sd, h + 9), TAU_G * hash(sd, h + 10));
-        n.scale.x = n.scale.y = n.scale.z = motion[m + 9];
-        n.visible = true;
+    const heal = s => {
+      const slot=slots[s], d=list[slot.id], n=paneNodes[d.id];
+      pieceOfPane(n,d,-d.halfW,d.halfW,d.y1-d.y0); n.visible=true;
+      slot.sides[0].geometry=slot.sides[1].geometry=null;
+      for(let j=0;j<perPane;j++){const sh=shards[s*perPane+j];sh.visible=false;sh.geometry=null;}
+      slotOf[d.id]=-1;slot.id=-1;ages[s]=0;
+    };
+    let seq=0;
+    const intact=id=>slotOf[id]<0;
+    const shatter=(id,point,velocity,seed)=>{
+      if(!Number.isInteger(id) || !list[id] || !intact(id))return false;
+      let s=slots.findIndex(slot=>slot.id<0);
+      if(s<0){s=ages[0]>=ages[1]?0:1;heal(s);}
+      const d=list[id], slot=slots[s], n=paneNodes[id], sd=seed ?? ++seq;
+      const ix=point?.x ?? d.cx, iy=point?.y ?? d.cy, iz=point?.z ?? d.cz;
+      const along=(ix-d.cx)*d.ux+(iz-d.cz)*d.uz, center=d.cx*d.ux+d.cz*d.uz;
+      let left=-d.halfW,right=d.halfW;
+      for(const member of d.members){const u=member-center;if(u<along)left=u;else{right=u;break;}}
+      slot.id=id;ages[s]=0;slot.left=left;slot.right=right;slotOf[id]=s;n.visible=false;
+      for(let j=0;j<2;j++){
+        const a=j?right:-d.halfW,b=j?d.halfW:left,side=slot.sides[j];
+        if(b>a){side.geometry=n.geometry;side.glow=n.glow;pieceOfPane(side,d,a,b,d.y1-d.y0);}
+      }
+      const vx=velocity?.x ?? d.nx,vy=velocity?.y ?? 0,vz=velocity?.z ?? d.nz;
+      const width=right-left,height=d.y1-d.y0, yaw=Math.atan2(-d.uz,d.ux);
+      for(let j=0;j<perPane;j++){
+        const i=s*perPane+j,m=i*stride,h=j*13,sh=shards[i],cell=cells[j];
+        const u=cell ? left+cell.x*width : Math.max(left,Math.min(right,along+(hash(sd,h)-.5)*.72));
+        const y=cell ? d.y0+cell.y*height : Math.max(d.y0,Math.min(d.y1,iy+(hash(sd,h+1)-.5)*.65));
+        const du=u-along,dy=y-iy,dist=Math.sqrt(du*du+dy*dy),near=Math.exp(-1.35*dist);
+        const transfer=(cell ? .08+.72*near : .35+.58*hash(sd,h+3)), spread=(.2+near)*hash(sd,h+4);
+        sh.position.x=motion[m]=d.cx+d.ux*u; sh.position.y=motion[m+1]=y; sh.position.z=motion[m+2]=d.cz+d.uz*u;
+        motion[m+3]=vx*transfer+d.ux*du*spread;motion[m+4]=vy*transfer+dy*spread;
+        motion[m+5]=vz*transfer+d.uz*du*spread;
+        const spin=(cell?3:9)*(1+near);
+        motion[m+6]=(hash(sd,h+6)-.5)*spin;motion[m+7]=(hash(sd,h+7)-.5)*spin;motion[m+8]=(hash(sd,h+8)-.5)*spin;
+        const size=.55+hash(sd,h+9);
+        sh.scale.x=motion[m+9]=cell?width:size;sh.scale.y=motion[m+10]=cell?height:size;sh.scale.z=motion[m+11]=cell?1:size;
+        motion[m+12]=cell ? Math.min(.17,dist*(.018+.018*hash(sd,h+10))) : 0;
+        sh.geometry=cell?cell.geometry:p.shard;
+        Q.fromEuler(sh.quaternion,0,yaw,0);sh.visible=true;
       }
       return true;
     };
-    // Per frame: the shards fly and tumble, then go; an open pane grows back from HEAL_AFTER with its glints riding the
-    // edge; after HEAL_AFTER + HEAL_TIME it is whole. Allocates nothing.
-    const update = dt => {
-      for (let s = 0; s < MAX_BROKEN; s++) {
-        const id = slotPane[s];
-        if (id < 0) continue;
-        const t = slotTime[s] += dt, d = list[id], n = paneNodes[id], tall = d.y1 - d.y0;
-        if (t >= HEAL_AFTER + HEAL_TIME) { heal(s); continue; }
-        if (!shards.length) continue;
-        if (t < SHARD_LIFE) {
-          const fade = t > SHARD_LIFE - SHARD_FADE ? (SHARD_LIFE - t) / SHARD_FADE : 1;
-          for (let j = 0; j < SHARDS_PER; j++) {
-            const i = s * SHARDS_PER + j, m = i * 10, sh = shards[i];
-            motion[m + 4] -= SHARD_G * dt;
-            motion[m] += motion[m + 3] * dt; motion[m + 1] += motion[m + 4] * dt; motion[m + 2] += motion[m + 5] * dt;
-            sh.position.x = motion[m]; sh.position.y = motion[m + 1]; sh.position.z = motion[m + 2];
-            turn(sh.quaternion, motion, m + 6, dt);
-            sh.scale.x = sh.scale.y = sh.scale.z = motion[m + 9] * fade;
+    const update=dt=>{
+      for(let s=0;s<slots.length;s++){
+        const slot=slots[s];if(slot.id<0)continue;
+        const before=ages[s],t=ages[s]+=dt,d=list[slot.id],n=paneNodes[d.id];
+        if(t>=HEAL_AFTER+HEAL_TIME){heal(s);continue;}
+        if(t>=HEAL_AFTER){
+          const v=(t-HEAL_AFTER)/HEAL_TIME;
+          pieceOfPane(n,d,slot.left,slot.right,Math.max(.001,(d.y1-d.y0)*v*v*(3-2*v)));n.visible=true;
+        }
+        for(let j=0;j<perPane;j++){
+          const i=s*perPane+j,m=i*stride,sh=shards[i];
+          if(!sh.visible)continue;
+          if(t>=SHARD_LIFE){sh.visible=false;continue;}
+          const elapsed=t-Math.max(before,motion[m+12]);if(elapsed<=0)continue;
+          // Substeps keep a chip from skipping the sill or bouncing harder on a slow display.
+          const steps=Math.max(1,Math.ceil(elapsed*120)),h=elapsed/steps;
+          for(let k=0;k<steps;k++){
+            motion[m]+=motion[m+3]*h;motion[m+2]+=motion[m+5]*h;
+            motion[m+1]+=(motion[m+4]-.5*9.81*h)*h;motion[m+4]-=9.81*h;
+            const floor=supportAt(motion[m],motion[m+2])+.014;
+            if(motion[m+1]<floor){
+              motion[m+1]=floor;motion[m+4]=motion[m+4]<-.7 ? -motion[m+4]*.21 : 0;
+              const friction=Math.exp(-12*h);motion[m+3]*=friction;motion[m+5]*=friction;
+              motion[m+6]*=friction;motion[m+7]*=friction;motion[m+8]*=friction;
+              if(motion[m+4]===0) {const q=sh.quaternion, blend=1-Math.exp(-14*h); // Settle flat, shortest rotation of the local normal to the deck.
+                const nx=2*(q[0]*q[2]+q[3]*q[1]), ny=2*(q[1]*q[2]-q[3]*q[0]), nz=1-2*(q[0]*q[0]+q[1]*q[1]);
+                const sign=ny>=0?1:-1;motion[m+6]-=nz*sign*blend*4;motion[m+8]+=nx*sign*blend*4;
+              }
+            }
+            turn(sh.quaternion,motion,m+6,h);
           }
-        } else if (t < HEAL_AFTER) {
-          if (shards[s * SHARDS_PER].visible) hideShards(s);
-        } else {
-          // Healing: the glass grows up from its foot, a glint at each of SHARDS_PER places along its rising edge.
-          const v = (t - HEAL_AFTER) / HEAL_TIME, e = v * v * (3 - 2 * v), edge = d.y0 + tall * e, size = 0.08 + 0.5 * Math.sin(Math.PI * e);
-          n.visible = true; n.scale.y = Math.max(0.001, tall * e);
-          for (let j = 0; j < SHARDS_PER; j++) {
-            const i = s * SHARDS_PER + j, sh = shards[i], along = ((j + 0.5) / SHARDS_PER * 2 - 1) * d.halfW;
-            sh.position.x = d.cx + d.ux * along - d.nx * 0.03; sh.position.y = edge + 0.04 * Math.sin(t * 17 + j * 2.3); sh.position.z = d.cz + d.uz * along - d.nz * 0.03;
-            turn(sh.quaternion, GLINT_SPIN, 0, dt);
-            sh.scale.x = sh.scale.y = sh.scale.z = size;
-            sh.visible = true;
-          }
+          sh.position.x=motion[m];sh.position.y=motion[m+1];sh.position.z=motion[m+2];
+          const fade=Math.min(1,(SHARD_LIFE-t)/.32);
+          sh.scale.x=motion[m+9]*fade;sh.scale.y=motion[m+10]*fade;sh.scale.z=motion[m+11]*fade;
         }
       }
     };
-    const broken = () => { let k = 0; for (let s = 0; s < MAX_BROKEN; s++) if (slotPane[s] >= 0) k++; return k; };
+    const broken = () => { let k = 0; for (let s = 0; s < MAX_BROKEN; s++) if (slots[s].id >= 0) k++; return k; };
     const shardsOut = () => { let k = 0; for (let i = 0; i < shards.length; i++) if (shards[i].visible) k++; return k; };
     // Every pane whole and every shard pooled at once, for a scene's leave.
-    const reset = () => { for (let s = 0; s < MAX_BROKEN; s++) if (slotPane[s] >= 0) heal(s); };
+    const reset = () => { for (let s = 0; s < MAX_BROKEN; s++) if (slots[s].id >= 0) heal(s); };
     const dispose = () => { reset(); while (root.children.length) S.removeChild(root, root.children[root.children.length - 1]); };
-    return { root, glass, flames, dispose, panes: () => list, blockers, shatter, update, intact, broken, shards: shardsOut, reset };
+    return { root, glass, flames, shardNodes:shards, dispose, panes: () => list, blockers, shatter, update, intact, broken, shards: shardsOut, reset };
   };
   BL.pokerGlazing = Object.freeze({ barGlass, OPEN, BOOK_X, BOOK_HALF, SIDE_X, END_Z, SILL_TOP, HEAD, TRANSOM_Y, SILL, TERRACE, RAIL, columnX, COLUMN_X, COLUMN_Z, SCONCE_Y, CUPS, PORTAL_Z, BOARD_Y, BOARD_Z,
-    HEAL_AFTER, HEAL_TIME, SHARD_LIFE, SHARDS_PER, SHARD_CAP, MAX_BROKEN, sidePosts, endPosts, parts, panes, blockers, build });
+    supportAt, HEAL_AFTER, HEAL_TIME, SHARD_LIFE, SHARDS_PER, SHARD_CAP, MAX_BROKEN, sidePosts, endPosts, parts, panes, blockers, build });
 })();

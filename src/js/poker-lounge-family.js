@@ -154,7 +154,7 @@
     g.imageSurface={canvas,rect:[-w/2,-w/2,w,w],smooth:true,version:1};return g;
   });
   // Traverse City: a little Great Lakes lighthouse on a stone plinth, white with red bands, its lantern turning. The
-  // lamp swells with the noon light each day, as the rose window's sun does.
+  // lamp swells with the morning light each day, as the rose window's sun does.
   const LIGHT_Y=.505;
   const lighthouse=M.cached(()=>{
     const turn=(profile,color,emissive=0)=>M.lathe({profile,segments:28,color,emissive});

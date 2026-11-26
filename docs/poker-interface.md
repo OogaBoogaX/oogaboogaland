@@ -14,15 +14,15 @@ banana chips.
   tables, Open seats and In play filters help find a seat or a hand to watch.
   Open seats means a seat can be taken between hands, not a mid-hand waitlist.
 - **Follow a hand:** the oval table emphasizes the board, pot, acting player,
-  stacks and round bets. Private cards sit beside the turn prompt. A separate
-  information rail holds public actions, table options and expandable details.
+  stacks and round bets. Private cards sit beside the turn prompt. Table tools
+  opens hand history and table options.
 - **Act:** Fold, Check/Call and Bet/Raise retain their positions. Presets choose
   a size without sending it. The input is a total for the round; helper text
   explains the additional chips and remaining stack. Calls and maximum raises
   explicitly identify all-ins. Refills say they are free.
 - **Ask Ooga To Move:** a computer opponent's seat card (on live tables, a seat
-  with a guest's figure and no player) is a button reading Ask Ooga To Move, or
-  "Moves after this hand" once pressed mid-hand. Your Ooga lifts the guest and
+  with a guest's figure and no player) offers Ask Ooga To Move on hover or keyboard focus.
+  On phones, tap the seat for that action. After a mid-hand request its status reads "Moves after this hand". Your Ooga lifts the guest and
   you carry it; a bar low in the middle of the floor view says what the aim is
   on, shows the keys ("Aim with the camera · Space or Throw throws · Esc puts
   down", or the stick's words on touch) and holds Throw (enabled only while a
@@ -30,22 +30,17 @@ banana chips.
   take. All of it stays on your page; see Computer opponents and Ask Ooga To Move
   in [banana-poker.md](banana-poker.md). Not verified: the bar's place on phones
   beside the sticks, and the seat card's extra line on the narrowest seats.
-- **Walk:** Walk the floor keeps the seat, exposes movement controls and moves
-  the avatar into an aisle. The lobby shows a return button and turn status.
-  Return restores the seated view. Turn sounds, if enabled, work while walking.
+- **Walk the floor** opens a confirmation for seated players. Stay at table
+  dismisses it. Leaving returns the player to the aisle and releases the chair.
+  A live departure during a hand finishes through the connected worker.
+  Spectators can walk away immediately.
 - **Leave:** Table options contains a separate Leave seat control. Practice
   can check/fold remaining turns and leave after settlement; live play requires
   waiting between hands. Walking never silently submits a poker action.
 
-The gold, emerald and ivory interface uses the panel's colour variables (the
-`--pk-*` variables on `#poker` in `style.css`) and original vector cards. The
-room is white marble (see the marble hall in [banana-poker.md](banana-poker.md)),
-but its table view keeps its dark green and gold on purpose, so its text stays
-readable. Smaller viewports stack the information rail below
-the hand, with a scrollable panel and compact private-card layout. Buttons keep
-visible keyboard focus; card motion respects reduced-motion preferences. History,
-verification and rules remain available without filling the action
-area. This is source-level implementation, not a claim of completed visual QA.
+The selected table sets the artwork, title, crest, rail, seat and control palette in practice and live play. Each surface follows its matching floor table. The hosted site fetches the selected picture when the table opens. The single-file build embeds all ten.
+
+On portrait phones the action dock sits below the table. In phone landscape it sits beside the board. Tap a seat to inspect its stack and last action. The seat sheet offers the applicable seating or move action. Bet or Raise opens the sizing sheet, where the player chooses an amount and submits it. Table tools opens on Hand history. Open Options to manage preferences. Choose another table from the casino floor. On touchscreens the floor list starts closed and the Tables button sits above the look stick. A changed turn or connection closes an outstanding bet before it can be submitted.
 
 ## The table view
 
@@ -56,9 +51,7 @@ over it:
   with it, eight chips high at most (`BL.pokerHud.potChips`). Their row keeps
   the same height empty or full, so the board never moves as the pot grows or
   as a result shrinks it to the amount collected.
-- **Rail and felt:** the rail is wider and stitched like leather, and a faint
-  weave lies over the felt. The chips, rail, felt and stitch take their colours
-  from the panel's colour variables.
+- **Rail and felt:** the room's ten material palettes and rail fittings appear in the seated view. Card faces and chip counts stay readable over the clear center.
 - **Faces at the seats:** every occupied seat shows its character's face: the
   visitor's own Ooga, a computer opponent's cast member, a live player's own
   Ooga when they sit in that chair as themselves, or else their hashed
@@ -75,7 +68,7 @@ over it:
   play does not trigger it.
 - **The room behind the table:** on desktop the backdrop is a see-through veil
   in the panel's colours, so the room shows dimly round the table. The table
-  head, status strip, information rail, dock and result banner each sit on a
+  head, status strip, action dock and result banner each sit on a
   solid surface so their text stays readable. On phones the backdrop stays
   solid. The crowd keeps strolling behind the view. The visitor's own Ooga is
   held in its chair while seated, and stands idle rather than frozen
@@ -134,7 +127,7 @@ Found / maintainer play-tests before marking the PR ready:
 
 - Complete practice hands using all action types, preset sizes, short all-ins,
   free refills and automatic dealing; compare chip totals and showdown results.
-- Use all table filters and the table switcher as a spectator. Walk while
+- Use all floor filters, watch a table, then walk back to select another. Walk while
   seated, return on your turn, then deliberately leave after a practice hand.
   Verify Escape, keyboard focus, optional turn sounds and mirror round trips.
 - Check phone portrait and landscape, narrow desktop windows, and zoomed text in

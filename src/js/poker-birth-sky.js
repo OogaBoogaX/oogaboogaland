@@ -1,20 +1,18 @@
-// An invented morning sky, leaded as a round window for the stained glass room. A sky map
-// as seen looking up (zenith at the middle, the horizon at the rim, north up, east on the left): daylight glass
-// warming to gold round the sun, every bright star still there behind the day as a small jewel, the constellations in
-// fine gold came, the waning moon in the west, and a ring of larkspur round the rim. The sun carries
-// the light: it swells each day at noon on the visitor's clock.
+// Round stained-glass sky above the hearth. North is up and east is on the left.
 (() => {
   "use strict";
   const BL = window.BL, M = BL.models, tau = Math.PI * 2, DEG = Math.PI / 180;
-  // Made up, not any real moment: the latitude and local sidereal angle (degrees) that turn the star field, the sun's
-  // and moon's altitude and azimuth (degrees, azimuth from north through east) and the moon's lit share.
-  const SKY = Object.freeze({ lat: 36, lst: 140, sun: [52, 110], moon: [30, 240], moonLit: 0.5 });
-  // Noon on the visitor's clock as a time of day in UTC, read once at load, for the sun's daily swell.
-  const NOON = (12 * 60 + new Date().getTimezoneOffset()) * 60000, DAY = 86400000;
+  // Solar right ascension (hours) and declination (degrees), rounded for the glass.
+  const sunRa = 7, sunDec = 23;
+  // Tilt the window's pole by a tenth of a turn and frame the sun three hours east
+  // of the centre line. These are design angles in the window's own sky.
+  const poleHeight = tau / 10, meridian = sunRa - 3;
+  // All visitors see the tree brighten together on the same daily schedule.
+  const PEAK_UTC = (16 * 60 + 30) * 60000, DAY = 86400000;
   const SIZE = 1024, MID = SIZE / 2, HORIZON = 404, RIM = 500;
   // Altitude and azimuth (degrees, azimuth from north through east) of a body at right ascension `ra` hours.
   const altAz = (ra, dec) => {
-    const h = (SKY.lst - ra * 15) * DEG, d = dec * DEG, p = SKY.lat * DEG;
+    const h = (meridian - ra) * 15 * DEG, d = dec * DEG, p = poleHeight;
     const alt = Math.asin(Math.sin(d) * Math.sin(p) + Math.cos(d) * Math.cos(p) * Math.cos(h));
     const az = Math.atan2(-Math.sin(h) * Math.cos(d), Math.cos(p) * Math.sin(d) - Math.sin(p) * Math.cos(d) * Math.cos(h));
     return [alt / DEG, (az / DEG + 360) % 360];
@@ -24,7 +22,7 @@
     const r = HORIZON * (90 - alt) / 90;
     return [MID - r * Math.sin(az * DEG), MID - r * Math.cos(az * DEG)];
   };
-  const sunAt = place(...SKY.sun), moonAltAz = SKY.moon, moonAt = place(...moonAltAz);
+  const sunAt = place(...altAz(sunRa, sunDec)), moonAt = place(30, 240);
 
   const LEAD = "#1b1724";
   const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
@@ -92,10 +90,9 @@
     }
     for (const { xy, mag, k } of at.values()) jewel(c, xy[0], xy[1], Math.max(5, 15 - 3.2 * mag), STAR_INK[k]);
   };
-  // The waning moon at its true phase, its lit side toward the sun.
+  // A decorative moon in the western panes, with its lit side toward the sun.
   const moon = c => {
-    if (moonAltAz[0] <= 0) return;
-    const [x, y] = moonAt, r = 30, toward = Math.atan2(sunAt[1] - y, sunAt[0] - x), k = 1 - 2 * SKY.moonLit;
+    const [x, y] = moonAt, r = 30, toward = Math.atan2(sunAt[1] - y, sunAt[0] - x), k = -0.25;
     c.save(); c.translate(x, y); c.rotate(toward);
     c.beginPath(); c.arc(0, 0, r, 0, tau); c.fillStyle = "#3d4f86"; c.fill();
     c.beginPath(); c.arc(0, 0, r, -Math.PI / 2, Math.PI / 2); c.ellipse(0, 0, Math.abs(k) * r, r, 0, Math.PI / 2, -Math.PI / 2, k > 0);
@@ -170,14 +167,14 @@
   };
   // Where the sun sits on a window of `radius` metres, from its middle (y up), and how wide its boss is.
   const sunOn = radius => ({ x: (sunAt[0] - MID) / MID * radius, y: (MID - sunAt[1]) / MID * radius, r: 36 / MID * radius });
-  // The light, 0 to 1 by the time of day: a gentle glow always, swelling through the half hour before noon, full for
+  // The light, 0 to 1 by the time of day: a gentle glow always, swelling through the half hour before the peak, full for
   // that minute, easing back over the half hour after.
   // `?debug=1&herlight=1` holds it full all day, to look at it outside that hour.
   const params = typeof location === "undefined" ? null : new URLSearchParams(location.search);
   const HELD = !!params && params.get("debug") === "1" && params.get("herlight") === "1";
   const light = ms => {
     if (HELD) return 1;
-    const t = ((ms - NOON) % DAY + DAY) % DAY, before = DAY - t, ease = u => u * u * (3 - 2 * u);
+    const t = ((ms - PEAK_UTC) % DAY + DAY) % DAY, before = DAY - t, ease = u => u * u * (3 - 2 * u);
     if (t < 60000) return 1;
     if (t < 60000 + 1800000) return ease(1 - (t - 60000) / 1800000);
     if (before < 1800000) return ease(1 - before / 1800000);

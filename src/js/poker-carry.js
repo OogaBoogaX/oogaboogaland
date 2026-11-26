@@ -25,14 +25,11 @@
   const CARRIED_ARMS = -1.3, CARRIED_LEGS = -0.45, CARRIED_HEAD = 0.2;
   // Carrying: metres a second, and as a share of the scene's own walk, with the step's heavier bob (a share of height).
   const CARRY_SPEED = 1.3, CARRY_SPEED_SHARE = 0.5, BOB = 0.045;
-  // The throw: a fixed step, gravity inside the hall (outside the glass there is none: the figure sails on into
-  // space), the launch speeds a charge of 0 to 1 spans, the farthest aim, the removal distance from the launch (the
-  // figure shrinks past SHRINK_FROM to MIN_SCALE), the twinkle's time, the tumble's rate, and the clearance a body
-  // needs from any frame member, sill, transom or rail.
-  const FIXED = 1 / 120, MAX_SUBSTEPS = 8, GRAVITY = 9.8, SPEED_MIN = 5, SPEED_MAX = 18, MAX_THROW = 16;
-  const REMOVE_DIST = 40, SHRINK_FROM = 18, MIN_SCALE = 0.3, TWINKLE_TIME = 0.6, TUMBLE = 7, BODY_CLEAR = 0.35;
+  // Fixed-step motion in metres. A pane absorbs a fraction of the normal velocity at crossing.
+  const FIXED = 1 / 120, MAX_SUBSTEPS = 12, GRAVITY = 9.81, SPEED_MIN = 5, SPEED_MAX = 18, MAX_THROW = 16;
+  const REMOVE_DIST = 40, TUMBLE = 3, BODY_CLEAR = 0.35, THROUGH = 0.87;
   // arcTo's level speed: ARC_BASE plus ARC_GAIN a metre, held between ARC_MIN and ARC_MAX; closer than ARC_NEAR is no throw.
-  const ARC_BASE = 7, ARC_GAIN = 0.5, ARC_MIN = 8, ARC_MAX = 12, ARC_NEAR = 1;
+  const ARC_BASE = 9, ARC_GAIN = 0.5, ARC_MIN = 10, ARC_MAX = 14, ARC_NEAR = 1;
 
   // Turns q by the world-frame angular velocity w[i..i+2] over dt, as math.js's quat.integrate does, reading the rates
   // from an array so no number is boxed between calls (and with no Math.hypot, which allocates on V8 here).
@@ -157,18 +154,28 @@
     p.head.rotation.y = a * 0.45 * Math.sin(SQUIRM_RATE[6] * (0.7 + 0.6 * HASHES[6]) * time + TAU * HASHES[22]);
     p.head.rotation.x = CARRIED_HEAD + a * 0.12 * WAVES[7];
   };
-  // Flailing in flight, `time` seconds since the throw: arms windmilling, legs bicycling, the head looking about,
-  // easing in from the carried pose (exactly so at time <= 0).
-  const flail = (npc, time, seed) => {
+  // Damped joint responses to release, impact and touchdown; the torso carries the flight rotation.
+  const flail = (npc, time, seed, flight) => {
     const p = npc.parts;
-    if (time <= 0) { carried(p, CARRIED_ARMS, 0, CARRIED_LEGS, CARRIED_LEGS, CARRIED_HEAD, 0); return; }
     seeded(seed);
-    const v = time / 0.2, a = v >= 1 ? 1 : v * v * (3 - 2 * v), fa = 11 + 4 * HASHES[48], fl = 13 + 4 * HASHES[49], pa = TAU * HASHES[50], pl = TAU * HASHES[51];
-    p.armR.rotation.x = CARRIED_ARMS + a * 1.3 * Math.sin(fa * time + pa);
-    p.armL.rotation.x = CARRIED_ARMS + a * 1.3 * Math.sin(fa * time + pa + 2.4);
-    p.armR.rotation.y = a * 0.6 * Math.cos(fa * time + pa); p.armL.rotation.y = -a * 0.6 * Math.cos(fa * time + pa + 2.4);
-    p.legL.rotation.x = CARRIED_LEGS + a * 0.7 * Math.sin(fl * time + pl); p.legR.rotation.x = CARRIED_LEGS + a * 0.7 * Math.sin(fl * time + pl + Math.PI);
-    p.head.rotation.y = a * 0.35 * Math.sin(0.37 * fa * time + pl); p.head.rotation.x = CARRIED_HEAD + a * 0.15 * Math.sin(0.53 * fl * time + pa);
+    const drop = flight ? Math.min(1, Math.max(0, -flight.vy / 9)) : 0;
+    const hit = flight?.crossed ? time - flight.crossTime : -1;
+    const recoil = hit >= 0 ? Math.sin(13 * hit) * Math.exp(-4.5 * hit) : 0;
+    const land = flight?.groundTime || 0, rest = Math.exp(-4 * land);
+    const reach = (1 - Math.exp(-4 * time)) * rest;
+    const arms = CARRIED_ARMS + reach * (.45 - .65 * drop);
+    const leg = CARRIED_LEGS + reach * (.35 - .2 * drop);
+    const swing = (1 - Math.exp(-14 * time)) * Math.exp(-1.9 * time) * rest;
+    const left = swing * Math.sin((6 + HASHES[48]) * time + TAU * HASHES[49]);
+    const right = swing * Math.sin((7 + HASHES[50]) * time + TAU * HASHES[51]);
+    p.armL.rotation.x = arms - .7 * left + .46 * recoil;
+    p.armR.rotation.x = arms - .7 * right + .36 * recoil;
+    p.armL.rotation.y = -.52 * reach - .18 * left;
+    p.armR.rotation.y = .48 * reach + .21 * right;
+    p.legL.rotation.x = leg + .55 * right - .31 * recoil;
+    p.legR.rotation.x = leg + .50 * left - .20 * recoil;
+    p.head.rotation.x = CARRIED_HEAD + .12 * left - .19 * recoil;
+    p.head.rotation.y = .15 * right;
   };
   // Standing, for anything cut short: the crew's standing arms, straight legs and a level head, every rotation the
   // poses here write.
@@ -196,14 +203,14 @@
 
   // ---- the flight ----
   const createFlight = () => ({ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, q: Q.create(), w: new Float64Array(3), ox: 0, oy: 0, oz: 0,
-    nx: 0, ny: 0, nz: 0, nd: 0, plane: false, crossed: false, cx: 0, cy: 0, cz: 0, crossTime: 0, time: 0, dist: 0, scale: 1,
-    gone: false, goneTime: 0, star: 0, done: false, acc: 0 });
+    nx: 0, ny: 0, nz: 0, nd: 0, plane: false, crossed: false, cx: 0, cy: 0, cz: 0, crossTime: 0, time: 0, dist: 0,
+    deckAt: null, height: 1, groundTime: 0, touched: false, done: false, acc: 0 });
   const speedOf = charge => SPEED_MIN + (charge <= 0 ? 0 : charge >= 1 ? 1 : charge) * (SPEED_MAX - SPEED_MIN);
   // Launches from `from` ({ x, y, z } and, if it has one, its orientation `q`: a carried spot from carriedAt) along
   // `dir` (made unit) at the speed `charge` (0 to 1) gives, tumbling head over heels about a level axis square to the
   // throw with a seeded wobble. `plane` is the pane aimed at (its centre and outward normal, from the glazing's panes
-  // or `aim.pane`), whose crossing the flight reports; with none it never crosses and gravity never ends.
-  const throwInit = (state, from, dir, charge, plane, seed = 0) => {
+  // or `aim.pane`), whose crossing the flight reports. Gravity acts throughout the flight.
+  const throwInit = (state, from, dir, charge, plane, seed = 0, deckAt = null, height = 1) => {
     const len = Math.sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z) || 1, dx = dir.x / len, dy = dir.y / len, dz = dir.z / len, v = speedOf(charge);
     state.x = state.ox = from.x; state.y = state.oy = from.y; state.z = state.oz = from.z;
     state.vx = dx * v; state.vy = dy * v; state.vz = dz * v;
@@ -214,21 +221,35 @@
     state.plane = !!plane;
     if (plane) { state.nx = plane.nx; state.ny = plane.ny || 0; state.nz = plane.nz; state.nd = plane.cx * plane.nx + plane.cy * state.ny + plane.cz * plane.nz; }
     state.crossed = state.plane && state.x * state.nx + state.y * state.ny + state.z * state.nz - state.nd >= 0;
-    state.cx = state.cy = state.cz = state.crossTime = state.time = state.dist = state.goneTime = state.star = state.acc = 0;
-    state.scale = 1; state.gone = state.done = false;
+    state.cx = state.cy = state.cz = state.crossTime = state.time = state.dist = state.groundTime = state.acc = 0;
+    state.deckAt = deckAt; state.height = height; state.touched = state.done = false;
   };
-  // One step of `dt` seconds (FIXED): exact constant-acceleration motion (gravity until the glass is crossed, none
-  // after), the tumble integrated as a world-frame angular velocity (`w`, radians a second), the crossing point (`cx`,
-  // `cy`, `cz`) found inside the step, `dist` from the launch and `scale` past SHRINK_FROM. Past REMOVE_DIST the figure
-  // is `gone` and stops; `star` (0 to 1 and back) is its twinkle there for the caller's pooled star, and then `done`.
+  // An oriented capsule gives the torso a support point. Its offset from the centre converts
+  // a landing impulse into rotation; tangential friction dissipates slide and spin on the terrace.
+  const deckContact = (s, dt) => {
+    const q = s.q, half = .34 * s.height, radius = .18 * s.height;
+    const ax = 2 * (q[0] * q[1] - q[3] * q[2]), ay = 1 - 2 * (q[0] * q[0] + q[2] * q[2]), az = 2 * (q[1] * q[2] + q[3] * q[0]);
+    const side = ay > 0 ? -half : half, rx = ax * side, rz = az * side;
+    const ground = s.deckAt(s.x + rx, s.z + rz);
+    const support = ground + radius - ay * side;
+    if (s.y > support) return;
+    s.y = support; s.touched = true;
+    const inertia = 1 / (.12 * s.height * s.height);
+    const normal = s.vy + s.w[2] * rx - s.w[0] * rz;
+    if (normal < 0) {
+      const impulse = -normal * (normal < -1 ? 1.12 : 1) / (1 + (rx * rx + rz * rz) * inertia);
+      s.vy += impulse; s.w[0] -= rz * impulse * inertia; s.w[2] += rx * impulse * inertia;
+      const speed = Math.sqrt(s.vx * s.vx + s.vz * s.vz);
+      const drag = 1 - Math.min(1, .52 * impulse / Math.max(.001, speed));
+      s.vx *= drag; s.vz *= drag;
+    }
+    const drag = Math.exp(-5 * dt);
+    s.w[0] *= drag; s.w[1] *= drag; s.w[2] *= drag;
+    if (s.vx * s.vx + s.vz * s.vz < .12 && Math.abs(s.vy) < .4) s.groundTime += dt;
+  };
   const throwStep = (state, dt) => {
     if (state.done) return;
-    if (state.gone) {
-      state.goneTime += dt;
-      if (state.goneTime >= TWINKLE_TIME) { state.done = true; state.star = 0; } else state.star = Math.sin(Math.PI * state.goneTime / TWINKLE_TIME);
-      return;
-    }
-    const g = state.crossed ? 0 : GRAVITY, x0 = state.x, y0 = state.y, z0 = state.z;
+    const g = GRAVITY, x0 = state.x, y0 = state.y, z0 = state.z;
     state.x += state.vx * dt; state.y += state.vy * dt - 0.5 * g * dt * dt; state.z += state.vz * dt; state.vy -= g * dt;
     turn(state.q, state.w, 0, dt);
     if (state.plane && !state.crossed) {
@@ -237,13 +258,17 @@
         const s0 = x0 * state.nx + y0 * state.ny + z0 * state.nz - state.nd, f = s0 < 0 ? s0 / (s0 - s1) : 0;
         state.cx = x0 + (state.x - x0) * f; state.cy = y0 + (state.y - y0) * f; state.cz = z0 + (state.z - z0) * f;
         state.crossTime = state.time + f * dt; state.crossed = true;
+        const absorbed = (1 - THROUGH) * (state.vx * state.nx + state.vz * state.nz);
+        state.vx -= absorbed * state.nx; state.vz -= absorbed * state.nz;
+        state.x -= absorbed * state.nx * (1-f) * dt; state.z -= absorbed * state.nz * (1-f) * dt;
+        state.w[0] -= .32 * absorbed * state.nz; state.w[2] += .32 * absorbed * state.nx;
       }
     }
+    if (state.crossed && state.deckAt) deckContact(state, dt);
     state.time += dt;
     const ex = state.x - state.ox, ey = state.y - state.oy, ez = state.z - state.oz;
     state.dist = Math.sqrt(ex * ex + ey * ey + ez * ez);
-    state.scale = state.dist <= SHRINK_FROM ? 1 : Math.max(MIN_SCALE, 1 - (1 - MIN_SCALE) * (state.dist - SHRINK_FROM) / (REMOVE_DIST - SHRINK_FROM));
-    if (state.dist >= REMOVE_DIST) state.gone = true;
+    state.done = state.dist >= REMOVE_DIST || state.groundTime >= 2.2;
   };
   // A displayed frame's worth of steps: `frameDt` (held to 0.1 s) accumulated into FIXED steps, at most MAX_SUBSTEPS.
   // Returns the steps taken.
@@ -332,7 +357,7 @@
   // The launch that carries a body from `from` (over the carrier's head) through `point` on the glass: a ballistic arc
   // at a level speed rising with distance (ARC_BASE, ARC_GAIN, ARC_MIN, ARC_MAX), as a unit direction (`out.dx`, `dy`,
   // `dz`) and the `charge` throwInit turns back into that speed, with the flight `time`. With `pane` (the pane aimed at)
-  // it also refuses an arc whose straight run on past the glass would not clear the balustrade outside ("low") or
+  // it also refuses an arc whose continuation under gravity would not clear the balustrade outside ("low") or
   // whose top would meet the cornice ("high"). `point` may be `out` itself (plan does that).
   const arcTo = (from, point, out, pane) => {
     const px = point.x, py = point.y, pz = point.z, dx = px - from.x, dy = py - from.y, dz = pz - from.z, level = Math.sqrt(dx * dx + dz * dz);
@@ -345,7 +370,8 @@
     if (pane) {
       const vn = vx * pane.nx + vz * pane.nz;
       if (vn <= 1e-6) { out.reason = "none"; return false; }
-      if (py + (vy - GRAVITY * T) * pane.rail.dist / vn - BODY_CLEAR <= pane.rail.top) { out.reason = "low"; return false; }
+      const toRail = pane.rail.dist / (vn * THROUGH);
+      if (py + (vy - GRAVITY * T) * toRail - .5 * GRAVITY * toRail * toRail - BODY_CLEAR <= pane.rail.top) { out.reason = "low"; return false; }
       if (vy > 0 && vy / GRAVITY < T && from.y + vy * vy / (2 * GRAVITY) > pane.ceiling - BODY_CLEAR) { out.reason = "high"; return false; }
     }
     out.dx = vx / speed; out.dy = vy / speed; out.dz = vz / speed;
@@ -409,7 +435,7 @@
     NPC_MAX, NPC_COUNTS, npcSeats, botId, preseat, addBots, isBot, mustWait, freeSeat,
     LIFT_TIME, GRIP_AT, HOIST_FROM, WIND_TIME, RELEASE_TIME, RELEASE_AT, LEG_SHARE, HANDS, LIE_DEPTH, MIDDLE,
     STAND_ARMS, SIT_ARMS, SIT_LEGS, HOLD_HEAD, CARRIED_ARMS, CARRIED_LEGS, CARRIED_HEAD, CARRY_SPEED, CARRY_SPEED_SHARE, BOB,
-    FIXED, MAX_SUBSTEPS, GRAVITY, SPEED_MIN, SPEED_MAX, MAX_THROW, REMOVE_DIST, SHRINK_FROM, MIN_SCALE, TWINKLE_TIME, TUMBLE, BODY_CLEAR,
+    FIXED, MAX_SUBSTEPS, GRAVITY, SPEED_MIN, SPEED_MAX, MAX_THROW, REMOVE_DIST, TUMBLE, BODY_CLEAR,
     createPose, lift, hold, wind, release, rise, squirm, flail, settle, createCarried, carriedAt,
     createFlight, speedOf, throwInit, throwStep, throwRun, createAim, cylinder, box, aimAt, arcTo, plan
   });

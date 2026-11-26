@@ -27,7 +27,7 @@ Follow the stream of amber blocks past the Bitcoin-orange Charging Bull to the G
 
 The hourglass on the west side of the promenade shows the observed block height. Gold sand drains according to the time since the tip and the recent average block interval. When a new tip arrives, the height lifts, a two-tone chime sounds, and all three diamond chandeliers cast orange light for three seconds. Opening the room on an existing tip is quiet. The sound follows the room audio controls.
 
-Walk through the middle of the even-numbered table wall to reach the marble terrace. The brass telescope has controls for the Moon, black hole and Earth. At the portrait camera, use **Act**, take a picture and select **Save PNG**. Leaving the camera returns you to where you stood. The three plaques beside the booth rank settled player awards of at least 100 play chips observed by this browser. Returned bets are excluded. The board resets at 6 a.m. local time.
+Walk through the middle of the even-numbered table wall to reach the marble terrace. Your Ooga gets a jetpack on the deck. Hold Jump to climb, use J or the jetpack button to toggle it, and land to walk back through the doorway. The brass telescope has controls for the Moon, black hole and Earth. At the portrait camera, use **Act**, take a picture and select **Save PNG**. Leaving the camera returns you to where you stood. The three plaques beside the booth rank settled player awards of at least 100 play chips observed by this browser. Returned bets are excluded. The board resets at 6 a.m. local time.
 
 Gate 21 at the east bar leads to the rooftop. The gate opens on the twenty-first visit or when you win a share of a non-refund pot worth at least 100 play chips. That win also opens Cold Storage. Upstairs, there is a fireside bar, a second telescope and a copy of the Wall of Fame. A hooded figure walks the rail at 9:21 p.m. local time. The marked return control leads back to the gaming floor.
 
@@ -56,6 +56,8 @@ it shows a picture of the room. The same Ooga appears directly in the room,
 without a title card or transition animation. The return mirror brings them
 back to ₿IFRÖST, in front of that window.
 
+On the gaming floor, walk up to a chair to see its table number and name. Choose **Open table** (Y on a keyboard) to watch, then **Take a seat** when you want to play. **Keep walking** dismisses the offer until you approach again. Jump and Act let you move past tables.
+
 **Play a practice hand** takes a free seat, adds enough computer opponents for four
 players and deals. If every table is mid-hand, it keeps a seat at the table shown
 and sits you down when that hand ends. Or choose any of the ten lobby table cards,
@@ -81,8 +83,8 @@ it squirms. Aim with the camera at a window: the pane a throw would go through
 is outlined in gold, and the bar at the bottom says what is wrong otherwise
 ("Aim at a window", "Too far: walk closer to the glass", "Aim higher"). Space,
 the act button or **Throw** throws it: the pane shatters where the guest goes
-through, the guest tumbles away into space, and the pane grows back within six
-seconds. **Put down** or Escape sets the guest on its feet instead, and it walks
+through. Glass falls in clusters and chips. The guest tumbles under gravity,
+landing on the terrace or falling past its edge. The pane regrows within six seconds. **Put down** or Escape sets the guest on its feet instead, and it walks
 out through the mirror. Either way a guest walks back in through the mirror a
 minute later, so the room does not empty. The seat is then free, and the panel
 offers it like any other; nothing sits you there.
@@ -153,14 +155,13 @@ tabletop hole cards are identical backs; walking behind a seat reveals nothing.
 A spectator can watch the focused view, return to walking, and select another
 table. Taking a second seat requires leaving the first.
 
-**Walk the floor** moves a seated visitor into the aisle while keeping their
-seat and normal turns. The lobby's **Your seat** button returns to the table;
-it shows when it is time to act. Walking does not check or fold for you.
-**Leave seat** is a separate control under Table options. During a practice
-hand it checks when free and folds when facing a bet, then releases the seat
-after settlement. Already all-in chips remain eligible. Live seats can leave
-only between hands. Escape closes the focused view; a second Escape while
-seated requests leaving the seat. Unseated visitors can return through the
+**Walk the floor** and Escape ask seated players to confirm their departure.
+**Stay at table** keeps the hand open. Confirming returns you to the aisle.
+Practice folds at the next eligible turn and settles the hand immediately.
+Already all-in chips remain eligible. In a live hand, the connected worker
+finishes its card shares, folds at its next legal turn and releases the chair
+when the hand settles. Once the chair is free you can sit at another table.
+Unseated visitors can return through the
 mirror to ₿IFRÖST. Leaving the scene pauses its local tables; returning resumes
 them. Reloading resets practice chips.
 
@@ -617,8 +618,8 @@ and the Canvas 2D set beyond one picture.
 The room plays four recorded lounge tracks by Kevin MacLeod (CC BY 4.0; see
 [CREDITS.md](../CREDITS.md)). “Lobby Time” starts on entry, followed by “Cool Vibes,”
 “Vibing Over Venus,” and “Bossa Antigua” in shuffled order. The hosted site
-fetches the stereo recordings individually. The downloadable page includes
-compact mono recordings for offline play. Each version decodes one track at a time.
+streams the stereo recordings through the music mixer, preloading the next recording near the end.
+The downloadable page decodes one embedded mono recording at a time. A browser that requires a separate gesture for a media element can play the hosted recording through its already-unlocked audio context.
 On a direct launch, the first player gesture enables sound. When a track starts, a small line under the header names it for
 six seconds ("♪ "Lobby Time" · Kevin MacLeod"); a tap on it, or on the brass
 **Music** plate on the front of the bar, opens the credits, a page a track. The

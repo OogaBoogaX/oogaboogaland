@@ -3253,7 +3253,7 @@ void main() {
       }
       return changed || baked !== shadowBakedCount;
     };
-    const markMirrorVisible = () => {
+    const markMirrorVisible = (trimInstances) => {
       const captureRecords = cameraFeedSource?.captureRecords || activeRecords;
       for (let i = 0; i < captureRecords.length; i++) {
         const rec = captureRecords[i];
@@ -3261,6 +3261,13 @@ void main() {
         const sphere = rec.batch && rec.batch.cullSphere;
         let visible = count > 0 && rec.batch ? !sphere || sphereInFrustum(sphere[0], sphere[1], sphere[2], sphere[3] + CULL_MARGIN, MIRROR_FRUSTUM) : false;
         for (let k = 0; !rec.batch && !visible && k < count; k++) visible = slotInFrustum(rec.spheres, k * 4, MIRROR_FRUSTUM);
+        // The same conservative sphere test used for record rejection also bounds the last instance
+        // needed by a full-detail capture. Keep the original prefix and instance IDs for this pass.
+        let end = count;
+        if (trimInstances && visible && !rec.batch && !rec.geometry.meshRig && !rec.geometry.projective) {
+          while (end > 1 && !slotInFrustum(rec.spheres, (end - 1) * 4, MIRROR_FRUSTUM)) end--;
+        }
+        rec.mirrorCount = end;
         rec.mirrorVisible = visible;
       }
     };
@@ -4356,7 +4363,7 @@ uniform float uDiffuseFloor;`)
           : g.sway || g.foliageVisibility === false || g.imageSurface && !(g.architectRoom && g.imageSurface.feed)))) continue;
         if (captureProfile) captureGeometry = g;
         const part = rec[kind], n = cameraFeedCapture ? rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.batch.drawInstanceCount : rec.count
-          : rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : cull ? rec.drawCount : rec.viewCount;
+          : rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : cull ? rec.drawCount : excludeMirror ? rec.mirrorCount : rec.viewCount;
         if (!part || !n) continue;
         let first = 0, count = part.count;
         if (plainFilter) {
@@ -4625,7 +4632,7 @@ uniform float uDiffuseFloor;`)
       if (target !== mirror) ensureReflectorTarget(target);
       else if (!cube) ensureMirrorTarget();
       extractFrustum(mirrorViewProj, MIRROR_FRUSTUM);
-      markMirrorVisible();
+      markMirrorVisible(qualityName === "high" && target.record?.geometry.trimReflectionInstances && !cameraFeedCapture);
       // Every reflector shows in a reflection as its plain glass, but the one being captured.
       reflectorPass = target.record;
       const pg = programs;

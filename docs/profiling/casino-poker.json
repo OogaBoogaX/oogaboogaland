@@ -1,0 +1,330 @@
+{
+  "environment": {
+    "date": "2026-11-26",
+    "browser": "Google Chrome 158.0.8127.37",
+    "host": "macOS arm64",
+    "node": "24.22.1",
+    "viewport": [
+      390,
+      844
+    ],
+    "device": "desktop Chrome with touch emulation",
+    "serving": "local HTTP, gzip, immutable hashed assets",
+    "framesPerTrial": 120,
+    "trialsPerBuild": 5,
+    "tierDuringFrameSample": "high",
+    "cache": "fresh profile per trial; second navigation in the same tab"
+  },
+  "trials": [
+    {
+      "trial": 1,
+      "htmlBytes": 296736,
+      "cold": {
+        "readyMs": 843.2000000476837,
+        "transferBytes": 3335709
+      },
+      "warm": {
+        "readyMs": 801.1999999880791,
+        "transferBytes": 60792
+      },
+      "renderer": "webgl2",
+      "quality": "high",
+      "frameP50Ms": 16.69999998807907,
+      "frameP95Ms": 17.80000001192093,
+      "hudMs": 5.399999976158142,
+      "hiddenRowMutations": 1170,
+      "recording": "lobby",
+      "recordingBufferBytes": 74160000,
+      "build": "before"
+    },
+    {
+      "trial": 1,
+      "htmlBytes": 296736,
+      "cold": {
+        "readyMs": 823.9000000357628,
+        "transferBytes": 3231303
+      },
+      "warm": {
+        "readyMs": 770.6999999880791,
+        "transferBytes": 57539
+      },
+      "renderer": "webgl2",
+      "quality": "high",
+      "frameP50Ms": 16.5,
+      "frameP95Ms": 18.400000035762787,
+      "hudMs": 2.599999964237213,
+      "hiddenRowMutations": 0,
+      "recording": "lobby",
+      "recordingBufferBytes": 0,
+      "build": "after"
+    },
+    {
+      "trial": 2,
+      "htmlBytes": 296736,
+      "cold": {
+        "readyMs": 828.2000000476837,
+        "transferBytes": 3231303
+      },
+      "warm": {
+        "readyMs": 776.3999999761581,
+        "transferBytes": 60792
+      },
+      "renderer": "webgl2",
+      "quality": "high",
+      "frameP50Ms": 16.69999998807907,
+      "frameP95Ms": 17.80000001192093,
+      "hudMs": 2.600000023841858,
+      "hiddenRowMutations": 0,
+      "recording": "lobby",
+      "recordingBufferBytes": 0,
+      "build": "after"
+    },
+    {
+      "trial": 2,
+      "htmlBytes": 296736,
+      "cold": {
+        "readyMs": 841.0999999642372,
+        "transferBytes": 3335709
+      },
+      "warm": {
+        "readyMs": 800.8000000119209,
+        "transferBytes": 57539
+      },
+      "renderer": "webgl2",
+      "quality": "high",
+      "frameP50Ms": 16.69999998807907,
+      "frameP95Ms": 17.69999998807907,
+      "hudMs": 5.199999988079071,
+      "hiddenRowMutations": 1170,
+      "recording": "lobby",
+      "recordingBufferBytes": 74160000,
+      "build": "before"
+    },
+    {
+      "trial": 3,
+      "htmlBytes": 296736,
+      "cold": {
+        "readyMs": 848.5,
+        "transferBytes": 3335709
+      },
+      "warm": {
+        "readyMs": 797.6000000238419,
+        "transferBytes": 60792
+      },
+      "renderer": "webgl2",
+      "quality": "high",
+      "frameP50Ms": 16.69999998807907,
+      "frameP95Ms": 17.900000035762787,
+      "hudMs": 5.300000011920929,
+      "hiddenRowMutations": 1170,
+      "recording": "lobby",
+      "recordingBufferBytes": 74160000,
+      "build": "before"
+    },
+    {
+      "trial": 3,
+      "htmlBytes": 296736,
+      "cold": {
+        "readyMs": 820.3999999761581,
+        "transferBytes": 3231303
+      },
+      "warm": {
+        "readyMs": 787.1999999880791,
+        "transferBytes": 57539
+      },
+      "renderer": "webgl2",
+      "quality": "high",
+      "frameP50Ms": 16.69999998807907,
+      "frameP95Ms": 17.5,
+      "hudMs": 2.600000023841858,
+      "hiddenRowMutations": 0,
+      "recording": "lobby",
+      "recordingBufferBytes": 0,
+      "build": "after"
+    },
+    {
+      "trial": 4,
+      "htmlBytes": 296736,
+      "cold": {
+        "readyMs": 819.3999999761581,
+        "transferBytes": 3231303
+      },
+      "warm": {
+        "readyMs": 764.8000000119209,
+        "transferBytes": 57539
+      },
+      "renderer": "webgl2",
+      "quality": "high",
+      "frameP50Ms": 16.600000023841858,
+      "frameP95Ms": 18.30000001192093,
+      "hudMs": 2.700000047683716,
+      "hiddenRowMutations": 0,
+      "recording": "lobby",
+      "recordingBufferBytes": 0,
+      "build": "after"
+    },
+    {
+      "trial": 4,
+      "htmlBytes": 296736,
+      "cold": {
+        "readyMs": 840.3999999761581,
+        "transferBytes": 3335709
+      },
+      "warm": {
+        "readyMs": 798.8999999761581,
+        "transferBytes": 60792
+      },
+      "renderer": "webgl2",
+      "quality": "high",
+      "frameP50Ms": 16.69999998807907,
+      "frameP95Ms": 18,
+      "hudMs": 5.100000023841858,
+      "hiddenRowMutations": 1170,
+      "recording": "lobby",
+      "recordingBufferBytes": 74160000,
+      "build": "before"
+    },
+    {
+      "trial": 5,
+      "htmlBytes": 296736,
+      "cold": {
+        "readyMs": 833.3999999761581,
+        "transferBytes": 3335709
+      },
+      "warm": {
+        "readyMs": 803.5999999642372,
+        "transferBytes": 57539
+      },
+      "renderer": "webgl2",
+      "quality": "high",
+      "frameP50Ms": 16.599999964237213,
+      "frameP95Ms": 18.30000001192093,
+      "hudMs": 5.300000011920929,
+      "hiddenRowMutations": 1170,
+      "recording": "lobby",
+      "recordingBufferBytes": 74160000,
+      "build": "before"
+    },
+    {
+      "trial": 5,
+      "htmlBytes": 296736,
+      "cold": {
+        "readyMs": 805,
+        "transferBytes": 3231303
+      },
+      "warm": {
+        "readyMs": 772.6000000238419,
+        "transferBytes": 57539
+      },
+      "renderer": "webgl2",
+      "quality": "high",
+      "frameP50Ms": 16.69999998807907,
+      "frameP95Ms": 18,
+      "hudMs": 2.800000011920929,
+      "hiddenRowMutations": 0,
+      "recording": "lobby",
+      "recordingBufferBytes": 0,
+      "build": "after"
+    }
+  ],
+  "functionalAndPixelChecks": {
+    "hats": {
+      "initial": false,
+      "loaded": true,
+      "requests": 1
+    },
+    "audio": {
+      "first": "lobby",
+      "next": "venus",
+      "decoded": 0,
+      "played": 2
+    },
+    "render": {
+      "quality": "high",
+      "width": 800,
+      "height": 513,
+      "views": [
+        {
+          "name": "seated",
+          "reference": {
+            "calls": 888,
+            "triangles": 1295719,
+            "instances": 4177
+          },
+          "optimized": {
+            "calls": 888,
+            "triangles": 1097579,
+            "instances": 3410
+          },
+          "differentChannels": 0,
+          "maxChannelError": 0,
+          "baselineDiff": 0
+        },
+        {
+          "name": "from the entrance",
+          "reference": {
+            "calls": 911,
+            "triangles": 1297465,
+            "instances": 4267
+          },
+          "optimized": {
+            "calls": 911,
+            "triangles": 1128059,
+            "instances": 3589
+          },
+          "differentChannels": 0,
+          "maxChannelError": 0,
+          "baselineDiff": 0
+        },
+        {
+          "name": "across the floor",
+          "reference": {
+            "calls": 660,
+            "triangles": 1268154,
+            "instances": 4258
+          },
+          "optimized": {
+            "calls": 660,
+            "triangles": 1019907,
+            "instances": 3192
+          },
+          "differentChannels": 0,
+          "maxChannelError": 0,
+          "baselineDiff": 0
+        },
+        {
+          "name": "toward the terrace",
+          "reference": {
+            "calls": 258,
+            "triangles": 585058,
+            "instances": 1801
+          },
+          "optimized": {
+            "calls": 258,
+            "triangles": 336017,
+            "instances": 764
+          },
+          "differentChannels": 0,
+          "maxChannelError": 0,
+          "baselineDiff": 0
+        }
+      ]
+    }
+  },
+  "mainScript": {
+    "before": {
+      "bytes": 9802834,
+      "gzipBytes": 2693510
+    },
+    "after": {
+      "bytes": 8973023,
+      "gzipBytes": 2587601
+    }
+  },
+  "recordingsVerifiedByteIdentical": [
+    "lobby",
+    "cool",
+    "venus",
+    "bossa"
+  ]
+}

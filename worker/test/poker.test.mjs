@@ -225,9 +225,20 @@ test("private worker reload recovers a hand key and pending move, then erases th
     assert.equal(saved.hand, secret);
     assert.equal(saved.publicKey, key);
     assert.equal(s.tables[0].state().keys.length, 1);
+    second.postMessage({ type: "action", name: "depart", requestId: 2 });
+    await waitFor(() => saved.departing && messages.some(m => m.packet?.departing));
+    assert.ok(s.tables[0].summary().state.seats.some(p => p?.id === key));
+    await second.terminate(); messages.length = 0;
+    const third = spawn(false);
+    await waitFor(() => messages.some(m => m.packet?.departing));
     s.advance(90001); await s.sweep();
     await waitFor(() => saved.hand === null && saved.lastRecord?.events.at(-1).request.op === "cancel");
     assert.equal(saved.keyHand, "");
-    await second.terminate();
+    await waitFor(() => !saved.departing && !s.tables[0].summary().state.seats.some(p => p?.id === key));
+    third.postMessage({ type: "action", name: "watch", value: 1 });
+    await waitFor(() => messages.some(m => m.packet?.table === 1));
+    third.postMessage({ type: "action", name: "join" });
+    await waitFor(() => s.tables[1].summary().state.seats.some(p => p?.id === key));
+    await third.terminate();
   } finally { for (const worker of workers) await worker.terminate(); peer.dispose(); await s.close(); }
 });

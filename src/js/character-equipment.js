@@ -35,11 +35,13 @@
     return record;
   };
   // Compiled seeds are already hash-checked by the build. Network reads verify both immutable objects below.
+  let seeded = false;
   const seed = (archives, blobs = {}) => {
     for (const [version, archive] of Object.entries(archives)) {
       const hash = archive.format === 2 ? archive.content : hats.get(archive.item, version)?.content || version;
       install(version, archive, archive.format === 2 ? blobs[hash] : hats.contentOf(archive), hash);
     }
+    seeded = true;
   };
   const read = async (response) => {
     if (!response.ok || !(response.headers.get("content-type") || "").startsWith("application/json")
@@ -86,6 +88,9 @@
     if (item === "none" && version === null) return Promise.resolve(hats.get(item, version));
     if (!hats.current(item) || !HASH.test(version || "")) return Promise.reject(new Error("Unsupported hat version"));
     if (recipes.has(version)) return loaded(item, version) ? Promise.resolve(hats.get(item, version)) : Promise.reject(new Error("Hat identity mismatch"));
+    if (!seeded && BL.deferredScripts?.["hat-archives"] && hats.has(item, version)) {
+      return BL.deferred.load("hat-archives").then(() => load(item, version));
+    }
     if (pending.has(version)) return pending.get(version).then((record) => { if (record.id !== item) throw new Error("Hat identity mismatch"); return record; });
     if (pending.size >= DOWNLOAD_MAX || recipes.size >= CACHE_MAX) return Promise.reject(new Error("Hat cache capacity reached"));
     const task = (async () => {
@@ -221,5 +226,5 @@
     return kept;
   };
   BL.characterEquipment = { apply, clear: (cave) => apply(cave, null), detach, supports: supported, selection, size, minimumSize, seed,
-    get loaded() { return recipes.size; } };
+    get seeded() { return seeded; }, get loaded() { return recipes.size; } };
 })();
