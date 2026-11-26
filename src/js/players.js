@@ -312,11 +312,13 @@
       const rec = net.remotes.get(row.id);
       if (!rec) continue;
       let aim = "route", metres = -1, distance = -1, lastKnown = false;
-      if (BL.voiceBlend.sameFrame(rec.zone, mine)) {
+      if (BL.voiceBlend.sameFrame(rec.zone, mine) || Z.sharedFrame(rec.zone, mine)) {
         if (rec.poseZone === rec.zone) {
           lastKnown = !rec.body;
           aim = lastKnown ? "known" : "player";
-          if (placed) { distance = Math.hypot(rec.x - me.x, rec.y - me.y, rec.z - me.z); metres = Math.round(distance); }
+          // Positions an area of a land reports from its own middle (zone-map.js `offsetOf`) have it added back.
+          const oa = Z.offsetOf(rec.zone), ob = Z.offsetOf(mine);
+          if (placed) { distance = Math.hypot(rec.x + oa.x - me.x - ob.x, rec.y - me.y, rec.z + oa.z - me.z - ob.z); metres = Math.round(distance); }
         } else aim = "nowhere";
       } else {
         const step = Z.next(mine, rec.zone);
@@ -498,8 +500,9 @@
     }
     const rec = net.remotes.get(row.id);
     if (!rec || rec.zone !== row.zone) return;
-    if (BL.voiceBlend.sameFrame(rec.zone, s.zone)) {
-      if (rec.poseZone === rec.zone) BL.pilot.turnToward(rec.x, rec.y + BODY_Y, rec.z);
+    if (BL.voiceBlend.sameFrame(rec.zone, s.zone) || Z.sharedFrame(rec.zone, s.zone)) {
+      const o = Z.offsetOf(rec.zone);
+      if (rec.poseZone === rec.zone) BL.pilot.turnToward(rec.x + o.x, rec.y + BODY_Y, rec.z + o.z);
       return;
     }
     const me = s.self, placed = me.zone === s.zone, step = Z.next(s.zone, rec.zone);

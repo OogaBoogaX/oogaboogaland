@@ -170,6 +170,8 @@
         <p data-scene="factory" data-zone-line hidden>Lightning Factory</p>
         <p data-scene="hangar" data-zone-line hidden>Lightning Jet Hangar</p>
         <p data-scene="bifrost" data-zone-line hidden>₿IFRÖST</p>
+        <p data-scene="keep" data-zone-line hidden>VALHODL</p>
+        <p data-scene="keephalls" data-zone-line hidden>VALHODL</p>
         <p data-scene="timechain" id="sphere-subtitle" hidden>Timechain Sphere</p>
         <p data-scene="arcade" data-zone-line hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr></p>
         <p data-scene="skee" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Thro-ball</p>
@@ -352,6 +354,13 @@
         <button type="button" data-preset="sky">Sky</button>
         <button type="button" data-action="bifrost-mute">Sound</button>
         <button type="button" class="leave" data-action="leave">Leave<span> chamber</span></button>
+      </nav>
+      <nav class="presets" aria-label="Valhodl" data-scene="keep" hidden>
+        <button type="button" data-preset="castle">The Keep</button>
+        <button type="button" class="leave" data-action="leave">Leave<span> the Keep</span></button>
+      </nav>
+      <nav class="presets" aria-label="Valhodl, the keep's halls" data-scene="keephalls" hidden>
+        <button type="button" class="leave" data-action="leave">Leave<span> the halls</span></button>
       </nav>
       <nav class="presets" aria-label="Drop" data-scene="drop" hidden>
         <button type="button" data-action="drop-board" id="drop-board-btn">Board</button>
@@ -2319,6 +2328,13 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
       <p class="help" id="ooga-portal-status" role="status"></p>
     </dialog>
     <div class="bottom-hud">
+      <div class="keep-status" id="keep-status" hidden>
+        <div class="keep-health keep-boat" id="keep-boat" role="meter" aria-label="Boat hull" aria-valuemin="0" aria-valuemax="3" aria-valuenow="3" hidden><svg viewBox="0 0 16 10" aria-hidden="true" shape-rendering="crispEdges"><path fill="#8a5a2c" d="M0 3h16v2h-1v2h-1v2H2V7H1V5H0z"/><path fill="#5a3a20" d="M1 5h14v1H1z"/></svg><i></i><i></i><i></i></div>
+        <div class="keep-helm" id="keep-helm" hidden>
+          <button type="button" class="keep-helm-side" id="keep-helm-port" data-on="false" title="Look to port"><span>Port</span><b></b></button>
+          <button type="button" class="keep-helm-side" id="keep-helm-star" data-on="false" title="Look to starboard"><span>Starboard</span><b></b></button>
+        </div>
+      </div>
       <button type="button" class="act" id="act" data-action="act" hidden>JUMP!</button>
       <div class="message-stack" id="message-stack">
         <output class="toast" id="reload-notice" data-reload="true" hidden></output>
@@ -2391,6 +2407,68 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
       </div>
     </section>
     <canvas class="ghost-minimap" id="ghost-minimap" aria-hidden="true" hidden></canvas>
+    <dialog class="modal keep-shop" id="keep-shop" aria-labelledby="keep-shop-title">
+      <div class="keep-shop-head">
+        <h3 id="keep-shop-title">Aras-Son's armory</h3>
+        <button type="button" class="modal-close" id="keep-shop-close" aria-label="Close">✕</button>
+      </div>
+      <p class="keep-shop-purse" id="keep-shop-purse"></p>
+      <ul class="keep-shop-list slab" id="keep-shop-list"></ul>
+      <p class="keep-shop-note">Bananas here are the Keep's own.</p>
+    </dialog>
+    <dialog class="modal keep-talk" id="keep-talk" aria-labelledby="keep-talk-name">
+      <div class="keep-shop-head">
+        <h3 id="keep-talk-name">Eryk</h3>
+        <button type="button" class="modal-close" id="keep-talk-close" aria-label="Close">✕</button>
+      </div>
+      <p class="keep-talk-line slab" id="keep-talk-line" aria-live="polite"></p>
+      <div class="keep-talk-actions" id="keep-talk-actions"></div>
+    </dialog>
+    <dialog class="modal keep-quests" id="keep-quests" aria-labelledby="keep-quests-title">
+      <div class="keep-shop-head">
+        <h3 id="keep-quests-title">Quests</h3>
+        <button type="button" class="modal-close" id="keep-quests-close" aria-label="Close">✕</button>
+      </div>
+      <ul class="keep-quests-list slab" id="keep-quests-list"></ul>
+      <div class="keep-quests-foot">
+        <p class="keep-quests-note" id="keep-quests-note" role="status"></p>
+        <button type="button" class="keep-quests-reset" id="keep-quests-reset" hidden>Reset quests</button>
+      </div>
+    </dialog>
+    <div class="keep-hurt" id="keep-hurt" aria-hidden="true" hidden></div>
+    <div class="keep-area" id="keep-area" role="status" aria-live="polite" hidden></div>
+    <div class="keep-weapon-reveal" id="keep-weapon-reveal" role="status" aria-live="polite" hidden>
+      <span class="keep-weapon-reveal-kicker" id="keep-weapon-reveal-kicker">New weapon</span>
+      <div class="keep-weapon-reveal-picture" id="keep-weapon-reveal-picture"></div>
+      <span class="keep-weapon-reveal-name" id="keep-weapon-reveal-name"></span>
+      <span class="keep-weapon-reveal-damage" id="keep-weapon-reveal-damage"></span>
+      <p class="keep-weapon-reveal-about" id="keep-weapon-reveal-about"></p>
+    </div>
+    <div class="keep-keys" id="keep-keys" role="img" aria-label="W forward, S back, A turn left, D turn right" hidden>
+      <span class="keep-keys-say keep-keys-wl">Forward</span><kbd class="keep-keys-w">W</kbd>
+      <span class="keep-keys-say keep-keys-al">Turn left</span><kbd class="keep-keys-a">A</kbd><kbd class="keep-keys-s">S</kbd><kbd class="keep-keys-d">D</kbd><span class="keep-keys-say keep-keys-dl">Turn right</span>
+      <span class="keep-keys-say keep-keys-sl">Back</span>
+    </div>
+    <div class="keep-quest-banner" id="keep-quest-banner" role="status" aria-live="polite" hidden>
+      <span class="keep-quest-banner-kicker" id="keep-quest-banner-kicker">New quest</span>
+      <span class="keep-quest-banner-name" id="keep-quest-banner-name"></span>
+    </div>
+    <div class="keep-side" id="keep-side" hidden>
+      <div class="keep-bananas" id="keep-bananas" role="img" aria-label="0 bananas"><span class="keep-side-face"><img class="keep-side-icon" data-keep-icon="banana" alt=""><b id="keep-bananas-count">0</b></span><span class="keep-side-name">Bananas</span></div>
+      <nav class="keep-arms" id="keep-arms" aria-label="Weapons" hidden>
+        <button type="button" class="keep-arm keep-arms-open" id="keep-arms-open" aria-expanded="false" aria-controls="keep-arms-fan"></button>
+        <div class="keep-arms-fan" id="keep-arms-fan" role="group" aria-label="Choose a weapon"></div>
+      </nav>
+      <nav class="keep-arms keep-ship" id="keep-ship" aria-label="Ship" hidden>
+        <button type="button" class="keep-arm keep-ship-act" data-act="0" data-state="ready" title="Full sail: faster for a few seconds"><span class="keep-arm-picture"><svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="#7a4a26" d="M7 1h1v12H7zM3 13h10v1H4v1h8v-1"/><path fill="#e8dcc0" d="M8 2h4v2h1v5h-1v2H8z"/><path fill="#c9bda0" d="M3 5h4v6H4V9H3z"/></svg></span><span>Full sail · 1</span><b></b></button>
+        <button type="button" class="keep-arm keep-ship-act" data-act="1" data-state="ready" title="Quick repair: half her hull back at once"><span class="keep-arm-picture"><svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="#9aa0a8" d="M3 2h9v2h1v2h-1v1H3z"/><path fill="#6c7178" d="M3 6h9v1H3z"/><path fill="#7a4a26" d="M6 7h3v7H6z"/><path fill="#5a3a20" d="M8 7h1v7H8z"/></svg></span><span>Repair · 2</span><b></b></button>
+        <button type="button" class="keep-arm keep-ship-act" data-act="2" data-state="ready" title="Smoke screen: the enemy cannot see to fire"><span class="keep-arm-picture"><svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="#2c2a2e" d="M3 7h3V5h5v2h3v2h1v4H1V9h2z"/><path fill="#4a474d" d="M6 6h4v1h3v2H3V8h3z"/><path fill="#66636a" d="M7 4h3v1H7zM11 3h2v1h-2z"/></svg></span><span>Smoke · 3</span><b></b></button>
+        <button type="button" class="keep-arm keep-ship-act" data-act="3" data-state="ready" title="Ram: drive her bow into an enemy's hull"><span class="keep-arm-picture"><svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="#7a4a26" d="M1 6h8v4H1z"/><path fill="#5a3a20" d="M1 9h8v1H1z"/><path fill="#c9ccd2" d="M9 5h2v6H9zM11 6h2v4h-2zM13 7h2v2h-2z"/><path fill="#f7931a" d="M2 3h3v1H2zM3 12h4v1H3z"/></svg></span><span>Ram · 4</span><b></b></button>
+      </nav>
+      <button type="button" class="keep-quests-open" id="keep-quests-open" aria-label="Quests" title="Quests" data-active="false"><span class="keep-side-face"><img class="keep-side-icon" data-keep-icon="quests" alt=""></span><span class="keep-side-name">Quests</span></button>
+      <div class="keep-life" id="keep-health" role="meter" aria-label="Health" aria-valuemin="0" aria-valuemax="10" aria-valuenow="10"><span class="keep-side-face"><img class="keep-side-icon" data-keep-icon="health" alt=""><b id="keep-health-count">10</b></span><span class="keep-side-name">Health</span></div>
+    </div>
+    <button type="button" class="keep-cannon-leave" id="keep-cannon-leave" hidden>Leave cannon</button>
     <div class="ghost-spectate" id="ghost-spectate" role="group" aria-label="Watch while you're down" hidden>
       <span class="ghost-spectate-head">You're down · watching</span>
       <div class="ghost-spectate-watch" id="ghost-spectate-watch">
@@ -2878,6 +2956,8 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
   <script src="js/bifrost-heimdall.js"></script>
   <script src="js/bifrost-window.js"></script>
   <script src="js/cave-directory.js"></script>
+  <script src="js/bifrost-valhodl-art.js"></script>
+  <script src="js/bifrost-valhodl.js"></script>
   <script src="js/bifrost-audio.js"></script>
   <script src="js/bifrost-echo.js"></script>
   <script src="js/scene-bifrost.js"></script>
@@ -2995,6 +3075,21 @@ When it is sent, tell me what happens next and when I can sign in at oogabooga.l
   <script src="js/lounge-track-venus.js" data-defer="lounge-track-venus"></script>
   <script src="js/lounge-track-bossa.js" data-defer="lounge-track-bossa"></script>
   <script src="js/scene-poker.js" data-defer="poker-scene"></script>
+  <!-- Valhodl (the Byzantine Keep), behind ₿IFRÖST's west window: nothing of it loads until that window is walked through. -->
+  <script src="js/keep-rules.js" data-defer="keep-scene"></script>
+  <script src="js/keep-layout.js" data-defer="keep-scene"></script>
+  <script src="js/keep-font-data.js" data-defer="keep-scene"></script>
+  <script src="js/keep-snapshot.js" data-defer="keep-scene"></script>
+  <script src="js/keep-models.js" data-defer="keep-scene"></script>
+  <script src="js/keep-audio-data.js" data-defer="keep-scene"></script>
+  <script src="js/keep-music-data.js" data-defer="keep-scene"></script>
+  <script src="js/keep-audio.js" data-defer="keep-scene"></script>
+  <script src="js/keep-icon-data.js" data-defer="keep-scene"></script>
+  <script src="js/scene-keep.js" data-defer="keep-scene"></script>
+  <script src="js/keep-halls-layout.js" data-defer="keep-scene"></script>
+  <script src="js/keep-halls-models.js" data-defer="keep-scene"></script>
+  <script src="js/keep-art-data.js" data-defer="keep-scene"></script>
+  <script src="js/scene-keep-halls.js" data-defer="keep-scene"></script>
   <!-- HALLOWEEN: only the herald is present at entry; the hunt loads when a player starts or joins. -->
   <script src="js/ghost-herald-data.js" data-defer="arcade-scene"></script>
   <script src="js/ghost-entry.js" data-defer="arcade-scene"></script>

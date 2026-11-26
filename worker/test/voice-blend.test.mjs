@@ -33,6 +33,8 @@ test("on the main world's surface everyone hears everyone, whatever their zone; 
   assert.ok(BLEND.world("between") && BLEND.world("hq") && BLEND.world("hq-basement") && BLEND.world("rainforest-under") && !BLEND.world("bifrost.chamber") && !BLEND.world("none") && !BLEND.world("factory.hall"));
   assert.ok(BLEND.sameFrame("between", "hq") && BLEND.sameFrame("outside", "rainforest") && !BLEND.sameFrame("outside", "bifrost.chamber") && !BLEND.sameFrame("outside", "none"), "the world's zones share coordinates");
   assert.ok(protocol.seenTogether("outside", "hq") && protocol.seenTogether("between", "sphere") && protocol.seenTogether("arcade.hall", "arcade.hall") && !protocol.seenTogether("outside", "arcade.hall") && !protocol.seenTogether("arcade.hall", "arcade.haunt"), "what the room relays follows who is shown");
+  assert.ok(protocol.seenTogether("byzantine-keep", "byzantine-keep.y4r1") && protocol.seenTogether("byzantine-keep.y1r0", "byzantine-keep.y2r0") && protocol.seenTogether("byzantine-keep.halls", "byzantine-keep.h3")
+    && !protocol.seenTogether("byzantine-keep", "byzantine-keep.halls") && !protocol.seenTogether("byzantine-keep.y4r1", "byzantine-keep.h0") && !protocol.seenTogether("byzantine-keep", "outside"), "Valhodl's areas are seen together, a scene at a time");
 });
 
 test("down through the main world's levels a player hears the level above and the one below, whatever their zone; on a level, that level alone", () => {

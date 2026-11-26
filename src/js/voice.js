@@ -382,10 +382,12 @@
     if (!stats.radius || BL.net.voiceLink(id) === "linked" || outdoorSource(id)) return 1;
     const s = BL.net.state, zone = s.zone, me = s.self, rec = BL.net.remotes.get(id);
     if (me.zone !== zone) return 1;
-    const frame = BL.voiceBlend.sameFrame;
-    const across = rec && (frame(rec.zone, zone) || rec.zone === s.blendTo || rec.blendTo === zone);
+    const frame = BL.voiceBlend.sameFrame, Z = BL.zoneMap;
+    const across = rec && (frame(rec.zone, zone) || Z.sharedFrame(rec.zone, zone) || rec.zone === s.blendTo || rec.blendTo === zone);
     if (!across || rec.poseZone !== rec.zone) return 0;
-    return falloff(Math.hypot(rec.x - me.x, rec.y - me.y, rec.z - me.z), stats.radius);
+    // An area of a land reports from its own middle (zone-map.js `offsetOf`), added back for the distance.
+    const oa = Z.offsetOf(rec.zone), ob = Z.offsetOf(zone);
+    return falloff(Math.hypot(rec.x + oa.x - me.x - ob.x, rec.y - me.y, rec.z + oa.z - me.z - ob.z), stats.radius);
   };
   // Whether this visitor could hear player `id` where both stand now: a voice link, or one place by the room's rule
   // (`sharesPlace` in worker/src/protocol.js) and inside the hearing range. For the Online Oogas panel's faded mark.

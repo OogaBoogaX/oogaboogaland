@@ -443,6 +443,15 @@
     let waterTime = 0;
     const waterWave = new Float64Array(3), waterBodyPoint = new Float64Array(3);
     let pointLights = null, pointLightCount = 0;
+    // The render's `relit` gain and the upright cylinders it lights (`relitBodies`), as the WebGL renderer has them.
+    let relitGain = 1, relitBodies = null, relitCount = 0;
+    const relitAt = (x, y, z) => {
+      for (let i = 0; i < relitCount; i++) {
+        const o = i * 5, dx = x - relitBodies[o], dz = z - relitBodies[o + 1], r = relitBodies[o + 2];
+        if (dx * dx + dz * dz < r * r && y > relitBodies[o + 3] && y < relitBodies[o + 4]) return relitGain;
+      }
+      return 1;
+    };
     let spotLight = null, blacklight = null, characterProjection = null;
     const spotEnergy = (x, y, z, nx, ny, nz) => {
       if (!spotLight || spotLight[3] <= 0) return 0;
@@ -978,7 +987,8 @@
               } else {
                 const diffuse = Math.max(diffuseFloor, nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2]);
                 const hemi = Math.max(ambientFloor, lerp(groundLuma, skyLuma, ny * 0.5 + 0.5));
-                k = lerp(Math.min(1, hemi + diffuse * 0.7 * directStrength), 1.1, Math.min(1, emissive));
+                const relit = relitCount ? relitAt(centerX, centerY, centerZ) : 1;
+                k = lerp(Math.min(1, (hemi + diffuse * 0.7 * directStrength) * relit), 1.1, Math.min(1, emissive));
               }
               k = lerp(k, 1.3, node.scorch > 0 ? 0 : node.highlight * 0.4);
               const c = cursor ? cursor.color.data : face.color, colorStart = cursor ? cursor.color.start : 0;
@@ -2172,6 +2182,9 @@
       diffuseFloor = diffuse;
       pointLights = opts.lights || null;
       pointLightCount = pointLights ? Math.min(6, opts.lightCount || 0) : 0;
+      relitGain = opts.relit === undefined ? 1 : opts.relit;
+      relitBodies = opts.relitBodies || null;
+      relitCount = relitGain !== 1 && relitBodies ? Math.min(BL.glRenderer.RELIT_MAX, opts.relitCount || 0) : 0;
       skyLuma = sky[0] * 0.2126 + sky[1] * 0.7152 + sky[2] * 0.0722;
       groundLuma = ground[0] * 0.2126 + ground[1] * 0.7152 + ground[2] * 0.0722;
       waterTime = performance.now() * 0.001 % 3600;

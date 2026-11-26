@@ -4418,7 +4418,7 @@ const orbitFlow = async (b) => {
 // perf floor; `perf` runs the perf floor alone; `unit` (or nothing) runs only the global tier.
 // Two lanes limit concurrent WebGL boot pressure; four produced long startups
 // and a GPU context loss during the full suite.
-const SCENES = ["hub", "lab", "studio", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "raid", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
+const SCENES = ["hub", "lab", "studio", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "keep", "keephalls", "timechain", "poker", "arcade", "raid", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
 for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "poker-unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "ooga-chat-app", "character-catalog-app", "equipment-app", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
@@ -20438,8 +20438,10 @@ const hubOutdoorTravel = { name: "hub outdoor travel", why: "rule: passive Hub N
 // and the second visit may hold no more GPU records, nodes, input targets or DOM than the first.
 // `settle` (see tourGo) reads both visits only once the scene has finished what it builds on a time budget; a wait
 // that runs out fails the check.
-const trip = (id, settle = null) => ({ name: `${id} round trip`, why: "contract: a scene left and entered again keeps nothing from the last visit, and takes a donation whenever one arrives", run: async (b) => {
-  const away = id === "hub" ? "lab" : "hub", laps = [], beds = [];
+// `away` is where each lap steps out to: the island, or the lab from the island; a scene whose own neighbour is
+// another names it.
+const trip = (id, settle = null, awayTo = null) => ({ name: `${id} round trip`, why: "contract: a scene left and entered again keeps nothing from the last visit, and takes a donation whenever one arrives", run: async (b) => {
+  const away = awayTo || (id === "hub" ? "lab" : "hub"), laps = [], beds = [];
   for (let i = 0; i < 2; i++) {
     await tourGo(b, away);
     laps.push(await tourGo(b, id, settle));
@@ -21215,7 +21217,9 @@ const hostedSite = async () => {
   const deferred = new Map();
   for (const [, src, group] of readFileSync(join(root, "src/index.html"), "utf8").matchAll(/<script src="([^"]+)" data-defer="([a-z-]+)"><\/script>/g)) deferred.set(group, [...(deferred.get(group) || []), src]);
   // A module's block in the built page runs from its marker to the next module's.
-  const block = (src) => { const start = html.indexOf(`// ---- ${src} ----\n`); return html.slice(start, html.indexOf("\n\n// ---- ", start + 1)); };
+  // A hosted-only group (the lounge's recordings) is not in the page at all: its bundle comes from the source, as
+  // scripts/site.mjs builds it.
+  const block = (src) => { const start = html.indexOf(`// ---- ${src} ----\n`); return start < 0 ? `// ---- ${src} ----\n${readFileSync(join(root, "src", src), "utf8").trim()}` : html.slice(start, html.indexOf("\n\n// ---- ", start + 1)); };
   // `gone` answers 404, as a chunk a later deploy replaced does.
   const page = externalizePage(externalizeModules(html, out, deferred, block), out, block, ["js/jumbotron-data.js"]), refused = [], gone = [], fetched = [], probed = [];
   const server = createServer((req, res) => {
@@ -35577,6 +35581,67 @@ const studioPlaces = { name: "studio places", why: "playthrough: the studio is w
   record("studio places: reloading an Ooga in bed preserves its rifle selection and waking restores the held rifle", reloaded.asleep && reloaded.kept && reloaded.standing, JSON.stringify(reloaded));
 } };
 scene("studio", { query: `character=${STUDIO_OOGA}`, steps: [studioPlaces, trip("studio")] });
+// Valhodl (scene-keep.js, scene-keep-halls.js), a `wip` land behind ₿IFRÖST's west window.
+const KEEP_OOGA = "portlandhodl";
+// Waits in the page until the director has landed on `id`.
+const keepGo = (b, id, place = null) => b.evaluate(`(async () => { const B = window.__ooga, t0 = performance.now(); B.go("${id}"${place ? `, "${place}"` : ""});
+  while ((B.transitioning || B.scene !== "${id}") && performance.now() - t0 < 60000) await new Promise((r) => setTimeout(r, 50));
+  B.advance(0.3, 1 / 60); return B.scene; })()`);
+const keepWalking = { name: "keep walking", why: "rule: W A S D walk the visitor's Ooga its way on screen in Valhodl's yard and inside its keep, from two camera angles", run: async (b) => {
+  const yard = await walkKeys(b, KEEP_OOGA, 0, -48, [0, 2.2], 0.5);
+  await keepGo(b, "keephalls");
+  const halls = await walkKeys(b, KEEP_OOGA, 0, -14, [0, 2.2], 0.5);
+  await keepGo(b, "keep");
+  record("keep walking: W A S D walk the Ooga its way on screen in the yard and in the keep's lounge, from two camera angles", allWalk(yard) && allWalk(halls), JSON.stringify({ yard, halls }));
+} };
+// Where the visitor's Ooga is sent to the room from: inside the room's bounds on a position, under the zone of the
+// area it stands in, and that area's middle added back gives where it stands.
+const KEEP_FRAME_PROBE = `(spots, keep) => { const B = window.__ooga, P = B.pilot, Z = BL.zoneMap, L = keep ? BL.keepLayout : BL.keepHallsLayout, out = [];
+  for (const [x, z, y] of spots) {
+    P.navigate({ position: { x, y: y ?? (keep ? L.supportAt(x, z, 60) : 0), z }, yaw: 0, pitch: 0.4, dist: 8 }); B.advance(0.4, 1 / 60);
+    const s = BL.net.state, o = Z.offsetOf(s.zone), p = P.player.root.position;
+    out.push({ at: [x, z], zone: s.zone, x: +s.self.x.toFixed(2), z: +s.self.z.toFixed(2), off: Math.hypot(s.self.x + o.x - p.x, s.self.z + o.z - p.z) });
+  }
+  return out; }`;
+const keepFrames = { name: "keep frames", why: "regression: Valhodl sent raw world positions past the room's ±160 m bound (Portal Island at z 308, CBDC at x 950, Cold Storj at x −1012, the tower interiors from x 200), so other players and voice saw everyone there pinned to its edge", run: async (b) => {
+  const yard = await b.evaluate(`(${KEEP_FRAME_PROBE})([[0, -48], [0, 300], [930, -50], [-1012, -50, -6]], true)`);
+  await keepGo(b, "keephalls");
+  const halls = await b.evaluate(`(() => { const T = BL.keepHallsLayout.TOWERS, C = BL.keepHallsLayout.CAVE; return (${KEEP_FRAME_PROBE})([[0, -14], [T[0].x, T[0].z], [T[5].x, T[5].z], [C.arrive.x, C.arrive.z]], false); })()`);
+  await keepGo(b, "keep");
+  const all = [...yard, ...halls];
+  record("keep frames: every pose Valhodl sends lies inside the room's ±160 m bound, under the zone of the area it stands in, and that area's middle added back is where the Ooga stands, in the yard and in the halls",
+    all.every((r) => Math.abs(r.x) <= 160 && Math.abs(r.z) <= 160 && r.off < 0.05) && yard.every((r) => r.zone === "byzantine-keep" || r.zone.startsWith("byzantine-keep.y")) && halls.every((r) => r.zone === "byzantine-keep.halls" || r.zone.startsWith("byzantine-keep.h"))
+    && new Set(all.map((r) => r.zone)).size === all.length, JSON.stringify({ yard, halls }));
+} };
+// The land's object link, faked so the check needs no backend: one socket across the yard and the halls, its minute's
+// `here` sent from inside the keep, closed only when Valhodl is left.
+const keepLink = { name: "keep link", why: "regression: walking into the keep closed the land's object link and the halls sent no `here`, so after ten minutes inside the saved record was swept and the drawbridge was shut again on the way out", run: async (b) => {
+  await b.evaluate(`(() => { const G = BL.gameNet, log = window.__keepLink = { opened: 0, closed: 0, here: 0, real: { offers: G.offers, open: G.open } };
+    G.offers = (kind) => kind === "keep" || log.real.offers(kind);
+    G.open = (kind, venue, hooks) => kind !== "keep" ? log.real.open(kind, venue, hooks) : (log.opened++, { state: "live", send: (m) => { if (m.t === "here") log.here++; return true; }, close: () => { log.closed++; } }); })()`);
+  try {
+    await keepGo(b, "keephalls");
+    const inside = await b.evaluate(`(() => { const log = window.__keepLink, at = { opened: log.opened }; window.__ooga.advance(61, 1 / 10); at.here = log.here; at.closed = log.closed; return at; })()`);
+    await keepGo(b, "keep");
+    const back = await b.evaluate(`({ opened: window.__keepLink.opened, closed: window.__keepLink.closed })`);
+    await keepGo(b, "hub");
+    const gone = await b.evaluate(`({ closed: window.__keepLink.closed })`);
+    await keepGo(b, "keep");
+    record("keep link: one link to the land's object across the yard and the halls, a `here` sent inside the keep after a minute, and closed only once Valhodl is left",
+      inside.opened === 1 && inside.here >= 1 && inside.closed === 0 && back.opened === 1 && back.closed === 0 && gone.closed === 1, JSON.stringify({ inside, back, gone }));
+  } finally {
+    await b.evaluate(`(() => { const G = BL.gameNet, log = window.__keepLink; G.offers = log.real.offers; G.open = log.real.open; })()`);
+  }
+} };
+// The kit's crates and barrels (keep-models.js `kit`) in the yard's shipyard and Armory & Forge, and the halls' dungeon.
+const keepPieces = { name: "keep pieces", why: "rule: Valhodl's crates and barrels come from the set-dressing kit, each a poke target that answers with its tooltip", run: async (b) => {
+  const r = await b.evaluate(`(() => { const K = BL.keepModels, kinds = ["crates", "casks", "barrel", "barrels"].map((k) => [k, K.kit(k)]);
+    return { kinds: kinds.map(([k, c]) => [k, !!c && c.picks.length / 6, !!c && c.geometry.faces.length > 0]) }; })()`);
+  record("keep pieces: the crates, casks and barrels are built from the set-dressing kit with a pick sphere for every piece", r.kinds.every(([, n, faces]) => n >= 1 && faces), JSON.stringify(r));
+} };
+scene("keep", { query: `wip=keep&character=${KEEP_OOGA}&castle=1`, steps: [keepWalking, keepFrames, keepLink, keepPieces, trip("keep")] });
+// The halls step out to the yard, their own neighbour, so the kept island's own changes stay out of the reading.
+scene("keephalls", { query: `wip=keep&character=${KEEP_OOGA}`, steps: [trip("keephalls", null, "keep")] });
 const modelledCarryPoses = { name: "modelled Heimdall and axe poses", why: "regression: Heimdall's props followed the old straight arms and planting an axe lifted the whole arm before bending its elbow", run: async b => {
   const result = await b.evaluate(`(() => {
     const S = BL.scene, M = BL.models, C = BL.crew, stage = S.createNode(), rows = [], shots = [];
@@ -42868,6 +42933,7 @@ const voiceHearingChecks = async () => {
     const win={BL:{sound,net:{state,setMuted:on=>netMuted.push(on),remotes,voiceLink:()=>"none",subscribe:fn=>{subscribers.add(fn);return()=>subscribers.delete(fn);}}},setTimeout:()=>0,clearTimeout(){},setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id),addEventListener:(k,fn)=>handlers.set(k,fn),removeEventListener(){}};
     const context={window:win,document:{createElement:()=>probe},localStorage:{getItem:k=>store.has(k)?store.get(k):null,setItem:(k,v)=>store.set(k,String(v))},navigator:{userActivation:activation,mediaDevices:{getUserMedia:async()=>{captures++;return stream;}}},RTCPeerConnection:Pc,Audio,MediaStream,fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math,Number,String};
     if(webAudio)win.AudioContext=context.AudioContext=Ctx;
+    runInNewContext(readFileSync(join(root,"src/js/zone-map.js"),"utf8"),context);
     runInNewContext(readFileSync(join(root,"src/js/voice-blend.js"),"utf8"),context);
     runInNewContext(source,context);
     const V=win.BL.voice,elOf=id=>els[pulled.lastIndexOf(id)],gainOf=id=>gains.filter(g=>g.id===id&&g.out.size).at(-1);
@@ -48114,7 +48180,10 @@ const raceRigChecks = async () => {
     // Ember Den infinity-pool faces select the filtered moonlit water material.
     // The falling sheets share the Matrix glyph atlas and attenuate their own glass alpha.
     // Blended canvas surfaces use pigment alpha; the soft flame shell also fades at its silhouette.
-    "00d52eb414368e793c194c5a50164a2d6350788a3ff57c89dcccbe903935ac60",
+    // Valhodl's wand charge adds uRelit and up to eight relit upright cylinders (uRelitCount, uRelitA, uRelitTop),
+    // which keep the Ooga and the enemies near it lit while the land darkens (was 00d52eb4); the loop ends at once
+    // with uRelitCount 0, as it is in every other scene and moment, so ordinary output is unchanged.
+    "58fe75f930579e85f2d4514bc115ec1e70a5568b3d46389249e3b2ba8b72e981",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));

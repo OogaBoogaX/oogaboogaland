@@ -118,6 +118,19 @@ test("equipment Room: appearance is scoped to visibility, catches up on entry an
   assert.deepEqual(frames(c).at(-1), { t: "equipment", kind: "remove", ids: [1] });
 });
 
+test("equipment Room: crossing between two areas of one Valhodl scene keeps the look; the halls are apart", async t => {
+  const h = await host(t), a = (await h.join()).ws, b = (await h.join(2)).ws;
+  h.send(a, { t: "zone", name: "byzantine-keep" });
+  h.send(b, { t: "zone", name: "byzantine-keep.y4r1" });
+  await h.save(1, { revision: 0, selection: hat(), size: 120 });
+  assert.equal(frames(b).some(m => m.id === 1 && m.revision === 1), true, "a neighbouring area sees the choice");
+  b.sent.length = 0;
+  h.send(a, { t: "zone", name: "byzantine-keep.y4r0" });
+  assert.equal(frames(b).some(m => m.kind === "remove"), false, "an area's edge sends no remove");
+  h.send(a, { t: "zone", name: "byzantine-keep.halls" });
+  assert.deepEqual(frames(b).at(-1), { t: "equipment", kind: "remove", ids: [1] }, "the keep's halls are a scene of their own");
+});
+
 test("equipment Room: an older admission/sweep read cannot regress a concurrent save", async t => {
   const h = await host(t), { ws } = await h.join();
   await h.save(1, { revision: 0, selection: hat(), size: 80 });

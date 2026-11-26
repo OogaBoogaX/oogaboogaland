@@ -19,7 +19,7 @@
     "html_handling": "drop-trailing-slash",
     "not_found_handling": "404-page",
     // Only these paths run the Worker (worker/src/index.js); every other path is served straight from _site.
-    "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/game/*", "/donations/*", "/inspect", "/media/lectures/*", "/art/*"]
+    "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/game/*", "/donations/*", "/inspect", "/media/lectures/*", "/media/keep/*", "/art/*"]
   },
   "vars": {
     "ENVIRONMENT": "production",
@@ -64,7 +64,8 @@
   // uploaded by hand before a deploy that names them (`npm --prefix worker run lectures:production`, docs/lectures.md).
   "r2_buckets": [
     { "binding": "CLOUD_HOPPER_REPLAYS", "bucket_name": "oogaboogaland-production-replays" },
-    { "binding": "LECTURE_AUDIO", "bucket_name": "oogaboogaland-production-lectures" }
+    { "binding": "LECTURE_AUDIO", "bucket_name": "oogaboogaland-production-lectures" },
+    { "binding": "KEEP_MUSIC", "bucket_name": "oogaboogaland-production-keep-music" }
   ],
   "d1_databases": [
     {
