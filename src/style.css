@@ -2219,12 +2219,18 @@ body[data-active-scene="block"] .mode-hud {
   @container reactions (min-width: 460px) { .reaction-grid { --reaction-cell: 44px; } }
 }
 
-/* The chevron over the row's right edge, which fades into the card under it. */
+/* While a mouse drags the row (reaction-bar.js), it follows the pointer with snapping off. */
+.reaction-grid[data-dragging] { scroll-snap-type: none; cursor: grabbing; }
+.reaction-grid[data-dragging] > .reaction { cursor: grabbing; }
+
+/* The chevrons over the row's ends, each fading into the card under it: the right one while more lie to the right, the
+   left one once the row has scrolled away from its start. */
 .reaction-more {
   position: absolute; top: 0; right: 0; bottom: 0; display: grid; place-items: center end; width: 40px; padding: 0 2px 0 0; border: 0;
   background: linear-gradient(90deg, transparent, var(--slab-dark) 62%); color: rgba(243, 239, 228, 0.8); cursor: pointer;
 }
 .reaction-more[hidden] { display: none; }
+.reaction-back { right: auto; left: 0; place-items: center start; padding: 0 0 0 2px; background: linear-gradient(270deg, transparent, var(--slab-dark) 62%); }
 .reaction-more svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .reaction-more:is(:hover, :focus-visible) { color: var(--paper); }
 .reaction-more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
