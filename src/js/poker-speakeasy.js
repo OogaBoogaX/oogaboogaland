@@ -91,17 +91,6 @@
       ...[-.145,.251].map(y=>box(0,y,.174,step*.79,.016,.013,brass,.12)),
       M.moved(BL.factoryModels.smoothBitcoin(.11,.024,"#9a6238",.05),0,0,.186)),
       bookX-pivot,.20+2*.67+.05+.245,.12);
-    const spillGeo=M.geometry();
-    // A translucent taper admits the marble grain through the wash. Grow it with the leaf.
-    for(let i=0;i<5;i++){
-      const z0=i*.46,z1=z0+.46;
-      const side=(d,right)=>-.12+.17*d+(right?1:-1)*(.37+.092*d);
-      const ids=[[side(z0,false),z0],[side(z1,false),z1],[side(z1,true),z1],[side(z0,true),z0]]
-        .map(([u,v])=>M.pushVert(spillGeo,u,.027,v));
-      M.face(spillGeo,ids,BL.math.hexToRgb(["#ffc777","#edb067","#cd945a","#ac8154","#8e7150"][i]),{emissive:.85});
-    }
-    spillGeo.glassOpacity=.15; spillGeo.glassGrazing=0; spillGeo.castShadow=false;
-    const spill=add(target,spillGeo,-.18,0,.11);
     let progress=0, opening=false, closing=false;
     const swing=t=>{
       const v=Math.max(0,(t-.15)/.85);
@@ -115,10 +104,9 @@
     const leafBox={x:-pivot,z:-.031,hx:half,hz:.27};
     const bookBox={x:book.position.x,z:0,hx:step*.47,hz:0};
     const pose=()=>{
-      const u=Math.min(1,progress/.24),v=Math.max(0,(progress-.15)/.85);
+      const u=Math.min(1,progress/.24);
       book.rotation.x=u*.26;book.position.z=.12+.115*u;
       hinge.rotation.y=swing(progress);
-      spill.visible=v>.02;spill.scale.x=spill.scale.z=Math.max(.01,v);
     };
     pose();
     const clearAt=(angle,front,ax,az,bx,bz,r)=>{

@@ -8,14 +8,14 @@
 // stop; `land` is the leaf coming down on the abutment. `choir` is the ghost hunt's elixir choir, heard as the knights
 // first face each other. The boat: `wash` is the water each pull of the oars pushes past (a soft swell of noise), and
 // `wake(level, x, y, z)`, once a frame, the recorded water (`wake`) looping along its hull, as loud as it goes fast;
-// `rowing(on)`, once a frame, the rowing music (keep-music-data.js `row`, then `ivar`, in turn) on the page's music channel, faded in as a
-// visitor sits down to row, looping while they do and faded out as they get out.
+// `rowing(on, lead)`, once a frame, the sailing music (keep-music-data.js `row`, `ivar` and `armory`, in a random order,
+// `row` first while `lead`) on the page's music channel, faded in as a visitor sits down to row or takes a helm, playing
+// on while they do and faded out as they get out.
 //
 // `BL.keepAudio.music` is the places' music, one for the page and apart from either scene's sounds, so it plays on
 // through the keep's door: `play(name)`, once a frame from the yard and the halls, the music of where the visitor is
-// (keep-music-data.js `shore` anywhere outside the castle's walls, `yard`, `northern` and `daudir` in
-// turn inside them and in the keep, `shipyard` at the shipyard past the west bridge's middle, `armory` at the Armory & Forge past the east
-// one's, null for none),
+// (`land`, the land's playlist of keep-music-data.js `yard`, `northern`, `daudir` and `shipyard` in a random order,
+// anywhere on foot; null for none),
 // on the music channel, each from its beginning faded in as they come there, looping while they stay and faded out as
 // they leave; `handoff()` as one Keep scene goes to the other, so the music carries on across the switch; `leave()`
 // in each scene's `leave`, which fades it out and closes it unless a handoff is under way.
@@ -33,21 +33,28 @@
   // The drawbridge's level and how long it fades as the leaf or portcullis stops; the wake's level at full speed and
   // how much of each end of its loop is left out (an MP3's padding, so the loop never clicks).
   const BRIDGE = 0.9, BRIDGE_FADE = 0.7, WAKE = 0.375, WAKE_TRIM = 0.05;
-  // The rowing music's level, how long it takes to fade in and out, and its songs, played in turn from the first each
-  // time a visitor sits down to row or takes a ship's helm (`row`, then `ivar`).
-  const ROW = 0.55, ROW_FADE = 2.5, ROW_SONGS = ["row", "ivar"];
+  // The sailing music's level, how long it takes to fade in and out, and its songs, played in a random order each
+  // time a visitor sits down to row or takes a ship's helm, `row` first on their first crossing to the castle island.
+  const ROW = 0.55, ROW_FADE = 2.5, ROW_SONGS = ["row", "ivar", "armory"];
   // The places' music: each one's level, how long it takes to fade in and out, and how long a handoff waits for the
   // next scene before it gives up and fades out.
-  const PLACE = { shore: 0.125, yard: 0.375, shipyard: 0.375, armory: 0.375 }, PLACES = Object.keys(PLACE), PLACE_IN = 4, PLACE_OUT = 2.5, HANDOFF_S = 30;
-  // A place with more than one song plays them in turn, each to its end and then the next, round again after the last
-  // (the courtyard: `yard`, `northern`, then `daudir`); any other place loops its one song.
-  const PLAYLIST = { yard: ["yard", "northern", "daudir"] };
+  const PLACE = { land: 0.375 }, PLACES = Object.keys(PLACE), PLACE_IN = 4, PLACE_OUT = 2.5, HANDOFF_S = 30;
+  // A place with more than one song plays them in a random order, each to its end and then the next, shuffled again
+  // after the last (the land's: every song but the sailing ones); any other place loops its one song.
+  const PLAYLIST = { land: ["yard", "northern", "daudir", "shipyard"] };
+  // A list in a random order, never starting with `avoid` (the song just played) while it has another.
+  const shuffle = (list, avoid) => {
+    const a = list.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; }
+    if (a.length > 1 && a[0] === avoid) { const t = a[0]; a[0] = a[1]; a[1] = t; }
+    return a;
+  };
 
   const create = () => {
     let ctx = null, master = null, noise = null, muted = BL.sound.muted;
     const soundChannel = BL.sound.channel("keep"), musicChannel = BL.sound.channel("music");
     const tones = [], noises = [];
-    let rowGain = null, rowSrc = null, rowOn = false, rowTurn = 0, toneNext = 0, noiseNext = 0, wakeGain = null, wakeSrc = null, wakeLevel = 0, bridgeGain = null, bridgeSrc = null;
+    let rowGain = null, rowSrc = null, rowOn = false, rowTurn = 0, rowOrder = ROW_SONGS, toneNext = 0, noiseNext = 0, wakeGain = null, wakeSrc = null, wakeLevel = 0, bridgeGain = null, bridgeSrc = null;
     // The recordings, each decoded once the context is open: name to its buffer (null while it decodes).
     const recorded = new Map();
     const ear = { x: 0, y: 0, z: 0 };
@@ -521,29 +528,33 @@
       wakeGain.gain.setTargetAtTime(want, ctx.currentTime, 0.25);
       wakeSrc.playbackRate.setTargetAtTime(0.85 + 0.3 * k, ctx.currentTime, 0.3);
     };
-    // One of the rowing songs from its start, the next one taken up as it ends (its own fades carry the join), round
-    // again after the last; one not decoded yet is passed over for one that is.
+    // One of the sailing songs from its start, the next one taken up as it ends (its own fades carry the join),
+    // shuffled again after the last; one not decoded yet is passed over for the next that is.
     const rowSong = (t) => {
-      let buffer = recorded.get(ROW_SONGS[rowTurn]);
-      if (!buffer) { rowTurn = 0; buffer = recorded.get(ROW_SONGS[0]); }
+      let buffer = recorded.get(rowOrder[rowTurn]);
+      for (let k = 1; !buffer && k < rowOrder.length; k++) { const i = (rowTurn + k) % rowOrder.length; if (recorded.get(rowOrder[i])) { rowTurn = i; buffer = recorded.get(rowOrder[i]); } }
       const src = rowSrc = ctx.createBufferSource();
       src.buffer = buffer; src.connect(rowGain); src.start(t);
       src.onended = () => {
         if (rowSrc !== src || !ctx) return;
-        rowTurn = (rowTurn + 1) % ROW_SONGS.length;
+        if (++rowTurn >= rowOrder.length) { rowOrder = shuffle(ROW_SONGS, rowOrder[rowOrder.length - 1]); rowTurn = 0; }
         rowSong(ctx.currentTime);
       };
     };
-    // The rowing music: decoded the first time it is wanted, started from its beginning as the visitor sits down to row
-    // and faded in, faded out and stopped as they get out. The page-wide mute and the music level are its channel's.
-    const rowing = (on) => {
+    // The sailing music: decoded the first time it is wanted, started from its beginning as the visitor sits down to row
+    // and faded in, faded out and stopped as they get out; `lead` (their first crossing) starts it on `row`. The
+    // page-wide mute and the music level are its channel's.
+    const rowing = (on, lead) => {
       if (on === rowOn && (!on || rowSrc)) return;
       if (!ctx) { if (!on) return; init(); if (!ctx) return; }
       const t = ctx.currentTime;
       if (on) {
-        if (!rowOn) rowTurn = 0;
+        if (!rowOn) {
+          rowOrder = shuffle(ROW_SONGS); rowTurn = 0;
+          if (lead) { const i = rowOrder.indexOf("row"); rowOrder[i] = rowOrder[0]; rowOrder[0] = "row"; }
+        }
         for (const name of ROW_SONGS) decode(name, BL.keepMusicData);
-        const buffer = recorded.get(ROW_SONGS[rowTurn]);
+        const buffer = recorded.get(rowOrder[rowTurn]);
         if (!buffer) { rowOn = true; return; }
         if (ctx.state === "suspended") ctx.resume();
         if (rowSrc) rowSrc.stop(t);
@@ -586,8 +597,8 @@
     let ctx = null, channel = null, on = null, handing = false, timer = 0;
     // Each place's gain, the source playing it, the one still fading out from when the visitor last left it, and the
     // recordings, each decoded the first time it is wanted (null while it decodes).
-    const gain = {}, src = {}, old = {}, turn = {}, buffers = new Map();
-    const songs = (place) => PLAYLIST[place] || [place];
+    const gain = {}, src = {}, old = {}, turn = {}, order = {}, buffers = new Map();
+    const songs = (place) => order[place] || (order[place] = PLAYLIST[place] ? shuffle(PLAYLIST[place]) : [place]);
     const song = (place, ahead = 0) => { const list = songs(place); return list[((turn[place] || 0) + ahead) % list.length]; };
     // The place's song now from its start, and, in a playlist, the next one readied and taken up as this one ends.
     const start = (place) => {
@@ -597,7 +608,8 @@
       decode(song(place, 1));
       s.onended = () => {
         if (src[place] !== s) return;
-        turn[place] = ((turn[place] || 0) + 1) % list.length; src[place] = null;
+        turn[place] = (turn[place] || 0) + 1; src[place] = null;
+        if (turn[place] >= list.length) { order[place] = shuffle(PLAYLIST[place], list[list.length - 1]); turn[place] = 0; decode(song(place)); }
         if (on === place && buffers.get(song(place))) start(place);
       };
     };

@@ -281,8 +281,10 @@
   // gate through its middle (keep-layout.js `WEST`): its buttresses and lancets left off either side of the arch, the
   // passage cut clean through under a head of dressed stone.
   const wall = variants((short) => cachedSteps(snap("wall:" + short, function* (slice = null) {
-    const gate = short === 3 || short === 0, GATE_W = L.WEST.half / U;
-    const len = [2 * CASTLE.half - 9, CASTLE.half - 11.5, CASTLE.stretch[1].len - 9, CASTLE.stretch[0].len - 9][short], sx = Math.round(len / U), Y0 = 2, IN = 2, OUT = 21, WALK = Y0 + Math.round(CASTLE.walk / U), sy = WALK + 18, sz = OUT + 6, g = T.makeGrid(sx, sy, sz), K = tools(g), m = masonry(3, 6, Y0);
+    // 4 to 7 are Outpost Island's (keep-layout.js `OUTPOST`): its outer curtain's north and south sides (corner to
+    // corner) and its east and west (between those), then its courtyard's the same, each with a gate in its middle.
+    const O = L.OUTPOST, gate = short === 3 || short === 0 || short >= 4, GATE_W = L.WEST.half / U;
+    const len = [2 * CASTLE.half - 9, CASTLE.half - 11.5, CASTLE.stretch[1].len - 9, CASTLE.stretch[0].len - 9, 2 * O.outer, 2 * (O.outer - CASTLE.wall), 2 * O.inner, 2 * (O.inner - CASTLE.wall)][short], sx = Math.round(len / U), Y0 = 2, IN = 2, OUT = 21, WALK = Y0 + Math.round(CASTLE.walk / U), sy = WALK + 18, sz = OUT + 6, g = T.makeGrid(sx, sy, sz), K = tools(g), m = masonry(3, 6, Y0);
     const BAY = 34, bays = Math.floor(sx / BAY), lead = Math.floor((sx - bays * BAY) / 2);
     K.box(0, sx, 0, WALK, IN, OUT + 1, m);
     K.box(0, sx, 0, Y0 + 8, OUT + 1, OUT + 2, darker(m));
@@ -560,7 +562,7 @@
   // `tag` for the keep's two halves. The yard stands them all; the halls' rooftop stands them round itself as its view
   // out (all but the keep's body, which is the halls' own walls), so the two never disagree.
   const castleParts = (tall) => {
-    const list = [], put = (geometry, x = 0, z = 0, ry = 0, hidden = false, tag = null, y = 0) => list.push({ geometry, x, y, z, ry, hidden, tag });
+    const list = [], put = (geometry, x = 0, z = 0, ry = 0, hidden = false, tag = null, y = 0, scale = 1) => list.push({ geometry, x, y, z, ry, hidden, tag, scale });
     const H = CASTLE.half, HZ = CASTLE.halfZ, k = keep();
     put(terrain(0)()); put(terrain(1)()); put(terrain(2)()); put(volcanoCone()); put(water(), 0, 0, 0, true);
     // Cold Storj: its ground, its mountains, its paths' ledges, its dock and its caves' mouths.
@@ -574,6 +576,35 @@
     { const d = storjDock(); put(d.stone); put(d.timber); }
     for (const c of L.STORJ.caveAt) { const cave = storjCave(); put(cave.rock, c.x, c.z, c.yaw, false, null, c.y); put(cave.ice, c.x, c.z, c.yaw, true, null, c.y); }
     { const v = volcanoDock(); put(v.stone); put(v.timber); put(v.glow, 0, 0, 0, true); }
+    // Outpost Island: its ground, its two curtains (a gate through every side), its courtyard's flags, the castle's
+    // keep in the middle with its door shut, a bridge out of every outer gate to its dock, and a curtain tower on its
+    // footing at each end of every dock's cross. All tagged `outpost`, its towers `outpost-tower` in `L.GALLERIES`' order.
+    {
+      const O = L.OUTPOST, k = keep(), d = outpostDocks(), tag = "outpost";
+      put(terrain(6)(), 0, 0, 0, false, tag);
+      for (const [W, ns, ew] of [[O.outer, 4, 5], [O.inner, 6, 7]]) {
+        put(wall(ns)(), O.x, O.z + W, 0, false, tag); put(wall(ns)(), O.x, O.z - W, Math.PI, false, tag);
+        put(wall(ew)(), O.x + W, O.z, Math.PI / 2, false, tag); put(wall(ew)(), O.x - W, O.z, -Math.PI / 2, false, tag);
+      }
+      put(d.yard, 0, 0, 0, false, tag); put(d.stone, 0, 0, 0, false, tag); put(d.timber, 0, 0, 0, false, tag);
+      put(k.body, O.x, O.z, 0, false, tag); put(k.top, O.x, O.z, 0, false, tag); put(keepSpire(), O.x, O.z, 0, false, tag);
+      for (const f of L.BALCONY.floors) put(balcony(), O.x, O.z, 0, false, tag, f);
+      const door = O.z + KEEP.r - 0.5;
+      put(doorLeaf(), O.x - 1.48, door, Math.PI / 2, false, tag); put(doorLeaf(), O.x + 1.48, door, -Math.PI / 2, false, tag);
+      put(models.box({ w: 3.2, h: 5.4, d: 0.2, color: "#0b0a0c", offset: { y: 2.7 } }), O.x, door - 0.3, 0, false, tag);
+      for (const a of O.arms) put(outpostBridge(), a.gx, a.gz, a.yaw, false, tag);
+      for (const t of O.towers) { put(tower(t.tall)(), t.x, t.z, t.yaw, false, "outpost-tower", t.ground); put(towerSkirt(), t.x, t.z, 0, false, tag, t.ground); }
+    }
+    // Shards: its ground, its dock, its paved way down the trench, and the cave's mouth at the trench's foot under its
+    // sign, looking back up the trench to the west.
+    {
+      const S = L.SHARDS, d = shardsDock(), mouth = storjCave().frame, sign = wordSign("SHARDS", 0.7);
+      put(terrain(5)()); put(d.stone); put(d.timber); put(shardsWays());
+      put(mouth, S.mouth.x, S.z, -Math.PI / 2, false, null, S.trench.floor);
+      let low = Infinity;
+      for (let i = 1; i < sign.verts.length; i += 3) low = Math.min(low, sign.verts[i]);
+      put(sign, S.trench.notch.x0 + 0.6, S.z, -Math.PI / 2, false, null, S.plateau - low);
+    }
     // CBDC's wall round the cone: its eight sides (the gate's first, the two with a stair either side of it), a
     // red-roofed turret at every corner, and the paved way from the gate to the cave.
     {
@@ -618,7 +649,7 @@
     CASTLE.towers.forEach(([x, z, t], i) => { put(tower(t)(), x, z, L.GALLERIES[i].yaw, false, "castle-tower"); put(towerSkirt(), x, z, i * 2.3); });
     put(wall(0)(), 0, CZ - HZ, Math.PI);
     put(gatehouse(), 0, GATE.front);
-    L.TURRETS.forEach((t, i) => { const l = L.LADDERS[i]; put(turret(), t.x, t.z, 0, false, "turret", t.y); put(turretCrown(), t.x, t.z, 0, false, "turret-crown", t.y); put(turretLadder(Math.round((l.top - l.bottom) * 4) / 4)(), l.x, l.z, 0, false, "turret-ladder", l.bottom); });
+    L.TURRETS.forEach((t, i) => { const l = L.LADDERS[i]; put(turret(), t.x, t.z, t.yaw, false, "turret", t.y); put(turretCrown(), t.x, t.z, t.yaw, false, "turret-crown", t.y); put(turretLadder(Math.round((l.top - l.bottom) * 4) / 4)(), l.x, l.z, t.yaw, false, "turret-ladder", l.bottom); });
     put(k.body, KEEP.x, KEEP.z, 0, false, "keep-body");
     put(k.top, KEEP.x, KEEP.z, 0, false, "keep-top");
     put(keepSpire(), KEEP.x, KEEP.z, 0, false, "keep-top");
@@ -966,11 +997,22 @@
           for (let j = 0; j < t; j++) d[base + j * sz] = j === t - 1 || top === SEA ? top : j < t - 2 || top < SNOW ? SLATE + ((j >> 1) + (x >> 2)) % 3 : SNOW + 1;
           continue;
         }
+        // Outpost Island is the castle island's own grass and rock, down to its beach of black sand.
+        if (which === 6) {
+          if (L.seaAt(wx, wz)) top = SEA;
+          else if (steep >= 3) top = ROCK + Math.floor(L.hash2(x >> 1, z >> 1) * 3);
+          else if (y < L.SEA + 1.6) top = y < L.SEA + 0.8 ? ASH_WET : ASH;
+          else top = GRASS + Math.min(2, Math.floor(L.noise(wx * 0.21 + 3, wz * 0.21 + 9) * 3));
+          const base = x * sy * sz + z;
+          for (let j = 0; j < t; j++) d[base + j * sz] = j === t - 1 || top === SEA ? top : j >= t - 3 && top < ROCK ? SLATE + ((j >> 1) + (x >> 2)) % 3 : ROCK + ((j >> 1) + (x >> 3) + (z >> 3)) % 3;
+          continue;
+        }
         // The islet is volcanic slate, layered dark grey to its beach of black sand, its path of cinders.
         if (which >= 1) {
           // The volcano's island is the same slate, lava in its streams' channels, ash inside its wall, cinders on
           // its court, in the cave's mouth and down the path to its dock.
-          const cinder = which === 4 ? L.arenaDist(wx, wz) > L.ARENA_ISLE.r - L.ARENA_ISLE.floor : which === 1 ? L.onIsletPath(wx, wz) > 0.55 : L.onVolcanoCourt(wx, wz) > 0.6 || L.inVolcanoMouth(wx, wz) || (Math.abs(wz - L.VOLCANO.z) < 2.3 && wx > L.VOLCANO.dock.quay.x1 - 0.5 && wx < L.VOLCANO.court.x0 + 1);
+          // Shards is the islet's own slate, its way and its trench down to the cave in cinders.
+          const cinder = which === 5 ? L.onShardsWay(wx, wz) > 0.55 || L.shardsTrench(wx, wz) !== null : which === 4 ? L.arenaDist(wx, wz) > L.ARENA_ISLE.r - L.ARENA_ISLE.floor : which === 1 ? L.onIsletPath(wx, wz) > 0.55 : L.onVolcanoCourt(wx, wz) > 0.6 || L.inVolcanoMouth(wx, wz) || (Math.abs(wz - L.VOLCANO.z) < 2.3 && wx > L.VOLCANO.dock.quay.x1 - 0.5 && wx < L.VOLCANO.court.x0 + 1);
           top = L.seaAt(wx, wz) ? SEA : which === 2 && L.lavaStream(wx, wz) > 0 ? LAVA : cinder ? CINDER : y < L.SEA + 1.6 ? (y < L.SEA + 0.8 ? ASH_WET : ASH) : which === 2 && L.cbdcAt(wx, wz, 60) && L.wallPlace(wx, wz).v < 0 ? ASH : SLATE + Math.floor(L.hash2(x >> 1, z >> 1) * 3);
           const base = x * sy * sz + z;
           for (let j = 0; j < t; j++) d[base + j * sz] = j === t - 1 || top === SEA ? top : SLATE + ((j >> 1) + (x >> 2)) % 3;
@@ -1053,18 +1095,20 @@
   // along at a time following the way's line, its top just under the walked height, and on it three flagstones
   // across, their joints wandering, a low kerb of slate along a mountain path's downhill edge.
   const WAY_STONE = ["#7f8a97", "#6d7885", "#8c97a3", "#616c79", "#77828f"];
+  // A stride of paved way from (ax, ay, az) to (bx, by, bz), `half` either side of its line, into `parts`: its bed of
+  // dark slate, three flagstones across it and, with `kerbX`, a kerb that far to one side.
+  const wayLayer = (parts, rand) => (ax, ay, az, bx, by, bz, half, kerbX, kerbZ) => {
+    const mx = (ax + bx) / 2, mz = (az + bz) / 2, my = (ay + by) / 2, len = Math.hypot(bx - ax, bz - az), yaw = Math.atan2(bx - ax, bz - az), cs = Math.cos(yaw), sn = Math.sin(yaw);
+    parts.push(moved(models.turnedY(box({ w: half * 2 + 0.3, h: 0.9, d: len + 0.3, color: "#212226", offset: { y: -0.5 } }), yaw), mx, my, mz));
+    const cut = [-half, -half / 3 + (rand() - 0.5) * 0.7, half / 3 + (rand() - 0.5) * 0.7, half];
+    for (let k = 0; k < 3; k++) {
+      const w = cut[k + 1] - cut[k] - 0.08, c = (cut[k] + cut[k + 1]) / 2;
+      parts.push(moved(models.turnedY(bevelBox({ w, h: 0.12, d: len - 0.07, color: WAY_STONE[Math.floor(rand() * WAY_STONE.length)], bevel: 0.035, offset: { x: c, y: -0.06 + rand() * 0.015 } }), yaw), mx, my, mz));
+    }
+    if (kerbX !== undefined) parts.push(moved(models.turnedY(box({ w: 0.4, h: 0.32, d: len + 0.2, color: "#2a2c31", offset: { y: 0.1 } }), yaw), mx + kerbX, my, mz + kerbZ));
+  };
   const storjWays = cached(() => {
-    const parts = [], S = L.STORJ, P = S.path, rand = mulberry32(5519), at = {}, next = {};
-    const lay = (ax, ay, az, bx, by, bz, half, kerbX, kerbZ) => {
-      const mx = (ax + bx) / 2, mz = (az + bz) / 2, my = (ay + by) / 2, len = Math.hypot(bx - ax, bz - az), yaw = Math.atan2(bx - ax, bz - az), cs = Math.cos(yaw), sn = Math.sin(yaw);
-      parts.push(moved(models.turnedY(box({ w: half * 2 + 0.3, h: 0.9, d: len + 0.3, color: "#212226", offset: { y: -0.5 } }), yaw), mx, my, mz));
-      const cut = [-half, -half / 3 + (rand() - 0.5) * 0.7, half / 3 + (rand() - 0.5) * 0.7, half];
-      for (let k = 0; k < 3; k++) {
-        const w = cut[k + 1] - cut[k] - 0.08, c = (cut[k] + cut[k + 1]) / 2;
-        parts.push(moved(models.turnedY(bevelBox({ w, h: 0.12, d: len - 0.07, color: WAY_STONE[Math.floor(rand() * WAY_STONE.length)], bevel: 0.035, offset: { x: c, y: -0.06 + rand() * 0.015 } }), yaw), mx, my, mz));
-      }
-      if (kerbX !== undefined) parts.push(moved(models.turnedY(box({ w: 0.4, h: 0.32, d: len + 0.2, color: "#2a2c31", offset: { y: 0.1 } }), yaw), mx + kerbX, my, mz + kerbZ));
-    };
+    const parts = [], S = L.STORJ, P = S.path, rand = mulberry32(5519), at = {}, next = {}, lay = wayLayer(parts, rand);
     for (const m of S.mountains) {
       const length = P.turns * TAU * (L.pathPoint(m, 0).d + L.pathPoint(m, 1).d) / 2, n = Math.ceil(length / 1.25);
       for (let k = 0; k < n; k++) {
@@ -1075,6 +1119,55 @@
     const line = (ax, az, bx, bz, y, half) => { const n = Math.ceil(Math.hypot(bx - ax, bz - az) / 1.25); for (let k = 0; k < n; k++) { const t0 = k / n, t1 = (k + 1) / n; lay(ax + (bx - ax) * t0, y(t0), az + (bz - az) * t0, ax + (bx - ax) * t1, y(t1), az + (bz - az) * t1, half); } };
     for (const p of S.spurs) line(p.ax, p.az, p.bx, p.bz, (t) => p.ay + (p.by - p.ay) * t, p.half);
     return merge(...parts);
+  });
+  // Shards' paved way (keep-layout.js `SHARDS`), in the land's frame, as Cold Storj's ways are flagged: from its quay up
+  // to the plateau and east to the trench, and down the trench's treads to the court before the cave's mouth, each
+  // stretch of it as level as the terrain's blocks under it; and the court and the notch flagged over.
+  const shardsWays = cached(() => {
+    const parts = [], S = L.SHARDS, T = S.trench, rand = mulberry32(8653), lay = wayLayer(parts, rand), u = TERRAIN_UNIT;
+    const run = (x0, x1, half) => {
+      let from = x0, y = L.terrainTop(x0 + u / 2, S.z);
+      for (let x = x0 + u; x <= x1; x += u) {
+        const next = x < x1 ? L.terrainTop(x + u / 2, S.z) : NaN;
+        if (next === y) continue;
+        for (let a = from; a < x - 0.01; a += 1.25) lay(a, y, S.z, Math.min(x, a + 1.25), y, S.z, half);
+        from = x; y = next;
+      }
+    };
+    run(S.way.x0 + 0.5, T.x0, S.way.half);
+    run(T.x0, T.court.x0, T.half);
+    const C = T.court, N = T.notch, flat = (x, z) => (x > C.x0 && x < C.x1 && Math.abs(z - S.z) < C.half - 0.1) || (x >= C.x1 && x < N.x1 && Math.abs(z - S.z) < N.half - 0.1);
+    parts.push(moved(paved(flat, C.x0, N.x1, S.z - C.half, S.z + C.half, 1.4, 8657), 0, T.floor, 0));
+    return merge(...parts);
+  });
+  // Shards' crystal (keep-layout.js `SHARDS.clusters`), in the land's frame: Merge Rock's own quartz
+  // (repo-island-models.js `quartz`) grown up out of the ground, glowing of itself in its colours taken a share of the
+  // way to its cores' light, as a lit cluster under Merge Rock does: `clusters`, a lead crystal and its satellites at
+  // each of the layout's places, and `carpet`, short crystals scattered over the dry ground clear of the way, each
+  // its own glass. WebGL draws them; Canvas 2D, which sorts every face, keeps to the ground's own glow.
+  const SHARD_LIGHT = 0.45;
+  const shardsCrystals = cached(() => {
+    const RM = BL.repoIslandModels, S = L.SHARDS, T = S.trench, light = [RM.CORE[1], RM.CORE[0], RM.CORE[2], RM.CORE[1]];
+    const hues = RM.HUES.map((h) => h.map((c, i) => c.map((v, ch) => v + (light[i][ch] - v) * SHARD_LIGHT)));
+    const clusters = { verts: [], faces: [], lines: [] }, carpet = { verts: [], faces: [], lines: [] }, root = (x, z) => L.terrainTop(x, z);
+    for (const c of S.clusters) {
+      const rand = mulberry32(math.fnv1a(`shards/${c.seed}`)), hue = hues[Math.floor(rand() * hues.length)], len = c.tall, r = 0.16 + 0.2 * c.size;
+      const dx = (rand() - 0.5) * 0.35, dz = (rand() - 0.5) * 0.35;
+      RM.quartz(clusters, c.x, root(c.x, c.z), c.z, dx, 1, dz, r, len, hue, rand, 6, 0.4);
+      for (let m = 0, count = 3 + Math.floor(rand() * 4); m < count; m++) {
+        const turn = rand() * TAU, off = r * (1 + rand() * 1.2), ox = Math.cos(turn), oz = Math.sin(turn), tilt = 0.3 + rand() * 0.5, px = c.x + ox * off, pz = c.z + oz * off;
+        RM.quartz(clusters, px, root(px, pz), pz, dx + ox * tilt, 1, dz + oz * tilt, r * (0.4 + rand() * 0.35), len * (0.3 + rand() * 0.4), hue, rand, 6, 0.4);
+      }
+    }
+    const rand = mulberry32(8663), n = 520, golden = Math.PI * (3 - Math.sqrt(5));
+    for (let k = 0; k < n; k++) {
+      const at = (S.r - 2) * Math.sqrt((k + 0.5) / n), a = k * golden, x = S.x + Math.sin(a) * at + (rand() - 0.5) * 1.6, z = S.z + Math.cos(a) * at + (rand() - 0.5) * 1.6;
+      const hue = hues[Math.floor(rand() * hues.length)], r = 0.07 + rand() * 0.09, tilt = rand() * TAU, lean = rand() * 0.6;
+      if (L.seaAt(x, z) || (x < T.notch.x1 + 2 && Math.abs(z - S.z) < 5) || (x < S.dock.quay.x1 + 2 && Math.abs(z - S.z) < 13)) continue;
+      RM.quartz(carpet, x, root(x, z), z, Math.cos(tilt) * lean, 1, Math.sin(tilt) * lean, r, r * (2.5 + rand() * 3), hue, rand, 6, 0.3, false);
+    }
+    clusters.glass = RM.CRYSTAL.glass; carpet.glass = RM.CRYSTAL.carpetGlass;
+    return { clusters: noShadow(clusters), carpet: noShadow(carpet) };
   });
   // A cave's mouth along a path, a part looking out along +z, its foot at the origin: an arch of grey blocks framing the
   // notch cut into the mountain behind it (keep-layout.js `caveNotch`), sealed at the notch's back by a wall of ice
@@ -1090,7 +1183,8 @@
     rock.push(box({ w: C.half * 2 + 0.2, h: 0.8, d: 4.2, color: "#212226", offset: { y: C.tall + 0.4, z: -1.9 } }));
     const drift = lathe({ profile: [[0, 0.9], [0.9, 0.82], [1.7, 0.5], [2.4, 0]], segments: 12, color: "#eaf0f6" });
     drift.verts.forEach((v, i, a) => { if (i % 3 === 0) a[i] *= 0.85; else if (i % 3 === 2) a[i] = a[i] * 0.4 - 2.1; });
-    return { rock: merge(...rock, dark, drift), ice };
+    // `frame`, the arch and the dark behind it alone, for a mouth that is open (Shards').
+    return { rock: merge(...rock, dark, drift), ice, frame: merge(...rock, dark) };
   });
   // Cold Storj's two docks (keep-layout.js `STORJ.docks`), in the land's frame, as the shipyard's: `stone`, each quay along its
   // bay's west shore, its faces in the arena's blocks, flagged, iron bollards down its seaward edge, a skin of snow on
@@ -1199,9 +1293,10 @@
       return g;
     };
     const m = MOAT.half + 1, mz = MOAT.halfZ + 1;
-    const FAR = 2600, A = TERRAIN[0], B = TERRAIN[1], C = TERRAIN[2], D = TERRAIN[3], Y = L.SEA;
+    const FAR = 2600, A = TERRAIN[0], B = TERRAIN[1], C = TERRAIN[2], D = TERRAIN[3], E = TERRAIN[5], F = TERRAIN[6], Y = L.SEA;
     return noShadow(merge(sheet(-m, m, CZ - mz, CZ + mz, MOAT.water, SEA_HEX), sheet(-FAR, D.x0, -FAR, FAR, Y, SEA_HEX), sheet(D.x1, A.x0, -FAR, FAR, Y, SEA_HEX),
-      sheet(D.x0, D.x1, -FAR, D.z0, Y, SEA_HEX), sheet(D.x0, D.x1, D.z1, FAR, Y, SEA_HEX), sheet(A.x1, C.x0, -FAR, FAR, Y, SEA_HEX),
+      sheet(D.x0, D.x1, -FAR, D.z0, Y, SEA_HEX), sheet(D.x0, F.x0, D.z1, FAR, Y, SEA_HEX), sheet(F.x0, D.x1, D.z1, F.z0, Y, SEA_HEX), sheet(F.x0, D.x1, F.z1, FAR, Y, SEA_HEX), sheet(A.x1, E.x0, -FAR, FAR, Y, SEA_HEX), sheet(E.x1, C.x0, -FAR, FAR, Y, SEA_HEX),
+      sheet(E.x0, E.x1, -FAR, E.z0, Y, SEA_HEX), sheet(E.x0, E.x1, E.z1, FAR, Y, SEA_HEX),
       sheet(C.x1, FAR, -FAR, FAR, Y, SEA_HEX), sheet(C.x0, C.x1, -FAR, C.z0, Y, SEA_HEX), sheet(C.x0, C.x1, C.z1, FAR, Y, SEA_HEX),
       sheet(A.x0, A.x1, -FAR, A.z0, Y, SEA_HEX), sheet(A.x0, A.x1, A.z1, B.z0, Y, SEA_HEX), sheet(A.x0, B.x0, B.z0, B.z1, Y, SEA_HEX), sheet(B.x1, A.x1, B.z0, B.z1, Y, SEA_HEX),
       sheet(A.x0, A.x1, B.z1, FAR, Y, SEA_HEX)));
@@ -1966,6 +2061,15 @@
     yield* pause(slice);
     yield* armoryDock.steps(slice);
     yield* volcanoDock.steps(slice);
+    yield* terrain(5).steps(slice);
+    yield* shardsDock.steps(slice);
+    yield* terrain(6).steps(slice);
+    for (let i = 4; i < 8; i++) yield* wall(i).steps(slice);
+    yield* outpostBridge.steps(slice);
+    yield* outpostDocks.steps(slice);
+    yield* pause(slice);
+    shardsWays();
+    if (BL.repoIslandModels) { yield* pause(slice); shardsCrystals(); }
     cbdcWall();
     longhouse(); barkeep(); shipwright(); smith(); alchemist(); westPortcullis();
     for (const kind of Object.keys(YARD_PROPS)) { yield* pause(slice); yardProp(kind); }
@@ -2488,13 +2592,16 @@
   // turns to run north: `x` here is the land's z along the way and `z` the land's -x across it. The west bridge's
   // make throughout: the arena's blocks on piers, each arch ringed in dressed voussoirs, a flagged deck between
   // pierced parapets under a coping, a pillar either side at every pier with a cresset on its head.
-  const backBridge = cachedSteps(function* (slice = null) {
-    const B = L.BACK_BRIDGE, rand = mulberry32(9127), crag = geometry(), flat = [], C = 1, low = L.SEA - 2.5, hw = B.halfW, E = B.z0, X1 = B.z1, moatEnd = CZ - MOAT.halfZ;
+  // An arched bridge of the back way's kind (keep-layout.js `spanY`), its along `z` the model's x and its middle line
+  // on z 0: `moatEnd` where the castle's moat stops (its faces and pillars go only down to the moat's bed inside it) and
+  // `xIn` where its flags begin.
+  const archBridge = function* (B, seed, flagSeed, moatEnd, xIn, slice) {
+    const rand = mulberry32(seed), crag = geometry(), flat = [], C = 1, low = L.SEA - 2.5, hw = B.halfW, E = B.z0, X1 = B.z1, deckY = (x) => L.spanY(B, x);
     const cols = Math.round((E - X1) / C), cw = (E - X1) / cols, rows = Math.ceil((B.peak + 0.3 - low) / C);
     for (const s of [-1, 1]) {
       blockFace(crag, rand, [E, low, s * hw], [-1, 0, 0], UP, [0, 0, s], cols, rows, cw, C, BIG_BLOCKS, BIG, (i, j) => {
         const x = E - (i + 0.5) * cw, y = low + (j + 0.5) * C;
-        return y < L.backY(x) + 0.2 && y > L.backSoffit(x) && (x < moatEnd || y > MOAT.bed - 0.6);
+        return y < deckY(x) + 0.2 && y > L.spanSoffit(B, x) && (x < moatEnd || y > MOAT.bed - 0.6);
       });
       yield* pause(slice);
     }
@@ -2512,18 +2619,18 @@
       yield* pause(slice);
     }
     // The deck: flags from the passage through the back curtain out onto the arena, lifted onto its rise and fall.
-    const X_IN = CZ - YARD.halfZ - 0.05;
-    flat.push(lifted(paved((x, z) => Math.abs(z) < B.half - 0.04 && x < X_IN && x > X1 + 0.1, X1, X_IN, -B.half, B.half, 1.2, 9131), L.backY));
+    const X_IN = xIn;
+    flat.push(lifted(paved((x, z) => Math.abs(z) < B.half - 0.04 && x < X_IN && x > X1 + 0.1, X1, X_IN, -B.half, B.half, 1.2, 9131), deckY));
     for (let i = 1; i < B.profile.length; i++) {
       const a = Math.min(E, B.profile[i - 1][0]), b = Math.max(X1, B.profile[i][0]);
       if (a <= b) continue;
       // The fill under the flags, a slab a stretch of the profile, tipped to its slope.
-      const ya = L.backY(a), yb = L.backY(b), len = Math.hypot(a - b, ya - yb);
+      const ya = deckY(a), yb = deckY(b), len = Math.hypot(a - b, ya - yb);
       flat.push(moved(turnedZ(box({ w: len + 0.05, h: 0.5, d: 2 * hw - 0.3, color: "#2a2623" }), Math.atan2(ya - yb, a - b)), (a + b) / 2, (ya + yb) / 2 - 0.27, 0));
     }
     yield* pause(slice);
     for (const s of [-1, 1]) for (let x = E - 0.5; x > X1; x -= 1) {
-      const z = s * (B.half + 0.35), y = L.backY(x);
+      const z = s * (B.half + 0.35), y = deckY(x);
       flat.push(box({ w: 1.0, h: 0.3, d: 0.7, color: ARENA[0], offset: { x, y: y + 0.15, z } }));
       flat.push(bevelBox({ w: 0.56, h: 0.62, d: 0.5, color: ARENA[(Math.round(x) & 1) + 1], bevel: 0.07, offset: { x, y: y + 0.6, z } }));
       flat.push(bevelBox({ w: 1.03, h: 0.2, d: 0.84, color: DRESSED, bevel: 0.05, offset: { x, y: y + B.rail - 0.1, z } }));
@@ -2531,7 +2638,7 @@
     yield* pause(slice);
     const bowl = () => lathe({ profile: [[0, 0], [0.16, 0], [0.12, 0.22], [0.42, 0.42], [0.46, 0.56], [0.38, 0.56], [0.32, 0.46], [0, 0.46]], segments: 10, color: IRON });
     for (const px of B.pillars) for (const s of [-1, 1]) {
-      const z = s * B.pillarZ, deck = L.backY(px), head = deck + B.rail + B.pillar, foot = px > moatEnd ? MOAT.bed - 0.4 : low;
+      const z = s * B.pillarZ, deck = deckY(px), head = deck + B.rail + B.pillar, foot = px > moatEnd ? MOAT.bed - 0.4 : low;
       let k = 0;
       // Banded stone in taller courses the higher the pillar stands, so the tall ones are no more pieces than the low.
       const course = Math.max(1.1, (deck + B.rail - foot) / 14);
@@ -2545,6 +2652,13 @@
       flat.push(moved(bowl(), px, head, z), box({ w: 0.5, h: 0.05, d: 0.5, color: "#ff7a1a", emissive: 1, offset: { x: px, y: head + 0.49, z } }));
     }
     return shaded([crag], flat);
+  };
+  const backBridge = cachedSteps(function* (slice = null) {
+    return yield* archBridge(L.BACK_BRIDGE, 9127, 9131, CZ - MOAT.halfZ, CZ - YARD.halfZ - 0.05, slice);
+  });
+  // Outpost Island's four, one model (keep-layout.js `OUTPOST.bridge`) turned onto each arm.
+  const outpostBridge = cachedSteps(function* (slice = null) {
+    return yield* archBridge(L.OUTPOST.bridge, 9301, 9303, Infinity, L.OUTPOST.bridge.z0 - 0.05, slice);
   });
   // Timber: a deck of oak planks over the rectangle `R` at `y` (laid across its shorter side, `pw` wide), two stringers
   // under it, and posts down into the sea every `every` metres round it (or under all of it, `stilts`), the outer ones
@@ -2638,22 +2752,55 @@
   // The volcano island's dock (keep-layout.js `VOLCANO.dock`), in the land's frame, as the shipyard's: `stone`, the
   // quay along the shore, its faces in the arena's blocks, flagged, iron bollards down its seaward edge; `timber`, the
   // oak pier out from its middle; and `glow`, the dull red light at the back of the cave mouth's cut.
-  const volcanoDock = cachedSteps(function* (slice = null) {
-    const V = L.VOLCANO, D = V.dock, Q = D.quay, rand = mulberry32(8419), crag = geometry(), flat = [], low = L.SEA - 2.5, y = D.y, P = D.pier;
-    const rows = 4, ch = (y - low) / rows, nz = Math.round(Q.z1 - Q.z0), nx = Math.round(Q.x1 - Q.x0), cz = (Q.z1 - Q.z0) / nz, cx = (Q.x1 - Q.x0) / nx;
-    blockFace(crag, rand, [Q.x0, low, Q.z0], [0, 0, 1], UP, [-1, 0, 0], nz, rows, cz, ch, BIG_BLOCKS, BIG);
+  // A dock on an island's west shore, as CBDC's and Shards' are: the quay `D.quay` with its seaward face down to `low`
+  // in `rows` of the arena's blocks, its pier `D.pier` out from its middle at `mid`.
+  // With `east` its face to the sea is on the east instead, and with no `D.pier` it has none.
+  const westQuay = function* (D, mid, low, rows, seed, flags, slice, east = false) {
+    const Q = D.quay, rand = mulberry32(seed), crag = geometry(), flat = [], y = D.y, P = D.pier;
+    const ch = (y - low) / rows, nz = Math.round(Q.z1 - Q.z0), nx = Math.round(Q.x1 - Q.x0), cz = (Q.z1 - Q.z0) / nz, cx = (Q.x1 - Q.x0) / nx;
+    if (east) blockFace(crag, rand, [Q.x1, low, Q.z1], [0, 0, -1], UP, [1, 0, 0], nz, rows, cz, ch, BIG_BLOCKS, BIG);
+    else blockFace(crag, rand, [Q.x0, low, Q.z0], [0, 0, 1], UP, [-1, 0, 0], nz, rows, cz, ch, BIG_BLOCKS, BIG);
     yield* pause(slice);
     for (const [z, n] of [[Q.z0, -1], [Q.z1, 1]]) blockFace(crag, rand, [Q.x0, low, z], [1, 0, 0], UP, [0, 0, n], nx, rows, cx, ch, BIG_BLOCKS, BIG);
     yield* pause(slice);
     flat.push(box({ w: Q.x1 - Q.x0 - 0.2, h: y - low, d: Q.z1 - Q.z0 - 0.2, color: "#2a2623", offset: { x: (Q.x0 + Q.x1) / 2, y: (y + low) / 2 - 0.02, z: (Q.z0 + Q.z1) / 2 } }));
-    flat.push(moved(paved((x, z) => x > Q.x0 + 0.15 && x < Q.x1 - 0.15 && z > Q.z0 + 0.15 && z < Q.z1 - 0.15, Q.x0, Q.x1, Q.z0, Q.z1, 1.6, 8423), 0, y, 0));
-    for (let z = Q.z0 + 2.5; z < Q.z1 - 1; z += 6.4) if (Math.abs(z - V.z) > 2.2) flat.push(moved(lathe({ profile: [[0, 0], [0.2, 0], [0.15, 0.12], [0.14, 0.5], [0.22, 0.58], [0, 0.62]], segments: 10, color: IRON }), Q.x0 + 0.4, y, z));
+    flat.push(moved(paved((x, z) => x > Q.x0 + 0.15 && x < Q.x1 - 0.15 && z > Q.z0 + 0.15 && z < Q.z1 - 0.15, Q.x0, Q.x1, Q.z0, Q.z1, 1.6, flags), 0, y, 0));
+    for (let z = Q.z0 + 2.5; z < Q.z1 - 1; z += 6.4) if (Math.abs(z - mid) > 2.2) flat.push(moved(lathe({ profile: [[0, 0], [0.2, 0], [0.15, 0.12], [0.14, 0.5], [0.22, 0.58], [0, 0.62]], segments: 10, color: IRON }), east ? Q.x1 - 0.4 : Q.x0 + 0.4, y, z));
     const stone = shaded([crag], flat);
     yield* pause(slice);
     const wood = [];
-    timberDeck(wood, rand, P, y, { up: 1.0 });
+    if (P) timberDeck(wood, rand, P, y, { up: 1.0 });
+    return { stone, timber: merge(...wood) };
+  };
+  const volcanoDock = cachedSteps(function* (slice = null) {
+    const V = L.VOLCANO, { stone, timber } = yield* westQuay(V.dock, V.z, L.SEA - 2.5, 4, 8419, 8423, slice);
     const M = V.mouth, glow = noShadow(box({ w: 0.2, h: M.spring + M.rise - 0.5, d: M.half * 2 - 0.4, color: "#7a1c08", emissive: 0.75, offset: { x: M.x1 - 0.15, y: V.court.y + (M.spring + M.rise - 0.5) / 2, z: V.z } }));
-    return { stone, timber: merge(...wood), glow };
+    return { stone, timber, glow };
+  });
+  // A stone quay standing in the open water, the rectangle `Q` at `y`: its four faces in the arena's blocks down to
+  // `low` in `rows`, flagged over (Outpost Island's crosses).
+  const seaQuay = (Q, y, low, rows, seed, flags) => {
+    const rand = mulberry32(seed), crag = geometry(), flat = [], ch = (y - low) / rows, nz = Math.max(1, Math.round(Q.z1 - Q.z0)), nx = Math.max(1, Math.round(Q.x1 - Q.x0)), cz = (Q.z1 - Q.z0) / nz, cx = (Q.x1 - Q.x0) / nx;
+    blockFace(crag, rand, [Q.x0, low, Q.z0], [0, 0, 1], UP, [-1, 0, 0], nz, rows, cz, ch, BIG_BLOCKS, BIG);
+    blockFace(crag, rand, [Q.x1, low, Q.z1], [0, 0, -1], UP, [1, 0, 0], nz, rows, cz, ch, BIG_BLOCKS, BIG);
+    for (const [z, n] of [[Q.z0, -1], [Q.z1, 1]]) blockFace(crag, rand, [Q.x0, low, z], [1, 0, 0], UP, [0, 0, n], nx, rows, cx, ch, BIG_BLOCKS, BIG);
+    flat.push(box({ w: Q.x1 - Q.x0 - 0.2, h: y - low, d: Q.z1 - Q.z0 - 0.2, color: "#2a2623", offset: { x: (Q.x0 + Q.x1) / 2, y: (y + low) / 2 - 0.02, z: (Q.z0 + Q.z1) / 2 } }));
+    flat.push(moved(paved((x, z) => x > Q.x0 + 0.15 && x < Q.x1 - 0.15 && z > Q.z0 + 0.15 && z < Q.z1 - 0.15, Q.x0, Q.x1, Q.z0, Q.z1, 1.6, flags), 0, y, 0));
+    return shaded([crag], flat);
+  };
+  // Outpost Island's docks (keep-layout.js `OUTPOST`): each arm's stone cross and its timber pier; and its courtyard's
+  // flags inside the inner curtain.
+  const outpostDocks = cachedSteps(function* (slice = null) {
+    const O = L.OUTPOST, D = O.dock, stone = [], wood = [], rand = mulberry32(9311);
+    for (const a of O.arms) { stone.push(seaQuay(a.cross, D.y, L.SEA - 7, 6, 9313 + a.k, 9317 + a.k)); timberDeck(wood, rand, a.pier, D.y, { up: 1.0 }); yield* pause(slice); }
+    const h = O.inner - CASTLE.wall - 0.2;
+    const yard = moved(paved((x, z) => Math.max(Math.abs(x), Math.abs(z)) < h, -h, h, -h, h, 1.6, 9323), O.x, 0, O.z);
+    return { stone: merge(...stone), timber: merge(...wood), yard };
+  });
+  // Shards' dock (keep-layout.js `SHARDS.dock`), CBDC's own, its quay's face going down into the deep water along it.
+  const shardsDock = cachedSteps(function* (slice = null) {
+    const S = L.SHARDS;
+    return yield* westQuay(S.dock, S.z, S.dock.deep - 0.5, 9, 8609, 8611, slice);
   });
   // A longhouse on the docks (keep-layout.js `HALL`, `HALLS`), parts about its middle with its floor at y 0 and its
   // door in the middle of its +z side: `walls`, its four log walls (toward +z, -z, +x and -x in turn, each with the
@@ -3426,6 +3573,6 @@
     g.beginPath(); g.arc(w / 2, w / 2, w * 0.45, 0, Math.PI * 2); g.stroke();
   }));
 
-  BL.keepModels = { kit, arenaColumn, COLUMN_FIRE, sunBeam, swooshTint, pulseDisc, pulseWave, spiritBall, purpleOrb, runeCircle, auroraBeam, fireSwirl, backBridge, FROST, bladeFlame, lightning, LIGHTNING_LEN, fireSwoosh, keepSpire, storjTower, storjMountain, storjWays, storjCave, STORJ_CAVE, storjDock, snowPine, storjForest, stoneKnight, storjPlinth, captain, questMark, raiderFlag, cbdcFlag, cbdcWall, mallet, longshipGuns, helm, HELM, fireGlow, ashPuff, troll, TROLL, volcanoCone, volcanoDock, groundTorch, TORCH_FLAME, spireFlag, SPIRE_FLAG, knightCape, KNIGHT_CAPE, greenRing, swoosh, whiteOrb, whiteDisc, whiteRing, turret, cannon, CANNON, fireball, aimDot, dropBanana, questCrystal, keepWeapon, skeleton, SKELETON, GREEN_SKELETON, ogre, OGRE, smash, waterCandle, CANDLE, drip, hangChain, balcony, banner, BANNER, paved, layBlocks, BIG_BLOCKS, BIG, glowBeam, greenBeam, whiteBeam, lavaFlame, lavaPool, brewBubble, brewMist, foam, glowDisc, glowRing, castleParts, porch, PORCH, doorLeaf, U, ARENA, PIER_H, SENTINEL_FOOT, CHAIN_LINK, TERRAIN_UNIT, buildSteps, terrain, wall, tower, gatehouse, keep, plinth, towerSkirt, stairs, dock, boat, oar, BOAT, abutment, ruin, flags, pine, farPine, forest, water,
+  BL.keepModels = { kit, arenaColumn, COLUMN_FIRE, sunBeam, swooshTint, pulseDisc, pulseWave, spiritBall, purpleOrb, runeCircle, auroraBeam, fireSwirl, backBridge, FROST, bladeFlame, lightning, LIGHTNING_LEN, fireSwoosh, keepSpire, storjTower, storjMountain, storjWays, storjCave, STORJ_CAVE, storjDock, snowPine, storjForest, stoneKnight, storjPlinth, captain, questMark, raiderFlag, cbdcFlag, cbdcWall, mallet, longshipGuns, helm, HELM, fireGlow, ashPuff, troll, TROLL, volcanoCone, volcanoDock, shardsDock, outpostBridge, outpostDocks, shardsWays, shardsCrystals, groundTorch, TORCH_FLAME, spireFlag, SPIRE_FLAG, knightCape, KNIGHT_CAPE, greenRing, swoosh, whiteOrb, whiteDisc, whiteRing, turret, cannon, CANNON, fireball, aimDot, dropBanana, questCrystal, keepWeapon, skeleton, SKELETON, GREEN_SKELETON, ogre, OGRE, smash, waterCandle, CANDLE, drip, hangChain, balcony, banner, BANNER, paved, layBlocks, BIG_BLOCKS, BIG, glowBeam, greenBeam, whiteBeam, lavaFlame, lavaPool, brewBubble, brewMist, foam, glowDisc, glowRing, castleParts, porch, PORCH, doorLeaf, U, ARENA, PIER_H, SENTINEL_FOOT, CHAIN_LINK, TERRAIN_UNIT, buildSteps, terrain, wall, tower, gatehouse, keep, plinth, towerSkirt, stairs, dock, boat, oar, BOAT, abutment, ruin, flags, pine, farPine, forest, water,
     lanternPost, standLantern, hangLantern, fireArrow, arrowFlame, ARROW, warship, WARSHIP_LIGHTS, westBridge, westPortcullis, shipyard, armoryDock, longhouse, yardProp, FURNACE, wordSign, galleon, GALLEON_LIGHTS, barkeep, shipwright, smith, alchemist, leaf, chainLink, portcullis, knight, KNIGHT_UNIT, viking, GUARD_UNIT, dust, sentinelPlinth, firefly, wallBracket, BRACKET, yard, crow, gargoyle };
 })();

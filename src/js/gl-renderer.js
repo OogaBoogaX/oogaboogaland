@@ -558,7 +558,7 @@ uniform vec4 uLakeFlowV;
 uniform vec4 uLakeCharge;
 uniform vec2 uLakeChargeCenter;
 uniform vec4 uLakeOcclude;
-uniform float uLightBeam;
+uniform vec2 uLightBeam;
 uniform float uMatrixCave;
 uniform vec4 uMatrixCaves[8];
 uniform vec4 uMatrixCaveBounds[8];
@@ -1285,9 +1285,15 @@ void main() {
   float glassAlpha = uGlass < 1.0 ? clamp(uGlass + pow(1.0 - abs(dot(n, normalize(uEye - vWorld))), 2.0) * 0.55, 0.0, 1.0) : 1.0;
   if (lake) glassAlpha = lakeAlpha;
   // Dust scatters faint light without a glass rim; its intensity fades toward the far end.
-  if (uLightBeam > 0.0) {
-    float fade = clamp(1.0 - vLocal.x / uLightBeam, 0.0, 1.0);
+  if (uLightBeam.x > 0.0) {
+    float fade = clamp(1.0 - vLocal.x / uLightBeam.x, 0.0, 1.0);
     glassAlpha = uGlass * fade * fade;
+    if (uLightBeam.y > 0.0) {
+      // Through a round shaft the scattering path is longest on its axis and
+      // approaches zero at its silhouette. Both passes contribute half the depth.
+      float chord = abs(dot(n, normalize(viewTowardEye(vWorld))));
+      glassAlpha = 1.0 - exp(-3.0 * uGlass * fade * chord);
+    }
   }
   if (uGlassOpacity > 0.0) {
     vec3 view = normalize(viewTowardEye(vWorld));
@@ -4295,9 +4301,9 @@ uniform float uDiffuseFloor;`)
       drawParts("mesh", name, true, cull);
       glassPass = false;
       gl.uniform1f(mesh.u.uGlass, 1);
-      gl.uniform1f(mesh.u.uLightBeam, 0);
+      gl.uniform2f(mesh.u.uLightBeam, 0, 0);
       mesh.glass = 1;
-      mesh.lightBeam = 0;
+      mesh.lightBeam = mesh.roundBeam = 0;
       if (plain) gl.useProgram(programs.mesh.prog);
       gl.depthMask(true);
       gl.disable(gl.BLEND);
@@ -4410,8 +4416,10 @@ uniform float uDiffuseFloor;`)
             mesh.glass = g.glass;
           }
           const beam = g.lightBeam || 0;
-          if (beam !== mesh.lightBeam) {
-            gl.uniform1f(mesh.u.uLightBeam, beam);
+          const round = g.roundBeam ? 1 : 0;
+          if (beam !== mesh.lightBeam || round !== mesh.roundBeam) {
+            gl.uniform2f(mesh.u.uLightBeam, beam, round);
+            mesh.roundBeam = round;
             mesh.lightBeam = beam;
           }
         }

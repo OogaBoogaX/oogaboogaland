@@ -145,11 +145,11 @@
     let fadeAt = 0, endAt = 0, prefetchAt = 0, prefetched = false;
     // `off`: a decode failed, so this browser cannot play the tracks' format and the playlist stops for the visit.
     const playlist = { loaded: [], decoding: null, playing: null, failed: [], fallback: true, held: 0, played: 0, off: false };
-    let doorGain, doorFilter, doorPan, lastDistance = -1, lastPan = -2;
+    let doorGain, doorFilter, doorPan, lastDistance = -1, lastPan = -2, bellPass = 1;
     const musicChannel = BL.sound.channel("music"), roomChannel = BL.sound.channel("room");
     const triangles = [], sines = [], noises = [], brushes = [], roomSines = [], bed = {};
     const motors = [];
-    let exhaust = null;
+    let exhaust = null, hearthWait = 0;
     let wingBuffer=null,flutter=null,nextFlutter=0;
     const stopFlutter=()=>{
       if(!flutter)return;
@@ -412,8 +412,8 @@
         (bass ? triangles : sines).push({ osc: osc(bass ? "triangle" : "sine", 220, f), filter: f, gain: g, pan, until: 0 });
       }
       for (let i = 0; i < ROOM_TONES; i++) {
-        const pan = panner(room), g = gain(0, pan), f = filter("lowpass", 4000, 0.7, g);
-        roomSines.push({ osc: osc("sine", 220, f), filter: f, gain: g, pan, until: 0 });
+        const pan = panner(room), gate = gain(1,pan), g = gain(0,gate), f = filter("lowpass", 4000, 0.7, g);
+        roomSines.push({ osc: osc("sine", 220, f), filter: f, gain: g, pan, gate, bell: false, until: 0 });
       }
       for (let i = 0; i < NOISES; i++) {
         const pan = panner(room), g = gain(0, pan), f = filter("bandpass", 1000, 1, g);
@@ -725,6 +725,7 @@
     };
     // `count` taps `gap` apart on the free voice `v` from `now`, each up to `level` and away by `dur`, where AT says.
     const taps = (v, count, gap, level, dur, now, attack = 0.002) => {
+      if (v.bell) { v.gate.gain.setValueAtTime(1,now); v.bell=false; }
       const g = v.gain.gain, peak = Math.max(0.0002, level * AT.level);
       g.cancelScheduledValues(now);
       for (let i = 0; i < count; i++) {
@@ -783,8 +784,9 @@
       roomSines.forEach((v,i) => {
         v.osc.frequency.cancelScheduledValues(now);
         v.osc.frequency.setValueAtTime(i ? 1327 : 587.33,now);
-        v.filter.frequency.setValueAtTime(5100,now);
+        v.filter.frequency.setValueAtTime(520+4580*bellPass,now);
         taps(v,1,0,i ? 0.17 : 0.38,i ? 0.85 : 2.2,now,0.007);
+        v.bell=true; v.gate.gain.setValueAtTime(bellPass,now);
       });
       stats.blockChimes++;
     };
@@ -802,7 +804,7 @@
     };
     // The bed follows the nearest table or the nearer edge of the bar.
     let lastBedLevel = BED_FLOOR;
-    const bedLevel = () => {
+    const bedLevel = (chapel) => {
       let d2 = Infinity;
       for (let i = 0; i < wings.length; i++) {
         const w = wings[i], dx = Math.max(0, Math.abs(EAR.x - w.x) - w.hx), dz = Math.max(0, Math.abs(EAR.z - w.z) - w.hz);
@@ -812,29 +814,36 @@
         const dx = EAR.x - tables[i].x, dz = EAR.z - tables[i].z;
         d2 = Math.min(d2, dx * dx + dz * dz);
       }
-      const target = BED_FLOOR + BED_NEAR / (1 + d2 / (BED_REF * BED_REF));
+      const target = (1 - chapel) * (BED_FLOOR + BED_NEAR / (1 + d2 / (BED_REF * BED_REF)));
       if (target !== lastBedLevel) {
         bed.level.gain.setTargetAtTime(target, ctx.currentTime, BED_EASE / 3);
         lastBedLevel = target;
       }
     };
 
-    const update = (dt, ear, time = 0, pressureAge = Infinity) => {
+    const update = (dt, ear, time = 0, pressureAge = Infinity, chapel = 0, transmission = 1) => {
       EAR.x = ear.x; EAR.z = ear.z; EAR.fx = ear.fx; EAR.fz = ear.fz;
       activate();
+      if (transmission !== bellPass) {
+        bellPass=transmission;
+        if (ready) for (const v of roomSines) if (v.bell && v.until>ctx.currentTime) {
+          v.gate.gain.setTargetAtTime(bellPass,ctx.currentTime,.045);
+          v.filter.frequency.setTargetAtTime(520+4580*bellPass,ctx.currentTime,.045);
+        }
+      }
       if (!ready) return;
       sequence();
       step();
       if ((bedWait -= dt) <= 0) {
         bedWait = BED_EVERY;
-        bedLevel();
+        bedLevel(chapel);
         if (engineBank && !document.hidden) spatialEngines(time, pressureAge, ear);
         // Outdoors, both the recording and the synth reach the ear from the open bay.
         const dx = 24.42 - ear.x, dz = -ear.z, dist = Math.hypot(dx, dz);
         // Across the wider deck the recording continues to recede toward the doorway, including in either wing.
         const reach = Math.max(0, Math.min(1, -dx / 2)) * dist;
         const panMix = Math.min(1, reach / 7);
-        const outside = panMix + .4 * (1 - 1 / (1 + Math.max(0, reach - 8) / 12));
+        const outside = Math.max(2.4 * chapel, panMix + .4 * (1 - 1 / (1 + Math.max(0, reach - 8) / 12)));
         const pan = dist > 0 ? panMix * 0.9 * (-dx * ear.fz + dz * ear.fx) / dist : 0;
         if (Math.abs(outside - lastDistance) > 0.004 || outside !== lastDistance && (outside === 0 || outside === 1)) {
           doorGain.gain.setTargetAtTime(Math.pow(0.25, outside), ctx.currentTime, 0.09);
@@ -844,6 +853,19 @@
         }
         if (Math.abs(pan - lastPan) > 0.008 || pan === 0 && lastPan !== 0) {
           doorPan.pan.setTargetAtTime(pan, ctx.currentTime, 0.09); lastPan = pan;
+        }
+      }
+      // Small irregular wood pops use a free room voice and follow the room volume.
+      if (chapel > 0 && !muted && !document.hidden && (hearthWait -= dt) <= 0) {
+        hearthWait = between(.09,.43);
+        const r = BL.pokerSalons.ROOMS[0], z = r.z-r.d/2+2;
+        const distance = place(r.x,z), now = ctx.currentTime;
+        const voice = free(noises,noiseNext,now);
+        if (voice) {
+          // The vaulted room carries a little of the fire all the way to its doorway.
+          AT.level = chapel * (.19 + .81 / (1 + distance*distance/70));
+          voice.filter.frequency.setValueAtTime(between(480,2900),now);
+          taps(voice,1,0,between(.12,.4),between(.028,.18),now);
         }
       }
       if ((chipWait -= dt) <= 0) {

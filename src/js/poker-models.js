@@ -237,19 +237,26 @@
     amber.castShadow = false; amber.fogPierce = 1;
     return amber;
   };
-  // Two crossed, tapering ribbons. The beam shader fades from local x=0 to its distant tip.
+  // The shaft widens away from its crystal. Round sections give the renderer a smooth
+  // silhouette from every chair, including a view looking almost along the light.
+  const RAY_LENGTH = 20;
   const chandelierRay = () => {
-    const g=M.geometry(), ink=BL.math.hexToRgb("#ffa23a"), reach=8.4;
-    for (let plane=0;plane<2;plane++) {
-      const pairs=[];
-      for (const [x,w] of [[0,0.012],[0.8,0.046],[4,0.12],[reach,0.19]]) {
-        pairs.push([-1,1].map(s=>M.pushVert(g,x,plane?0:s*w,plane?s*w:0)));
+    const g = M.geometry(), sides = lite ? 8 : 16, ink = BL.math.hexToRgb("#f7931a");
+    let previous = null;
+    for (const x of [0, 2, 6, 12, RAY_LENGTH]) {
+      const ring = [], radius = .075 + x * .057;
+      for (let i = 0; i < sides; i++) {
+        const angle = 2 * Math.PI * i / sides;
+        ring.push(M.pushVert(g, x, radius * Math.cos(angle), radius * Math.sin(angle)));
       }
-      for (let i=1;i<pairs.length;i++) {
-        const a=pairs[i-1], b=pairs[i]; M.face(g,[a[0],a[1],b[1],b[0]],ink,{emissive:1});
+      if (previous) for (let i = 0; i < sides; i++) {
+        const j = (i + 1) % sides;
+        M.face(g, [previous[i], previous[j], ring[j], ring[i]], ink, { emissive: 1 });
       }
+      previous = ring;
     }
-    g.glass=0.075;g.lightBeam=reach;g.castShadow=false;g.twoSided=true;
+    g.glass = .095; g.lightBeam = RAY_LENGTH * 1.18; g.roundBeam = true;
+    g.smooth = true; g.castShadow = false;
     return g;
   };
   // Banana Club's ornate table. Each part is built in the unit space its table node scales (top TOP_A by TOP_B, felt FELT_A by
@@ -453,6 +460,75 @@
   };
   // Canvas 2D's lite set never builds the props; its methods do nothing and `beadAt` gives null.
   const LITE_PROPS = Object.freeze({ beadAt: () => null, setBeads: NOOP, placeToss: NOOP, hideToss: NOOP, placePush: NOOP, hidePush: NOOP });
+  // The Lightning table uses its public board and awards for the dealer's pitch and pot push.
+  const LIGHTNING = 2;
+  const chairTable = (table, geo) => {
+    const stacks = new Array(SEATS.length).fill(null);
+    let pitch=-1, first=0, last=0, push=-1, hole=-1;
+    const won=new Array(SEATS.length).fill(0);
+    const knownBoard=s=>{
+      let n=0;
+      while(n<s.board.length && Number.isInteger(s.board[n]))n++;
+      return n;
+    };
+    const sync=(s,was,calm)=>{
+      if(!was || was.hand!==s.hand){
+        pitch=push=hole=-1;
+        won.fill(0);
+        if(was && s.phase==="preflop" && !calm)hole=s.smallBlind;
+      }else if(!calm && knownBoard(s)>knownBoard(was)){
+        hole=-1;first=knownBoard(was);last=knownBoard(s);pitch=0;
+      }
+      if(s.result && was && was.hand===s.hand && !was.result){
+        for(let j=0;j<won.length;j++)won[j]=s.result.awards[j];
+        for(const pot of s.result.pots)if(pot.refund)won[pot.winners[0]]-=pot.amount;
+        push=calm?-1:0;
+      }
+      if(hole>=0 && pitch<0)pitch=0;
+      for(let j=0;j<stacks.length;j++){
+        const amount=s.result?won[j]:j===0?s.pot:0;
+        const visible=amount>0 && (!s.result || push>=0);
+        let n=stacks[j];
+        if(!n){
+          if(!visible)continue;
+          n=stacks[j]=onFelt(geo.chip,0,FELT_Y+.02,.42);
+          S.addChild(table.root,n);
+        }
+        n.visible=visible;
+        n.scale.y=TABLE_K*Math.min(9,1+Math.log2(Math.max(1,amount)));
+        if(push<0){n.position.x=0;n.position.z=.42;}
+      }
+    };
+    const step=(dt,s)=>{
+      const card=table.dealCard;
+      card.visible=false;
+      table.agent.parts.armL.rotation.x=-.5;
+      if(pitch>=0){
+        pitch+=dt;
+        const j=hole>=0?hole:first+Math.floor(pitch/.29);
+        const done=hole>=0?pitch>=.29:j>=last;
+        if(hole<0)for(let i=0;i<last;i++)table.board[i].visible=i<j && Number.isInteger(s.board[i]);
+        if(done)pitch=hole=-1;
+        else{
+          const u=(pitch/.29)%1, dest=hole>=0?table.backs[j].position:table.board[j].position;
+          card.visible=true;card.geometry=hole>=0?geo.back:table.board[j].geometry;card.rotation.y=Math.PI;
+          card.position.x=dest.x*u;card.position.z=DEAL_FROM*(1-u)+dest.z*u;
+          card.position.y=dest.y+.11*(1-u)+.14*Math.sin(Math.PI*u);
+          table.agent.parts.armL.rotation.x=-.48-.71*Math.sin(Math.PI*u);
+        }
+      }
+      if(push<0)return;
+      push+=dt;
+      const u=Math.min(1,push/.88), k=u*u*(3-2*u);
+      for(let j=0;j<stacks.length;j++)if(won[j]>0){
+        const n=stacks[j],dest=table.chips[j].position;
+        n.position.x=dest.x*k;n.position.z=.42*(1-k)+dest.z*k;
+        n.visible=push<1.12;
+      }
+      if(push>=1.12)push=-1;
+    };
+    return {sync,step};
+  };
   const build = () => {
     const geo = geometry(), root = S.createNode(), environment = S.createNode(), tables = [];
     const fixtures = S.createNode();
@@ -491,6 +567,7 @@
       S.addChild(root, group);
       const table = { root: group, base, top, rim, felt, pinstripe, chairs, chips, backs, board, button, label, plate:label, agent, dealCard,
         beads: SEATS.map(() => null), toss: null, push: null, actors: new Array(SEATS.length).fill(null), version: -1, pulse: 0 };
+      if(i===LIGHTNING)table.chairPlay=chairTable(table,geo);
       tables.push(Object.assign(table, lite ? LITE_PROPS : tellProps(table, geo)));
     }
     const updateInstruments = BL.pokerEraTables.instruments(tables,geo.instruments);
@@ -511,11 +588,21 @@
       const z = (f - 1) * 24;
       S.addChild(fixtures, node(geo.chandelier, 0, CHANDELIER_LIFT, z));
       for (let ring = 0; ring < 4; ring++) { const n = node(geo.crystals[ring], 0, CHANDELIER_LIFT, z); n.ring = ring; n.fixture = f; n.prism = n.geometry; n.amber = geo.amber[ring]; sparkle.push(n); S.addChild(fixtures, n); }
-      for (let k=0;k<(lite?4:7);k++) {
-        const a=(k+f*0.27)*2*Math.PI/(lite?4:7);
-        const ray=node(geo.ray, 0.62*Math.cos(a),5.6 + CHANDELIER_LIFT,z+0.62*Math.sin(a));
-        ray.rotation.y=-a; ray.rotation.z=-0.49-0.12*(k%3); ray.visible=false;
-        rays.push(ray); S.addChild(fixtures,ray);
+      const count = lite ? 4 : 7;
+      for (let k = 0; k < count; k++) {
+        const a = (k + f * .27) * 2 * Math.PI / count, dx = Math.cos(a), dz = Math.sin(a);
+        const x = .8 * dx, y = 4.75 + CHANDELIER_LIFT, startZ = z + .8 * dz;
+        // Aim alternating facets across the promenade and the table banks. The end
+        // fixtures land their outward-facing beams before the mirror and the vault.
+        let run = 12 + 3.5 * (k % 3);
+        if (Math.abs(dz) > .001) run = Math.min(run, (Math.sign(dz) * 35.6 - startZ) / dz);
+        const ray = node(geo.ray, x, y, startZ);
+        ray.rotation.y = -a; ray.rotation.z = -Math.atan2(y, run);
+        ray.scale.x = Math.hypot(y, run) / RAY_LENGTH;
+        ray.fixture = f;
+        ray.midX = x + dx*run*.5; ray.midY = y*.5; ray.midZ = startZ + dz*run*.5;
+        ray.visible = false;
+        rays.push(ray); S.addChild(fixtures, ray);
       }
     }
     for (const f of FURNITURE) {
@@ -807,5 +894,5 @@
     if (p.legL) p.legL.rotation.x = 0; if (p.legR) p.legR.rotation.x = 0;
     if (p.armL) p.armL.rotation.x = STAND_ARMS; if (p.armR) p.armR.rotation.x = STAND_ARMS;
   };
-  BL.pokerModels = { CHANDELIER_LIGHT_Y, TABLE_K, FELT_A, FELT_B, RAIL_A, RAIL_B, TOP_A, TOP_B, WALK_A, WALK_B, TABLE_HX, TABLE_HZ, CHAIR_RADIUS, DEALER_Z, DEAL_FROM, DEAL_RUN, FELT_Y, RAIL_TOP, SEAT_TOP, SIT_HIP, DEALER_SCALE, sitY, PLACES, BEAD_Y, TABLES, GAMES, SEATS, REAR_WALL_Z, PORTAL_Z, EXIT_Z, FURNITURE, HIGH_ROLLER, geometry, card, build, walkable, crosses, setLite, nearestClear, CLUB_LIGHTS, COLONNADE, LOUNGE_LIGHTS, GAME_LIGHTS, spots, bendKnees, sitPose, standPose };
+  BL.pokerModels = { LIGHTNING, CHANDELIER_LIGHT_Y, TABLE_K, FELT_A, FELT_B, RAIL_A, RAIL_B, TOP_A, TOP_B, WALK_A, WALK_B, TABLE_HX, TABLE_HZ, CHAIR_RADIUS, DEALER_Z, DEAL_FROM, DEAL_RUN, FELT_Y, RAIL_TOP, SEAT_TOP, SIT_HIP, DEALER_SCALE, sitY, PLACES, BEAD_Y, TABLES, GAMES, SEATS, REAR_WALL_Z, PORTAL_Z, EXIT_Z, FURNITURE, HIGH_ROLLER, geometry, card, build, walkable, crosses, setLite, nearestClear, CLUB_LIGHTS, COLONNADE, LOUNGE_LIGHTS, GAME_LIGHTS, spots, bendKnees, sitPose, standPose };
 })();

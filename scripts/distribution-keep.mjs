@@ -34,7 +34,7 @@ const bake = (root) => {
   for (let i = 0; i < L.TERRAIN.length; i++) add(`terrain:${i}`, K.terrain(i)());
   add("volcanoCone", K.volcanoCone());
   for (let i = 0; i < L.STORJ.mountains.length; i++) add(`storjMountain:${i}`, K.storjMountain(i)());
-  for (let i = 0; i < 4; i++) add(`wall:${i}`, K.wall(i)());
+  for (let i = 0; i < 8; i++) add(`wall:${i}`, K.wall(i)());
   for (let i = 0; i < 2; i++) add(`tower:${i}`, K.tower(i)());
   for (const name of ["gatehouse", "keep", "keepSpire", "balcony", "porch"]) add(name, K[name]());
   return { key, buffer: making.done() };

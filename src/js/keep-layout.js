@@ -104,14 +104,16 @@
   ].filter((w) => clearOfArches(w.floor, w.a));
   /** Whether a body `r` across, its feet at `y`, is in one of the keep's open levels at (x, z): inside its room, or in
    *  one of its arches. */
-  const arcadeClear = (x, z, y, r = 0) => {
+  const arcadeClear = (x, z, y, r = 0, c = KEEP) => {
     const level = arcadeAt(y);
     if (!level || y < level.floor - 1e-3 || y > level.floor + KEEP.arch.spring) return false;
-    const d = Math.hypot(x - KEEP.x, z - KEEP.z);
-    return d < KEEP.r - KEEP.wall - r || arcadeTop(Math.atan2(z - KEEP.z, x - KEEP.x), d, r, level.arches) > 0;
+    // Outpost Island's keep is open at its top level alone.
+    if (c !== KEEP && level.floor !== KEEP.roof) return false;
+    const d = Math.hypot(x - c.x, z - c.z);
+    return d < KEEP.r - KEEP.wall - r || arcadeTop(Math.atan2(z - c.z, x - c.x), d, r, level.arches) > 0;
   };
   /** Whether a body `r` across stands within the keep's round at (x, z). */
-  const inKeep = (x, z, r = 0) => Math.hypot(x - KEEP.x, z - KEEP.z) < KEEP.r + 0.3 + r;
+  const inKeep = (x, z, r = 0, c = KEEP) => Math.hypot(x - c.x, z - c.z) < KEEP.r + 0.3 + r;
   // The moat: a rounded square round the castle, its bed and its water's level, and how steeply its bank falls.
   const MOAT = { half: 52, halfZ: 68.5, round: 14, bed: -4.5, water: -1.5, bank: 1.5 };
   // The gatehouse: `halfW` either side of the way in, from its `front` face back to `back`, `height` to its walk; its
@@ -321,48 +323,52 @@
     profile: [[CZ - CASTLE.halfZ, 0], [-150, 0], [-164, 5.5], [-211, 24.5], [-237, 24.5], [-272, ARENA_ISLE.y], [-290, ARENA_ISLE.y]],
     arches: [[-136, -148], [-178, -191], [-194, -207], [-211, -237], [-241, -254], [-257, -270]],
     pillars: [-134.2, -149.8, -176.5, -192.5, -209, -239, -255.5, -271.5], pillar: 5, pillarZ: 6, pillarR: 0.9, spans: [], cressets: [] };
-  /** The back way's deck at `z` along it. */
-  const backY = (z) => {
-    const P = BACK_BRIDGE.profile;
+  // An arched bridge like the back way, `B`, along `z` from `z0` down to `z1`, `x` its middle line: its deck by its
+  // `profile` ([z, y] points), pointed `arches` ([e, w] pairs) under it, `pillars` along it either side with a cresset
+  // on each, parapets `rail` high whose outer faces stand `halfW` out. The back way is one; Outpost Island's four are
+  // another, in their own frames (`OUTPOST.bridge`).
+  /** Its deck at `z` along it. */
+  const spanY = (B, z) => {
+    const P = B.profile;
     if (z >= P[0][0]) return P[0][1];
     for (let i = 1; i < P.length; i++) if (z >= P[i][0]) return P[i - 1][1] + (P[i][1] - P[i - 1][1]) * (P[i - 1][0] - z) / (P[i - 1][0] - P[i][0]);
     return P[P.length - 1][1];
   };
-  {
-    const B = BACK_BRIDGE;
-    for (const [e, w] of B.arches) { const half = (e - w) / 2; B.spans.push({ e, w, mid: (e + w) / 2, half, spring: Math.min(backY(e), backY(w)) - B.thick - half * Math.sqrt(3) }); }
-    for (const z of B.pillars) for (const s of [-1, 1]) B.cressets.push([B.x + s * B.pillarZ, backY(z) + B.rail + B.pillar, z]);
-  }
-  /** The underside of the back way at `z`: an arch's soffit, or -Infinity where it is solid. */
-  const backSoffit = (z) => {
-    const spans = BACK_BRIDGE.spans;
+  /** Its arches' spans, worked out from its profile, and a cresset on each pillar. */
+  const spanInit = (B) => {
+    for (const [e, w] of B.arches) { const half = (e - w) / 2; B.spans.push({ e, w, mid: (e + w) / 2, half, spring: Math.min(spanY(B, e), spanY(B, w)) - B.thick - half * Math.sqrt(3) }); }
+    for (const z of B.pillars) for (const s of [-1, 1]) B.cressets.push([B.x + s * B.pillarZ, spanY(B, z) + B.rail + B.pillar, z]);
+  };
+  /** Its underside at `z`: an arch's soffit, or -Infinity where it is solid. */
+  const spanSoffit = (B, z) => {
+    const spans = B.spans;
     for (let i = 0; i < spans.length; i++) { const s = spans[i]; if (z < s.e && z > s.w) return archTop(s.half, s.spring, z - s.mid); }
     return -Infinity;
   };
-  /** Whether (x, z), grown by `pad`, lies on or beside the back way. */
-  const backAt = (x, z, pad = 0) => z <= BACK_BRIDGE.z0 + pad && z >= BACK_BRIDGE.z1 - pad && Math.abs(x - BACK_BRIDGE.x) <= BACK_BRIDGE.pillarZ + BACK_BRIDGE.pillarR + pad;
+  /** Whether (x, z), grown by `pad`, lies on or beside it. */
+  const spanAt = (B, x, z, pad = 0) => z <= B.z0 + pad && z >= B.z1 - pad && Math.abs(x - B.x) <= B.pillarZ + B.pillarR + pad;
   /** The top of its parapet at (x, z) grown by `r`, or of a pillar standing there, or null off both. */
-  const backRail = (x, z, r = 0) => {
-    const B = BACK_BRIDGE, dx = Math.abs(x - B.x);
+  const spanRail = (B, x, z, r = 0) => {
+    const dx = Math.abs(x - B.x);
     if (z > B.z0 + r || z < B.z1 - r || dx < B.half - r || dx > B.pillarZ + B.pillarR + r) return null;
-    if (dx >= B.pillarZ - B.pillarR - r) for (let i = 0; i < B.pillars.length; i++) if (Math.abs(z - B.pillars[i]) <= B.pillarR + r) return backY(B.pillars[i]) + B.rail + B.pillar;
-    return dx <= B.halfW + r ? backY(z) + B.rail : null;
+    if (dx >= B.pillarZ - B.pillarR - r) for (let i = 0; i < B.pillars.length; i++) if (Math.abs(z - B.pillars[i]) <= B.pillarR + r) return spanY(B, B.pillars[i]) + B.rail + B.pillar;
+    return dx <= B.halfW + r ? spanY(B, z) + B.rail : null;
   };
   /** What it gives feet at `feet` to stand on: its deck or a parapet's top from above, null under it or off it. */
-  const backSupport = (x, z, feet) => {
-    const B = BACK_BRIDGE, dx = Math.abs(x - B.x);
+  const spanSupport = (B, x, z, feet) => {
+    const dx = Math.abs(x - B.x);
     if (z > B.z0 || z < B.z1 || dx > B.pillarZ + B.pillarR) return null;
-    const rail = backRail(x, z);
+    const rail = spanRail(B, x, z);
     if (rail !== null && feet >= rail - STEP) return rail;
     if (dx > B.halfW) return null;
-    const deck = backY(z);
+    const deck = spanY(B, z);
     return feet >= deck - STEP ? deck : null;
   };
-  /** A step on foot to (x, z), as the back way sees it: 1 along its deck, -1 into its stone, 0 where it has no say. */
-  const backWalk = (x, z, feet, r) => {
-    const B = BACK_BRIDGE, dx = Math.abs(x - B.x);
+  /** A step on foot to (x, z), as it sees it: 1 along its deck, -1 into its stone, 0 where it has no say. */
+  const spanWalk = (B, x, z, feet, r) => {
+    const dx = Math.abs(x - B.x);
     if (z > B.z0 + r || z < B.z1 - r || dx > B.pillarZ + B.pillarR + r) return 0;
-    const deck = backY(z), rail = backRail(x, z, r);
+    const deck = spanY(B, z), rail = spanRail(B, x, z, r);
     if (feet > deck - B.thick) {
       if (rail !== null && rail > feet + STEP) return -1;
       if (dx > B.halfW) return 0;
@@ -371,22 +377,32 @@
     }
     if (rail !== null && rail > deck + B.rail + 1) return -1;
     if (dx > B.halfW + r) return 0;
-    return Math.min(backSoffit(z - r), backSoffit(z), backSoffit(z + r)) < feet + 2 ? -1 : 0;
+    return Math.min(spanSoffit(B, z - r), spanSoffit(B, z), spanSoffit(B, z + r)) < feet + 2 ? -1 : 0;
   };
-  /** Whether a body in the air at `y` meets the back way at (x, z). */
-  const backFly = (x, z, y, r) => {
-    const B = BACK_BRIDGE, dx = Math.abs(x - B.x);
+  /** Whether a body in the air at `y` meets it at (x, z). */
+  const spanFly = (B, x, z, y, r) => {
+    const dx = Math.abs(x - B.x);
     if (z > B.z0 + r || z < B.z1 - r || dx > B.pillarZ + B.pillarR + r) return false;
-    const deck = backY(z), rail = backRail(x, z, r);
+    const deck = spanY(B, z), rail = spanRail(B, x, z, r);
     if (rail !== null && rail > deck + B.rail + 1) return y < rail - 1e-3;
     if (dx > B.halfW + r) return false;
     if (y >= deck - 1e-3) return rail !== null && y < rail - 1e-3;
-    return y + HEAD > Math.min(backSoffit(z - r), backSoffit(z), backSoffit(z + r));
+    return y + HEAD > Math.min(spanSoffit(B, z - r), spanSoffit(B, z), spanSoffit(B, z + r));
   };
   /** Whether the point (x, y, z) lies in its stone. */
-  const backHit = (x, y, z) => { const B = BACK_BRIDGE; return z <= B.z0 && z >= B.z1 && Math.abs(x - B.x) <= B.halfW && y <= backY(z) && y >= backSoffit(z); };
+  const spanHit = (B, x, y, z) => z <= B.z0 && z >= B.z1 && Math.abs(x - B.x) <= B.halfW && y <= spanY(B, z) && y >= spanSoffit(B, z);
   /** Whether a hull may not lie at (x, z), grown by `pad`: a pier, a pillar or the solid causeway; its arches are open. */
-  const backFoul = (x, z, pad) => backAt(x, z, pad) && Math.min(backSoffit(z - pad), backSoffit(z), backSoffit(z + pad)) === -Infinity;
+  const spanFoul = (B, x, z, pad) => spanAt(B, x, z, pad) && Math.min(spanSoffit(B, z - pad), spanSoffit(B, z), spanSoffit(B, z + pad)) === -Infinity;
+  // The back way's own.
+  const backY = (z) => spanY(BACK_BRIDGE, z);
+  spanInit(BACK_BRIDGE);
+  const backSoffit = (z) => spanSoffit(BACK_BRIDGE, z);
+  const backAt = (x, z, pad = 0) => spanAt(BACK_BRIDGE, x, z, pad);
+  const backSupport = (x, z, feet) => spanSupport(BACK_BRIDGE, x, z, feet);
+  const backWalk = (x, z, feet, r) => spanWalk(BACK_BRIDGE, x, z, feet, r);
+  const backFly = (x, z, y, r) => spanFly(BACK_BRIDGE, x, z, y, r);
+  const backHit = (x, y, z) => spanHit(BACK_BRIDGE, x, y, z);
+  const backFoul = (x, z, pad) => spanFoul(BACK_BRIDGE, x, z, pad);
   /** The arena's rock at (x, z): its floor, sheer down to the sea bed at its rim. */
   const arenaDist = (x, z) => ARENA_ISLE.r - Math.hypot(x - ARENA_ISLE.x, z - ARENA_ISLE.z);
   const arenaHeight = (x, z) => { const d = arenaDist(x, z); return d < -12 ? -Infinity : d >= 1.5 ? ARENA_ISLE.y : d >= 0 ? SEA + 0.4 + (ARENA_ISLE.y - SEA - 0.4) * d / 1.5 : SEA + 0.4 + d * 1.6; };
@@ -468,6 +484,11 @@
   // Aras-Son's stall (keep-halls-models.js `merchant`) on the quay's seaward edge south of the stair's foot, its counter
   // toward the stair: where it stands, which way its counter faces, where a buyer stands before it, how near they must
   // be to trade and how big the knight inside it is.
+  // A rowboat's berth along the quay's seaward face south of the stair's foot, clear of the longship moored to the
+  // north, its bow to the north.
+  FERRY.armory = { x: ARMORY.quay.x1 + 1.15, z: -66, deck: ARMORY.y, walkX: ARMORY.quay.x1 - 1.2, side: 1 };
+  // And one along the shipyard's quay's seaward face, south of the great longship's pier, its bow to the north.
+  FERRY.shipyard = { x: SHIPYARD.quay.x0 - 1.15, z: -97, deck: SHIPYARD.y, walkX: SHIPYARD.quay.x0 + 1.2, side: -1 };
   ARMORY.merchant = { x: 144.1, z: -56.3, turn: -Math.PI / 2, reach: 2.6, front: 2.6, knight: 0.6 };
   ARMORY.merchant.at = { x: ARMORY.merchant.x + Math.sin(ARMORY.merchant.turn) * ARMORY.merchant.front, z: ARMORY.merchant.z + Math.cos(ARMORY.merchant.turn) * ARMORY.merchant.front };
   ARMORY.props.push({ k: "merchant", x: ARMORY.merchant.x, z: ARMORY.merchant.z, ry: ARMORY.merchant.turn, r: 0 });
@@ -599,7 +620,7 @@
     // small one and a great one to the east, toward CBDC. Each comes for whoever sails within `wake` of where
     // it is.
     { scale: 0.13, role: "raider", hull: 3, roam: [[-400, -150], [-680, -150], [-680, 40], [-400, 40]] },
-    { scale: 0.13, role: "raider", hull: 3, roam: [[-420, 200], [-640, 230], [-520, 120]] },
+    { scale: 0.13, role: "raider", hull: 3, roam: [[-420, 150], [-660, 150], [-520, 80]] },
     { scale: 0.35, role: "raider", hull: 5, roam: [[-450, -280], [-720, -220], [-600, -60]] },
     { scale: 0.13, role: "raider", hull: 3, roam: [[360, -150], [780, -160], [780, 60], [380, 80]] },
     { scale: 0.35, role: "raider", hull: 5, roam: [[450, -280], [800, -240], [640, 0], [400, -40]] },
@@ -608,16 +629,31 @@
     // portal's islet, never in the water between the islet and the castle island (`WANDER_OUT`).
     { scale: 0.13, role: "raider", hull: 3, roam: [[-260, -330], [-180, -400]], wander: { x0: -480, x1: -90, z0: -430, z1: -170 } },
     { scale: 0.35, role: "raider", hull: 5, roam: [[260, -330], [180, -400]], wander: { x0: 90, x1: 480, z0: -430, z1: -170 } },
-    { scale: 0.13, role: "raider", hull: 3, roam: [[-300, 230], [-200, 300]], wander: { x0: -520, x1: -130, z0: 90, z1: 340 } },
-    { scale: 0.13, role: "raider", hull: 3, roam: [[300, 230], [200, 300]], wander: { x0: 130, x1: 520, z0: 90, z1: 340 } },
-    // The red-sailed raider Leif's quest sends a visitor out after (`quest`: on the water only while that quest wants
-    // her), far out to sea west of the shipyard; she fights whoever comes within `wake` of her.
-    { scale: 0.13, role: "raider", quest: "sails", wake: 95, hull: 3, home: { x: -335, z: -205, yaw: 0.6 } }
+    { scale: 0.13, role: "raider", hull: 3, roam: [[-300, 230], [-200, 250]], wander: { x0: -440, x1: -130, z0: 90, z1: 260 } },
+    { scale: 0.13, role: "raider", hull: 3, roam: [[300, 230], [200, 250]], wander: { x0: 130, x1: 460, z0: 90, z1: 260 } },
+    // And four more roaming the open water north of the castle island, out past the portal's islet: a great one and a
+    // small one to the west, toward Outpost Island, and the same to the east, toward Shards.
+    { scale: 0.35, role: "raider", hull: 5, roam: [[-250, 380], [-650, 360], [-600, 520], [-300, 520]] },
+    { scale: 0.13, role: "raider", hull: 3, roam: [[-160, 170], [-400, 330], [-200, 470]] },
+    { scale: 0.35, role: "raider", hull: 5, roam: [[250, 440], [420, 530], [780, 510], [740, 430]] },
+    { scale: 0.13, role: "raider", hull: 3, roam: [[200, 160], [400, 250], [380, 460], [180, 420]] },
+    // The three red-sailed raiders Leif's quest sends a visitor out after (`quest`: each on the water only while that
+    // quest wants her and until she is sunk), far out to sea west of the shipyard; each fights whoever comes within
+    // `wake` of her.
+    { scale: 0.13, role: "raider", quest: "sails", wake: 95, hull: 3, home: { x: -335, z: -205, yaw: 0.6 } },
+    { scale: 0.13, role: "raider", quest: "sails", wake: 95, hull: 3, home: { x: -290, z: -265, yaw: 1.4 } },
+    { scale: 0.13, role: "raider", quest: "sails", wake: 95, hull: 3, home: { x: -400, z: -250, yaw: -0.3 } },
+    // Cannon Basics' raiders, by the wave they come for the tower a visitor holds on Outpost Island in (`wave`), one
+    // at a time: two small and then a great one, each on the water only while its wave is under way (scene-keep.js
+    // `TOWER_QUEST`).
+    ...[[0.13, 0], [0.13, 1], [0.35, 2]].map(([scale, wave]) => ({ scale, role: "raider", quest: "cannon", wave, hull: scale < 0.2 ? 3 : 5, home: { x: -846, z: 300, yaw: 0 } }))
   ];
   /** The water between the portal's islet and the castle island, which no wandering raider sails into. */
   const WANDER_OUT = { half: 110, z0: -20, z1: ISLET.z + 50 };
   const wanderOut = (x, z) => Math.abs(x) < WANDER_OUT.half && z > WANDER_OUT.z0 && z < WANDER_OUT.z1;
-  for (const ship of SHIPS) {
+  // Each ship's own measures from its kind and scale, its guns, helm and mending places (`fitShip`; a ship moored at
+  // one of the far islands' docks is added later, once the dock is laid out).
+  const fitShip = (ship) => {
     if (ship.roam) ship.home = { x: ship.roam[0][0], z: ship.roam[0][1], yaw: Math.atan2(ship.roam[1][0] - ship.roam[0][0], ship.roam[1][1] - ship.roam[0][1]) };
     const galleon = ship.kind === "galleon";
     ship.bow = (galleon ? GALLEON.bow : LONGSHIP.bow) * ship.scale; ship.beam = (galleon ? GALLEON.beam : LONGSHIP.beam) * ship.scale; ship.keel = (galleon ? GALLEON.keel : 3.2) * ship.scale;
@@ -634,7 +670,8 @@
     // deck's height over the waterline there], more on a bigger ship.
     ship.mend = (galleon ? [[18, 0], [7, 3.6], [1, -3.8], [-12.5, 3.4], [-16, -3.2], [-23, 0]] : s < 0.2 ? [[16, 3.5], [-10, -3.5]] : [[26, 0], [12, 4.2], [-6, -4.4], [-20, 4]])
       .map(([a, c]) => [a * s, c * s, (galleon ? galleonTop(a, c) : longshipTop(a, c)) * s]);
-  }
+  };
+  for (const ship of SHIPS) fitShip(ship);
   /** A ship's half breadth `a` along it from its middle, or 0 past its ends. */
   const shipHalf = (ship, a) => (ship.kind === "galleon" ? galleonHalf(a / ship.scale) : longshipHalf(a / ship.scale)) * ship.scale;
   // The two knights on their plinths, twice life size: how far either reaches out from its middle, and how high a
@@ -669,11 +706,11 @@
   // The four terrain grids, one an island (the castle's, the islet's, the volcano's, Cold Storj's), and how far out a
   // body may go (`BOUNDS`, `roam` in from its edge).
   const TERRAIN = [{ x0: -120, x1: 120, z0: -210, z1: 56 }, { x0: -40, x1: 40, z0: ISLET.z - 40, z1: ISLET.z + 40 }, { x0: 870, x1: 1030, z0: -130, z1: 30 }, { x0: -1252, x1: -772, z0: -286, z1: 186 },
-    { x0: ARENA_ISLE.x - 60, x1: ARENA_ISLE.x + 60, z0: ARENA_ISLE.z - 60, z1: ARENA_ISLE.z + 60 }];
+    { x0: ARENA_ISLE.x - 60, x1: ARENA_ISLE.x + 60, z0: ARENA_ISLE.z - 60, z1: ARENA_ISLE.z + 60 }, { x0: 490, x1: 630, z0: 260, z1: 400 }, { x0: -920, x1: -772, z0: 401, z1: 549 }];
   // West and east, past the first grid's edges, the sea is the water's flat sheet alone, out to `x0` beyond the
   // shipyard and Cold Storj and `z0` behind the castle island, open water to sail in, and, past the Armory & Forge
   // and the volcano's island, to `x`.
-  const BOUNDS = { x: 1040, x0: -1420, z0: -450, z1: ISLET.z + 54, low: SEA - 1, high: 13, roam: 14 };
+  const BOUNDS = { x: 1040, x0: -1420, z0: -450, z1: 760, low: SEA - 1, high: 13, roam: 14 };
 
   const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
   const smooth = (v) => { const t = clamp01(v); return t * t * (3 - 2 * t); };
@@ -859,6 +896,257 @@
     if (!whole && inVolcanoMouth(x, z)) h = VOLCANO.court.y;
     if (h > SEA + 0.8 && lavaStream(x, z) > 0) h -= VOLCANO.cut;
     return h;
+  };
+
+  // ---------- Shards ----------
+  // The crystal island out in the water between Portal Island and CBDC, a little further from the castle island than
+  // the islet: round about its middle, `r` to its shore (wandering by `wobble`, but hardly at all by its dock on the
+  // west), its beach rising `beach` a metre inland to a plateau `plateau` high of the glowing amethyst under Merge Rock
+  // (keep-models.js), gently rolling (`roll`) out from `flat` round its middle. Its dock on the west shore is CBDC's:
+  // a stone `quay` along the shore and an oak `pier` out to the west from its middle, both at `y`, the water `deep`
+  // along the quay for `deepHalf` either side of its middle so a ship comes alongside. A paved `way`
+  // `half` either side of the island's middle line climbs from the quay to the plateau by `top` and runs on east to
+  // the head of the `trench`, which goes down in `steps` treads `tread` long to its floor `floor` high, opens into a
+  // sunken `court` before the cave's mouth and, past it, the `notch` cut into the rock under the mouth's lintel
+  // (keep-models.js `storjCave`'s frame, standing at `mouth`); a walker past `enter` goes underground.
+  const SHARDS = { x: 560, z: 330, r: 52, wobble: 3, beach: 0.7, plateau: 0.5, flat: 30, roll: 1.6 };
+  SHARDS.dock = { y: SEA + 1.1, deep: SEA - 6, deepHalf: 26, quay: { x0: 504, x1: 509, z0: SHARDS.z - 12, z1: SHARDS.z + 12 }, pier: { x0: 492, x1: 504, z0: SHARDS.z - 1.3, z1: SHARDS.z + 1.3 } };
+  SHARDS.way = { half: 1.8, x0: SHARDS.dock.quay.x1 - 0.5, top: 523 };
+  SHARDS.trench = { x0: 544.5, tread: 1, steps: 11, half: 1.8, floor: SHARDS.plateau - 5.5 };
+  SHARDS.trench.court = { x0: SHARDS.trench.x0 + SHARDS.trench.steps * SHARDS.trench.tread, x1: 558.6, half: 3.4 };
+  SHARDS.trench.notch = { x0: SHARDS.trench.court.x1, x1: SHARDS.trench.court.x1 + 4.3, half: 2.1 };
+  SHARDS.mouth = { x: SHARDS.trench.notch.x0 + 0.3, enter: SHARDS.trench.notch.x0 + 1.6 };
+  FERRY.shards = { x: SHARDS.dock.quay.x0 - 1.15, z: SHARDS.z + 6.6, deck: SHARDS.dock.y, walkX: SHARDS.dock.quay.x0 + 1.2, side: -1 };
+  /** How far (x, z) lies inland of Shards' shore, negative out at sea. */
+  const shardsDist = (x, z) => {
+    const dx = x - SHARDS.x, dz = z - SHARDS.z, west = dx < 0 ? 1 - smooth((Math.abs(dz) - 14) / 14) : 0;
+    return SHARDS.r - Math.hypot(dx, dz) + (noise(x * 0.06 + 71, z * 0.06 + 23) - 0.5) * 2 * SHARDS.wobble * (1 - 0.9 * west);
+  };
+  /** How much (x, z) is on the way from the quay to the trench (1 on its middle line, fading off it). */
+  const onShardsWay = (x, z) => {
+    const W = SHARDS.way;
+    return x < W.x0 || x > SHARDS.trench.x0 + 0.5 ? 0 : 1 - smooth((Math.abs(z - SHARDS.z) - W.half) / 2.5);
+  };
+  /** The floor of the trench at (x, z), down to the cave's mouth, or null outside it. */
+  const shardsTrench = (x, z) => {
+    const T = SHARDS.trench, dz = Math.abs(z - SHARDS.z);
+    if (x >= T.x0 && x < T.court.x0 && dz <= T.half) return SHARDS.plateau - 0.5 * Math.min(T.steps, Math.ceil((x - T.x0) / T.tread));
+    if (x >= T.court.x0 && x < T.court.x1 && dz <= T.court.half) return T.floor;
+    if (x >= T.notch.x0 && x < T.notch.x1 && dz <= T.notch.half) return T.floor;
+    return null;
+  };
+  /** Whether (x, z) is in the notch under the cave mouth's lintel, grown by `r`. */
+  const inShardsNotch = (x, z, r = 0) => { const N = SHARDS.trench.notch; return x >= N.x0 - r && x <= N.x1 + r && Math.abs(z - SHARDS.z) <= N.half + r; };
+  /** Shards' own ground: the sea bed (cut deep by the dock), the beach, its rolling plateau, the way levelled and
+   *  sloping down to the quay, and the trench stepping down to the cave. */
+  const shardsHeight = (x, z) => {
+    if (Math.abs(x - SHARDS.x) > SHARDS.r + 60 || Math.abs(z - SHARDS.z) > SHARDS.r + 60) return -Infinity;
+    const c = shardsDist(x, z), Q = SHARDS.dock.quay;
+    // Along the quay the water is deep enough for a ship to come alongside it.
+    if (c < 0) return x < Q.x1 && Math.abs(z - SHARDS.z) < SHARDS.dock.deepHalf ? Math.min(SEA + 0.4 + c * ISLAND.bed, x < Q.x0 ? SHARDS.dock.deep : SEA - 1.1) : SEA + 0.4 + c * ISLAND.bed;
+    const d = Math.hypot(x - SHARDS.x, z - SHARDS.z);
+    let h = SHARDS.plateau + (d < SHARDS.flat ? 0 : smooth((d - SHARDS.flat) / 6) * SHARDS.roll * noise(x * 0.11 + 4, z * 0.11 + 19));
+    h = Math.min(h, SEA + 0.4 + c * SHARDS.beach * (0.8 + 0.4 * noise(x * 0.1 + 12, z * 0.1 + 3)));
+    if (x < Q.x1 + 0.5 && Math.abs(z - SHARDS.z) < Q.z1 - SHARDS.z + 0.5) h = Math.min(h, SHARDS.dock.y - 0.6);
+    const w = onShardsWay(x, z);
+    if (w > 0) { const W = SHARDS.way, t = clamp01((x - W.x0) / (W.top - W.x0)), way = SHARDS.dock.y + 0.15 + (SHARDS.plateau - SHARDS.dock.y - 0.15) * t; h += (way - h) * w; }
+    const trench = shardsTrench(x, z);
+    return trench === null ? h : trench;
+  };
+
+  // ---------- Outpost Island ----------
+  // A square island out between Portal Island and Cold Storj, built as the castle island is: about its middle a
+  // rounded square `half` to its shore (`p` its squareness, the shore wandering by `wobble`), level at y 0 inside,
+  // its beach rising `beach` a metre and the sea bed falling `bed` a metre out. Two square curtains of the castle's
+  // own stand on it, `outer` and `inner` (the courtyard's) out from its middle to their outer faces, `CASTLE.wall`
+  // thick and `CASTLE.walk` to their walks, a gate through the middle of every side of each as the west gate is
+  // (`WEST.half` either side, `westArchTop`); the castle's keep in the middle, its door shut and nothing yet inside;
+  // and out of each outer gate an arched bridge as the shipyard's is, half its length (`bridge`, the back way's kind in
+  // its own frame: along -z from the wall's face, `x` across), down to a T of a dock at `dock.y`: a stone `cross` quay
+  // across the bridge's foot, `at` to `at + w` out from the wall, `half` either side, and a timber `pier` out from its
+  // middle `len` long; a curtain tower at each end of every cross (`towers`, the castle's, its stair inside in the
+  // halls, its cannon in its gallery looking out to sea, its door toward the bridge). The rowboat berths along the
+  // east pier (`FERRY.outpost`).
+  const OUTPOST = { x: -846, z: 475, half: 54, p: 4, wobble: 3, beach: 0.7, bed: 0.35, outer: 44, inner: 27,
+    dock: { y: DOCK.y, at: 37, w: 6, half: 22, pier: { len: 18, half: 1.3 } } };
+  OUTPOST.bridge = { x: 0, half: 5, halfW: 5.7, rail: 1.1, thick: 0.9, z0: 0, z1: -OUTPOST.dock.at, peak: 1.5,
+    profile: [[0, 0], [-5, 0], [-14, 1.5], [-22, 1.5], [-OUTPOST.dock.at, OUTPOST.dock.y]],
+    arches: [[-7, -13], [-16, -22], [-25, -31]], pillars: [-5.4, -14.5, -23.5, -32.6], pillar: 5, pillarZ: 6, pillarR: 0.9, spans: [], cressets: [] };
+  // Its four arms, north, east, south and west: each the way out (`dx`, `dz`), the way across it (`nx`, `nz`) and its
+  // gate on the outer wall's face (`gx`, `gz`), and how its bridge is turned (`yaw`, the model's frame onto the land's).
+  OUTPOST.arms = [[0, 1], [1, 0], [0, -1], [-1, 0]].map(([dx, dz], k) => ({ k, dx, dz, nx: dz, nz: -dx, gx: OUTPOST.x + dx * OUTPOST.outer, gz: OUTPOST.z + dz * OUTPOST.outer, yaw: Math.atan2(dz, -dx) }));
+  OUTPOST.towers = [];
+  OUTPOST.decks = [];
+  {
+    const O = OUTPOST, D = O.dock, rect = (a, ua, ub, va, vb) => {
+      const x0 = a.gx + a.dx * ua + a.nx * va, x1 = a.gx + a.dx * ub + a.nx * vb, z0 = a.gz + a.dz * ua + a.nz * va, z1 = a.gz + a.dz * ub + a.nz * vb;
+      return { x0: Math.min(x0, x1), x1: Math.max(x0, x1), z0: Math.min(z0, z1), z1: Math.max(z0, z1) };
+    };
+    for (const a of O.arms) {
+      a.cross = rect(a, D.at, D.at + D.w, -D.half, D.half);
+      a.pier = rect(a, D.at + D.w, D.at + D.w + D.pier.len, -D.pier.half, D.pier.half);
+      O.decks.push(a.cross, a.pier);
+      // A tower at each end of the cross, its gallery looking out along the arm and its door toward the bridge.
+      for (const s of [-1, 1]) {
+        const out = D.at + D.w / 2, x = a.gx + a.dx * out + a.nx * s * D.half, z = a.gz + a.dz * out + a.nz * s * D.half;
+        O.towers.push({ x, z, yaw: Math.atan2(a.dx, a.dz), tall: 0, ground: D.y, door: { dx: -a.nx * s, dz: -a.nz * s } });
+      }
+    }
+  }
+  spanInit(OUTPOST.bridge);
+  FERRY.outpost = (() => { const a = OUTPOST.arms[1], P = a.pier; return { x: (P.x0 + P.x1) / 2 + 3, z: P.z1 + 1.15, deck: OUTPOST.dock.y, walkZ: P.z1 - 0.6, side: 1, faceZ: 1 }; })();
+  // Small longships of the Oogas' moored at the far islands, each along a pier's or quay's side with a plank onto her,
+  // as the Armory & Forge's is (`SHIPS`' `drive`, sailed by whoever takes her helm): two at Outpost Island, along the
+  // east pier's south side and the north pier's east side, and one along Shards' quay south of its pier.
+  const FAR_PLANKS = [];
+  {
+    const S = 0.13, off = LONGSHIP.beam * S + 0.35, moor = (home, cast, plank) => { const ship = { scale: S, role: "docked", drive: true, hull: 3, cast, home }; fitShip(ship); SHIPS.push(ship); FAR_PLANKS.push(plank); };
+    const E = OUTPOST.arms[1].pier, N = OUTPOST.arms[0].pier, ex = (E.x0 + E.x1) / 2, nz = (N.z0 + N.z1) / 2;
+    moor({ x: ex, z: E.z0 - off, yaw: Math.PI / 2 }, 3, { x0: ex - 1.5, x1: ex + 1.5, z0: E.z0 - 1.1, z1: E.z0 });
+    moor({ x: N.x1 + off, z: nz, yaw: 0 }, 3, { x0: N.x1, x1: N.x1 + 1.1, z0: nz - 1.5, z1: nz + 1.5 });
+    const Q = SHARDS.dock.quay, sz = SHARDS.z - 8;
+    moor({ x: Q.x0 - off, z: sz, yaw: 0 }, -3, { x0: Q.x0 - 1.1, x1: Q.x0, z0: sz - 1.5, z1: sz + 1.5 });
+  }
+  // The keep's middle on the island, and the torches on its balconies' piers, as the castle's keep has them.
+  const OUTPOST_KEEP = { x: OUTPOST.x, z: OUTPOST.z };
+  // The firepit in the middle of its top level (keep-halls-models.js `firepit`, as the castle keep's rooftop has it).
+  OUTPOST.fire = { x: OUTPOST_KEEP.x, z: OUTPOST_KEEP.z, r: 2.1 };
+  OUTPOST.torches = TORCHES.map(([x, y, z]) => [x - KEEP.x + OUTPOST_KEEP.x, y, z - KEEP.z + OUTPOST_KEEP.z]);
+  /** How far (x, z) lies inland of Outpost Island's shore, negative out at sea. */
+  const outpostDist = (x, z) => {
+    const O = OUTPOST, ax = Math.abs(x - O.x) / O.half, az = Math.abs(z - O.z) / O.half;
+    return (1 - Math.pow(Math.pow(ax, O.p) + Math.pow(az, O.p), 1 / O.p)) * O.half + (noise(x * 0.07 + 41, z * 0.07 + 7) - 0.5) * 2 * O.wobble;
+  };
+  /** Outpost Island's own ground: level inside, its beach and the sea bed. */
+  const outpostHeight = (x, z) => {
+    const O = OUTPOST;
+    if (Math.abs(x - O.x) > O.half + 70 || Math.abs(z - O.z) > O.half + 70) return -Infinity;
+    const c = outpostDist(x, z);
+    if (c < 0) return SEA + 0.4 + c * O.bed;
+    return Math.min(0, SEA + 0.4 + c * O.beach * (0.8 + 0.4 * noise(x * 0.1 + 31, z * 0.1 + 13)));
+  };
+  /** Which arm of Outpost Island (x, z) lies out along, into `ARM_AT` with its place in the arm's frame: `u` along it
+   *  (0 at the gate's face, falling outward, as `OUTPOST.bridge` runs) and `v` across. */
+  const ARM_AT = { a: null, u: 0, v: 0 };
+  const outpostArm = (x, z) => {
+    const O = OUTPOST, dx = x - O.x, dz = z - O.z, a = O.arms[Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 1 : 3) : (dz > 0 ? 0 : 2)];
+    ARM_AT.a = a; ARM_AT.u = -((x - a.gx) * a.dx + (z - a.gz) * a.dz); ARM_AT.v = (x - a.gx) * a.nx + (z - a.gz) * a.nz;
+    return ARM_AT;
+  };
+  /** Whether (x, z) lies anywhere near Outpost Island's stone. */
+  const nearOutpost = (x, z) => Math.abs(x - OUTPOST.x) < OUTPOST.outer + OUTPOST.dock.at + 12 && Math.abs(z - OUTPOST.z) < OUTPOST.outer + OUTPOST.dock.at + 12;
+  /** The curtain whose wall (x, z), grown by `r`, stands in, into `OUTPOST_WALL` (its walk's `top`, whether that is
+   *  over a gate's passage, and the passage's soffit there), or null. */
+  const OUTPOST_WALL = { top: 0, gate: false, soffit: 0 };
+  const outpostWall = (x, z, r = 0) => {
+    const O = OUTPOST, ax = Math.abs(x - O.x), az = Math.abs(z - O.z), m = Math.max(ax, az), along = Math.min(ax, az);
+    for (const W of [O.outer, O.inner]) {
+      if (m > W + r || m < W - CASTLE.wall - r) continue;
+      OUTPOST_WALL.top = CASTLE.walk; OUTPOST_WALL.gate = along < WEST.half - r; OUTPOST_WALL.soffit = OUTPOST_WALL.gate ? westArchTop(along) : 0;
+      return OUTPOST_WALL;
+    }
+    return null;
+  };
+  // Its towers' galleries and doors, after the castle's six (their halls' insides are keep-halls-layout.js `TOWERS`
+  // 6 on), each standing on the dock at its `ground`, its gallery its walk up from there.
+  for (const t of OUTPOST.towers) {
+    const i = GALLERIES.length, inner = CASTLE.tower - GALLERY.wall, floor = t.ground + CASTLE.towerWalk[t.tall];
+    t.i = i;
+    GALLERIES.push({ i, x: t.x, z: t.z, floor, top: floor, r: CASTLE.tower, inner, yaw: t.yaw, ahead: inner - 1.5, arc: Math.PI / 2, gallery: true, defend: true, outpost: true, ground: t.ground, tall: t.tall });
+    TOWER_DOORS.push({ i, cx: t.x, cz: t.z, dx: t.door.dx, dz: t.door.dz, half: 1.1, frame: 1.6, front: CASTLE.tower + 0.8, y: t.ground, outpost: true });
+  }
+  /** The top of Outpost Island's towers and their porches within `r` of (x, z), or -Infinity off them all. */
+  const outpostTowerTop = (x, z, r = 0) => {
+    let top = -Infinity;
+    for (const t of OUTPOST.towers) {
+      const ox = x - t.x, oz = z - t.z;
+      if (Math.abs(ox) > CASTLE.tower + 9 + r || Math.abs(oz) > CASTLE.tower + 9 + r) continue;
+      if (Math.hypot(ox, oz) < CASTLE.tower + 0.45 + r) top = Math.max(top, t.ground + CASTLE.towerWalk[t.tall] + SPIRE);
+      const d = t.door, out = ox * d.dx + oz * d.dz;
+      if (out > 0 && out < CASTLE.tower + 0.8 + r && Math.abs(ox * d.dz - oz * d.dx) < 1.6 + r) top = Math.max(top, t.ground + 6.3);
+    }
+    return top;
+  };
+  /** The top of Outpost Island's keep within `r` of (x, z), tapering to its spire, or -Infinity off it. */
+  const outpostKeepTop = (x, z, r = 0) => {
+    const d = Math.hypot(x - OUTPOST_KEEP.x, z - OUTPOST_KEEP.z);
+    if (d >= KEEP.r + 0.3 + r) return -Infinity;
+    return KEEP.roof + KEEP.arcade + KEEP.spire * Math.max(0, 1 - Math.max(0, d - r) / (KEEP.r + 1.2));
+  };
+
+  // Outpost Island underfoot and in the air: its bridges (in each arm's frame, `outpostArm`), its walls, towers and
+  // keep. Each answers null, 0 or false away from it.
+  const outpostBridge = (x, z) => { if (!nearOutpost(x, z)) return null; const A = outpostArm(x, z); return A.u <= OUTPOST.bridge.z0 + 1 && A.u >= OUTPOST.bridge.z1 - 1 ? A : null; };
+  const outpostSupport = (x, z, feet) => {
+    if (!nearOutpost(x, z)) return null;
+    const A = outpostBridge(x, z);
+    if (A) { const b = spanSupport(OUTPOST.bridge, A.v, A.u, feet); if (b !== null) return b; }
+    const balcony = balconyAt(x, z, feet, OUTPOST_KEEP);
+    if (balcony !== null) return balcony;
+    const w = outpostWall(x, z);
+    if (w && feet >= w.top - STEP) return w.top;
+    // The keep's top level, open: its floor, in through its arches from the top balcony.
+    if (inKeep(x, z, 0, OUTPOST_KEEP) && feet >= KEEP.roof - STEP && feet < KEEP.roof + KEEP.arch.spring) return KEEP.roof;
+    const t = Math.max(outpostTowerTop(x, z), outpostKeepTop(x, z));
+    if (t > -Infinity && feet >= t - STEP) return t;
+    return null;
+  };
+  /** A step on foot to (x, z) on Outpost Island: 1 to take it, -1 to refuse it, 0 where it has no say. */
+  const outpostWalk = (x, z, feet, r) => {
+    if (!nearOutpost(x, z)) return 0;
+    const balcony = balconyAt(x, z, feet, OUTPOST_KEEP);
+    if (balcony !== null) return balconyClear(x, z, feet, r, balcony, OUTPOST_KEEP) && balcony <= feet + STEP && balcony >= feet - DROP ? 1 : -1;
+    const A = outpostBridge(x, z);
+    if (A) { const b = spanWalk(OUTPOST.bridge, A.v, A.u, feet, r); if (b !== 0) return b; }
+    const w = outpostWall(x, z, r);
+    if (w) {
+      if (feet >= w.top - STEP) return w.top <= feet + STEP && w.top >= feet - DROP ? 1 : -1;
+      if (!(w.gate && feet + 2 < w.soffit)) return -1;
+    }
+    if (inKeep(x, z, r, OUTPOST_KEEP) && feet > KEEP.roof - 1 && feet < KEEP.roof + KEEP.arch.spring) {
+      if (!arcadeClear(x, z, Math.max(feet, KEEP.roof), r, OUTPOST_KEEP) || Math.hypot(x - OUTPOST.fire.x, z - OUTPOST.fire.z) < OUTPOST.fire.r + r) return -1;
+      return KEEP.roof <= feet + STEP && KEEP.roof >= feet - DROP ? 1 : -1;
+    }
+    if (outpostTowerTop(x, z, r) > feet + STEP || outpostKeepTop(x, z, r) > feet + STEP) return -1;
+    return 0;
+  };
+  /** Whether (x, y, z) a body `r` across is in the open air of Outpost Island's keep's top level, in from its room or
+   *  through one of its arches, and clear of its firepit. */
+  const outpostRoom = (x, z, y, r) => {
+    if (y < KEEP.roof - 0.05 || !inKeep(x, z, r, OUTPOST_KEEP)) return false;
+    const d = Math.hypot(x - OUTPOST_KEEP.x, z - OUTPOST_KEEP.z);
+    if (y < KEEP.roof + 1.2 && Math.hypot(x - OUTPOST.fire.x, z - OUTPOST.fire.z) < OUTPOST.fire.r + r) return false;
+    if (d + r < KEEP.r - KEEP.wall) return y < KEEP.roof + KEEP.arcade - HEAD - 0.5;
+    return arcadeClear(x, z, y, r, OUTPOST_KEEP);
+  };
+  /** Whether a body in the air at `y` meets Outpost Island's stone at (x, z). */
+  const outpostFly = (x, z, y, r) => {
+    if (!nearOutpost(x, z)) return false;
+    const A = outpostBridge(x, z);
+    if (A && spanFly(OUTPOST.bridge, A.v, A.u, y, r)) return true;
+    if (balconyBlocks(x, z, y, r, OUTPOST_KEEP)) return true;
+    const w = outpostWall(x, z, r);
+    if (w && y < w.top - 1e-3 && !(w.gate && y + HEAD < w.soffit)) return true;
+    if (outpostRoom(x, z, y, r)) return false;
+    return y < outpostTowerTop(x, z, r) - 1e-3 || y < outpostKeepTop(x, z, r) - 1e-3;
+  };
+  /** Whether the point (x, y, z) lies in Outpost Island's stone. */
+  const outpostHit = (x, y, z) => {
+    if (!nearOutpost(x, z)) return false;
+    const A = outpostBridge(x, z);
+    if (A && spanHit(OUTPOST.bridge, A.v, y, A.u)) return true;
+    const w = outpostWall(x, z);
+    if (w && y <= w.top && !(w.gate && y < w.soffit)) return true;
+    if (y <= outpostKeepTop(x, z) && !outpostRoom(x, z, y, 0)) return true;
+    return y <= outpostTowerTop(x, z) && !galleryAir(x, y, z);
+  };
+  /** Whether a hull may not lie at (x, z), grown by `pad`: a bridge's pier or causeway, or a tower's footing. */
+  const outpostFoul = (x, z, pad) => {
+    if (!nearOutpost(x, z)) return false;
+    const A = outpostBridge(x, z);
+    if (A && spanFoul(OUTPOST.bridge, A.v, A.u, pad)) return true;
+    for (const t of OUTPOST.towers) if (Math.hypot(x - t.x, z - t.z) < CASTLE.tower + 1.3 + pad) return true;
+    return false;
   };
 
   // ---------- Cold Storj ----------
@@ -1071,7 +1359,7 @@
    *  and the islet across the water. */
   const heightAt = (x, z) => {
     // Far to the west there is Cold Storj alone, and the open sea's bed.
-    if (x < STORJ.east + 40) return Math.max(storjHeight(x, z), SEA - 30);
+    if (x < STORJ.east + 40) return Math.max(storjHeight(x, z), outpostHeight(x, z), SEA - 30);
     const m = moatDist(x, z);
     if (m < 0) return Math.max(MOAT.bed, m * MOAT.bank);
     const d = playDist(x, z);
@@ -1084,7 +1372,7 @@
     // Under the stair and the quay, the cliff is cut back so the steps stand clear of it.
     const ax = Math.abs(x);
     if (z >= STAIRS.z0 && z < QUAY.z1 + 0.6 && ax < (z > QUAY.z0 - 0.4 ? QUAY.halfW : STAIRS.halfW) + 0.6) h = Math.min(h, stairsAt(Math.min(ax, STAIRS.halfW), Math.min(z, QUAY.z1)) - 0.6);
-    return Math.max(h, isletHeight(x, z), volcanoHeight(x, z), storjHeight(x, z), arenaHeight(x, z));
+    return Math.max(h, isletHeight(x, z), volcanoHeight(x, z), storjHeight(x, z), arenaHeight(x, z), shardsHeight(x, z), outpostHeight(x, z));
   };
 
   // What stands in a walker's way on the level: the sentinels' plinths and the arch's jambs, [x, z, radius].
@@ -1147,6 +1435,29 @@
       for (let x = gate + W.half + 2.4; x < V.mouth.x0 - 1; x += 3.6) for (const s of [-1, 1]) ISLET_TORCHES.push([x, V.z + s * 3.4, land(x, V.z + s * 3.4)]);
       for (const [x, z] of [[gate - W.half - W.pillarOut - 1.2, W.gate.half + 1.6], [V.mouth.x0 + 1, V.mouth.half + 1.3]]) for (const s of [-1, 1]) ISLET_TORCHES.push([x, V.z + s * z, land(x, V.z + s * z)]);
     }
+    // Shards': down both sides of the way from its dock to the trench, along the trench's rim either side, and either
+    // side of the cave's mouth on the plateau over it.
+    {
+      const S = SHARDS, T = S.trench, land = (x, z) => Math.max(SEA, Math.round(shardsHeight(x, z) / 0.5) * 0.5);
+      for (let x = S.dock.quay.x1 + 1.5; x < T.x0 - 1; x += 3.6) for (const s of [-1, 1]) ISLET_TORCHES.push([x, S.z + s * 3, land(x, S.z + s * 3)]);
+      for (let x = T.x0 + 1; x < T.court.x1; x += 3.6) for (const s of [-1, 1]) { const z = S.z + s * (x < T.court.x0 ? T.half + 0.9 : T.court.half + 0.9); ISLET_TORCHES.push([x, z, land(x, z)]); }
+      for (const s of [-1, 1]) ISLET_TORCHES.push([T.notch.x0 + 1.5, S.z + s * (T.notch.half + 1.6), S.plateau]);
+      // Its crystal clusters (keep-models.js `shardsCrystals`): on a sunflower's spiral over its dry ground, clear of
+      // the way, the trench, the dock and the torches, each `size`, its lead crystal `tall` over its `base`, and in a
+      // walker's way.
+      const golden = Math.PI * (3 - Math.sqrt(5)), n = 96, torches = ISLET_TORCHES.length;
+      S.clusters = [];
+      for (let k = 0; k < n; k++) {
+        const at = (S.r - 5) * Math.sqrt((k + 0.5) / n), a = k * golden + (hash2(k, 7) - 0.5) * 0.6, x = S.x + Math.sin(a) * at, z = S.z + Math.cos(a) * at;
+        if (shardsHeight(x, z) < SEA + 1.4 || (x < T.notch.x1 + 4 && Math.abs(z - S.z) < 6.5) || (x < S.dock.quay.x1 + 4 && Math.abs(z - S.z) < 15)) continue;
+        let clear = true;
+        for (let i = 0; i < torches; i++) if (Math.hypot(x - ISLET_TORCHES[i][0], z - ISLET_TORCHES[i][1]) < 2.6) { clear = false; break; }
+        if (!clear) continue;
+        const size = (0.55 + 1.25 * hash2(k, 13)) * (1.15 - 0.45 * at / S.r);
+        S.clusters.push({ x, z, size, seed: k, base: land(x, z), tall: 1.6 + 2.6 * size });
+        BLOCKS.push([x, z, 0.25 + 0.3 * size]);
+      }
+    }
     // Cold Storj's: up both sides of each way from a dock to its mountain, and along the downhill edge of each mountain path,
     // with one either side of every cave's mouth.
     {
@@ -1175,6 +1486,14 @@
     for (const z of [-76, -64, -36, -24]) LANTERNS.push([ARMORY.quay.x0 + 0.6, z, "post", Math.PI / 2, ARMORY.y]);
     // The volcano island's dock: two posts on its quay's landward edge, their arms out over the quay.
     for (const s of [-1, 1]) LANTERNS.push([VOLCANO.dock.quay.x1 - 0.6, VOLCANO.z + s * 8.5, "post", -Math.PI / 2, VOLCANO.dock.y]);
+    // Shards' dock: two posts on its quay's landward edge, their arms out over the quay.
+    for (const s of [-1, 1]) LANTERNS.push([SHARDS.dock.quay.x1 - 0.6, SHARDS.z + s * 8.5, "post", -Math.PI / 2, SHARDS.dock.y]);
+    // Outpost Island's: either side of each bridge's foot on its cross, their arms over the bridge, and at each pier's end.
+    for (const a of OUTPOST.arms) {
+      const D = OUTPOST.dock, at = (u, v) => [a.gx + a.dx * u + a.nx * v, a.gz + a.dz * u + a.nz * v], turn = Math.atan2(-a.dx, -a.dz);
+      for (const s of [-1, 1]) { const [x, z] = at(D.at + 0.6, s * (OUTPOST.bridge.halfW + 1.2)); LANTERNS.push([x, z, "post", turn, D.y]); }
+      for (const s of [-1, 1]) { const [x, z] = at(D.at + D.w + D.pier.len - 0.5, s * (D.pier.half - 0.35)); LANTERNS.push([x, z, "post", turn, D.y]); }
+    }
     // And Cold Storj's: two posts on its quay's landward edge, their arms out over the quay.
     for (const d of STORJ.docks) {
       const land = d.face > 0 ? d.quay.z0 + 0.6 : d.quay.z1 - 0.6, turn = d.face > 0 ? 0 : Math.PI;
@@ -1234,8 +1553,9 @@
     const s = lavaStream(x, z);
     return s !== 0 && !seaAt(x, z) && feet < landTop(x, z) + 0.6;
   };
-  /** Whether a walker at (x, z) has gone in under the cave mouth's arch far enough to go underground. */
-  const caveAt = (x, z) => x > VOLCANO.mouth.enter && inVolcanoMouth(x, z);
+  /** Which cave a walker at (x, z) has gone in under the mouth of far enough to go underground (`cave` under the
+   *  volcano, `shards` under Shards' lintel), or null. */
+  const caveAt = (x, z) => x > VOLCANO.mouth.enter && inVolcanoMouth(x, z) ? "cave" : x > SHARDS.mouth.enter && inShardsNotch(x, z) ? "shards" : null;
   /** The underside of the cave mouth's arch over (x, z), where the cone stands over it, or Infinity. */
   const mouthArch = (x, z) => {
     if (!inVolcanoMouth(x, z)) return Infinity;
@@ -1274,26 +1594,29 @@
   };
   /** The floor of the balcony a body with its feet at `feet` stands over at (x, z), its middle out on the ring past
    *  the keep's face, or null off them. */
-  const balconyAt = (x, z, feet) => {
-    const d = Math.hypot(x - KEEP.x, z - KEEP.z);
+  // Each of these takes the keep's middle as `c`: the castle's, or Outpost Island's (`OUTPOST_KEEP`), whose arches
+  // are shut.
+  const balconyAt = (x, z, feet, c = KEEP) => {
+    const d = Math.hypot(x - c.x, z - c.z);
     if (d < KEEP.r - 0.05 || d > BALCONY.outer) return null;
     for (let i = BALCONY.floors.length - 1; i >= 0; i--) if (feet >= BALCONY.floors[i] - STEP) return BALCONY.floors[i];
     return null;
   };
   /** Whether a body `r` across, its feet at `feet`, may stand at (x, z) on the balcony at `floor`: off its parapet,
    *  and off the keep's face but where one of its level's arches opens. */
-  const balconyClear = (x, z, feet, r, floor) => {
-    const dx = x - KEEP.x, dz = z - KEEP.z, d = Math.hypot(dx, dz);
+  const balconyClear = (x, z, feet, r, floor, c = KEEP) => {
+    const dx = x - c.x, dz = z - c.z, d = Math.hypot(dx, dz);
     if (d + r > BALCONY.outer - BALCONY.railW && feet < floor + BALCONY.rail) return false;
     if (d - r >= KEEP.r) return true;
+    if (c !== KEEP && floor !== KEEP.roof) return false;
     const level = arcadeAt(feet);
     return !!level && level.floor === floor && arcadeTop(Math.atan2(dz, dx), d, r, level.arches) > 0;
   };
   /** Whether a body `r` across in the air at `y` meets a balcony at (x, z): the underside of its deck (a body `HEAD`
    *  tall rising into it), its parapet, or a bartizan over the top one. */
   const HEAD = 2.4;
-  const balconyBlocks = (x, z, y, r) => {
-    const dx = x - KEEP.x, dz = z - KEEP.z, d = Math.hypot(dx, dz);
+  const balconyBlocks = (x, z, y, r, c = KEEP) => {
+    const dx = x - c.x, dz = z - c.z, d = Math.hypot(dx, dz);
     if (d - r > BALCONY.outer || d + r < KEEP.r) return false;
     for (let i = 0; i < BALCONY.floors.length; i++) {
       const f = BALCONY.floors[i];
@@ -1464,7 +1787,7 @@
   };
   /** Whether the point (x, y, z) lies in either way's stone or in a hall, for whatever flies into them. */
   const westHit = (x, y, z) => {
-    if (backHit(x, y, z) || cbdcHit(x, y, z)) return true;
+    if (backHit(x, y, z) || cbdcHit(x, y, z) || outpostHit(x, y, z)) return true;
     const B = WEST_BRIDGE, fx = fold(x);
     if (fx <= B.x0 && fx >= WEST_STAIR.x1 && Math.abs(z - B.z) <= B.halfW && y <= wayY(fx) && y >= bridgeSoffit(fx)) return true;
     const h = hallAt(x, z, HALL.over);
@@ -1481,6 +1804,9 @@
     for (const d of [ARMORY.quay, ...ARMORY.piers, ...ARMORY.planks]) DECKS.push({ ...d, y: ARMORY.y });
     // And the volcano island's quay and pier, and Cold Storj's.
     for (const d of [VOLCANO.dock.quay, VOLCANO.dock.pier]) DECKS.push({ ...d, y: VOLCANO.dock.y });
+    for (const d of [SHARDS.dock.quay, SHARDS.dock.pier]) DECKS.push({ ...d, y: SHARDS.dock.y });
+    for (const d of OUTPOST.decks) DECKS.push({ ...d, y: OUTPOST.dock.y });
+    for (const d of FAR_PLANKS) DECKS.push({ ...d, y: DOCK.y });
     for (const k of STORJ.docks) for (const d of [k.quay, k.pier, ...k.boardwalk]) DECKS.push({ ...d, y: k.y });
   }
   /** The deck of the shipyard or the Armory & Forge under (x, z), each grown by `pad`, or null off them all. */
@@ -1512,7 +1838,7 @@
     if (ax <= DOCK.halfW + 0.12 && z >= DOCK.z0 - 0.1 && z <= DOCK.z1 + 0.1) return false;
     const fx = fold(x);
     if (fx < WEST_BRIDGE.x0 && ((westAt(fx, z, 0.2) && (bridgeSoffit(fx) === -Infinity || bridgeRail(fx, z, 0.2) > wayY(fx) + WEST_BRIDGE.rail + 1)) || shipyardDeck(x, z, 0.15) !== null)) return false;
-    if (backFoul(x, z, 0.2)) return false;
+    if (backFoul(x, z, 0.2) || outpostFoul(x, z, 0.2)) return false;
     return shipTop(x, z, 0.3) === null;
   };
   /** Whether a ship's hull may lie over (x, z): inside the land's bounds and off everything built in the water (the
@@ -1524,7 +1850,7 @@
     if (ax <= STAIRS.halfW + 0.3 && z >= STAIRS.z0 - 1 && z <= QUAY.z1 + 0.3) return false;
     if (ax <= QUAY.halfW + 0.3 && z >= QUAY.z0 - 0.3 && z <= QUAY.z1 + 0.3) return false;
     if (ax <= DOCK.halfW + 0.3 && z >= DOCK.z0 - 0.3 && z <= DOCK.z1 + 0.3) return false;
-    return !westAt(x, z, 0.5) && !backFoul(x, z, 0.5) && shipyardDeck(x, z, 0.3) === null;
+    return !westAt(x, z, 0.5) && !backFoul(x, z, 0.5) && !outpostFoul(x, z, 0.5) && shipyardDeck(x, z, 0.3) === null;
   };
   /** The ruin behind the arch: how high it stands at `x`, or 0 off it. */
   const ruinTop = (x, z, r = 0) => Math.abs(x) < RUIN.half + r && z > RUIN.z0 - r && z < RUIN.z1 + r ? 4 + 6.5 * Math.pow(Math.max(0, Math.cos(x / RUIN.half * Math.PI / 2)), 0.7) : 0;
@@ -1533,6 +1859,14 @@
   /** The deck a walker stands on at (x, z), its height, or null off them all: the stair's treads between its parapets,
    *  the quay at its foot, the islet's dock, the shipyard's quay, piers, stages, ramp and planks, and the Armory &
    *  Forge's quay and piers. */
+  /** How far (x, z) lies from the nearest dock, quay or pier anywhere in the land (the castle island's quay and the
+   *  portal islet's dock among them), in metres over the water. */
+  const boxDist = (x, z, x0, x1, z0, z1) => Math.hypot(Math.max(x0 - x, 0, x - x1), Math.max(z0 - z, 0, z - z1));
+  const dockDist = (x, z) => {
+    let d = Math.min(boxDist(x, z, -QUAY.halfW, QUAY.halfW, QUAY.z0, QUAY.z1), boxDist(x, z, -DOCK.halfW, DOCK.halfW, DOCK.z0, DOCK.z1));
+    for (let i = 0; i < DECKS.length; i++) { const k = DECKS[i]; d = Math.min(d, boxDist(x, z, k.x0, k.x1, k.z0, k.z1)); }
+    return d;
+  };
   const deckAt = (x, z) => {
     if (Math.abs(x) > -SHIPYARD.slip.x1 - 1) return shipyardDeck(x, z);
     const ax = Math.abs(x);
@@ -1574,7 +1908,15 @@
     STORJ.turrets.push({ x, z, y, r: TURRET.r, rise: TURRET.rise * 3, top: y + TURRET.rise * 3, yaw: Math.atan2(-nx * s, -nz * s), ledge: false, red: true, storj: true });
   }
   const DRUMS = [...TURRETS, ...VOLCANO.wall.turrets, ...STORJ.turrets];
-  const LADDERS = TURRETS.map((t) => ({ x: t.x, z: t.z - t.r - TURRET.off, bottom: terrainTop(t.x, t.z - t.r - TURRET.off - 0.4), top: t.top, nx: 0, nz: -1, width: 1.4, inset: TURRET.off + 1.1 }));
+  // Each drum's turn, for the tests in its own frame (its ladder on its -z, its open quarter toward its +z).
+  for (const t of DRUMS) { t.cy = Math.cos(t.yaw || 0); t.sy = Math.sin(t.yaw || 0); }
+  /** (x, z) in the turret `t`'s own frame, into `TURRET_AT`: `x` across it and `z` out toward its open quarter. */
+  const TURRET_AT = { x: 0, z: 0 };
+  const turretLocal = (t, x, z) => { const dx = x - t.x, dz = z - t.z; TURRET_AT.x = dx * t.cy - dz * t.sy; TURRET_AT.z = dx * t.sy + dz * t.cy; return TURRET_AT; };
+  const LADDERS = TURRETS.map((t) => {
+    const d = t.r + TURRET.off, x = t.x - t.sy * d, z = t.z - t.cy * d;
+    return { x, z, bottom: t.defend ? t.y : terrainTop(x - t.sy * 0.4, z - t.cy * 0.4), top: t.top, nx: -t.sy, nz: -t.cy, width: 1.4, inset: TURRET.off + 1.1 };
+  });
   /** The turret whose drum (x, z), grown by `r`, is in, or null. */
   const turretAt = (x, z, r = 0) => {
     for (let i = 0; i < DRUMS.length; i++) { const t = DRUMS[i]; if (Math.hypot(x - t.x, z - t.z) < t.r + r) return t; }
@@ -1586,19 +1928,20 @@
       const t = DRUMS[i], dx = x - t.x, dz = z - t.z;
       // Nothing stands on a roofed turret.
       if (t.roofed) continue;
-      if (Math.hypot(dx, dz) < t.r || (t.ledge !== false && Math.abs(dx) < TURRET.ledge && dz < 0 && dz > -(t.r + TURRET.off + 0.25))) return t;
+      if (Math.hypot(dx, dz) < t.r) return t;
+      if (t.ledge !== false) { const l = turretLocal(t, x, z); if (Math.abs(l.x) < TURRET.ledge && l.z < 0 && l.z > -(t.r + TURRET.off + 0.25)) return t; }
     }
     return null;
   };
   /** Whether a body `r` across may stand on the turret `t`'s deck at (x, z): inside its parapet, or in the gap at its
    *  ladder's head and out on the ledge there. */
   const turretStand = (t, x, z, r) => {
-    const dx = x - t.x, dz = z - t.z;
-    return Math.hypot(dx, dz) + r * 0.5 < t.r - TURRET.parapet || (t.ledge !== false && Math.abs(dx) < TURRET.ledge - r * 0.4 && dz < 0 && dz > -(t.r + TURRET.off + 0.2));
+    const l = turretLocal(t, x, z);
+    return Math.hypot(l.x, l.z) + r * 0.5 < t.r - TURRET.parapet || (t.ledge !== false && Math.abs(l.x) < TURRET.ledge - r * 0.4 && l.z < 0 && l.z > -(t.r + TURRET.off + 0.2));
   };
   /** Whether (x, z) is in the way over the turret `t`'s lip at its ladder's head, where a climber comes up onto the
    *  deck: open to a body whose feet are within a body's height of the top. */
-  const turretLip = (t, x, z, feet) => t.ledge !== false && feet > t.top - 2.6 && Math.abs(x - t.x) < TURRET.ledge && z < t.z - 1.4;
+  const turretLip = (t, x, z, feet) => { if (t.ledge === false || feet <= t.top - 2.6) return false; const l = turretLocal(t, x, z); return Math.abs(l.x) < TURRET.ledge && l.z < -1.4; };
   const knightAt = (x, z, r) => {
     for (let i = 0; i < STATUES.length; i++) if (Math.hypot(x - STATUES[i].x, z - STATUES[i].z) < STATUE_R * 0.55 + r) return true;
     return false;
@@ -1615,6 +1958,8 @@
     if (well !== null) return well;
     const gallery = galleryAt(x, z, feet);
     if (gallery) return gallery.floor;
+    const outpost = outpostSupport(x, z, feet);
+    if (outpost !== null) return outpost;
     if (inWard(x, z)) {
       if (inKeep(x, z)) { const level = arcadeAt(feet); if (level) return level.floor; }
       const top = wardTop(x, z);
@@ -1642,6 +1987,8 @@
     if (ruin > 0 && feet >= ruin - STEP) return ruin;
     // Over the cave mouth's arch, the cone's own top.
     if (mouthArch(x, z) !== Infinity) { const top = Math.round(volcanoHeight(x, z, true)); if (feet >= top - STEP) return top; }
+    // Over Shards' notch, the lintel's top, level with the plateau round it.
+    if (inShardsNotch(x, z) && feet >= SHARDS.plateau - STEP) return SHARDS.plateau;
     return landTop(x, z);
   };
   const inBounds = (x, z) => x >= BOUNDS.x0 + BOUNDS.roam && x <= BOUNDS.x - BOUNDS.roam && z >= BOUNDS.z0 + BOUNDS.roam && z <= BOUNDS.z1 - BOUNDS.roam;
@@ -1678,6 +2025,9 @@
       if (w.s > -r && w.s < W.len && Math.abs(w.side) < W.half + W.rail + r && Math.abs(w.side) > W.half - r * 0.5 && feet < gallery.floor + W.railTall) return false;
       return galleryStand(gallery, bx, bz, r) && gallery.floor <= feet + STEP && gallery.floor >= feet - DROP;
     }
+    // Outpost Island's bridges, walls, towers and keep.
+    const outpost = outpostWalk(bx, bz, feet, r);
+    if (outpost !== 0) return outpost > 0;
     // Out of the west or east gate: along the bridge and down its stair between their parapets, or under its arches.
     const west = westWalk(bx, bz, feet, r);
     if (west !== 0) return west > 0;
@@ -1730,7 +2080,7 @@
       if (d - r >= gallery.r + 0.45) return true;
       return d + r <= gallery.inner || Math.abs(galleryAngle(gallery, bx, bz)) < GALLERY.open - r / Math.max(d, 1);
     }
-    if (westFly(bx, bz, y, r) || backFly(bx, bz, y, r) || hallFly(bx, bz, y, r) || cbdcFly(bx, bz, y, r)) return false;
+    if (westFly(bx, bz, y, r) || backFly(bx, bz, y, r) || hallFly(bx, bz, y, r) || cbdcFly(bx, bz, y, r) || outpostFly(bx, bz, y, r)) return false;
     // Cold Storj is come to by its fjord alone: none flies onto it from the open sea, only from its own land or water.
     if (bx < STORJ.east + 12) {
       if (storjLand(bx, bz) && !storjLand(ax, az) && !storjInner(ax, az)) return false;
@@ -1765,8 +2115,8 @@
     return ruin <= 0 || y >= ruin - 1e-3;
   };
 
-  BL.keepLayout = { GALLERY, GALLERIES, galleryAt, galleryAir, galleryExit, galleryAngle, wellAt, wellPlace, TURRET, TURRETS, LADDERS, turretAt, turretDeck, LANE, CANDLES, inLane, BANNERS, CZ, CASTLE, KEEP, BALCONY, TORCHES, HUNG, balconyAt, balconyClear, balconyBlocks, inKeep, archTop, arcadeTop, arcadeAt, arcadeClear, MOAT, GATE, YARD, TOWER_DOORS, inYard, LEAF, ABUTMENT, COURT, STAIRS, QUAY, ISLET, DOCK, ISLET_PATH, FERRY, LONGSHIP, longshipHalf, longshipSheer, SHIP, SHIPS, shipHalf, shipTop, hullClear, navigable, ARCH, ARRIVE, STATUES, STATUE_R, KNIGHT, GUARDS, CRYSTAL, LEVEL_SIGN, BOUNDS, TERRAIN, BLOCKS, LANTERNS, ISLET_TORCHES, ARENA_COLUMNS,
+  BL.keepLayout = { dockDist, GALLERY, GALLERIES, galleryAt, galleryAir, galleryExit, galleryAngle, wellAt, wellPlace, TURRET, TURRETS, LADDERS, turretAt, turretDeck, LANE, CANDLES, inLane, BANNERS, CZ, CASTLE, KEEP, BALCONY, TORCHES, HUNG, balconyAt, balconyClear, balconyBlocks, inKeep, archTop, arcadeTop, arcadeAt, arcadeClear, MOAT, GATE, YARD, TOWER_DOORS, inYard, LEAF, ABUTMENT, COURT, STAIRS, QUAY, ISLET, DOCK, ISLET_PATH, FERRY, LONGSHIP, longshipHalf, longshipSheer, SHIP, SHIPS, shipHalf, shipTop, hullClear, navigable, ARCH, ARRIVE, STATUES, STATUE_R, KNIGHT, GUARDS, CRYSTAL, LEVEL_SIGN, BOUNDS, TERRAIN, BLOCKS, LANTERNS, ISLET_TORCHES, ARENA_COLUMNS,
     SEA, ISLAND, STEP, LOW, TERRAIN_UNIT, RUIN,
     wanderOut, BACK, BACK_BRIDGE, ARENA_ISLE, ARENA_FOES, backY, backSoffit, backAt, arenaDist, WEST, westArchTop, fold, ARMORY, WEST_BRIDGE, WEST_STAIR, bridgeY, bridgeSoffit, westStairY, wayY, westAt, westHit, SHIPYARD, HALL, HALLS, hallAt, hallRoof, SEATS, GALLEON, galleonHalf, galleonTop, galleonSheer, shipyardDeck,
-    hash2, noise, smooth, moatDist, playDist, heightAt, standable, coastDist, isletDist, onIsletPath, stairsAt, deckAt, parapetAt, seaAt, terrainTop, landTop, VOLCANO, volcanoDist, volcanoHeight, onVolcanoCourt, inVolcanoMouth, lavaStream, lavaAt, caveAt, mouthArch, cbdcAt, cbdcHit, cbdcWalkY, cbdcSoffit, wallPlace, STORJ, storjHeight, storjPath, onSpur, onTerrace, storjMirror, storjHouse, storjLand, storjInner, storjCoast, storjInlet, pathPoint, pathAt, massif, inWard, wardTop, ruinTop, waterAt, supportAt, inBounds, walkClear, flyClear };
+    hash2, noise, smooth, moatDist, playDist, heightAt, standable, coastDist, isletDist, onIsletPath, stairsAt, deckAt, parapetAt, seaAt, terrainTop, landTop, OUTPOST, OUTPOST_KEEP, outpostDist, outpostHeight, outpostArm, nearOutpost, outpostWall, outpostTowerTop, outpostKeepTop, spanY, spanSoffit, SHARDS, shardsDist, shardsHeight, onShardsWay, shardsTrench, inShardsNotch, VOLCANO, volcanoDist, volcanoHeight, onVolcanoCourt, inVolcanoMouth, lavaStream, lavaAt, caveAt, mouthArch, cbdcAt, cbdcHit, cbdcWalkY, cbdcSoffit, wallPlace, STORJ, storjHeight, storjPath, onSpur, onTerrace, storjMirror, storjHouse, storjLand, storjInner, storjCoast, storjInlet, pathPoint, pathAt, massif, inWard, wardTop, ruinTop, waterAt, supportAt, inBounds, walkClear, flyClear };
 })();
