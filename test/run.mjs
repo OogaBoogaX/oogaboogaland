@@ -38600,7 +38600,7 @@ const hubPrivateChat = { name: "private chat", why: "rule: two players who hold 
       && after.late.phase === "idle" && after.late.sent.map((m) => m.op + m.to).join() === "end3" && after.late.after === "idle" && after.late.locks[3] === "open",
     JSON.stringify({ endedLocks: after.endedLocks, cyAsked: after.cyAsked, cancelled: after.cancelled, late: after.late }));
 } };
-// Rule (docs/ooga-chat-hosts.md, Who the island sees in chats): Online Oogas ends with In Ooga Chat, one button a live
+// Rule (docs/ooga-chat-hosts.md, Who the island sees in chats): Online Oogas ends with Ooga Chats, one button a live
 // hosted chat, busiest first, its title and how many speak and listen, the visitor's own marked; a press opens the chat's
 // preview, whose Join as listener opens it in the Ooga Chat tab (Change chats? first from another chat), and "N online"
 // adds each chat's Ooga Chat app count; saved to untracked/in-ooga-chat at 1280 and 390 pixels, the group and a preview.
@@ -38640,7 +38640,7 @@ const hubInOogaChat = (phone) => ({ name: phone ? "in ooga chat phone" : "in oog
   await b.sleep(200);
   const look = () => b.evaluate(`(() => {
     const panel = document.getElementById("players-panel"), groups = [...document.querySelectorAll("#players-list .players-group")];
-    const last = groups.at(-1), chats = last && last.querySelector("h3").textContent === "In Ooga Chat" ? [...last.querySelectorAll(".players-chat-open")] : [];
+    const last = groups.at(-1), chats = last && last.querySelector("h3").textContent === "Ooga Chats" ? [...last.querySelectorAll(".players-chat-open")] : [];
     const inside = (e) => { const r = e.getBoundingClientRect(), p = panel.getBoundingClientRect(); return r.width > 0 && r.left >= p.left - 1 && r.right <= p.right + 1; };
     return { headings: groups.map((g) => g.querySelector("h3").textContent),
       rows: chats.map((e) => e.querySelector(".players-chat-title").textContent + "=" + e.querySelector(".players-chat-counts").textContent + (e.querySelector(".players-chat-here").hidden ? "" : "=here")),
@@ -38697,7 +38697,7 @@ const hubInOogaChat = (phone) => ({ name: phone ? "in ooga chat phone" : "in oog
   const gone = await untilRoom((r) => /That chat has ended/.test(r.toast));
   await b.evaluate(`(() => { __inChats.room({ t: "chat-summary", chat: "EEEEEEEEEEEEEEEE", title: "", speakers: 0, listeners: 0, app: 0 }); BL.chatCall.leave(); __inChats.toPlayers(); })()`);
   await b.sleep(200);
-  record(`in ooga chat${phone ? " (390 px)" : ""}: a chat pressed in In Ooga Chat opens its preview (its stage, the Open stage tag, its counts, Join as listener focused, on screen) over Online Oogas; Join as listener opens it in the Ooga Chat tab and its row then reads "You're in this chat", and pressing it again only shows that tab; from another chat the preview says what joining does there: its host is told to end it first, with End chat and join and Stay in place of the ways in, Stay keeping the chat and giving the row the focus back, and anyone else is told joining leaves it, Join as listener moving; a chat no longer listed is said to have ended`,
+  record(`in ooga chat${phone ? " (390 px)" : ""}: a chat pressed in Ooga Chats opens its preview (its stage, the Open stage tag, its counts, Join as listener focused, on screen) over Online Oogas; Join as listener opens it in the Ooga Chat tab and its row then reads "You're in this chat", and pressing it again only shows that tab; from another chat the preview says what joining does there: its host is told to end it first, with End chat and join and Stay in place of the ways in, Stay keeping the chat and giving the row the focus back, and anyone else is told joining leaves it, Join as listener moving; a chat no longer listed is said to have ended`,
     previewed?.title === "Lightning dev call" && previewed.open && previewed.stage === 3 && previewed.count === "12 listening · 1 waiting to speak" && previewed.join === "Join as speaker,Join as listener" && previewed.focus === "Join as listener" && previewed.inside && previewed.shown
       && joined.room === "AAAAAAAAAAAAAAAA" && joined.cloud && !joined.preview && marked.rows.includes("Lightning dev call=3 speaking · 12 listening=here")
       && again.room === "AAAAAAAAAAAAAAAA" && again.cloud && !againPop
@@ -38714,12 +38714,12 @@ const hubInOogaChat = (phone) => ({ name: phone ? "in ooga chat phone" : "in oog
   await b.sleep(100);
   const ended = await look();
   await b.evaluate(`(() => { const W = __inChats; window.fetch = W.fetch; window.WebSocket = W.WebSocket; })()`);
-  record(`in ooga chat${phone ? " (390 px)" : ""}: Online Oogas ends with In Ooga Chat, one button a live hosted chat, busiest first then by title, its whole title and its counts under it (a count of nobody left out), "N online" adding the room's one number in chats through the app (each account once, island players left out), following each chat's changes and gone with the last chat; nothing clipped or wider than the panel`,
-    first.headings.at(-1) === "In Ooga Chat" && first.headings.filter((h) => h === "In Ooga Chat").length === 1
+  record(`in ooga chat${phone ? " (390 px)" : ""}: Online Oogas ends with Ooga Chats, one button a live hosted chat, busiest first then by title, its whole title and its counts under it (a count of nobody left out), "N online" adding the room's one number in chats through the app (each account once, island players left out), following each chat's changes and gone with the last chat; nothing clipped or wider than the panel`,
+    first.headings.at(-1) === "Ooga Chats" && first.headings.filter((h) => h === "Ooga Chats").length === 1
       && first.rows.join("|") === "Bitcoin office hours=3 speaking · 12 listening|Lightning dev call=3 speaking · 12 listening|Quiet room=4 listening|Routing fees, channel liquidity and the rebalancer at work=1 speaking · 1 listening"
       && first.buttons && first.fits && first.whole && !first.wide && first.chip === "21 online" && first.online === 21
       && changed.rows[0] === "Quiet room=1 speaking · 40 listening" && changed.chip === "58 online"
-      && !ended.headings.includes("In Ooga Chat") && ended.chip === "2 online",
+      && !ended.headings.includes("Ooga Chats") && ended.chip === "2 online",
     JSON.stringify({ first, changed, ended }));
 } });
 scene("hub", { label: "join alerts", query: "pos=0", steps: [hubJoinAlerts] });
@@ -47359,7 +47359,7 @@ const cloudPanelChecks = async BL => {
   const resyncs = sent.filter(x => x.type === "audience-resync").length, staleRetry = pressRetry() === "audience-resync:main" && sent.filter(x => x.type === "audience-resync").length === resyncs + 1;
   hear({ t: "audience", v: 1, kind: "snapshot", epoch: 1, rev: 10, zone: "main", rows: [row("w1", "speaker"), row("tester", "listener", { self: true })] });
   // The room drops and comes back while the panel is hidden, with the same rows in the same order: shown again, they draw.
-  const show = on => { visible = on; for (const fn of observers) fn(); };
+  const show = on => { visible = on; for (const fn of observers) fn([]); };
   show(false);
   state.room = "connecting"; tick();
   const dropped = /Joining Main Island/.test($("cloud-status-text").textContent) && !$("cloud-retry").hidden;
@@ -47606,8 +47606,8 @@ const playersColumnChecks = async () => {
   const cells = await rowsOf();
   const inChats = await rowsOf([{ id: "gh:2", login: "bea", display: "Bea", speaking: false }, { id: "gh:9", login: "zed", display: "Zed", speaking: true }, { id: "x:5", login: "xo", display: "Xo", speaking: false }]);
   const app = inChats.where.filter(([, group]) => group === "Ooga Chat");
-  record("Online Oogas lists everyone in hosted chats through Ooga Chat and not on the island under Ooga Chat with its purple dot, by name; one also on the island is listed once, as a player",
-    app.map(([name]) => name).sort().join() === "Xo,Zed" && app.every(([, , dot]) => dot === "cloud") && inChats.where.filter(([name]) => name === "Bea").length === 1,
+  record("Online Oogas lists nobody in hosted chats through Ooga Chat one by one (its Ooga Chats group lists the chats instead); one also on the island is listed once, as a player",
+    app.length === 0 && inChats.where.every(([name]) => name !== "Xo" && name !== "Zed") && inChats.where.filter(([name]) => name === "Bea").length === 1,
     JSON.stringify(inChats.where));
   const css = await readFile(join(root, "src/style.css"), "utf8");
   const ruleOf = (selector) => { const i = css.indexOf(`\n${selector} {`); return i < 0 ? "" : css.slice(i, css.indexOf("}", i)); };
