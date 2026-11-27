@@ -150,7 +150,7 @@ modules, so the two apps never drift. Joining a chat by voice there is like taki
 pauses until the visitor leaves the chat, with no mark over their Ooga (the room's `call-v1`, which keeps their island
 voice quiet and their nameplate's voice mark off: the page sends `{ t: "call", on }`, every page hears `call { id, on }`
 and finds `call: true` on such a player in `welcome` and `join`). Online Oogas lists island players by zone, and after
-every zone's group, **In Ooga Chat**: every live hosted chat with how many speak and listen in it (below).
+every zone's group, **Ooga Chats**: every live hosted chat with how many speak and listen in it (below).
 The same holds across devices: a chat tells the island room when a GitHub account takes or leaves its stage
 (`chatVoice`, kept in the room's storage as `chatVoices`). The room ends that account's island voice (`voice-moved`,
 whose toast says Ooga Chat took it), marks its Ooga in a call on every page, and tells its island page its voice is
@@ -158,7 +158,9 @@ elsewhere (`voice-elsewhere`, unless that page is itself in the chat), whose Swi
 going live while a chat holds the stage ends the lease there (`yieldVoice`), so one account has one voice either way. A Main Island chat's island view carries **Go
 there** for a speaker: on the island it takes the visitor's Ooga into the chat's copy of its zone; in Ooga Chat it opens
 the same chat on the island (below). In a chat the island's panel has the chat's own emoji bar
-(`#cloud-chat-reactions`, reaction-bar.js over the chat's socket, as Ooga Chat's footer has it), in place of the room's.
+(`#cloud-chat-reactions`, reaction-bar.js over the chat's socket, as Ooga Chat's footer has it), in place of the room's;
+in the list of chats, before one is joined, it keeps the room's, over the visitor's Ooga as in every other tab, with
+the hand the island's (Ooga Chat's app shows none there, having nowhere to send outside a chat).
 Every island tab but Bananas keeps the voice footer, its buttons over a line with the visitor's name and Sign out (in a
 chat too, and in Ooga Chat's app alike), the name's dot the same in every panel: green on the island, purple in Ooga
 Chat's app: before a chat is chosen the Ooga Chat tab's buttons are the island's own voice
@@ -191,10 +193,11 @@ island, each account once however many chats it is in, again whenever a chat rep
 sends it when it moves (`{ t: "chat-online", n }`, the welcome's `chatOnline`; relayed to an Ooga Chat member with `mine`, the welcome's `chatMine`, whether its own account is among the number), and the names behind it: every account in
 chats through the app and not on the island, each once, speaking if it speaks in any chat, by name, at most 200
 (`{ t: "chat-people", people: [{ id, login, display, speaking }] }`, the welcome's `chatPeople`, relayed to Ooga Chat's
-members too), sent when the list changes. Online Oogas on the island (`players.js`) and in Ooga Chat
-(`ooga-chat-panels.js`) list each under **Ooga Chat** with Ooga Chat's purple dot, after the visitor's own row there;
-anyone listed already (a player, a linked partner, a speaker on a cloud) is listed once. The page (`net.js` `state.chatMembers`,
-chat id to a frozen `{ title, speakers, listeners }`, and `state.chatOnline`, emptied with the socket) lists in In Ooga Chat one button a chat (`players.js`): its title, whole and wrapping, and its counts under
+members too), sent when the list changes. Ooga Chat's Online Oogas (`ooga-chat-panels.js`) lists each under **Ooga
+Chat** with Ooga Chat's purple dot, after the visitor's own row there; anyone listed already (a player, a linked
+partner, a speaker on a cloud) is listed once. The island's Online Oogas (`players.js`) lists them by their chats
+instead, in Ooga Chats, and names none of them one by one. The page (`net.js` `state.chatMembers`,
+chat id to a frozen `{ title, speakers, listeners }`, and `state.chatOnline`, emptied with the socket) lists in Ooga Chats one button a chat (`players.js`): its title, whole and wrapping, and its counts under
 it ("3 speaking · 12 listening", a count of nobody left out: "1 speaking" while nobody listens; a chat always has its
 host as a speaker), "You're in
 this chat" on the one the visitor is in, busiest first and then by title. Every "N online" on the island adds the room's

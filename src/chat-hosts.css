@@ -1,9 +1,10 @@
 /* Hosted chats' look (chat-hosts.js, docs/ooga-chat-hosts.md), Ooga Chat's and the island's alike: the list before a
-   chat is chosen (a panel's `data-space="list"`, which hides its roster), then the chat's bar, invite card, badges,
+   chat is chosen (a panel's `data-space="list"`, which hides its roster, and in Ooga Chat's app its emoji bar, which
+   has nowhere to send outside a chat; the island's sends over the visitor's Ooga, so it stays), then the chat's bar, invite card, badges,
    pop-ups and the Start a chat dialog. The island joins it after style.css; Ooga Chat stages it with its `hosts` chunk
    (scripts/ooga-chat.mjs). Under 400px the pop-ups are sheets at the foot of the screen with 44px controls. */
 .panel[data-space="list"] > :is(.cloud-status, .cloud-roster, .oc-volume, .hc-invite, .hc-room-strip),
-.panel[data-space="list"] > .panel-foot > .reactions,
+.oc-panel[data-space="list"] > .panel-foot > .reactions,
 .panel[data-space="list"] > .panel-title > .panel-chip,
 .hc-chats[hidden], .hc-room-bar[hidden], .hc-invite[hidden], .hc-pop[hidden] { display: none; }
 .hc-chats { display: grid; flex: 1 1 auto; align-content: start; gap: 10px; min-height: 0; overflow-y: auto; padding: 16px 18px; }
@@ -52,10 +53,10 @@
 .panel-title > .hc-room-bar .hc-room-back::before { content: ""; width: 7px; height: 7px; border-bottom: 2px solid currentColor; border-left: 2px solid currentColor; transform: translate(1.5px, -1px) rotate(45deg); }
 .panel-title > .hc-room-bar .hc-room-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; overflow-wrap: normal; }
 /* In a chat the title line is the chat's own dark bar, in both apps, out to the panel's edges (its padding and gap,
-   `--hc-pad-top`, `--hc-pad-x`, `--hc-gap`: the island's here, Ooga Chat's in ooga-chat.css; full screen fixes the same
+   `--hc-pad-top`, `--hc-pad-x`, `--hc-gap`, one tight set for both apps' panels; full screen fixes the same
    bar over the view there): Back, the title over its counts, a host's Requests bell, Share and the view's fold button,
    each 32px square. */
-.panel[data-space="on"] { --hc-pad-top: 12px; --hc-pad-x: 14px; --hc-gap: 10px; }
+.panel[data-space="on"] { --hc-pad-top: 6px; --hc-pad-x: 8px; --hc-gap: 6px; }
 .panel[data-space="on"] > .panel-title {
   box-sizing: border-box; min-height: 52px; margin: calc(-1 * var(--hc-pad-top)) calc(-1 * var(--hc-pad-x)) calc(-1 * var(--hc-gap));
   padding: 0 8px 0 4px; gap: 6px; border-bottom: 1px solid rgba(243, 239, 228, 0.08); border-radius: 0; background: #0c0b0a;
@@ -112,7 +113,7 @@
 .hc-alone .hc-alone-share { margin-top: 4px; min-height: 36px; padding: 0 16px; }
 .panel:has(> .hc-alone:not([hidden])) > .cloud-roster { flex: none; min-height: 0; border-bottom-width: 0; }
 /* It continues the roster's slab out to the panel's sides, with no seam between them. */
-.panel[data-space="on"] > .hc-alone { margin: -10px -14px 0; border-width: 0; border-radius: 0; }
+.panel[data-space="on"] > .hc-alone { margin: -6px -8px 0; border-width: 0; border-radius: 0; }
 /* The Requests panel's heading beside its × . */
 .hc-pop-top { display: flex; align-items: center; gap: 8px; }
 .hc-pop-top > .hc-pop-head { flex: 1 1 auto; min-width: 0; }
@@ -131,7 +132,7 @@
 /* A notice floats, taking no room: over the top of the roster (its host stands in the panel's flow at no height, the
    panel's gap taken back), or over the island view while there is one (chat-hosts.js moves it there), a dark plate
    between the view's corner buttons; each line fades in and out over the six seconds it stands (SHOWN_MS). */
-.hc-notice-host { position: relative; z-index: 3; flex: none; height: 0; margin-top: -10px; }
+.hc-notice-host { position: relative; z-index: 3; flex: none; height: 0; margin-top: -6px; }
 :is(.hc-notice-host, .iv-stage) > .hc-chat-notice {
   position: absolute; z-index: 3; top: 8px; left: 50%; box-sizing: border-box; width: max-content; max-width: calc(100% - 24px);
   transform: translateX(-50%); padding: 6px 10px; border-radius: 6px; background: rgba(20, 14, 8, 0.86); color: var(--paper);
@@ -254,7 +255,7 @@
 .iv-fold:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 .iv-stage[hidden] { display: none; }
 .hc-room-strip:has(> .iv[data-folded="true"]) { display: none; }
-.hc-room-strip { margin-bottom: -10px; }
+.hc-room-strip { margin-bottom: -6px; }
 .hc-room-strip .iv-stage { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .hc-room-strip:not([hidden]):not(:has(> .iv[data-folded="true"])) + .cloud-roster { border-top-left-radius: 0; border-top-right-radius: 0; }
 .iv-note { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -341,9 +342,9 @@
 html.iv-full .hc-room-strip { display: none; }
 /* On a screen taller than it is wide (a phone held upright) the view runs edge to edge across the top. */
 @media (max-aspect-ratio: 1 / 1) { .iv-full-host { right: 0; bottom: auto; height: var(--iv-split, 55dvh); } }
-/* In a chat the island view and the roster of faces run out to the panel's sides (its 14px padding taken back), square,
-   meeting with no gap, at every width: the island's panel here, Ooga Chat's in ooga-chat.css (8px on a phone). */
-.panel[data-space="on"] > :is(.hc-room-strip, .cloud-roster) { margin-right: -14px; margin-left: -14px; border-right-width: 0; border-left-width: 0; border-radius: 0; }
+/* In a chat the island view and the roster of faces run out to the panel's sides (its 8px padding taken back), square,
+   meeting with no gap, at every width, in both apps' panels. */
+.panel[data-space="on"] > :is(.hc-room-strip, .cloud-roster) { margin-right: -8px; margin-left: -8px; border-right-width: 0; border-left-width: 0; border-radius: 0; }
 .panel[data-space="on"] > .hc-room-strip .iv-stage { border-right-width: 0; border-left-width: 0; border-radius: 0; }
 /* In a chat on a narrow screen the footer is one row: the buttons, each as wide as its words (Unmute, Join voice,
    Request to speak, End chat), then the links (Leave chat); any note a button carries goes under them. */

@@ -357,10 +357,7 @@ body {
    with no gap. */
 .oc .oc-panel { gap: 6px; padding: 6px 8px; }
 .oc .oc-panel > .panel-foot { gap: 6px 12px; }
-.oc .oc-panel > .panel-foot > .reactions { margin: 0; }
 .oc .oc-panel.oc-panel > :is(.hc-room-strip, .cloud-roster) { margin-right: -8px; margin-left: -8px; border-right-width: 0; border-left-width: 0; border-radius: 0; }
-.oc .oc-panel > .hc-room-strip { margin-bottom: -6px; }
-.oc .oc-panel > .hc-notice-host { margin-top: -6px; }
 .oc .oc-panel > .hc-room-strip .iv-stage { border-right-width: 0; border-left-width: 0; border-radius: 0; }
 /* On a phone the app also runs edge to edge: no page margin or side borders. */
 @media (max-width: 480px) {
@@ -373,8 +370,6 @@ body {
    (ooga-chat-panels.js `outOfChat`). */
 .oc-panel[data-chat="none"] > .panel-foot > .reactions { display: none; }
 
-/* The chat's dark bar and its Requests drop-down (chat-hosts.css) run out to this panel's own padding and gap. */
-.oc .oc-chat[data-space="on"] { --hc-pad-top: 6px; --hc-pad-x: 8px; --hc-gap: 6px; }
 
 /* The island view full screen (island-view.js, chat-hosts.css `.iv-full-host`): the app's column at the right edge,
    the view filling the rest; on a screen taller than it is wide, under the view. */
@@ -424,7 +419,6 @@ html.iv-full .oc .oc-panel[data-space="on"] { gap: 0; padding: 0 8px 6px; }
 html.iv-full .oc .oc-panel[data-space="on"] > .hc-notice-host { margin-top: 0; }
 html.iv-full .oc .oc-panel[data-space="on"] > .cloud-roster { margin: 0 -8px; border-width: 0 0 2px; border-radius: 0; }
 html.iv-full .oc .oc-panel[data-space="on"] > .cloud-roster ~ :not(.hc-start, .hc-preview, .hc-pop) { margin-top: 6px; }
-.oc .oc-panel[data-space="on"] > .hc-alone { margin: -6px -8px 0; }
 html.iv-full .oc .oc-panel[data-space="on"] > .cloud-roster + .hc-alone { margin: 0 -8px; }
 html.iv-full .iv-reset { top: 8px; }
 html.iv-full .iv-stage > .hc-chat-notice { top: 8px; }
