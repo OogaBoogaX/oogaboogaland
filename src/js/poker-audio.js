@@ -46,7 +46,7 @@
   // `WIN_HOLD` seconds after a hand is won, dipped over `WIN_EASE` and back over `SEAT_EASE`.
   const SEATED = 0.45, WON = 0.25, WIN_HOLD = 1.5, SEAT_EASE = 0.6, WIN_EASE = 0.15;
   // The bed: a bandpass at `BED_HZ`, its gain at `BED_LEVEL` swinging `BED_DEPTH` either way at `BED_WOBBLE` hertz.
-  const BED_HZ = 420, BED_Q = 0.7, BED_LEVEL = 0.5, BED_DEPTH = 0.15, BED_WOBBLE = 0.13;
+  const BED_HZ = 420, BED_Q = 0.7, BED_LEVEL = 0.1, BED_DEPTH = 0.03, BED_WOBBLE = 0.13;
   // The brush kit's own noise voices, on the music bus.
   const BRUSHES = 4;
   // The bed's level: `BED_FLOOR` plus `BED_NEAR` times how near the nearer bar wing or the nearest table is (half at
