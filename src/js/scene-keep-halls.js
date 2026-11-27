@@ -700,8 +700,6 @@
   };
 
   const hallsScene = BL.deferred.scene("keephalls", {
-    // Unfinished, opened with the Keep itself: `?wip=keep` (AGENTS.md, Unfinished games).
-    wip: true,
     wipOf: "keep",
     // The yard's scene keeps these builders warm, and these the yard's, so walking in and out builds nothing again.
     keeps: ["keep"],

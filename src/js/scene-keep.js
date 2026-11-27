@@ -7089,8 +7089,6 @@
   };
 
   const keepScene = BL.deferred.scene("keep", {
-    // Unfinished: only the approach is built. `?wip=keep` opens it (AGENTS.md, Unfinished games).
-    wip: true,
     // Voice zone: a land of its own, reached from the ₿IFRÖST chamber.
     voiceZone: "byzantine-keep",
     // The halls' builders stay warm while the yard runs, and the yard's while the halls do.
