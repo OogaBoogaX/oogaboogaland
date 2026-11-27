@@ -59,6 +59,10 @@
         ["puppy-rescue", "puppy-rescue", "dsb-puppy-rescue", "Free Puppies Rescue", "Free Puppies Rescue in DSB Land: a kennel hall with a fenced yard, where puppies wait for an Ooga to adopt them."],
         ["free-wallets", "free-wallets", "dsb-free-wallets", "Free Hardware Wallets", "Free Hardware Wallets in DSB Land: a crammed, slightly dubious giveaway store round one vending machine."]
       ].map(([path, place, zone, name, description]) => ({ path: `dsb-${path}`, scene: "dsb", place, zone, title: `DSB Land · ${name}`, description })),
+      { path: "valhodl", scene: "keep", zone: "byzantine-keep", title: "Valhodl",
+        description: "Islands in a dark sea through ₿IFRÖST's window: row to Castle Island, sail the longships and take Leif's quests." },
+      { path: "valhodl-keep", scene: "keephalls", zone: "byzantine-keep.halls", title: "Valhodl · The Keep",
+        description: "Inside Valhodl's keep: a dungeon under a great lounge, the training room, the alchemy room and Founders Hall on the roof, one stair up the wall." },
       { path: "emberden", scene: "poker", zone: "emberden", title: "Ember Den",
         description: "A firelit card room through ₿IFRÖST's window: ten tables of Ooga poker round a fountain." },
       { path: "entropylab", scene: "hub", place: "lab", zone: "outside", image: "entropylab", title: "EntropyLab",
