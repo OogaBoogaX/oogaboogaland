@@ -292,11 +292,19 @@
       highest = value;
       show(value);
       remaining = SECONDS;
-      if (chime) chime(X, Z);
+      if (chime) chime(X, Z, value);
     };
     const update = (dt, time, snapshot, now, eye, chime) => {
       remaining = Math.max(0, remaining - dt);
-      if (snapshot.heightAt > 0 && snapshot.height > 0 && snapshot.height !== height) {
+      const socket=BL.mempool?.state;
+      // Reconnecting can restore a height seen before a lagging REST reading. Refresh the
+      // display quietly and keep the high-water mark for deduplicating block announcements.
+      if (socket?.connected && socket.height > height) {
+        highest = Math.max(highest, socket.height);
+        show(socket.height);
+      }
+      if (snapshot.heightAt > 0 && snapshot.height > 0 && snapshot.height !== height &&
+          !(socket?.connected && socket.height>snapshot.height)) {
         const recent = observedAt > 0 && now - observedAt <= 150000 && now - snapshot.heightAt <= 90000;
         if (recent && snapshot.height > highest && now - snapshot.lastBlockAt < 150000 && now - snapshot.lastBlockAt >= -7200000)
           block(snapshot.height, chime);

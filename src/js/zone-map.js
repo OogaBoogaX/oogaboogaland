@@ -87,18 +87,21 @@
   // report each one from the middle of the area it is in, under that area's zone, and every page adds the area's
   // middle back (`originOf`). Valhodl's yard (scene-keep.js) is a grid of areas `FRAME_SPAN` across, its castle
   // island's the bare `byzantine-keep`; its halls (scene-keep-halls.js) are the keep's inside, each tower's inside
-  // (keep-halls-layout.js `TOWER_SPAN` apart from x 200) and the volcano's cave past them. An area is kept until its
-  // walker is `FRAME_HOLD` past its own edge, so nobody flickers between two at a boundary.
+  // (keep-halls-layout.js `TOWER_SPAN` apart from x 200), the volcano's cave past them and Shards' caves past that.
+  // An area is kept until its walker is `FRAME_HOLD` past its own edge, so nobody flickers between two at a boundary.
   const FRAME_SPAN = 300, FRAME_HOLD = 4;
   const FRAME_SETS = (() => {
     const yard = [];
-    for (let c = 0; c < 9; c++) for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 9; c++) for (let r = 0; r < 4; r++) {
       const x = (c - 5) * FRAME_SPAN, z = (r - 1) * FRAME_SPAN;
       yard.push(Object.freeze({ zone: x === 0 && z === 0 ? "byzantine-keep" : `byzantine-keep.y${c}r${r}`, x, z }));
     }
     const halls = [Object.freeze({ zone: "byzantine-keep.halls", x: 0, z: 0 })];
     for (let i = 0; i < 6; i++) halls.push(Object.freeze({ zone: `byzantine-keep.h${i}`, x: 200 + i * 160, z: 0 }));
     halls.push(Object.freeze({ zone: "byzantine-keep.hcave", x: 1195, z: 0 }));
+    halls.push(Object.freeze({ zone: "byzantine-keep.hshards", x: 1356, z: 0 }));
+    // Outpost Island's eight towers' insides, past the caves (keep-halls-layout.js `OUTPOST_X`).
+    for (let i = 6; i < 14; i++) halls.push(Object.freeze({ zone: `byzantine-keep.h${i}`, x: 1600 + (i - 6) * 160, z: 0 }));
     return Object.freeze({ "keep-yard": Object.freeze(yard), "keep-halls": Object.freeze(halls) });
   })();
   const ORIGINS = new Map();

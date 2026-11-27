@@ -746,7 +746,13 @@
           if (node.geometry.lightBeam) {
             const along = ((centerX - w[12]) * w[0] + (centerY - w[13]) * w[1] + (centerZ - w[14]) * w[2]) / (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
             const fade = Math.max(0, Math.min(1, 1 - along / node.geometry.lightBeam));
-            faceOpacity *= fade * fade;
+            if (node.geometry.roundBeam) {
+              const dx = perspectiveWeight * (eye.x - centerX) + orthographicDepth * view[2];
+              const dy = perspectiveWeight * (eye.y - centerY) + orthographicDepth * view[6];
+              const dz = perspectiveWeight * (eye.z - centerZ) + orthographicDepth * view[10];
+              const chord = Math.abs(nx * dx + ny * dy + nz * dz) / Math.max(1e-6, Math.hypot(dx, dy, dz));
+              faceOpacity *= 3 * fade * chord;
+            } else faceOpacity *= fade * fade;
           }
           // Mode 5 keeps its own palette in the Matrix; clouds are mode 4.
           const matrixNative = matrixMode > 4.5;

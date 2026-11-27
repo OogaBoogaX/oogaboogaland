@@ -51,7 +51,7 @@
     lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 0, bloomStrength: 0.95
   };
   // The cave's light: its lava's, and each path's rockfall's; and what lava does to whoever stands in it, every `LAVA_S`.
-  const LAVA_TINT = [1.9, 0.62, 0.16], PATH_TINTS = [[1.7, 0.7, 0.2], [0.3, 1.3, 1.15], [1.0, 0.55, 1.6]], LAVA_K = { S: { blow: 1, name: "The lava" } }, LAVA_S = 0.8;
+  const SHARD_TINT = [0.95, 0.45, 1.35], LAVA_TINT = [1.9, 0.62, 0.16], PATH_TINTS = [[1.7, 0.7, 0.2], [0.3, 1.3, 1.15], [1.0, 0.55, 1.6]], LAVA_K = { S: { blow: 1, name: "The lava" } }, LAVA_S = 0.8;
   const LAVA_BITS = ["#ff8a1e", "#ffb347", "#ff5a1a"].map((c) => BL.models.particleGeometry(c, 0.16, 1));
   const INDOOR = { direct: 0.05, ambient: 0.4 }, TOWER = { direct: 0.45, ambient: 0.3 }, ROOFTOP = { direct: 0.5, ambient: 0.32 }, TORCH = 0.75;
   // The halls stand about the great door's wall line; the yard's castle stands this far along z from it.
@@ -91,6 +91,8 @@
   const WHEEL = 2 * (L.STAIR.r0 - 0.5), WHEEL_TURN = 0.045;
   // The hearth's fire: a clump of flames of their own sizes, each flickering on its own, and sparks flying up off it.
   const HEARTH_FIRE = [[0, 0.15, 0, 1.55], [-0.45, 0.05, 0.1, 1.05], [0.5, 0.05, -0.05, 1.1], [-0.15, 0.3, -0.2, 0.85], [0.2, 0, 0.25, 0.8], [0.75, 0, 0.15, 0.55], [-0.8, 0, -0.05, 0.6]];
+  // The purple and pink dust rising off the crystal in Shards' chamber and caves, a mote every `every` seconds.
+  const SHARD_DUST = { every: 0.06, bits: ["#c77dff", "#ff6ad5", "#e0aaff", "#ff9de6", "#9d4edd"].map((c) => BL.models.particleGeometry(c, 0.07, 1)) };
   const BREW_DUST = ["#ffb347", "#ff8a1e", "#ffd27a", "#ff9d3a"].map((c) => BL.models.particleGeometry(c, 0.05, 1));
   let wheelGeometry = null;
   const runeWheel = () => {
@@ -122,9 +124,15 @@
 
   // ---------- the halls for a visit ----------
   const build = () => {
-    const s = { lamps: [], order: null, flames: [], crows: [], pendulums: [], wheels: [], swingers: [], foes: null, beam: null, lava: 0, brewDust: 0, sparkAt: 0, bubbles: [], portal: null, seats: [], candles: null, candleNodes: [], outside: null };
+    const s = { lamps: [], order: null, flames: [], crows: [], pendulums: [], wheels: [], swingers: [], foes: null, beam: null, lava: 0, brewDust: 0, shardDust: 0, sparkAt: 0, bubbles: [], portal: null, seats: [], candles: null, candleNodes: [], outside: null };
     addChild(root, createNode({ geometry: HM.halls() }), createNode({ geometry: HM.liner() }), createNode({ geometry: HM.floors() }));
-    for (const t of L.TOWERS) addChild(root, createNode({ geometry: HM.towerInside(t.tall ? 1 : 0)(), position: { x: t.x, y: 0, z: t.z } }), createNode({ geometry: HM.towerLiner(t.tall ? 1 : 0), position: { x: t.x, y: 0, z: t.z } }));
+    // Outpost Island's towers' insides are drawn only while the visitor is in one (`s.outposts`).
+    s.outposts = [];
+    for (const t of L.TOWERS) {
+      const inside = createNode({ geometry: HM.towerInside(t.tall ? 1 : 0)(), position: { x: t.x, y: 0, z: t.z } }), liner = createNode({ geometry: HM.towerLiner(t.tall ? 1 : 0), position: { x: t.x, y: 0, z: t.z } });
+      addChild(root, inside, liner);
+      if (t.outpost) s.outposts.push({ t, nodes: [inside, liner] });
+    }
     // The volcano's cave: its rock, the night at its mouth, and the light of its lava, of the fire in the cracks of
     // its way in, and of whatever lies past each path's rockfall.
     {
@@ -135,6 +143,16 @@
       lamp(s, C.x + 12, -2.5, C.z, 13, LAVA_TINT);
       lamp(s, C.x + 1.5, 3, C.z, 10, [0.35, 0.45, 0.8]);
       C.paths.forEach((a, i) => lamp(s, C.x + C.chamber.at + Math.cos(a) * far, -C.entry.drop + 2.4, C.z + Math.sin(a) * far, 10, PATH_TINTS[i]));
+    }
+    // Shards' caves: their amethyst, the night at their mouth, the crystal standing in the chamber and in each cave
+    // where the renderer draws glass, and its glow; the torches down each tunnel are lamps (keep-halls-models.js).
+    {
+      const C = L.SHARDS_CAVE, H = C.chamber, deep = -C.entry.drop, far = H.r + C.tunnel.len + C.room.r - 1;
+      addChild(root, createNode({ geometry: HM.shardsCave() }), createNode({ geometry: BL.models.box({ w: 0.1, h: 8, d: 7, color: "#0b1226", emissive: 0.5 }), position: { x: C.x + C.grid.x0 + 0.7, y: 3, z: C.z }, sightHidden: true }));
+      if (renderer.kind === "webgl2") addChild(root, createNode({ geometry: HM.shardsCaveCrystals(), sightHidden: true }));
+      lamp(s, C.x + H.at, deep + 3, C.z, 14, SHARD_TINT);
+      s.shardSites = [[C.x + H.at, C.z], ...C.tunnels.map((a) => [C.x + H.at + Math.cos(a) * far, C.z + Math.sin(a) * far])];
+      C.tunnels.forEach((a) => lamp(s, C.x + H.at + Math.cos(a) * far, deep + 2.5, C.z + Math.sin(a) * far, 9, SHARD_TINT));
     }
     // What each door shows of the yard outside.
     addChild(root, createNode({ geometry: HM.glimpse(4), position: { x: 0, y: 0, z: 2.2 }, rotation: { x: 0, y: Math.PI, z: 0 }, sightHidden: true }));
@@ -178,7 +196,7 @@
     // rooftop's own parapet and corner spires.
     s.outside = createNode({ position: { x: 0, y: 0, z: YARD_SHIFT }, visible: false });
     for (const p of KM.castleParts(renderer.kind !== "canvas2d")) {
-      if (p.tag === "keep-body") continue;
+      if (p.tag === "keep-body" || p.tag === "outpost" || p.tag === "outpost-tower") continue;
       const node = createNode({ geometry: p.geometry, position: { x: p.x, y: p.y, z: p.z + (p.tag === "keep-top" ? YARD_SHIFT : 0) }, rotation: { x: 0, y: p.ry, z: 0 }, sightHidden: true });
       if (p.scale) node.scale.x = node.scale.y = node.scale.z = p.scale;
       addChild(p.tag === "keep-top" ? root : s.outside, node);
@@ -366,9 +384,11 @@
     if (place === "drop" && world.keepDrop) { const d = world.keepDrop; world.keepDrop = null; return d; }
     // In at the volcano's cave mouth.
     if (place === "cave") return { ...L.CAVE.arrive, y: L.supportAt(L.CAVE.arrive.x, L.CAVE.arrive.z, 1) };
-    const top = /^towertop-(\d)$/.exec(place || "");
+    // Down the trench into Shards' caves.
+    if (place === "shards") return { ...L.SHARDS_CAVE.arrive, y: L.supportAt(L.SHARDS_CAVE.arrive.x, L.SHARDS_CAVE.arrive.z, 1) };
+    const top = /^towertop-(\d+)$/.exec(place || "");
     if (top && L.TOWERS[+top[1]]) return L.towerTopArrive(L.TOWERS[+top[1]]);
-    const m = /^tower-(\d)$/.exec(place || "");
+    const m = /^tower-(\d+)$/.exec(place || "");
     return m && L.TOWERS[+m[1]] ? L.towerArrive(L.TOWERS[+m[1]]) : L.ARRIVE;
   };
 
@@ -498,7 +518,7 @@
   const update = (dt, elapsed) => {
     const s = scene;
     // The walls' music, carried on from the yard (keep-audio.js `music`), all through the keep.
-    if (!leaving) BL.keepAudio.music.play(here && here.cave ? null : "yard");
+    if (!leaving) BL.keepAudio.music.play(here && here.cave ? null : "land");
     if (s.foes) s.foes.unshake(camera);
     if (s.foes) s.foes.undarken(RENDER_OPTS);
     BL.keepLink.here(dt);
@@ -522,6 +542,7 @@
 
     const who = drivenHere ? drivenHere.root.position : pilot.orbit.target, feet = drivenHere ? who.y - drivenHere.baseY : who.y;
     here = L.placeAt(who.x, who.z, feet);
+    for (let i = 0; i < s.outposts.length; i++) { const o = s.outposts[i], on = here === o.t; if (o.nodes[0].visible !== on) o.nodes[0].visible = o.nodes[1].visible = on; }
     // Each level's name as the visitor comes to it, under the header where the islands are named (scene-keep.js
     // `BL.keepArea`); a tower's room as a hint.
     if (here !== shown) {
@@ -555,6 +576,12 @@
     if (Math.abs(feet) < 8 && (s.sparkAt -= dt) <= 0) {
       s.sparkAt = 0.07 + Math.random() * 0.12;
       fx.spawnParticle(BREW_DUST[(Math.random() * BREW_DUST.length) | 0], (Math.random() - 0.5) * 1.4, 0.5 + Math.random() * 0.6, L.HEARTH_AT.z + 0.4 + (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5, 1.2 + Math.random() * 1.4, (Math.random() - 0.3) * 0.4, 0.7 + Math.random() * 0.8, 6, -0.3, -100);
+    }
+    // Purple and pink dust rising off the crystal in Shards' chamber and in each of its caves.
+    if (here && (here === L.SHARDS_CAVE || L.SHARDS_CAVE.caves.includes(here)) && (s.shardDust -= dt) <= 0) {
+      s.shardDust = SHARD_DUST.every * (0.5 + Math.random());
+      const [cx, cz] = s.shardSites[(Math.random() * s.shardSites.length) | 0], a = Math.random() * Math.PI * 2, r = 0.2 + Math.random() * 0.6, cs = Math.cos(a), sn = Math.sin(a);
+      fx.spawnParticle(SHARD_DUST.bits[(Math.random() * SHARD_DUST.bits.length) | 0], cx + cs * r, -L.SHARDS_CAVE.entry.drop + Math.random() * 3, cz + sn * r, cs * 0.1, 0.5 + Math.random() * 0.5, sn * 0.1, 1.6 + Math.random() * 1.2, 3, -0.4, -100);
     }
     // Orange fairy dust rising off the brew, near enough to see it.
     if (Math.abs(feet - UPF) < 8 && (s.brewDust -= dt) <= 0) {
@@ -597,7 +624,7 @@
       }
       // Nothing should let a body out of the stone, but one that does fall clear is put back where it came in.
       if (feet < DNF - 6) {
-        const at = here && here.n ? L.towerArrive(here) : here && here.cave ? L.CAVE.arrive : L.ARRIVE;
+        const at = here && here.n ? L.towerArrive(here) : here && here.cave ? here.arrive : L.ARRIVE;
         p.x = at.x; p.z = at.z; p.y = drivenHere.baseY;
       }
     }

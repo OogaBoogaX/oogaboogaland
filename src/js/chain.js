@@ -100,7 +100,7 @@
     // Fees
     nextFee: 0, fastestFee: 0, halfHourFee: 0, hourFee: 0, economyFee: 0, minimumFee: 0,
     // Chain
-    height: 0, lastTxCount: 0, lastWeight: 0, lastSize: 0, lastBlockAt: 0, pace: TARGET_BLOCK,
+    height: 0, tipHash: "", lastTxCount: 0, lastWeight: 0, lastSize: 0, lastBlockAt: 0, pace: TARGET_BLOCK,
     // Mining and market
     progressPercent: 0, difficultyChange: 0, remainingBlocks: 0, remainingTime: 0, avgBlockMs: 0,
     hashrate: 0, difficulty: 0, priceUsd: 0, priceOpenUsd: 0, priceSource: null,
@@ -266,6 +266,7 @@
     if (tip && tip.height > 0) {
       snapshot.heightAt = Number.isInteger(Number(tip.height)) ? Date.now() : 0;
       snapshot.height = tip.height | 0;
+      snapshot.tipHash = typeof tip.id==="string" && /^[a-f0-9]{64}$/i.test(tip.id) ? tip.id.toLowerCase() : "";
       snapshot.lastTxCount = tip.tx_count | 0;
       snapshot.lastWeight = tip.weight | 0;
       snapshot.lastSize = tip.size | 0;
@@ -469,6 +470,7 @@
     if (event.type === "block") {
       snapshot.heightAt = Number.isInteger(Number(event.height)) && Number(event.height) > 0 ? Date.now() : 0;
       snapshot.height = event.height | 0;
+      snapshot.tipHash = BL.mempool?.state.height===snapshot.height ? BL.mempool.state.tipHash : "";
       snapshot.lastTxCount = event.txCount | 0;
       snapshot.lastWeight = 0;
       snapshot.lastSize = 0;

@@ -111,6 +111,26 @@
     const bandstand = BL.pokerBandstand.build(root,lite);
     const clock = BL.pokerHourglass.build(lite);
     S.addChild(root, clock.root);
+    // Fixed lengths of amber inlay run from the hourglass, past the bull's west flank, to the vault.
+    const ribbon=child(root,null), ribbonParts=[], amber=box(0,0,0,.27,.018,1,"#ffc364",1);
+    amber.castShadow=false;ribbon.visible=false;
+    const pathX=t=>BL.pokerHourglass.X*(1-t)-2.15*Math.sin(Math.PI*t);
+    for(let i=0;i<32;i++){
+      const a=i/32,b=(i+1)/32, x=pathX(a),dx=pathX(b)-x, dz=(-35.1-BL.pokerHourglass.Z)/32;
+      const n=child(ribbon,amber,x+dx/2,.038,BL.pokerHourglass.Z+(i+.5)*dz);
+      n.rotation.y=Math.atan2(dx,dz);n.scale.z=Math.hypot(dx,dz)*.985;ribbonParts.push(n);
+    }
+    const blockRibbon=(phase,calm)=>{
+      ribbon.visible=phase>=0 && phase<1;
+      if(!ribbon.visible)return;
+      const fade=calm ? Math.min(1,phase/.18,(1-phase)/.27) : 1;
+      for(let i=0;i<ribbonParts.length;i++){
+        const n=ribbonParts[i],trail=phase*1.42-i/(ribbonParts.length-1);
+        n.visible=calm || trail>=0 && trail<.42;
+        n.smokeOpacity=fade*fade*(3-2*fade);
+        if(n.visible)n.glow=calm?.85:1.7*(1-trail/.42);
+      }
+    };
     const bronze = child(root, g.bronze, 0, 0.56, 0);
     bronze.scale.x = bronze.scale.z = 1.04;
     bronze.scale.y = 1.10;
@@ -165,7 +185,7 @@
     };
     update(0, 0);
     const dispose = () => { while (root.children.length) S.removeChild(root, root.children[root.children.length - 1]); };
-    return { root, clock, vaultDoor, bandstand, aquarium, observe, update, dispose };
+    return { root, clock, vaultDoor, bandstand, aquarium, observe, blockRibbon, update, dispose };
   };
   BL.pokerHall = Object.freeze({ build, hangMoon, lunarSurface });
 })();

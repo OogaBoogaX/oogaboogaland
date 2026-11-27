@@ -48,24 +48,10 @@
     lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 0, bloomStrength: 0.9
   };
   // A lantern's flame, the ₿IFRÖST field's blue and the light behind the keep's door: colour and reach.
-  const FLAME = [1.35, 0.82, 0.36], FIELD = [0.3, 0.55, 1.1], HEARTH = [1.2, 0.74, 0.34], ICE = [0.45, 0.75, 1.25];
-  // The castle's welcome for a rowboat drawing near its quay: once each time someone boards, as the boat comes within
-  // `at` of the quay, `n` fire arrows loosed `gap` seconds apart from the gatehouse's turrets (`from`), each flying
-  // `time` seconds in an arc `arc` of its length high to stick in the boat's gunwale at `hit` [across, up, along],
-  // burning there brightly, its light `reach` and `bright` times a lantern's, and gone `burn` seconds after it struck,
-  // the last `fade` of them dying down.
-  const VOLLEY = {
-    at: 45, n: 2, gap: 0.7, time: 2.6, arc: 0.1, burn: 20, fade: 4, reach: 11, bright: 1.8,
-    from: [[-GATE.turretX, GATE.turretHeight + 1.5, GATE.turretZ + 1.5], [GATE.turretX, GATE.turretHeight + 1.5, GATE.turretZ + 1.5]],
-    hit: [[0.76, 0.56, 0.7], [-0.72, 0.56, -1.0]]
-  };
+  const FLAME = [1.35, 0.82, 0.36], FIELD = [0.3, 0.55, 1.1], HEARTH = [1.2, 0.74, 0.34], ICE = [0.45, 0.75, 1.25], AMETHYST = [0.95, 0.45, 1.35];
   // The land is being built: a debug page plays this Ooga unless it names another, and `castle=1` on one lands it on
   // the castle island's quay instead of the islet.
   const TEST_PLAYER = "rules-without-rulers";
-  // How far past a line between two places' music (a bridge's middle, a wing's edge) the music already playing holds.
-  const MUSIC_HOLD = 3;
-  // How far out to sea a wing's music is heard; past it, and on the volcano's island, the shore's.
-  const WING_FAR = 230;
   const LANTERN_REACH = 9, WAKE = 10.5, WAKE_EASE = 1.6, UNLIT = 0.05, TORCH = 0.75, HANG = 0.55, BONFIRE = 4;
   // The drawbridge: how fast it comes down and goes up (radians a second, eased at both ends), and how near level
   // counts as down.
@@ -92,6 +78,11 @@
   // The fairy dust rising round each knight: a mote every `MOTE_EVERY` s, somewhere within `MOTE_RING` of its feet,
   // while the view is within `MOTE_NEAR` (the page's particles are a shared pool).
   const MOTE_EVERY = 0.045, MOTE_RING = [1.2, 3.4], MOTE_NEAR = 60;
+  // How far off Outpost Island its stone is drawn at all; the haze has it well before.
+  const OUTPOST_SEEN = 520;
+  // The purple and pink dust rising off Shards' crystal clusters: a mote every `every` seconds off one of them, for a
+  // view within `near` of the island's middle.
+  const SHARD_DUST = { every: 0.03, near: 95, bits: ["#c77dff", "#ff6ad5", "#e0aaff", "#ff9de6", "#9d4edd"].map((c) => BL.models.particleGeometry(c, 0.09, 1)) };
   const KNIGHT_DUST = [["#ff5a4a", "#ff2a1f", "#ffb0a0", "#ff7a60"], ["#ffb04a", "#ff8a1e", "#ffe0a0", "#ffc070"]].map((tones) => tones.map((c) => BL.models.particleGeometry(c, 0.1, 1)));
   const NO_ACTORS = [];
   // How long a body stands in the water before the shore takes it back, and how often the castle's ward says so.
@@ -176,15 +167,19 @@
     return l;
   };
   const build = () => {
-    const s = { safe: null, wet: 0, archZ: 0, beamAt: -Infinity, lamps: [], order: null, statues: [], leaf: null, leafAngle: LEAF.raised, leafDrawn: NaN, hung: [], chains: [], flies: [], crows: [], motes: [], lane: false, lit: -1, runAt: -1, area: null, hinted: -Infinity, near: false, portcullis: null, gateLift: 0, told: {} };
+    const s = { safe: null, wet: 0, archZ: 0, beamAt: -Infinity, lamps: [], order: null, statues: [], leaf: null, leafAngle: LEAF.raised, leafDrawn: NaN, hung: [], chains: [], flies: [], crows: [], motes: [], lane: false, shardDust: 0, lit: -1, runAt: -1, area: null, hinted: -Infinity, near: false, portcullis: null, gateLift: 0, told: {} };
     const tall = renderer.kind !== "canvas2d";
     // The castle: the land, the curtain between its six towers, the gatehouse in the front wall and the keep across the
     // yard.
     s.crowns = []; s.drums = []; s.ladders = []; s.towers = []; s.cbdcDrums = []; s.storjDrums = [];
+    const outpostTowers = [];
+    // Outpost Island's stone in a group of its own, hidden from a view far off it (`OUTPOST_SEEN`).
+    s.outpost = createNode({});
+    addChild(root, s.outpost);
     for (const p of KM.castleParts(tall)) {
       // The shipyard is stood by `buildShipyard`, part by part.
       if (p.tag === "shipyard") continue;
-      const node = createNode({ geometry: p.geometry, position: { x: p.x, y: p.y, z: p.z }, rotation: { x: 0, y: p.ry, z: 0 }, sightHidden: p.hidden });
+      const node = createNode({ geometry: p.geometry, position: { x: p.x, y: p.y, z: p.z }, rotation: { x: 0, y: p.ry, z: 0 }, scale: { x: p.scale, y: p.scale, z: p.scale }, sightHidden: p.hidden });
       // A turret's merlons, its drum and its ladder, in `L.TURRETS`' order: whoever mans its cannon looks out without
       // the merlons, and in their own eyes without the turret at all.
       if (p.tag === "turret-crown") s.crowns.push(node);
@@ -196,8 +191,12 @@
       else if (p.tag === "cbdc-turret") s.cbdcDrums.push(node);
       // A tower of Cold Storj's fjord, in `L.STORJ.turrets`' order.
       else if (p.tag === "storj-tower") s.storjDrums.push(node);
-      addChild(root, node);
+      // Outpost Island's towers, set aside to follow the castle's own in `L.GALLERIES`' order (`castleParts` lays
+      // them first).
+      else if (p.tag === "outpost-tower") outpostTowers.push(node);
+      addChild(p.tag === "outpost" || p.tag === "outpost-tower" ? s.outpost : root, node);
     }
+    s.towers.push(...outpostTowers);
     // A flag on the tip of every spire.
     s.flags = [];
     flags.plant(root, root, 0, s.flags);
@@ -231,6 +230,10 @@
       }
       for (const c of L.STORJ.caveAt) lamp(s.lamps, c.x + Math.sin(c.yaw) * 1.6, c.y + 2.2, c.z + Math.cos(c.yaw) * 1.6, 7, ICE);
     }
+    // Shards' crystal, where the renderer draws glass (keep-models.js `shardsCrystals`), and its glow lighting the
+    // ground round the trench and out across the island.
+    if (renderer.kind === "webgl2") { const c = KM.shardsCrystals(); addChild(root, createNode({ geometry: c.clusters, sightHidden: true }), createNode({ geometry: c.carpet, sightHidden: true })); }
+    { const S = L.SHARDS; for (const [x, z, reach] of [[S.x - 8, S.z + 14, 20], [S.x + 12, S.z - 16, 20], [S.x + 22, S.z + 18, 18], [S.x - 30, S.z - 20, 16]]) lamp(s.lamps, x, L.terrainTop(x, z) + 2.5, z, reach, AMETHYST); }
     // The forest.
     if (tall) for (const [x, y, z, kind, turnBy, size] of KM.forest()) addChild(root, createNode({ geometry: L.playDist(x, z) < 16 ? KM.pine(kind) : KM.farPine(kind), position: { x, y, z }, rotation: { x: 0, y: turnBy, z: 0 }, scale: { x: size, y: size, z: size }, sightHidden: true }));
 
@@ -286,7 +289,16 @@
     // A torch burning on each pier round the keep's balconies.
     s.torches = [];
     const blaze = BL.blaze.smooth();
-    for (const [x, y, z] of L.TORCHES) {
+    // Outpost Island's keep's top level, open: the castle keep's rooftop firepit in its middle, burning.
+    {
+      const F = L.OUTPOST.fire, HM = BL.keepHallsModels;
+      addChild(s.outpost, createNode({ geometry: HM.prop({ k: "firepit", x: 0, z: 0 }), position: { x: F.x, y: KEEP.roof, z: F.z } }));
+      const node = createNode({ geometry: BL.blaze.smooth(), position: { x: F.x, y: KEEP.roof + 0.35, z: F.z }, scale: { x: 3, y: 3, z: 3 }, sightHidden: true });
+      addChild(s.outpost, node);
+      s.torches.push({ node, phase: 0.7, size: 3 / TORCH });
+      lamp(s.lamps, F.x, KEEP.roof + 2, F.z, 20, HEARTH);
+    }
+    for (const [x, y, z] of [...L.TORCHES, ...L.OUTPOST.torches]) {
       const node = createNode({ geometry: blaze, position: { x, y: y + 0.08, z }, scale: { x: TORCH, y: TORCH, z: TORCH }, sightHidden: true });
       addChild(root, node);
       s.torches.push({ node, phase: s.torches.length * 1.3 });
@@ -335,15 +347,15 @@
     // A door in each curtain tower's face toward the yard, a lantern on a bracket on each of its pilasters.
     const porch = KM.porch(), PL = KM.PORCH.lamp;
     for (const d of TOWER_DOORS) {
-      const turnBy = Math.atan2(d.dx, d.dz), R = CASTLE.tower;
-      addChild(root, createNode({ geometry: porch, position: { x: d.cx + d.dx * R, y: 0, z: d.cz + d.dz * R }, rotation: { x: 0, y: turnBy, z: 0 } }));
+      const turnBy = Math.atan2(d.dx, d.dz), R = CASTLE.tower, Y = d.y || 0;
+      addChild(root, createNode({ geometry: porch, position: { x: d.cx + d.dx * R, y: Y, z: d.cz + d.dz * R }, rotation: { x: 0, y: turnBy, z: 0 } }));
       for (const side of [-1, 1]) {
         const ax = d.dz * side * PL.x, az = -d.dx * side * PL.x;
-        addChild(root, createNode({ geometry: KM.wallBracket(), position: { x: d.cx + d.dx * (R + PL.z) + ax, y: PL.y, z: d.cz + d.dz * (R + PL.z) + az }, rotation: { x: 0, y: turnBy, z: 0 } }));
-        hook(d.cx + d.dx * (R + PL.z + KM.BRACKET) + ax, PL.y, d.cz + d.dz * (R + PL.z + KM.BRACKET) + az);
+        addChild(root, createNode({ geometry: KM.wallBracket(), position: { x: d.cx + d.dx * (R + PL.z) + ax, y: Y + PL.y, z: d.cz + d.dz * (R + PL.z) + az }, rotation: { x: 0, y: turnBy, z: 0 } }));
+        hook(d.cx + d.dx * (R + PL.z + KM.BRACKET) + ax, Y + PL.y, d.cz + d.dz * (R + PL.z + KM.BRACKET) + az);
       }
       // Its sign on the plain wall between the arch and the cornice.
-      addChild(root, createNode({ geometry: KM.wordSign("TOWER", 0.5), position: { x: d.cx + d.dx * (R + 0.875), y: KM.PORCH.sign, z: d.cz + d.dz * (R + 0.875) }, rotation: { x: 0, y: turnBy, z: 0 } }));
+      addChild(root, createNode({ geometry: KM.wordSign("TOWER", 0.5), position: { x: d.cx + d.dx * (R + 0.875), y: Y + KM.PORCH.sign, z: d.cz + d.dz * (R + 0.875) }, rotation: { x: 0, y: turnBy, z: 0 } }));
     }
     // The keep's sign over its great door, on the round of its face.
     addChild(root, createNode({ geometry: KM.wordSign("THE KEEP", 0.8), position: { x: KEEP.x, y: 6.6, z: KEEP.front + 0.12 } }));
@@ -484,7 +496,11 @@
     s.escorts = s.ships.filter((w) => w.at.role === "escort");
     buildFleet(s);
     s.raiders = s.ships.filter((w) => w.at.role === "raider");
-    s.redShip = s.raiders.find((w) => w.at.quest === "sails") || null;
+    // Red Sails' three, and which of them this page has sunk while the quest hunts them (`world.keepRedSunk`).
+    s.redShips = s.raiders.filter((w) => w.at.quest === "sails");
+    if (!Array.isArray(world.keepRedSunk) || quests.stage("sails") !== "hunt") world.keepRedSunk = [];
+    s.cannonShips = s.raiders.filter((w) => w.at.quest === "cannon").sort((a, b) => a.at.wave - b.at.wave);
+    s.cannon = null;
     for (const w of s.raiders) w.raid = { C: w.at.scale < 0.2 ? RAID.small : RAID.large, v: 0, hp: w.at.hull, sink: -1, hunting: false, leg: 1, rip: -1, ripSide: 0, ripT: 0, from: { ship: true }, guns: w.at.guns.map(([a, c, y, size]) => ({ a, c, y, size, side: c > 0 ? 1 : -1, wait: 0 })) };
     s.repair = { w: null, t: 0, knock: 0, told: -1, mallet: null };
     for (const w of s.ships) buildDrips(w);
@@ -542,18 +558,7 @@
     { const F = L.ARENA_FOES, of = (S, tip) => ({ ...S, chase: "arena", lazy: true, tip });
       F.ogres.forEach((post) => s.foes.add({ ...of(OGRE, "An ogre of the arena · keep clear of its axe"), post })); F.trolls.forEach((post) => s.foes.add({ ...of(TROLL, "A red troll of the arena · sidestep its cannon's fire"), post }));
       F.greens.forEach((post) => s.foes.add({ ...of(GREEN_SKEL, "A green skeleton of the arena · twice as hard to bring down"), post })); F.skeletons.forEach((post) => s.foes.add({ ...of(SKEL, "A skeleton of the arena · keep clear of its sword"), post })); }
-    forestPosts().forEach((post, i) => s.foes.add({ ...(i % GREEN_EVERY === GREEN_EVERY - 1 ? FOREST_GREEN : FOREST_SKEL), post }));
-    // The fire arrows, hidden until the castle looses them, each with its flame and its light.
-    s.arrows = [];
-    s.volley = false;
-    for (let i = 0; i < VOLLEY.n; i++) {
-      const node = createNode({ geometry: KM.fireArrow(), visible: false, sightHidden: true }), flame = createNode({ geometry: KM.arrowFlame(), position: { x: 0, y: 0, z: -KM.ARROW.rag }, sightHidden: true });
-      addChild(node, flame);
-      addChild(root, node);
-      const light = lamp(s.lamps, 0, 0, 0, VOLLEY.reach, FLAME.map((c) => c * VOLLEY.bright));
-      light.want = light.level = 0;
-      s.arrows.push({ node, flame, light, state: "idle", t: 0, burn: 0, from: VOLLEY.from[i], hit: VOLLEY.hit[i], phase: i * 2.1 });
-    }
+    // The castle island keeps no skeletons in its forest now (`FOREST.n`).
     s.ferries.forEach((f, i) => { input.add(f.boat, { kind: "keep-ferry", index: i }, { radius: 3 }); targets.push(f.boat); });
     s.others = [];
     if (tall) for (let i = 0; i < OTHER_BOATS; i++) { const o = boatRig(false); o.boat.visible = false; s.others.push(o); }
@@ -823,25 +828,29 @@
   const purse = (() => {
     let save = null, count = null;
     const load = () => {
-      const out = { bananas: 0, owned: [], active: null, levels: {} };
+      const out = { bananas: 0, owned: [], active: null, levels: {}, use: {} };
       try {
         const raw = JSON.parse(localStorage.getItem(PURSE_KEY) || "null");
         if (raw && Number.isInteger(raw.bananas) && raw.bananas >= 0 && raw.bananas <= PURSE_MAX) out.bananas = raw.bananas;
         if (raw && Array.isArray(raw.owned)) for (const id of WARE_IDS) if (raw.owned.includes(id)) out.owned.push(id);
         if (raw && out.owned.includes(raw.active)) out.active = raw.active;
         if (raw && raw.levels && typeof raw.levels === "object") for (const id of LEVELLED) { const n = raw.levels[id]; if (out.owned.includes(id) && Number.isInteger(n) && n > 1 && n <= LEVEL_MAX) out.levels[id] = n; }
+        // The level each is used at, where a lower one than its top was chosen.
+        if (raw && raw.use && typeof raw.use === "object") for (const id of LEVELLED) { const n = raw.use[id], top = ALL_LEVELS ? LEVEL_MAX : out.levels[id] || 1; if (out.owned.includes(id) && Number.isInteger(n) && n >= 1 && n < top) out.use[id] = n; }
       } catch { /* A browser without storage keeps them for the page. */ }
       if (TEST) out.bananas = Math.max(out.bananas, TEST_BANANAS);
       return out;
     };
     const state = () => save || (save = load());
     const store = () => { try { localStorage.setItem(PURSE_KEY, JSON.stringify(save)); } catch { /* as above */ } };
+    const topOf = (id) => ALL_LEVELS && LEVELLED.includes(id) ? LEVEL_MAX : state().levels[id] || 1;
+    const levelOf = (id) => { const top = topOf(id), n = state().use[id]; return n && n < top ? n : top; };
     const draw = () => { if (count) { count.textContent = BL.game.formatLarge(state().bananas); document.getElementById("keep-bananas").setAttribute("aria-label", `${state().bananas} bananas`); } };
     return {
       show() { const box = document.getElementById("keep-bananas"); count = document.getElementById("keep-bananas-count"); draw(); },
       get bananas() { return state().bananas; },
       // Where the stash is on the screen, for a banana flying in; and a bump as one lands.
-      target() { const box = count && count.parentNode.getBoundingClientRect(); return box ? { x: box.left + 14, y: box.top + box.height / 2 } : { x: innerWidth / 2, y: innerHeight - 30 }; },
+      target() { const box = count && count.parentNode.getBoundingClientRect(); return box ? { x: box.left + box.width / 2, y: box.top + box.height / 2 } : { x: innerWidth / 2, y: innerHeight - 30 }; },
       pulse() { const box = count && count.parentNode; if (box) { box.removeAttribute("data-pulse"); void box.offsetWidth; box.dataset.pulse = "1"; } },
       owns: (id) => state().owned.includes(id),
       get owned() { return state().owned; },
@@ -852,22 +861,37 @@
       forget(id) {
         const st = state(), i = st.owned.indexOf(id);
         if (i < 0) return false;
-        st.owned.splice(i, 1); delete st.levels[id];
+        st.owned.splice(i, 1); delete st.levels[id]; delete st.use[id];
         if (st.active === id) st.active = st.owned.length ? st.owned[st.owned.length - 1] : null;
         store(); draw(); return true;
       },
-      /** The level of `id`: 1 for one not raised, unowned or the dagger. */
-      level: (id) => ALL_LEVELS && LEVELLED.includes(id) ? LEVEL_MAX : state().levels[id] || 1,
-      // Raises owned `id` a level for `price`: true when it did.
+      /** The highest level of `id` owned: 1 for one not raised, unowned or the dagger. */
+      top: topOf,
+      /** The level `id` is used at: its top, or a lower one chosen at the merchant's (`setLevel`). */
+      level: levelOf,
+      // Uses owned `id` at level `n`, up to its top (at its top it follows any later upgrade): true when it changed.
+      setLevel(id, n) {
+        const st = state(), top = topOf(id);
+        if (!LEVELLED.includes(id) || !st.owned.includes(id) || !Number.isInteger(n) || n < 1 || n > top || n === levelOf(id)) return false;
+        if (n === top) delete st.use[id]; else st.use[id] = n;
+        store(); return true;
+      },
+      // Raises owned `id` a level for `price`, from its top, and uses it at the new one: true when it did.
       upgrade(id, price) {
         const st = state(), at = st.levels[id] || 1;
         if (ALL_LEVELS || !LEVELLED.includes(id) || !st.owned.includes(id) || at >= LEVEL_MAX || st.bananas < price) return false;
-        st.bananas -= price; st.levels[id] = at + 1; store(); draw(); return true;
+        st.bananas -= price; st.levels[id] = at + 1; delete st.use[id]; store(); draw(); return true;
       },
       // Takes owned `id` down a level (the test flag's Downgrade), its price not given back: true when it did.
-      downgrade(id) { const st = state(), at = st.levels[id] || 1; if (ALL_LEVELS || at <= 1) return false; if (at === 2) delete st.levels[id]; else st.levels[id] = at - 1; store(); return true; },
-      // Every weapon back to level 1 (the quest log's reset, on a debug page): true when one was raised.
-      resetLevels() { const st = state(), had = Object.keys(st.levels).length > 0; st.levels = {}; store(); return had; },
+      downgrade(id) {
+        const st = state(), at = st.levels[id] || 1;
+        if (ALL_LEVELS || at <= 1) return false;
+        if (at === 2) delete st.levels[id]; else st.levels[id] = at - 1;
+        if (st.use[id] && st.use[id] >= at - 1) delete st.use[id];
+        store(); return true;
+      },
+      // Every weapon back to level 1 (the quest log's reset, on a debug page): true when one was raised or used lower.
+      resetLevels() { const st = state(), had = Object.keys(st.levels).length > 0 || Object.keys(st.use).length > 0; st.levels = {}; st.use = {}; store(); return had; },
       // Buys `id` for `price`: true when it did.
       buy(id, price) { const st = state(); if (!WARE_IDS.includes(id) || st.owned.includes(id) || st.bananas < price) return false; st.bananas -= price; st.owned.push(id); st.active = id; store(); draw(); return true; }
     };
@@ -922,7 +946,11 @@
   /** The damage a blow of ware `w` does at the level it stands at. */
   const damageOf = (w) => w.damage * (w.levels ? LEVELS.power[purse.level(w.id) - 1] : 1);
   /** What raising ware `w` a level costs, or 0 when it has none or is at its top. */
-  const upgradePrice = (w) => { const at = purse.level(w.id); return w.levels && at < LEVELS.max ? w.price * LEVELS.cost[at - 1] : 0; };
+  const upgradePrice = (w) => { const at = purse.top(w.id); return w.levels && at < LEVELS.max ? w.price * LEVELS.cost[at - 1] : 0; };
+  /** Level `n` of ware `w`: its name, what it cost (the ware itself at level 1, its upgrade after) and its damage. */
+  const levelName = (w, n) => n > 1 ? w.upgrades[n - 2][0] : "Level 1";
+  const levelPrice = (w, n) => n > 1 ? w.price * LEVELS.cost[n - 2] : w.price;
+  const levelDamage = (w, n) => w.damage * LEVELS.power[n - 1];
   // A weapon's level as pips, filled to it (`.keep-level`, the dagger none): made once a holder and set by `data-level`.
   const levelPips = (holder, w) => {
     let el = holder.querySelector(".keep-level");
@@ -1148,7 +1176,7 @@
       draw();
     };
     return {
-      WARES, LEVELS, picture, skin: () => purse.active ? skinOf(purse.active) : null, choose, damageText, damageOf, upgradePrice, rearm, redraw: () => draw(), wheel, key,
+      WARES, LEVELS, picture, skin: () => purse.active ? skinOf(purse.active) : null, choose, damageText, damageOf, upgradePrice, levelName, levelPrice, levelDamage, rearm, redraw: () => draw(), wheel, key,
       ware: (id) => WARES.find((w) => w.id === id) || null,
       get active() { return purse.active; },
       // `audio` gives the scene's sound for the clicks.
@@ -1226,14 +1254,27 @@
       done: "Aras-Son gave you a dagger. Earn bananas from the small island's skeletons to buy better arms."
     }
   }, {
-    // Red Sails: Leif, the fleet's captain on the shipyard's quay, teaches the small longship and sends the visitor out
-    // to sea after a raider under red sails; sinking her earns the great longships (`greatShips`).
+    // Cannon Basics: Leif's first, which Red Sails waits on. The visitor rows out to Outpost Island and climbs one of
+    // its towers to the cannon at the top, and three raiders come for that tower one at a time (`TOWER_QUEST`); the
+    // other towers hold their fire on them. Sink all three to finish; the tower brought down, it fails and Leif hauls
+    // the visitor back to the shipyard to try again.
+    id: "cannon", title: "Cannon Basics", giver: "Leif", steps: ["tower", "battle", "report", "done"],
+    text: {
+      tower: "Take the rowboat moored along the shipyard's quay and row to Outpost Island, north of Cold Storj, with Leif's longships as your escort. Climb one of its eight towers to the cannon at the top.",
+      battle: "Raiders are coming for your tower, one at a time. Man the cannon (press Space Bar beside it), aim with the mouse and click to fire. Sink all three before they bring the tower down.",
+      report: "All three raiders are sunk. Go back to Leif at the shipyard.",
+      done: "Leif trusts you with a cannon. He has more work for you at sea."
+    }
+  }, {
+    // Red Sails: Leif's second, once Cannon Basics is done. Leif, the fleet's captain on the shipyard's quay, teaches the small longship and sends the visitor out
+    // to sea after three raiders under red sails. The great longships and the galleon are not to be had yet
+    // (`greatShips`): only the small longships.
     id: "sails", title: "Red Sails", giver: "Leif", steps: ["helm", "hunt", "report", "done"],
     text: {
       helm: "Take the small longship's wheel. She lies along the north side of the pier behind Leif at the shipyard: walk out along the pier to the wheel on her deck and press Space (HELM).",
-      hunt: "Sail west, out to sea, and find the ship with red sails (her name stands in the sky over her). W and S sail, A and D steer. Point the mouse at the water beside her and click or press Space to fire that side's guns. 1 full sail, 2 quick repair, 3 smoke screen, 4 ram. Sink her.",
-      report: "The red-sailed ship is sunk. Sail back to the shipyard and tell Leif.",
-      done: "Leif has given you the great longships: any large viking ship's wheel is yours to take."
+      hunt: "Sail west, out to sea, and find the three ships with red sails (RED SAILS stands in the sky over each). W and S sail, A and D steer. Point the mouse at the water beside her and click or press Space to fire that side's guns. 1 full sail, 2 quick repair, 3 smoke screen, 4 ram. Sink all three.",
+      report: "All three red-sailed ships are sunk. Sail back to the shipyard and tell Leif.",
+      done: "Leif trusts you at a helm: any small longship's wheel is yours to take. The great longships and the galleon are not yours yet."
     }
   }];
   const QUEST_BY_ID = new Map(QUESTS.map((q) => [q.id, q]));
@@ -1263,6 +1304,12 @@
       advance(id, to) {
         const q = QUEST_BY_ID.get(id), at = state()[id];
         if (!q || !at || q.steps.indexOf(to) !== q.steps.indexOf(at) + 1) return false;
+        state()[id] = to; changed(); return true;
+      },
+      /** Puts quest `id` back to an earlier step (a failed or abandoned try); true when it did. */
+      set(id, to) {
+        const q = QUEST_BY_ID.get(id), at = state()[id];
+        if (!q || !at || q.steps.indexOf(to) < 0 || q.steps.indexOf(to) >= q.steps.indexOf(at)) return false;
         state()[id] = to; changed(); return true;
       },
       /** Every quest back to not yet accepted (the quest log's reset, on a debug page). */
@@ -1331,6 +1378,8 @@
     let opener = null, dialog = null, list = null, close = null, hold = null, unsubscribe = null, reset = null, note = null;
     const DEBUG = new URLSearchParams(location.search).get("debug") === "1";
     const resetAll = () => {
+      if (scene) scene.cannon = null;
+      world.keepRedSunk = [];
       quests.reset();
       let took = false;
       for (const w of WARES) if (w.quest && purse.forget(w.id)) took = true;
@@ -1468,26 +1517,9 @@
   // The skeletons' posts round the islet's top, four of them, all white (the islet's green one keeps the keep's
   // dungeon now, scene-keep-halls.js, with its ogre).
   const SKEL_POSTS = [SKEL.post, { x: -3.5, z: ISLET.z - 1.5, yaw: Math.PI }];
-  // The forest's skeletons, out on the castle island's hills outside the walls: each keeps its own post and comes
-  // after the visitor once they come within `aggro` of it, until they are `leash` from its post or go in at the
-  // castle's walls, and one destroyed is back a minute after.
+  // How a skeleton of the castle island's forest chases (`chase: "forest"`): after the visitor once they come within
+  // `aggro` of it, until they are `leash` from its post or go in at the castle's walls. The forest keeps none now.
   const FOREST = { n: 20, aggro: 14, leash: 42, gap: 9, respawn: 60 };
-  const FOREST_SKEL = { ...SKEL, tip: "A skeleton of the forest · it comes for whoever comes near", chase: "forest", lazy: true, respawn: FOREST.respawn };
-  const FOREST_GREEN = { ...GREEN_SKEL, chase: "forest", lazy: true, respawn: FOREST.respawn };
-  // Every which of the forest's posts holds a green skeleton.
-  const GREEN_EVERY = 4;
-  const forestPosts = () => {
-    const out = [], rand = BL.math.mulberry32(9137), R = L.TERRAIN[0], pines = KM.forest();
-    for (let tries = 0; out.length < FOREST.n && tries < 4000; tries++) {
-      const x = R.x0 + 4 + rand() * (R.x1 - R.x0 - 8), z = R.z0 + 4 + rand() * (R.z1 - R.z0 - 8);
-      if (L.coastDist(x, z) < 12 || L.playDist(x, z) < 6 || L.inWard(x, z, 4) || L.moatDist(x, z) < 4 || L.westAt(x, z, 6) || L.backAt(x, z, 6) || L.waterAt(x, z, false, false) !== null) continue;
-      const y = L.terrainTop(x, z);
-      if (y < L.SEA + 1 || !L.walkClear(x, z, x + 0.3, z, y, SKEL.r, false, false) || !L.walkClear(x, z, x, z + 0.3, y, SKEL.r, false, false)) continue;
-      if (L.turretAt(x, z, 4) || out.some((q) => Math.hypot(q.x - x, q.z - z) < FOREST.gap) || pines.some((t) => Math.hypot(t[0] - x, t[2] - z) < 1.6)) continue;
-      out.push({ x, z, yaw: rand() * Math.PI * 2 });
-    }
-    return out;
-  };
   // The land's enemies and what they leave (`foes`): one world of them a scene, made with what that scene answers
   // (`env`: its root, input targets, particles, sound, renderer, crew and `leaving`; `walk(ax, az, bx, bz, feet, r,
   // tall)` and `ground(x, z, feet)` over its own floor, `step`; `chase(k, p, feet)`, whether the enemy `k` comes after
@@ -2095,6 +2127,14 @@
   // The frost blade's: the same in white, half the size.
   const STORM_DUST = [["#ffffff", 0.03], ["#f2f6ff", 0.026], ["#e6eeff", 0.03]].map(([color, w]) => BL.models.particleGeometry(color, w, 1));
   const stormAura = auraOf({ r: 1.5, disc: [0, 1], beam: KM.whiteBeam, beamWide: 0.28, sky: 40, beams: 8, curtain: () => KM.auroraBeam(3), tall: [1.75, 3.5], wide: [0.3, 0.55], dust: 45, bits: STORM_DUST, lift: 0.6, grow: 0.35, fade: 0.6 });
+  // The knights met: the frost blade's own under each of them, at a knight's size and with no dust (`knightAura`).
+  const KNIGHT_AURA = { r: 3.4, disc: [0, 1], beam: KM.whiteBeam, beamWide: 0.6, sky: 40, beams: 8, curtain: () => KM.auroraBeam(3), tall: [4, 7.5], wide: [0.6, 1.1], dust: 0, bits: STORM_DUST, lift: 0.6, grow: 0.35, fade: 0.9 };
+  const knightAuras = [];
+  const knightAura = (i, x, z, on) => {
+    if (!knightAuras[i]) knightAuras[i] = { aura: auraOf(KNIGHT_AURA), at: { root: { position: { x, y: 0, z } }, baseY: 0 } };
+    const k = knightAuras[i];
+    if (on && !k.aura.on) k.aura.start(k.at); else if (!on && k.aura.on) k.aura.stop();
+  };
   const rain = { on: false, t: 0, next: 0, cave: null };
   const rainStart = (cave) => {
     rain.on = true; rain.t = 0; rain.next = 0; rain.cave = cave;
@@ -2133,6 +2173,7 @@
   };
   const rainUpdate = (dt) => {
     rainAura.update(dt); stormAura.update(dt);
+    for (let i = 0; i < knightAuras.length; i++) knightAuras[i].aura.update(dt);
     if (!rain.on) return;
     const cave = rain.cave;
     rain.t += dt;
@@ -3363,7 +3404,7 @@
     k.head.rotation.y += (look - k.head.rotation.y) * Math.min(1, dt * 5); k.head.rotation.x = Math.sin(t * 0.9) * 0.03 - run * 0.15;
   };
   buildDrops();
-  return { add, update, swung, cast, spell, darken, undarken, drawFlights, get strikes() { return strikes; }, get bolts() { return st.bolts; }, get rain() { return rain; },
+  return { add, update, swung, cast, spell, darken, undarken, drawFlights, knightAura, get strikes() { return strikes; }, get bolts() { return st.bolts; }, get rain() { return rain; },
     // The ground shaken from outside (the volcano), `amp` of a slam's; and a blow from something that is no enemy
     // (`k`: `{ S: { blow, name } }`), with everything a blow does.
     rumble: (amp) => { st.quake = SLAM.settle; st.quakeAmp = amp; }, strike: (k, cave) => foeHit(k, cave), blast, homeAll: () => { for (let i = 0; i < st.foes.length; i++) if (st.foes[i].dead < 0) foeHome(st.foes[i]); }, get foes() { return st.foes; }, get drops() { return st.drops; }, get swooshes() { return st.swooshes; }, get smoke() { return st.smoke; }, get beam() { return st.beam; }, get pulses() { return st.pulses; }, shake, unshake, get quake() { return st.quake; }, get flights() { return st.flights; } };
@@ -3429,6 +3470,10 @@
     // in the tower's own voxels.
     const GAL = (Math.round(L.GALLERY.height / UK) + Math.round(L.GALLERY.ceil / UK)) * UK;
     for (const [x, z, t] of C.towers) out.push({ x, z, y: Math.round(C.towerWalk[t] / UK) * UK + GAL + 62 * UK - 0.35, k: 1.2, keep: false });
+    // Outpost Island's towers, on their docks, and its keep.
+    for (const t of L.OUTPOST.towers) out.push({ x: t.x, z: t.z, y: t.ground + Math.round(C.towerWalk[t.tall] / UK) * UK + GAL + 62 * UK - 0.35, k: 1.2, keep: false });
+    out.push({ x: L.OUTPOST.x, z: L.OUTPOST.z, y: K.roof + K.arcade + K.spire - 0.9, k: 2.2, keep: true });
+    for (const a of K.bartizans) out.push({ x: L.OUTPOST.x + Math.cos(a) * K.bartizan, z: L.OUTPOST.z + Math.sin(a) * K.bartizan, y: K.bartizanTop - 0.45, k: 0.9, keep: true });
     for (const sx of [-1, 1]) out.push({ x: sx * G.turretX, z: G.turretZ, y: G.turretHeight + 84 * U, k: 1, keep: false });
     out.push({ x: K.x, z: K.z, y: K.roof + K.arcade + K.spire - 0.9, k: 2.2, keep: true });
     for (const a of K.bartizans) out.push({ x: K.x + Math.cos(a) * K.bartizan, z: K.z + Math.sin(a) * K.bartizan, y: K.bartizanTop - 0.45, k: 0.9, keep: true });
@@ -3740,12 +3785,16 @@
   let hullEl = null, hullShown = -2;
   const hullShow = (s) => {
     // A rowboat's three, or a ship's own number, for whoever sits in the one or at the helm of the other.
-    const cave = people && people.player, f = s.ferry, ship = s.sail || s.repair.w, of = ship ? ship.at.hull : HULL.hits, n = ship ? ship.sail.hp : cave && f.seat.sitter === cave ? HULL.hits - f.hits : -1, key = n < 0 ? -1 : of * 100 + n;
+    // Or, while Cannon Basics' raiders come, the tower's.
+    const cave = people && people.player, f = s.ferry, ship = s.sail || s.repair.w, tower = !!s.cannon;
+    const of = tower ? TOWER_QUEST.hp : ship ? ship.at.hull : HULL.hits, n = tower ? s.cannon.hp : ship ? ship.sail.hp : cave && f.seat.sitter === cave ? HULL.hits - f.hits : -1, key = n < 0 ? -1 : (tower ? 1e4 : 0) + of * 100 + n;
     if (key === hullShown) return;
     hullShown = key;
     if (!hullEl) hullEl = document.getElementById("keep-boat");
     hullEl.hidden = n < 0;
     if (n < 0) return;
+    hullEl.setAttribute("aria-label", tower ? "Tower" : "Boat hull");
+    hullEl.querySelector("svg").hidden = tower;
     hullEl.setAttribute("aria-valuemax", of); hullEl.setAttribute("aria-valuenow", n);
     let pips = hullEl.querySelectorAll("i");
     for (let i = pips.length; i < of; i++) hullEl.appendChild(document.createElement("i"));
@@ -3833,6 +3882,39 @@
       }
       c.pivot.rotation.y = t.yaw + c.yaw; c.barrel.rotation.x = -c.elev; c.barrel.position.z = 0.25 - c.kick * c.kick * 1.6;
     }
+  };
+  // Outpost Island's towers' cannons (keep-layout.js `OUTPOST.towers`, their galleries `defend`), friendly: unmanned, each takes the nearest raider within
+  // the towers' range for its mark, leads it by its way through the water as the towers lead a boat, and fires the
+  // Oogas' own ball on it (never hostile, so it harms nobody of ours), holding fire while that raider is within
+  // `clear` of a boat or ship of ours.
+  const DEFEND = { clear: 15 };
+  const defendUpdate = (s, c, dt) => {
+    const t = c.t, C = KM.CANNON, f = prey(s);
+    let mark = null, best = TOWER.range;
+    for (let i = 0; i < s.raiders.length; i++) {
+      const r = s.raiders[i], d = Math.hypot(r.at.x - c.px, r.at.z - c.pz);
+      if (r.raid.sink < 0 && r.at.quest !== "cannon" && d < best && d > TOWER.near) { best = d; mark = r; }
+    }
+    if (!mark || (f.on && Math.hypot(f.x - mark.at.x, f.z - mark.at.z) < DEFEND.clear)) return;
+    const g = mark.at, v = mark.raid.v, gy = t.top + C.y, aimY = L.SEA + 1.2, lift0 = towerLift(best, aimY - gy), time = Number.isNaN(lift0) ? 0 : best / (TOWER.speed * Math.cos(lift0));
+    const tx = g.x + Math.sin(g.yaw) * v * time, tz = g.z + Math.cos(g.yaw) * v * time, flat = Math.hypot(tx - c.px, tz - c.pz), lift = towerLift(flat, aimY - gy);
+    let want = Math.atan2(tx - c.px, tz - c.pz) - t.yaw;
+    want = Math.atan2(Math.sin(want), Math.cos(want));
+    if (Math.abs(want) > L.TURRET.arc || Number.isNaN(lift)) return;
+    c.yaw += clamp(want - c.yaw, -TOWER.turn * dt, TOWER.turn * dt); c.elev += clamp(lift - c.elev, -TOWER.turn * dt, TOWER.turn * dt);
+    if (c.wait > 0 || Math.abs(want - c.yaw) > 0.04 || Math.abs(lift - c.elev) > 0.03 || leaving) return;
+    const b = s.balls.find((q) => !q.on && q.flash <= 0);
+    if (!b) return;
+    // Give or take a little, as the towers' aim is.
+    const off = TOWER.spread * flat / 100, keepYaw = c.yaw, keepElev = c.elev, a = Math.random() * Math.PI * 2, m = Math.sqrt(Math.random()) * off;
+    c.yaw += Math.sin(a) * m / flat; c.elev = towerLift(Math.max(4, flat + Math.cos(a) * m), aimY - gy) || c.elev;
+    b.on = true; b.t = 0; b.trail = 0; b.from = t; b.hostile = false;
+    muzzle(c, b, TOWER.speed);
+    c.yaw = keepYaw; c.elev = keepElev;
+    b.node.visible = true;
+    c.wait = TOWER.wait[0] + Math.random() * (TOWER.wait[1] - TOWER.wait[0]); c.kick = GUN.kick;
+    audio.cannon(b.x, b.y, b.z);
+    for (let k = 0; k < 8; k++) fx.spawnParticle(FIRE_BITS[k % FIRE_BITS.length], b.x, b.y, b.z, b.vx * 0.12 + (Math.random() - 0.5) * 3, b.vy * 0.12 + (Math.random() - 0.5) * 3, b.vz * 0.12 + (Math.random() - 0.5) * 3, 0.25 + Math.random() * 0.2, 6, 2, -100);
   };
   // Whether a tower's ball at (x, y, z) has come down on the rowboat `f`: over its hull and no higher than its gunwale.
   const onBoat = (f, x, y, z) => {
@@ -4039,6 +4121,7 @@
           c.yaw += clamp((want - c.yaw) * k, -GUN.turn * dt, GUN.turn * dt); c.elev += clamp((lift - c.elev) * k, -GUN.lift * dt, GUN.lift * dt);
         }
       } else if (s.manned === c) { s.manned = null; c.seat.lockMovement = false; cannonLeave().hidden = true; }
+      if (c.t.defend && !c.seat.sitter && s.manned !== c) defendUpdate(s, c, dt);
       // In the gunner's own eyes only the aim's dots show: no cannon, no turret under it.
       const eyes = s.manned === c && pilot.view === "first-person";
       c.pivot.visible = !eyes;
@@ -4080,6 +4163,8 @@
         // A visitor's ball on a red tower.
         const struck = b.hostile ? null : L.turretAt(b.x, b.z, 0.6);
         if (struck && struck.red) towerHit(s, struck, b);
+        // A raider's ball on the tower held in Cannon Basics.
+        if (b.hostile && s.cannon) { const g = s.cannon.g; if (Math.hypot(b.x - g.x, b.z - g.z) < g.r + 1.5 && b.y > g.ground - 1 && b.y < g.floor + L.GALLERY.height + 4) cannonHit(s, b); }
         // A tower's or a raider's ball on a ship of the fleet; a visitor's on a raider, and among the enemy, who are
         // hurt and flung into the air by it.
         const on = shipAt(s, b.x, b.z);
@@ -4101,8 +4186,16 @@
   const quayBerth = () => ({ x: FERRY.quay.x, z: FERRY.quay.z, yaw: Math.atan2(FERRY.islet.x - FERRY.quay.x, FERRY.islet.z - FERRY.quay.z) });
   // And Cold Storj's two, alongside each quay's face, bow along the channel to the east (`swingBoat`'s `zFace`).
   const storjBerth = (i) => () => { const C = i ? FERRY.storjS : FERRY.storjN; return { x: C.x, z: C.z, yaw: Math.PI / 2 }; };
+  // And Shards', along its quay's seaward face north of the pier, bow to the north as CBDC's moors.
+  const shardsBerth = () => ({ x: FERRY.shards.x, z: FERRY.shards.z, yaw: 0 });
+  // And Outpost Island's, along its east pier's north side, bow out along the pier.
+  const outpostBerth = () => ({ x: FERRY.outpost.x, z: FERRY.outpost.z, yaw: Math.PI / 2 });
+  // And the Armory & Forge's, along its quay's seaward face, bow to the north.
+  const armoryBerth = () => ({ x: FERRY.armory.x, z: FERRY.armory.z, yaw: 0 });
   // Each boat's own dock, in the order `s.ferries` keeps them: where it waits to begin with, and goes back to sunk.
-  const BOAT_HOMES = [berth, quayBerth, storjBerth(0), storjBerth(1)];
+  const shipyardBerth = () => ({ x: FERRY.shipyard.x, z: FERRY.shipyard.z, yaw: 0 });
+  const volcanoBerth = () => ({ x: FERRY.volcano.x, z: FERRY.volcano.z, yaw: 0 });
+  const BOAT_HOMES = [berth, quayBerth, storjBerth(0), storjBerth(1), shardsBerth, outpostBerth, armoryBerth, shipyardBerth, volcanoBerth];
   const keptBoats = () => scene.ferries.map((f) => ({ x: f.x, z: f.z, yaw: f.yaw }));
   // Both boats back where they wait to begin with, one moored at each dock (the visitor struck down).
   const resetBoats = (s) => {
@@ -4172,6 +4265,9 @@
       if (!w) { if (hud) hud.toast(LINES.away); return true; }
       const g = w.at, sn = Math.sin(g.yaw), cs = Math.cos(g.yaw), a = g.helm.a + KM.HELM.z * w.sail.hs, c = 1.1 * w.sail.hs;
       f.seat.walkAt.x = g.x + sn * a + cs * c; f.seat.walkAt.z = g.z + cs * a - sn * c; f.seat.floor = L.SEA + g.helm.y; f.seat.lockMovement = false;
+      // An escort climbed aboard leaves its duty there and then, as one whose helm is taken does, so it is not sent
+      // home from under its new crew when the rowing stops (`escortSnap`).
+      if (w.at.role === "escort") w.sail.away = true;
       hud.toast("You climb aboard. Take her wheel to sail her.");
       return false;
     }
@@ -4185,12 +4281,6 @@
     f.state = "paddling"; f.t = 0; f.v = 0; f.w = 0; f.stroke = 0; f.swing = null;
     f.seat.lockMovement = true;
     if (scene.first) { scene.first = false; scene.lane = true; markVisited(); if (!COARSE) showKeys(); }
-    // A fresh crossing: last time's arrows are gone from the boat, and the castle will loose again.
-    for (const a of scene.arrows) {
-      if (a.node.parent !== root) { removeChild(a.node.parent, a.node); addChild(root, a.node); }
-      a.state = "idle"; a.node.visible = false; a.light.want = 0;
-    }
-    scene.volley = false;
     hud.hint(COARSE ? LINES.paddleTouch : LINES.paddle, 5000);
     return true;
   };
@@ -4278,8 +4368,8 @@
       let spare = null;
       for (let i = 0; i < F.length; i++) {
         const f = F[i];
-        // Nor one left at the volcano island's dock or Cold Storj's, each its visitor's only way back.
-        if (f.state !== "moored" || f.seat.sitter || Math.hypot(p.x - f.x, p.z - f.z) < UNSEEN || (atDock(f, other) && there < 2) || atDock(f, FERRY.volcano) || atDock(f, FERRY.storjN) || atDock(f, FERRY.storjS)) continue;
+        // Nor one left at the volcano island's dock, Shards', Outpost Island's, the Armory & Forge's or Cold Storj's, each its visitor's only way back.
+        if (f.state !== "moored" || f.seat.sitter || Math.hypot(p.x - f.x, p.z - f.z) < UNSEEN || (atDock(f, other) && there < 2) || atDock(f, FERRY.volcano) || atDock(f, FERRY.shards) || atDock(f, FERRY.outpost) || atDock(f, FERRY.armory) || atDock(f, FERRY.shipyard) || atDock(f, FERRY.storjN) || atDock(f, FERRY.storjS)) continue;
         if (!spare || atDock(f, other)) spare = f;
       }
       if (!spare) continue;
@@ -4300,10 +4390,17 @@
       for (const [here, there] of [[FERRY.quay, FERRY.islet], [FERRY.islet, FERRY.quay]]) {
         if (Math.hypot(f.x - here.x, f.z - here.z) < SWING.near) f.swing = { yaw: there.z > here.z ? 0 : Math.PI, x: here.x, z: here.z, out: SWING.out, phase: 0 };
       }
-      // And at the volcano island's dock, along its quay's seaward face: out to the west, and from the pier's far
-      // side out past the pier's end first.
-      const V = FERRY.volcano, P = L.VOLCANO.dock.pier;
-      if (Math.hypot(f.x - V.x, f.z - V.z) < SWING.near + 4) f.swing = { yaw: 0, x: V.x, z: V.z, out: f.z < P.z1 + 1.3 ? P.x0 - 3.2 - V.x : -SWING.out, phase: 0 };
+      // And at the volcano island's dock or Shards', along its quay's seaward face: out to the west, and from the
+      // pier's far side out past the pier's end first.
+      for (const [V, P] of [[FERRY.volcano, L.VOLCANO.dock.pier], [FERRY.shards, L.SHARDS.dock.pier]]) {
+        if (Math.hypot(f.x - V.x, f.z - V.z) < SWING.near + 4) f.swing = { yaw: 0, x: V.x, z: V.z, out: f.z < P.z1 + 1.3 ? P.x0 - 3.2 - V.x : -SWING.out, phase: 0 };
+      }
+      // And at Outpost Island's, along its east pier's north side: out to the north, along, and in.
+      { const V = FERRY.outpost; if (Math.hypot(f.x - V.x, f.z - V.z) < SWING.near + 4) f.swing = { yaw: Math.PI / 2, x: V.x, z: V.z, zFace: true, out: SWING.out, phase: 0 }; }
+      // And at the Armory & Forge's, along its quay's seaward face: out to the east, along, and in.
+      { const V = FERRY.armory; if (Math.hypot(f.x - V.x, f.z - V.z) < SWING.near + 4) f.swing = { yaw: 0, x: V.x, z: V.z, out: SWING.out, phase: 0 }; }
+      // And at the shipyard's, along its quay's seaward face: out to the west, along, and in.
+      { const V = FERRY.shipyard; if (Math.hypot(f.x - V.x, f.z - V.z) < SWING.near + 4) f.swing = { yaw: 0, x: V.x, z: V.z, out: -SWING.out, phase: 0 }; }
       // And at either of Cold Storj's, along its quay's face to the channel east of its pier: out into the channel,
       // past the pier's end first from its far side.
       L.STORJ.docks.forEach((d, i) => {
@@ -4341,7 +4438,7 @@
       if (active) audio.wake(pace, f.x, f.y, f.z);
     } else { row(f, 0, 0); if (active) audio.wake(0, f.x, f.y, f.z); }
     // The rowing music while the visitor sits in the boat, faded out as they get out or leave.
-    if (active) audio.rowing((f.state === "paddling" || !!s.sail) && !leaving);
+    if (active) audio.rowing((f.state === "paddling" || !!s.sail) && !leaving, s.lane);
     // Holed, it rides lower for each hit and burns; sinking, it tips and goes under.
     const under = f.sink / HULL.sink;
     poseBoat(f, f.x, f.y - f.hits * HULL.low - under * under * HULL.deep, f.z, f.yaw, elapsed);
@@ -4371,7 +4468,7 @@
     ],
     shipwright: [
       { text: "Hm? Oh, a visitor. I'm Bjorn. Every keel in this yard has had my mallet on it." },
-      { text: "All three are fit to sail, though the great longship is Leif's to give: see him on the quay. Take the small longship's wheel from the pier; the galleon is the pride of the yard: up the ramp on the quay and across the brow to the wheel on her quarterdeck. Look out over a side to bring her guns to bear." },
+      { text: "The small longship by the pier is yours to try: take her wheel and look out over a side to bring her guns to bear. The great longship and the galleon are the pride of the yard, and nobody sails them yet." },
       { text: "The one on the slip is not for sale, and neither is anything else just yet. When I've timber to spare, we'll talk about a boat of your own." }
     ],
     // The Armory & Forge's two, the same: nothing to sell yet.
@@ -4412,33 +4509,60 @@
     reward: [{ text: "Aras-Son keeps his stall on the dock at the Armory & Forge, out through the courtyard's east gate. Turn the knights face to face if the drawbridge is still up. Tell him Eryk sent you." }],
     done: [{ text: "That dagger suits you. The skeletons on the small island pay in bananas, and Aras-Son sells better blades for them." }]
   };
-  // Leif's quest, Red Sails: talked to on the quay by where it stands, as Eryk is.
-  const LEIF = {
+  // Leif's first quest, Cannon Basics: talked to on the quay by where it stands, as Eryk is.
+  const LEIF_CANNON = {
     ask: [
       { text: "You've the look of someone who wants a deck under their feet. I'm Leif. These ships are mine to give or to keep." },
+      { text: "But nobody sails with me who can't work a gun. Take the rowboat moored along this quay, just south of the pier, and row out to Outpost Island, north of Cold Storj." },
+      { text: "You won't go alone: two of my longships will sail as your escort, one on each side of you, and fire on any raider that comes for you on the way." },
+      { text: "Climb one of its towers to the cannon at the top. Pressing Space Bar beside it mans it, the mouse aims it and a click fires. Raiders will come for that tower, one at a time." },
+      { text: "Sink three of them before they bring the tower down, and come back and tell me. Will you go?", choices: [{ label: "Accept", value: "accept", main: true }, { label: "Decline", value: "decline" }] }
+    ],
+    tower: [{ text: "Outpost Island lies out to the north of Cold Storj. Row there, climb any of its eight towers to the cannon at the top, and the raiders will come." }],
+    battle: [{ text: "What are you doing here? Your tower is under attack!" }],
+    report: [
+      { text: "Three raiders on the bottom! I heard the guns from here. You can work a cannon." },
+      { text: "Come and talk to me again. I've a ship for you to try." }
+    ],
+    done: [{ text: "You can work a gun. Now let's see you sail." }]
+  };
+  // Leif's second, Red Sails, once Cannon Basics is done.
+  const LEIF = {
+    ask: [
+      { text: "You held that tower. Now let's see what you do with a deck under you." },
       { text: "Start small. The little longship along the north side of this pier is yours to try: walk out to the wheel on her deck and take it. W and S sail her, A and D steer." },
       { text: "Her guns follow your mouse: point at the water off either side and click, and that side fires, one gun after another. Keys 1 to 4 are her full sail, a quick repair, a smoke screen and her ram." },
-      { text: "There's a raider out to sea in the west, under red sails. Sink her, come back and tell me, and the great longships are yours as well. Will you go?", choices: [{ label: "Accept", value: "accept", main: true }, { label: "Decline", value: "decline" }] }
+      { text: "There are three raiders out to sea in the west, under red sails. Sink all three, come back and tell me, and any small longship is yours to sail. Will you go?", choices: [{ label: "Accept", value: "accept", main: true }, { label: "Decline", value: "decline" }] }
     ],
     helm: [{ text: "The small longship lies along the north side of the pier behind me. Walk out to the wheel on her deck and take it: Space, or HELM." }],
     hunt: [
-      { text: "West, out to sea. You'll see RED SAILS written in the sky over her. W and S sail, A and D steer; point the mouse at the water beside her and click to fire that side." },
+      { text: "West, out to sea. You'll see RED SAILS written in the sky over each of the three. W and S sail, A and D steer; point the mouse at the water beside one and click to fire that side." },
       { text: "If she holes you, 2 mends half your hull at once, or leave the wheel and mend at a glowing ring on deck. 1 is full sail, 3 a smoke screen, 4 the ram." }
     ],
     report: [
-      { text: "Sunk! I saw the smoke from here. You can handle a ship." },
-      { text: "The great longships are yours: the one south of this pier, and the guards out in front of the castle. Take any of their wheels." }
+      { text: "All three sunk! I saw the smoke from here. You can handle a ship." },
+      { text: "Any small longship is yours to sail now. The great ones, and the galleon, will have to wait." }
     ],
-    done: [{ text: "Fair winds. The great longships answer to you now, and the galleon always did." }]
+    done: [{ text: "Fair winds. Any small longship answers to you now. The great ones will have to wait." }]
   };
-  // Whether the visitor has earned the great longships (Leif's quest done).
-  const greatShips = () => quests.stage("sails") === "done";
+  // Whether the visitor may sail the great longships and the galleon: not yet, by anyone.
+  const greatShips = () => false;
   // Whether Leif's raider is wanted on the water: from the quest's taking until she is sunk.
   const redWanted = () => { const at = quests.stage("sails"); return at === "helm" || at === "hunt"; };
   const talkLeif = (g) => {
+    // Cannon Basics comes first: until it is done he talks of nothing else.
+    const gun = quests.stage("cannon");
+    if (gun !== "done") {
+      if (gun === "report" && quests.advance("cannon", "done")) { banner("Quest complete", "Cannon Basics"); if (audio) audio.quest(); }
+      pilot.setMenuOpen(true);
+      return talk.show(g.at.name, LEIF_CANNON[gun === "report" ? "report" : gun || "ask"], (answer) => {
+        if (answer === "accept" && quests.accept("cannon")) { questStarted("cannon"); hud.hint("Take a rowboat out to Outpost Island, north of Cold Storj, and climb a tower", 7000); }
+        else if (answer === "decline") fx.sayAt(g.at.x, (g.at.y || 0) + 2.5, g.at.z, "The sea will wait. So will I.", 2.6);
+      }, () => { if (pilot) pilot.setMenuOpen(false); });
+    }
     const at = quests.stage("sails");
-    // Told of the sinking, he gives the great longships at once.
-    if (at === "report" && quests.advance("sails", "done")) { banner("Unlocked", "The great longships"); if (audio) audio.quest(); }
+    // Told of the sinking, the quest is done.
+    if (at === "report" && quests.advance("sails", "done")) { banner("Quest complete", "Red Sails"); if (audio) audio.quest(); }
     pilot.setMenuOpen(true);
     return talk.show(g.at.name, LEIF[at || "ask"], (answer) => {
       if (answer === "accept" && quests.accept("sails")) { questStarted("sails"); hud.hint("Walk out along the pier to the small longship's wheel and take it", 7000); }
@@ -4447,7 +4571,7 @@
   };
   // The mark over a quest giver's head: "!" while they have a quest to give, "?" while they wait to hear it is done,
   // nothing otherwise; bobbing, turned to the view (`questMarks`, after the view is final).
-  const MARKS = { viking: { quest: "crystal", ready: "carrying", lift: 3.2 }, captain: { quest: "sails", ready: "report", lift: 3.2 } };
+  const MARKS = { viking: { quest: () => "crystal", ready: "carrying", lift: 3.2 }, captain: { quest: () => quests.stage("cannon") === "done" ? "sails" : "cannon", ready: "report", lift: 3.2 } };
   const buildMarks = (s) => {
     for (const g of s.guards) {
       const M = MARKS[g.at.kind];
@@ -4459,7 +4583,7 @@
     for (let i = 0; i < s.guards.length; i++) {
       const g = s.guards[i], M = MARKS[g.at.kind];
       if (!M) continue;
-      const at = quests.stage(M.quest), show = at === null ? 0 : at === M.ready ? 1 : -1;
+      const at = quests.stage(M.quest()), show = at === null ? 0 : at === M.ready ? 1 : -1;
       for (let k = 0; k < 2; k++) {
         const n = g.marks[k];
         n.visible = k === show;
@@ -4501,17 +4625,46 @@
   const shop = (() => {
     // What was gained while the menu was open, announced once it closes (scene-keep.js `BL.keepWeaponReveal`).
     let dialog = null, list = null, purse = null, close = null, onClose = null, gained = [];
+    // A levelled weapon's Levels toggle and, while it is open, a line for each level owned (its pips, name, cost and
+    // damage) with a button to use it at that level; rebuilt only when what it shows changes.
+    const levelList = (row, w, owned, at, top) => {
+      const toggle = row.querySelector("button[data-levels]"), ol = row.querySelector(".keep-shop-levels"), open = owned && row.dataset.open === "true";
+      toggle.hidden = !owned;
+      toggle.textContent = open ? "Levels ▾" : "Levels ▸";
+      toggle.setAttribute("aria-expanded", String(open));
+      ol.hidden = !open;
+      const key = open ? `${top}:${at}` : "";
+      if (ol.dataset.key === key) return;
+      ol.dataset.key = key;
+      ol.replaceChildren();
+      if (!open) return;
+      const A = BL.keepArms, i = row.dataset.ware;
+      for (let n = 1; n <= top; n++) {
+        const li = document.createElement("li"), head = document.createElement("span"), name = document.createElement("span"), cost = document.createElement("span"), damage = document.createElement("span"), use = document.createElement("button");
+        li.dataset.current = String(n === at);
+        head.className = "keep-shop-level-head"; name.className = "keep-shop-level-name"; name.textContent = A.levelName(w, n);
+        const pips = document.createElement("span"); pips.className = "keep-level"; pips.dataset.level = String(n);
+        for (let k = 0; k < LEVELS.max; k++) pips.append(document.createElement("i"));
+        head.append(pips, name);
+        cost.className = "keep-shop-level-cost"; cost.textContent = `Cost ${A.levelPrice(w, n)} bananas`;
+        damage.className = "keep-shop-level-damage"; damage.textContent = `Damage ${A.damageText(A.levelDamage(w, n))}`;
+        use.type = "button"; use.dataset.useLevel = `${i}:${n}`; use.disabled = n === at; use.textContent = n === at ? "In use" : "Use";
+        li.append(head, cost, damage, use);
+        ol.append(li);
+      }
+    };
     const draw = () => {
       const have = BL.keepPurse.bananas, A = BL.keepArms;
       purse.textContent = `You have ${BL.game.formatLarge(have)} banana${have === 1 ? "" : "s"}`;
       for (const row of list.children) {
-        const w = WARES[+row.dataset.ware], owned = BL.keepPurse.owns(w.id), button = row.querySelector("button[data-buy]"), at = BL.keepPurse.level(w.id);
+        const w = WARES[+row.dataset.ware], owned = BL.keepPurse.owns(w.id), button = row.querySelector("button[data-buy]"), at = BL.keepPurse.level(w.id), top = BL.keepPurse.top(w.id);
         const price = row.querySelector(".keep-shop-price"), next = row.querySelector(".keep-shop-next"), down = row.querySelector("button[data-down]");
         // Its damage, and the name of the upgrade it has had, if any.
         row.querySelector(".keep-shop-damage").textContent = `Damage ${A.damageText(owned ? A.damageOf(w) : w.damage)}${owned && w.upgrades && at > 1 ? ` · ${w.upgrades[at - 2][0]}` : ""}`;
         levelPips(row.querySelector(".keep-shop-title"), w);
         next.textContent = "";
-        if (down) down.hidden = !(TEST && !ALL_LEVELS && owned && w.levels && at > 1);
+        if (down) down.hidden = !(TEST && !ALL_LEVELS && owned && w.levels && top > 1);
+        if (w.levels) levelList(row, w, owned, at, top);
         if (w.quest) {
           const due = BL.keepQuests.stage(w.quest) === "reward";
           button.disabled = owned || !due;
@@ -4521,13 +4674,13 @@
           button.disabled = have < w.price;
           button.textContent = have < w.price ? `Need ${w.price - have} more` : "Buy";
           price.textContent = `${w.price} bananas`;
-        } else if (at < LEVELS.max) {
+        } else if (top < LEVELS.max) {
           const cost = A.upgradePrice(w);
           button.disabled = have < cost;
           button.textContent = have < cost ? `Need ${cost - have} more` : "Upgrade";
           price.textContent = `${cost} bananas`;
-          const [title, what] = w.upgrades[at - 1];
-          next.textContent = `Next, level ${at + 1}: ${title}. ${what} Damage ${A.damageText(w.damage * LEVELS.power[at])}.`;
+          const [title, what] = w.upgrades[top - 1];
+          next.textContent = `Next, level ${top + 1}: ${title}. ${what} Damage ${A.damageText(w.damage * LEVELS.power[top])}.`;
         } else {
           button.disabled = true; button.textContent = "Max level"; price.textContent = "";
         }
@@ -4535,6 +4688,21 @@
       }
     };
     const buy = (e) => {
+      // A weapon's Levels opened or shut.
+      const fold = e.target.closest("button[data-levels]");
+      if (fold) { const row = fold.closest("li[data-ware]"); row.dataset.open = String(row.dataset.open !== "true"); draw(); fold.blur(); return; }
+      // One of its levels put in use.
+      const pick = e.target.closest("button[data-use-level]");
+      if (pick) {
+        const [i, n] = pick.dataset.useLevel.split(":").map(Number), w = WARES[i];
+        if (BL.keepPurse.setLevel(w.id, n)) {
+          BL.keepArms.rearm(); draw();
+          hud.toast(`${w.name} set to level ${n}: ${BL.keepArms.levelName(w, n)}.`);
+          if (audio) audio.click(false);
+        }
+        pick.blur();
+        return;
+      }
       // The test flag's Downgrade: the weapon back down a level, at once.
       const back = e.target.closest("button[data-down]");
       if (back) {
@@ -4591,8 +4759,13 @@
           row.dataset.ware = String(i); info.className = "keep-shop-info"; title.className = "keep-shop-title"; name.className = "keep-shop-name"; name.textContent = w.name;
           damage.className = "keep-shop-damage"; next.className = "keep-shop-next"; price.className = "keep-shop-price"; button.type = "button"; button.dataset.buy = String(i);
           title.append(name); info.append(title, damage, next);
-          if (w.levels) { const down = document.createElement("button"); down.type = "button"; down.className = "keep-shop-down"; down.dataset.down = String(i); down.textContent = "Downgrade"; down.hidden = true; info.append(down); }
-          row.append(BL.keepArms.picture(w.id, 128), info, price, button); list.append(row);
+          if (w.levels) {
+            const down = document.createElement("button"); down.type = "button"; down.className = "keep-shop-down"; down.dataset.down = String(i); down.textContent = "Downgrade"; down.hidden = true; info.append(down);
+            const fold = document.createElement("button"); fold.type = "button"; fold.className = "keep-shop-down keep-shop-fold"; fold.dataset.levels = String(i); fold.hidden = true; info.append(fold);
+          }
+          row.append(BL.keepArms.picture(w.id, 128), info, price, button);
+          if (w.levels) { const ol = document.createElement("ol"); ol.className = "keep-shop-levels"; ol.hidden = true; row.append(ol); }
+          list.append(row);
         });
         onClose = after;
         // On the test flag the purse is topped back up each time the menu opens.
@@ -4639,16 +4812,26 @@
   // The island being come to, named under the header (`#keep-area`) as the visitor comes within `near` of its shore
   // (an arrival too), and gone from it only past `far`, so a walk along the beach shows it once.
   // The shipyard and the Armory & Forge are named from the head of the stair down to each.
-  const AREAS = { near: 12, far: 18, portal: "Portal Island", castle: "Castle Island", shipyard: "The Shipyard", forge: "The Armory & Forge", volcano: "CBDC", storj: "Cold Storj", arena: "The Arena" };
-  const areaOf = (x, z, was) => {
+  const AREAS = { near: 12, far: 18, portal: "Portal Island", castle: "Castle Island", shipyard: "The Shipyard", forge: "The Armory & Forge", volcano: "CBDC", storj: "Cold Storj", arena: "The Arena", shards: "Shards Island", outpost: "Outpost Island" };
+  // The castle island's waters, the shipyard's and the Armory & Forge's among them: a box round it (`CASTLE_WATERS`,
+  // `hold` more to leave it), all of it Castle Island to anyone afloat; ashore, the shipyard and the Armory & Forge
+  // are named apart, from the head of each one's stair down.
+  const CASTLE_WATERS = { half: 230, z0: -240, z1: 70, hold: 12 };
+  const inCastleWaters = (x, z, pad = 0) => Math.abs(x) < CASTLE_WATERS.half + pad && z > CASTLE_WATERS.z0 - pad && z < CASTLE_WATERS.z1 + pad;
+  const areaOf = (x, z, was, afloat = false) => {
     // East past the Armory & Forge's water, the volcano's island and nothing else.
     if (x > L.VOLCANO.x - L.VOLCANO.r - 60) { const v = L.volcanoDist(x, z); return v > -AREAS.near || (was === "volcano" && v > -AREAS.far) ? "volcano" : null; }
+    // Out north of Cold Storj, Outpost Island and its docks.
+    { const O = L.OUTPOST, v = Math.max(Math.abs(x - O.x), Math.abs(z - O.z)); if (v < O.half + 14 || (was === "outpost" && v < O.half + 20) || L.nearOutpost(x, z) && was === "outpost") return "outpost"; }
     // West past the shipyard's water, Cold Storj (its fjord inside its shore).
     if (x < L.STORJ.east + 60) { const v = L.storjCoast(x, z); return v > -AREAS.near || (was === "storj" && v > -AREAS.far) ? "storj" : null; }
+    // Out between the islet and CBDC, Shards.
+    { const v = L.shardsDist(x, z); if (v > -AREAS.near || (was === "shards" && v > -AREAS.far)) return "shards"; }
     // North behind the castle island, the arena on its rock.
     { const a = L.arenaDist(x, z); if (a > -AREAS.near || (was === "arena" && a > -AREAS.far)) return "arena"; }
-    if (x < L.SHIPYARD.area + (was === "shipyard" ? 6 : 0)) return "shipyard";
-    if (x > L.ARMORY.area - (was === "forge" ? 6 : 0)) return "forge";
+    if (afloat && inCastleWaters(x, z, was === "castle" ? CASTLE_WATERS.hold : 0)) return "castle";
+    if (inCastleWaters(x, z) && x < L.SHIPYARD.area + (was === "shipyard" ? 6 : 0)) return "shipyard";
+    if (inCastleWaters(x, z) && x > L.ARMORY.area - (was === "forge" ? 6 : 0)) return "forge";
     const i = L.isletDist(x, z), c = L.coastDist(x, z);
     if (i > -AREAS.near) return "portal";
     if (c > -AREAS.near) return "castle";
@@ -4659,11 +4842,11 @@
   };
   // Come to by sea, in a boat or at a ship's helm, the island's name stands large across the view instead.
   const areaUpdate = (s, x, z) => {
-    const area = areaOf(x, z, s.area);
+    const cave = people && people.player, afloat = !!s.sail || (!!cave && s.ferries.some((f) => f.seat.sitter === cave));
+    const area = areaOf(x, z, s.area, afloat);
     if (area === s.area) return;
     s.area = world.keepArea = area;
     if (!area) return;
-    const cave = people && people.player, afloat = !!s.sail || (!!cave && s.ferries.some((f) => f.seat.sitter === cave));
     if (afloat) banner("", AREAS[area], true); else areaShow(AREAS[area]);
   };
   // A place's name slid in under the header and faded away (`#keep-area`): an island here, a level of the keep in the
@@ -4734,7 +4917,7 @@
   // metres tall so it is seen from the other islands, one a place (`questSpots`: both knights while they still have to
   // meet), fading out as the visitor comes within `near` of it and back as they leave. The first visit's beam on the
   // rowboat comes first, and none stands while the visitor is at a ship's helm hunting the raider but over her.
-  const QUEST_BEAM = { sky: 90, height: 3, near: 5, ease: 3, max: 3 };
+  const QUEST_BEAM = { sky: 90, height: 3, near: 5, ease: 3, max: 3, draw: 440 };
   const questSpots = (s, out) => {
     let n = 0;
     const put = (x, feet, z, key) => { if (n >= QUEST_BEAM.max) return; const o = out[n++]; o.x = x; o.feet = feet; o.z = z; o.key = key; };
@@ -4746,12 +4929,29 @@
       if (!rules.open("drawbridge")) for (let i = 0; i < STATUES.length; i++) put(STATUES[i].x, 0, STATUES[i].z, i ? "knight1" : "knight0");
       else { const M = L.ARMORY.merchant; put(M.x, L.ARMORY.y, M.z, "merchant"); }
     }
+    const gun = quests.stage("cannon");
+    if (gun === "tower") {
+      // A tutorial: first over the nearest free rowboat, then, once the visitor is afloat or on Outpost Island, over its
+      // tower nearest them.
+      const p = avatar && avatar.root.position, O = L.OUTPOST;
+      const afloat = !!s.sail || s.ferries.some((f) => f.seat.sitter === avatar), there = p && Math.hypot(p.x - O.x, p.z - O.z) < O.half + 70;
+      if (p && !afloat && !there) {
+        let boat = null, bd = Infinity;
+        for (const f of s.ferries) if (f.state === "moored" && !f.seat.sitter) { const d = Math.hypot(p.x - f.x, p.z - f.z); if (d < bd) { bd = d; boat = f; } }
+        if (boat) put(boat.x, L.SEA, boat.z, "boat");
+      } else {
+        let best = null, bd = Infinity;
+        for (const g of L.GALLERIES) if (g.outpost) { const d = p ? Math.hypot(p.x - g.x, p.z - g.z) : 0; if (d < bd) { bd = d; best = g; } }
+        if (best) put(best.x, best.floor, best.z, "outpost");
+      }
+    } else if (gun === "battle") {
+      if (s.cannon && s.cannon.live) for (const w of s.cannon.ships) if (w.at.wave === s.cannon.wave && w.raid.sink < 0 && w.at.z < 4000) put(w.at.x, L.SEA, w.at.z, "wave" + w.at.quest + s.cannon.ships.indexOf(w));
+    } else if (gun === "report") { const g = guard("captain"); if (g) put(g.at.x, g.at.y || 0, g.at.z, "leif"); }
     if (sails === "helm") {
       const w = s.fleet.find((f) => f.at.drive && f.at.scale < 0.2);
       if (w && !w.sail.seat.sitter) put(w.sail.seat.x, L.SEA + w.at.helm.y, w.sail.seat.z, "helm");
     } else if (sails === "hunt") {
-      const red = s.redShip;
-      if (red && red.raid.sink < 0) put(red.at.x, L.SEA, red.at.z, "red");
+      s.redShips.forEach((red, i) => { if (red.raid.sink < 0 && red.at.z < 4000) put(red.at.x, L.SEA, red.at.z, "red" + i); });
     } else if (sails === "report") { const g = guard("captain"); if (g) put(g.at.x, g.at.y || 0, g.at.z, "leif"); }
     return n;
   };
@@ -4763,7 +4963,10 @@
       if (g.key !== o.key) { g.key = o.key; g.at = t; g.k = 1; }
       const near = p && Math.hypot(p.x - o.x, p.z - o.z) < QUEST_BEAM.near && Math.abs(feet - o.feet) < 4;
       g.k = clamp(g.k + (near ? -dt : dt) * QUEST_BEAM.ease, 0, 1);
-      drawBeam(g, o.x, o.feet, o.z, QUEST_BEAM.height, t - g.at, Infinity, t, QUEST_BEAM.sky);
+      // Further off than the view draws, it is drawn nearer along the same line and as much smaller, so it looks the
+      // same and shows from anywhere in the land however far the next step is.
+      const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z, cd = Math.hypot(o.x - cx, o.z - cz), k = cd > QUEST_BEAM.draw ? QUEST_BEAM.draw / cd : 1;
+      drawBeam(g, cx + (o.x - cx) * k, cy + (o.feet - cy) * k, cz + (o.z - cz) * k, QUEST_BEAM.height * k, t - g.at, Infinity, t, QUEST_BEAM.sky * k);
       if (g.k < 0.02) { g.beam.visible = g.aura.visible = g.ring.visible = false; continue; }
       g.beam.smokeOpacity *= g.k; g.aura.smokeOpacity *= g.k; g.ring.smokeOpacity *= g.k;
     }
@@ -4791,60 +4994,6 @@
     const lines = GUARD_LINES[who];
     fx.sayAt(g.at.x, (g.at.y || 0) + 2.5, g.at.z, lines[g.line++ % lines.length], 2.6);
   };
-  // ---------- the fire arrows ----------
-  // Each arrow loosed flies from its turret to its place on the boat's gunwale, the place followed as the boat moves,
-  // in an arc, its point leading; it sticks there (into the boat's own node, so it goes where the boat goes) and burns
-  // down, crackling. Its flame stands upright whichever way it points.
-  const arrowUpdate = (s, dt, elapsed) => {
-    const f = s.ferry, boat = f.boat;
-    if (f.state === "paddling" && !s.volley && Math.hypot(f.x - FERRY.quay.x, f.z - FERRY.quay.z) < VOLLEY.at) {
-      s.volley = true;
-      for (let i = 0; i < s.arrows.length; i++) { s.arrows[i].state = "wait"; s.arrows[i].t = -i * VOLLEY.gap; }
-    }
-    const sn = Math.sin(f.yaw), cs = Math.cos(f.yaw);
-    let fire = 0;
-    for (const a of s.arrows) {
-      if (a.state === "idle") continue;
-      const [hx, hy, hz] = a.hit, tx = f.x + hx * cs + hz * sn, ty = boat.position.y + hy, tz = f.z - hx * sn + hz * cs;
-      if (a.state === "wait") {
-        a.t += dt;
-        if (a.t < 0) continue;
-        a.state = "flight"; a.t = 0; a.burn = VOLLEY.burn; a.node.visible = true; a.flame.visible = true; a.light.want = 1;
-        audio.loose(a.from[0], a.from[1], a.from[2]);
-        audio.flight(VOLLEY.time);
-      }
-      let lx = tx, ly = ty, lz = tz;
-      if (a.state === "flight") {
-        a.t += dt;
-        const u = Math.min(1, a.t / VOLLEY.time), [sx, sy, sz] = a.from, rise = Math.hypot(tx - sx, tz - sz) * VOLLEY.arc, p = a.node.position;
-        p.x = sx + (tx - sx) * u; p.y = sy + (ty - sy) * u + rise * 4 * u * (1 - u); p.z = sz + (tz - sz) * u;
-        const dx = tx - sx, dy = ty - sy + rise * 4 * (1 - 2 * u), dz = tz - sz;
-        a.node.rotation.y = Math.atan2(dx, dz); a.node.rotation.x = -Math.atan2(dy, Math.hypot(dx, dz));
-        lx = p.x; ly = p.y; lz = p.z;
-        if (u >= 1) {
-          // Struck: it stays where it bit, in the boat's own frame.
-          removeChild(root, a.node); addChild(boat, a.node);
-          p.x = hx; p.y = hy; p.z = hz;
-          a.node.rotation.y -= boat.rotation.y;
-          a.state = "stuck";
-          audio.strike(tx, ty, tz);
-        }
-      } else if (a.state === "stuck") {
-        a.burn = Math.max(0, a.burn - dt);
-        // Burnt out, it is gone from the boat.
-        if (a.burn <= 0) { a.state = "idle"; a.node.visible = false; a.light.want = 0; continue; }
-      }
-      const k = Math.min(1, a.burn / VOLLEY.fade), t = elapsed * 15 + a.phase;
-      a.flame.visible = k > 0.02;
-      a.flame.rotation.x = -a.node.rotation.x;
-      a.flame.scale.x = a.flame.scale.z = k * (0.9 + 0.12 * Math.sin(t * 1.3));
-      a.flame.scale.y = k * (0.85 + 0.25 * Math.sin(t) * Math.sin(t * 0.61));
-      a.light.x = lx; a.light.y = ly + 0.2; a.light.z = lz; a.light.want = k > 0.02 ? 1 : 0;
-      if (a.state === "stuck") fire += k;
-    }
-    audio.burn(fire, f.x, boat.position.y, f.z);
-  };
-
   // ---------- the ships ----------
   // How far a ship at (x, z) turned `yaw` would stand in what it must keep off, along its hull's circles: water too
   // shallow for its keel (more the shallower), another ship (by how far their hulls would overlap) and the rowboat (by how
@@ -4891,7 +5040,7 @@
   // under over `sink` s, whoever is aboard stands on the shipyard's quay, and it is back at its mooring whole. Left
   // within `home` of its mooring it eases back onto it (`berth` m/s) and is mended; one that lies against a quay is
   // warped off it sideways at `warp` m/s as its helm is taken there.
-  const SAIL = { small: { speed: 13, back: 4, accel: 4.6, drag: 2.2, turn: 1.0, cool: 3 }, large: { speed: 9.8, back: 3, accel: 2.8, drag: 1.4, turn: 0.62, cool: 4 }, galleon: { speed: 12.15, back: 3.75, accel: 2.4, drag: 1, turn: 0.3, cool: 5 },
+  const SAIL = { small: { speed: 8.8, back: 4, accel: 2.8, drag: 2.2, turn: 0.72, cool: 3 }, large: { speed: 6.4, back: 3, accel: 1.7, drag: 1.4, turn: 0.45, cool: 4 }, galleon: { speed: 12.15, back: 3.75, accel: 2.4, drag: 1, turn: 0.3, cool: 5 },
     still: 0.35, reach: 2.6, bear: 0.35, train: 0.3, ripple: 0.2, low: 0.12, sink: 3.2, home: 30, berth: 1.6, warp: 2.4, idle: 120 };
   // The helm's view from further off: scrolling out from the helmsman's shoulder draws the view back to circle the
   // whole ship (`start` of its length off to begin with, between `min` and `max`), as the rowboat's circles the boat:
@@ -4960,9 +5109,9 @@
       addChild(w.node, wheel);
       input.add(wheel, { kind: "keep-helm", index: i }, { radius: 1.3 });
       targets.push(wheel);
-      w.sail = { C, hs, away: away && g.role !== "docked", v: 0, w: 0, hp: ok ? clamp(Math.round(k.hp), 1, g.hull) : g.hull, sink: -1, cast: 0, side: 0, train: 0, elev: 0.15, tx: 0, tz: 0, aimed: false, acts: SHIP_ACTS.map(() => ({ on: 0, wait: 0 })), rip: -1, ripSide: 0, ripT: 0, carried: false, from: { ship: true },
+      w.sail = { C, hs, away: away && g.role !== "docked", v: 0, w: 0, hp: ok ? clamp(Math.round(k.hp), 1, g.hull) : g.hull, sink: -1, cast: 0, side: 0, train: 0, elev: 0.15, tx: 0, tz: 0, aimed: false, ashore: false, shoreAt: -1, acts: SHIP_ACTS.map(() => ({ on: 0, wait: 0 })), rip: -1, ripSide: 0, ripT: 0, carried: false, from: { ship: true },
         guns: g.guns.map(([a, c, y, size]) => ({ a, c, y, size, side: c > 0 ? 1 : -1, wait: 0 })),
-        seat: { kind: "helm", x: 0, y: 0, z: 0, floor: 0, ry: 0, ground: false, sitter: null, walkAt: { x: 0, z: 0 }, lockMovement: false, keepEquipment: true, act: () => { fireSide(s, w); return true; } } };
+        seat: { kind: "helm", x: 0, y: 0, z: 0, floor: 0, ry: 0, ground: false, sitter: null, walkAt: { x: 0, z: 0 }, lockMovement: false, keepEquipment: true, act: () => { if (w.sail.ashore) { leaveHelm(); return true; } fireSide(s, w); return true; } } };
       // Where she is mended (keep-layout.js `ship.mend`): at each place a ring glowing on the deck, a soft light
       // standing up out of it and a mallet turning over it, all shown only while she is hurt.
       w.sail.mend = g.mend.map(([a, c, y], n) => {
@@ -5023,9 +5172,9 @@
   const takeHelm = (w) => {
     const cave = people && people.player, S = w.sail;
     if (!cave || scene.sail || S.sink >= 0) return false;
-    // The great longships are Leif's to give (his quest, Red Sails); the small ones and the galleon are anyone's.
-    if (w.at.kind !== "galleon" && w.at.scale >= 0.2 && !greatShips()) {
-      hud.toast(quests.stage("sails") ? "The great longships are yours once Leif's quest, Red Sails, is done." : "The great longships are Leif's to give. Talk to him on the shipyard's quay.");
+    // Only the small longships are to be had for now: the great longships and the galleon wait (`greatShips`).
+    if ((w.at.kind === "galleon" || w.at.scale >= 0.2) && !greatShips()) {
+      hud.toast("Only the small longships are yours to sail for now. The great longships and the galleon will have to wait.");
       return false;
     }
     // Stood up again where they are, until the helm is left somewhere else.
@@ -5047,13 +5196,14 @@
     helmPanel(w);
     shipBar(w);
     // Leif's quest: at a small longship's wheel, out after the red sails.
-    if (w.at.scale < 0.2 && quests.stage("sails") === "helm" && quests.advance("sails", "hunt")) hud.toast("Quest updated: sail west and find the ship with red sails");
+    if (w.at.scale < 0.2 && quests.stage("sails") === "helm" && quests.advance("sails", "hunt")) hud.toast("Quest updated: sail west and find the three ships with red sails");
     hud.hint(COARSE ? "The stick sails and steers. Tap the water to fire at it. Drag to look, pinch out for the view from further off. Leave helm to step off." : "W S: sail · A D: steer · Mouse: lay the guns · Click or Space: fire · Drag: look · Scroll: nearer or further · X: leave", 10000);
     return true;
   };
   // Where the helmsman steps off: a dock or a shore within reach at about the deck's height, else the deck beside the
   // wheel.
-  const helmLanding = (w, cave) => {
+  // `shoreSpot` writes the dock or shore spot into the seat and answers whether there is one.
+  const shoreSpot = (w, cave) => {
     const g = w.at, st = w.sail.seat, deck = L.SEA + g.helm.y;
     for (const d of LAND_REACH) for (let k = 0; k < 16; k++) {
       const a = k / 16 * Math.PI * 2, x = st.x + Math.sin(a) * d, z = st.z + Math.cos(a) * d;
@@ -5061,16 +5211,20 @@
       const top = L.supportAt(x, z, deck + 1.5, bridgeDown(), gateUp());
       if (Math.abs(top - deck) > 1.5 || !walkableFor(x, z, x, z, top, cave.bodyHeight, cave)) continue;
       st.walkAt.x = x; st.walkAt.z = z; st.floor = top;
-      return;
+      return true;
     }
-    const sn = Math.sin(g.yaw), cs = Math.cos(g.yaw), a = g.helm.a + KM.HELM.z * w.sail.hs, c = 1.1 * w.sail.hs;
+    return false;
+  };
+  const helmLanding = (w, cave) => {
+    if (shoreSpot(w, cave)) return;
+    const g = w.at, st = w.sail.seat, sn = Math.sin(g.yaw), cs = Math.cos(g.yaw), a = g.helm.a + KM.HELM.z * w.sail.hs, c = 1.1 * w.sail.hs;
     st.walkAt.x = g.x + sn * a + cs * c; st.walkAt.z = g.z + cs * a - sn * c; st.floor = L.SEA + g.helm.y;
   };
   // The helm let go of: its helmsman's own view back, the panel and the button put away.
   const helmDropped = (w) => {
     const S = w.sail, cave = people && people.player;
     if (S.seat.sitter) standOff(w, S.seat.sitter);
-    S.seat.lockMovement = false; S.rip = -1;
+    S.seat.lockMovement = false; S.rip = -1; S.ashore = false; S.shoreAt = -1;
     if (S.carried && cave && !cave.weapon.aiming) pilot.modeAction("mode-toggle");
     if (cave && people) people.poseWeapon(cave);
     S.carried = false;
@@ -5328,10 +5482,114 @@
   // then runs along beside them, and whenever they lie within `range` and `abeam` of square off one of its sides it
   // fires that side's loaded guns one after another (`ripple` apart, each `cool` s to load) at where they will be,
   // give or take `spread` m at 100 m, on the towers' own flight. By size (`large`, `small`): its `speed`, `accel`
-  // and `turn`. A visitor's ball takes a point off its hull; at none it goes under over `sink` s and is back at its
+  // and `turn`, the same as the Oogas' own ship of that size (`SAIL`), so neither outsails the other but by full sail.
+  // A visitor's ball takes a point off its hull; at none it goes under over `sink` s and is back at its
   // mooring `respawn` s later. Nobody to hunt, it goes home.
   const RAID = { roam: 0.55, wake: 150, lose: 240, near: 34, range: 80, abeam: 0.5, ripple: 0.35, spread: 5, sink: 3.2, respawn: 180,
-    large: { speed: 6.4, accel: 1.7, turn: 0.45, cool: 6.5 }, small: { speed: 8.8, accel: 2.8, turn: 0.72, cool: 5 } };
+    large: { speed: SAIL.large.speed, accel: SAIL.large.accel, turn: SAIL.large.turn, cool: 6.5 }, small: { speed: SAIL.small.speed, accel: SAIL.small.accel, turn: SAIL.small.turn, cool: 5 } };
+  // Cannon Basics (`QUESTS`' `cannon`): the visitor reaching the gallery of one of Outpost Island's towers starts it.
+  // Its raiders (keep-layout.js `SHIPS`' `quest: "cannon"`) come in waves (their `wave`: three, one at a time), the
+  // next `gap` s after the last of a wave is sunk, each put out at sea `spawn` m from the tower along the way its
+  // gallery looks (a wave's two, were there two, `apart` across it), at `pace` of their usual speed. They never close on the tower: each comes in slantwise, turning
+  // broadside on as it nears `stand`, keeping within `cone` of the gallery's way out, and fires each side as it bears within `range` (`abeam` of square), sailing on
+  // all the while, and sheers off again if it comes nearer, turning the other way whenever the shore holds it. The
+  // other towers hold their fire on them (`defendUpdate`). The tower takes `hp` of their balls: the last brings it
+  // down, the quest goes back to its first step and the visitor is set down beside Leif. Out of the gallery for `away`
+  // s, or the yard left, and the try is called off. While the quest wants the rowboat, taking one puts the two
+  // escorts out beside it at once (`escortSnap`), and once it is done they are put back at their stations.
+  const TOWER_QUEST = { pace: 0.55, hp: 12, spawn: 240, gap: 6, away: 4, apart: 50, stand: 85, range: 120, abeam: 0.7, cone: 0.55 };
+  const CANNON_AT = { x: 0, z: 0, y: 0, yaw: 0, v: 0, on: true };
+  const cannonTick = (s, dt) => {
+    const cave = people && people.player, at = quests.stage("cannon");
+    if (!cave || leaving) return;
+    escortSnap(s, cave, at);
+    const p = cave.root.position, here = L.galleryAt(p.x, p.z, p.y - cave.baseY);
+    if (!s.cannon) {
+      // A battle left over from a visit that ended mid-way starts over.
+      if (at === "battle") quests.set("cannon", "tower");
+      if (quests.stage("cannon") !== "tower" || !here || !here.outpost || !quests.advance("cannon", "battle")) return;
+      s.cannon = { g: here, wave: 0, waves: 1 + Math.max(...s.cannonShips.map((w) => w.at.wave)), left: 0, hp: TOWER_QUEST.hp, next: 3, away: 0, live: false, ships: s.cannonShips };
+      banner("Defend the tower", "Cannon Basics");
+      if (audio) audio.quest();
+      hud.toast("Raiders are coming for this tower! Man the cannon: press Space Bar beside it.");
+      return;
+    }
+    const Q = s.cannon;
+    if (here === Q.g || (s.manned && s.manned.t === Q.g)) Q.away = 0;
+    else if ((Q.away += dt) > TOWER_QUEST.away) { s.cannon = null; quests.set("cannon", "tower"); hud.toast("You left the tower, and the raiders turn back. Climb an Outpost tower to try again."); return; }
+    if (!Q.live && Q.next > 0 && (Q.next -= dt) <= 0) cannonSpawn(s);
+  };
+  // The escorts with the rowboat only while it is out on the water: once it is `start` from every dock they are put
+  // out beside it at once (`L.dockDist`), and once it comes within `stop` of one they are put back at their stations.
+  const ESCORT_DOCK = { start: 20, stop: 10 };
+  const escortSnap = (s, cave, at) => {
+    const f = s.ferry, rowing = f.state === "paddling" && f.seat.sitter === cave, wants = at === "tower" || at === "battle";
+    const d = rowing ? L.dockDist(f.x, f.z) : 0, on = rowing && (s.escorting ? d > ESCORT_DOCK.stop : d >= ESCORT_DOCK.start);
+    if (on && !s.escorting) {
+      s.escorting = true;
+      const hx = Math.sin(f.yaw), hz = Math.cos(f.yaw), px = hz, pz = -hx;
+      s.escorts.forEach((w, i) => {
+        const g = w.at;
+        if (w.sail && (w.sail.away || w.sail.seat.sitter)) return;
+        if (Math.hypot(g.x - f.x, g.z - f.z) < 60) return;
+        const side = (i ? -1 : 1);
+        for (const k of [1, 1.4, 1.9, 2.5]) {
+          const x = f.x + hx * L.SHIP.ahead + px * side * L.SHIP.side * k, z = f.z + hz * L.SHIP.ahead + pz * side * L.SHIP.side * k;
+          if (shipFoul(w, x, z, f.yaw, s) > 0) continue;
+          g.x = x; g.z = z; g.yaw = f.yaw; w.vx = w.vz = 0; w.ttx = x; w.ttz = z; w.slot = side;
+          BOMB_AT.x = x; BOMB_AT.y = L.SEA; BOMB_AT.z = z;
+          ballPlunge(BOMB_AT, L.SEA);
+          break;
+        }
+      });
+      if (wants) hud.toast("Leif's escorts are with you. They'll fire on any raider that comes for you.");
+    } else if (!on && s.escorting) {
+      s.escorting = false;
+      for (const w of s.escorts) { if (w.sail && (w.sail.away || w.sail.seat.sitter)) continue; const g = w.at; g.x = g.home.x; g.z = g.home.z; g.yaw = g.home.yaw; w.vx = w.vz = 0; w.ttx = g.x; w.ttz = g.z; }
+    }
+  };
+  // The next wave out at sea off the tower, turned toward it, whole.
+  const cannonSpawn = (s) => {
+    const Q = s.cannon, wave = Q.ships.filter((w) => w.at.wave === Q.wave), sn = Math.sin(Q.g.yaw), cs = Math.cos(Q.g.yaw);
+    wave.forEach((w, k) => {
+      const g = w.at, R = w.raid, off = (k - (wave.length - 1) / 2) * TOWER_QUEST.apart;
+      let d = TOWER_QUEST.spawn, x = 0, z = 0;
+      for (; d > 80; d -= 10) { x = Q.g.x + sn * d + cs * off; z = Q.g.z + cs * d - sn * off; if (L.navigable(x, z)) break; }
+      g.x = x; g.z = z; g.yaw = Math.atan2(Q.g.x - x, Q.g.z - z);
+      R.sink = -1; R.hp = g.hull; R.v = 0; R.rip = -1; R.hunting = true; R.side = wave.length > 1 ? (k ? -1 : 1) : Math.random() < 0.5 ? -1 : 1; R.stuck = 0;
+      for (const gun of R.guns) gun.wait = 0;
+    });
+    Q.live = true; Q.left = wave.length;
+    hud.toast(wave.length > 1 ? `Wave ${Q.wave + 1} of ${Q.waves}: ${wave.length} raiders are coming!` : `Wave ${Q.wave + 1} of ${Q.waves}: a raider is coming!`);
+  };
+  const cannonSunk = (s) => {
+    const Q = s && s.cannon;
+    if (!Q) return;
+    if (--Q.left > 0) { hud.toast("A raider is sunk! One more in this wave."); return; }
+    Q.live = false; Q.wave++;
+    if (Q.wave < Q.waves) { Q.next = TOWER_QUEST.gap; hud.toast(`Wave ${Q.wave} of ${Q.waves} sunk! More are coming.`); return; }
+    s.cannon = null;
+    if (quests.advance("cannon", "report")) { banner("Quest updated", "Every raider sunk"); if (audio) audio.quest(); hud.toast("Every raider is sunk! Go back to Leif at the shipyard."); }
+  };
+  // A raider's ball on the held tower; with none left it falls, and the try with it.
+  const cannonHit = (s, b) => {
+    const Q = s.cannon;
+    if (--Q.hp > 0) { hud.toast(Q.hp <= 3 ? "The tower can't take much more!" : "Your tower is hit!"); return; }
+    BOMB_AT.x = Q.g.x; BOMB_AT.y = Q.g.floor + 2; BOMB_AT.z = Q.g.z;
+    ballBlast(BOMB_AT, 1.8);
+    s.cannon = null;
+    quests.set("cannon", "tower");
+    leaveCannon();
+    const cave = people && people.player, leif = L.GUARDS.find((q) => q.kind === "captain");
+    if (cave && leif) {
+      const x = leif.x + Math.sin(leif.yaw) * 2.2, z = leif.z + Math.cos(leif.yaw) * 2.2, p = cave.root.position;
+      Object.assign(p, { x, y: cave.baseY + L.supportAt(x, z, leif.y + 2, bridgeDown(), gateUp()), z });
+      cave.root.rotation.y = leif.yaw + Math.PI; cave.hop = 0; cave.hopV = 0;
+      s.safe.x = p.x; s.safe.y = p.y - cave.baseY; s.safe.z = p.z; s.wet = 0;
+    }
+    banner("Quest failed", "The tower fell");
+    hud.toast("Leif hauled you back to the shipyard. Row to Outpost and climb a tower to try again.");
+  };
   const raidFire = (s, w, gun, T) => {
     const b = s.balls.find((q) => !q.on && q.flash <= 0);
     if (!b) return;
@@ -5349,6 +5607,60 @@
     audio.cannon(b.x, b.y, b.z);
     for (let i = 0; i < 8; i++) fx.spawnParticle(FIRE_BITS[i % FIRE_BITS.length], b.x, b.y, b.z, b.vx * 0.12 + (Math.random() - 0.5) * 3, b.vy * 0.12 + (Math.random() - 0.5) * 3, b.vz * 0.12 + (Math.random() - 0.5) * 3, 0.25 + Math.random() * 0.2, 6, 2, -100);
   };
+  // The rowboat's escorts in its defence (`shipUpdate`): each raider that has the rowboat for its mark (hunting it
+  // while it is rowed and no ship of ours is sailed) draws them off their places to lie `stand` off its side toward the
+  // boat, a ship's length apart, and fire on it each gun on the side it lies off in turn within `range`, a gun loading
+  // `cool` s, the Oogas' own ball (never hostile, so it harms nobody of ours).
+  const DEFEND_ESCORT = { range: 90, stand: 24, apart: 14, cool: 5, ripple: 0.35 };
+  /** The raider attacking the rowboat nearest (x, z), or null. */
+  const attackerNear = (s, x, z) => {
+    let best = null, bd = Infinity;
+    for (let i = 0; i < s.raiders.length; i++) {
+      const r = s.raiders[i], R = r.raid;
+      if (R.sink >= 0 || !R.hunting) continue;
+      const d = Math.hypot(r.at.x - x, r.at.z - z);
+      if (d < bd) { bd = d; best = r; }
+    }
+    return best;
+  };
+  const ESCORT_FROM = { ship: true };
+  /** An escort `w`'s guns on the side the raider `m` lies off, fired one after another when loaded and in range. */
+  const escortGuns = (s, w, m, dt) => {
+    const g = w.at;
+    if (!w.eguns) w.eguns = g.guns.map(([a, c, y, size]) => ({ a, c, y, size, side: c > 0 ? 1 : -1, wait: Math.random() * DEFEND_ESCORT.cool }));
+    for (let i = 0; i < w.eguns.length; i++) if (w.eguns[i].wait > 0) w.eguns[i].wait = Math.max(0, w.eguns[i].wait - dt);
+    if (!m) return;
+    const sn = Math.sin(g.yaw), cs = Math.cos(g.yaw), dx = m.at.x - g.x, dz = m.at.z - g.z, d = Math.hypot(dx, dz);
+    if (d > DEFEND_ESCORT.range) return;
+    const side = dx * cs - dz * sn > 0 ? 1 : -1;
+    if ((w.eripT = (w.eripT || 0) - dt) > 0) return;
+    const T = TOWER_AT2;
+    T.x = m.at.x; T.z = m.at.z; T.yaw = m.at.yaw; T.v = m.raid.v; T.y = L.SEA + 1.2;
+    for (let i = 0; i < w.eguns.length; i++) {
+      const gun = w.eguns[i];
+      if (gun.side !== side || gun.wait > 0) continue;
+      escortFire(s, w, gun, T);
+      w.eripT = DEFEND_ESCORT.ripple;
+      return;
+    }
+  };
+  const TOWER_AT2 = { x: 0, y: 0, z: 0, yaw: 0, v: 0 };
+  const escortFire = (s, w, gun, T) => {
+    const b = s.balls.find((q) => !q.on && q.flash <= 0);
+    if (!b) return;
+    const g = w.at, sn = Math.sin(g.yaw), cs = Math.cos(g.yaw), gx = g.x + sn * gun.a + cs * gun.c, gz = g.z + cs * gun.a - sn * gun.c, gy = w.node.position.y + gun.y;
+    const d0 = Math.hypot(T.x - gx, T.z - gz), lift0 = towerLift(d0, T.y - gy), time = Number.isNaN(lift0) ? 0 : d0 / (TOWER.speed * Math.cos(lift0));
+    const a = Math.random() * Math.PI * 2, m = Math.sqrt(Math.random()) * RAID.spread * d0 / 100;
+    const tx = T.x + Math.sin(T.yaw) * T.v * time + Math.cos(a) * m, tz = T.z + Math.cos(T.yaw) * T.v * time + Math.sin(a) * m, flat = Math.hypot(tx - gx, tz - gz), lift = towerLift(Math.max(4, flat), T.y - gy);
+    if (Number.isNaN(lift)) return;
+    const dx = (tx - gx) / (flat || 1), dz = (tz - gz) / (flat || 1), ce = Math.cos(lift), se = Math.sin(lift), out = KM.CANNON.muzzle * gun.size;
+    b.on = true; b.t = 0; b.trail = 0; b.from = ESCORT_FROM; b.hostile = false;
+    b.x = gx + dx * ce * out; b.y = gy + se * out; b.z = gz + dz * ce * out; b.vx = dx * ce * TOWER.speed; b.vy = se * TOWER.speed; b.vz = dz * ce * TOWER.speed;
+    b.node.visible = true;
+    gun.wait = DEFEND_ESCORT.cool;
+    audio.cannon(b.x, b.y, b.z);
+    for (let i = 0; i < 8; i++) fx.spawnParticle(FIRE_BITS[i % FIRE_BITS.length], b.x, b.y, b.z, b.vx * 0.12 + (Math.random() - 0.5) * 3, b.vy * 0.12 + (Math.random() - 0.5) * 3, b.vz * 0.12 + (Math.random() - 0.5) * 3, 0.25 + Math.random() * 0.2, 6, 2, -100);
+  };
   // A wandering raider's next point: somewhere in its box of water deep enough for it, clear of everything built, and
   // never between the portal's islet and the castle island; given up for another after `WANDER.give` s.
   const WANDER = { tries: 24, deep: 4, give: 75, clear: 40 };
@@ -5363,11 +5675,19 @@
     R.goal = [g.roam[0][0], g.roam[0][1]];
   };
   const raidStep = (s, w, dt) => {
-    const g = w.at, R = w.raid, C = R.C, H = g.home, T = prey(s);
+    const g = w.at, R = w.raid, C = R.C, H = g.home;
+    let T = prey(s);
+    // Cannon Basics' raiders: on the water only while their own wave is under way, and then for the tower the visitor
+    // holds, whoever else is about (`cannonSpawn` puts each out at sea).
+    if (g.quest === "cannon") {
+      const Q = s.cannon, live = !!Q && Q.live && Q.wave === g.wave;
+      if (!live && R.sink < 0) { R.sink = RAID.sink + 1; g.x = H.x; g.z = 5000; R.v = 0; R.rip = -1; R.hunting = false; }
+      if (live) { const A = CANNON_AT; A.x = Q.g.x; A.z = Q.g.z; A.y = Q.g.floor + 1.5; A.yaw = 0; A.v = 0; A.on = true; T = A; }
+    }
     // A quest's raider is on the water only while that quest wants her: gone otherwise, and whole at her station when
     // it does.
-    if (g.quest) {
-      const wanted = redWanted();
+    else if (g.quest) {
+      const wanted = redWanted() && !world.keepRedSunk.includes(s.redShips.indexOf(w));
       if (!wanted && R.sink < 0) { R.sink = RAID.sink + 1; g.x = H.x; g.z = 5000; R.v = 0; R.rip = -1; R.hunting = false; }
       else if (wanted && R.sink > RAID.sink) { g.x = H.x; g.z = H.z; g.yaw = H.yaw; R.sink = -1; R.hp = g.hull; R.v = 0; R.hunting = false; }
     }
@@ -5381,11 +5701,30 @@
     for (let i = 0; i < R.guns.length; i++) if (R.guns[i].wait > 0) R.guns[i].wait = Math.max(0, R.guns[i].wait - dt);
     // A roamer comes for whoever sails near where it is now, a moored one for whoever nears its mooring.
     const from = g.roam ? g : H;
-    R.hunting = T.on && Math.hypot(T.x - from.x, T.z - from.z) < (R.hunting ? RAID.lose : g.wake || RAID.wake);
+    R.hunting = g.quest === "cannon" || T.on && Math.hypot(T.x - from.x, T.z - from.z) < (R.hunting ? RAID.lose : g.wake || RAID.wake);
     const dx = T.x - g.x, dz = T.z - g.z, d = Math.hypot(dx, dz), bearing = Math.atan2(dx, dz);
     let rel = bearing - g.yaw; rel = Math.atan2(Math.sin(rel), Math.cos(rel));
     let wantYaw = H.yaw, speed = 0;
-    if (R.hunting) {
+    if (R.hunting && g.quest === "cannon") {
+      // Standing off the tower: slantwise in, broadside on near `stand`, sheering off nearer than that, the other way
+      // round whenever the shore holds it.
+      // It keeps within `cone` of the way the gallery looks out, where the tower's cannon can bear on it: past half
+      // of that it turns back toward the middle, and outside it altogether it makes straight for the middle line.
+      const Q = TOWER_QUEST, G = s.cannon.g, a = L.galleryAngle(G, g.x, g.z), off = d > Q.stand ? Math.PI / 2 * clamp(1 - (d - Q.stand) / 150, 0.35, 1) : Math.PI / 2 + clamp((Q.stand - d) / 30, 0, 0.7);
+      if (Math.abs(a) > Q.cone) {
+        const mx = G.x + Math.sin(G.yaw) * Q.stand, mz = G.z + Math.cos(G.yaw) * Q.stand;
+        wantYaw = Math.atan2(mx - g.x, mz - g.z);
+      } else {
+        if (Math.abs(a) > Q.cone * 0.5) {
+          // The side whose way along takes it back toward the middle.
+          const y = bearing - off;
+          R.side = Math.abs(L.galleryAngle(G, g.x + Math.sin(y) * 10, g.z + Math.cos(y) * 10)) < Math.abs(a) ? 1 : -1;
+          R.stuck = 0;
+        }
+        wantYaw = bearing - R.side * off;
+      }
+      speed = C.speed * Q.pace;
+    } else if (R.hunting) {
       // Closing, then running along beside them on whichever side they already lie.
       wantYaw = d > RAID.near ? bearing : bearing - (rel > 0 ? 1 : -1) * Math.PI / 2; speed = d > RAID.near ? C.speed : C.speed * 0.6;
     } else if (g.wander) {
@@ -5406,6 +5745,7 @@
     const goal = speed * Math.max(0.25, Math.cos(gap));
     R.v += clamp(goal - R.v, -C.accel * dt, C.accel * dt);
     const turn = clamp(gap * 1.5, -C.turn, C.turn) * (0.4 + 0.6 * Math.min(1, Math.abs(R.v) / C.speed));
+    const wasX = g.x, wasZ = g.z;
     if (R.v !== 0 || turn !== 0) {
       const ny = g.yaw + turn * dt, nx = g.x + Math.sin(ny) * R.v * dt, nz = g.z + Math.cos(ny) * R.v * dt, was = sailFoul(w, g.x, g.z, g.yaw, s) + 1e-6;
       if (sailFoul(w, nx, nz, ny, s) <= was) { g.x = nx; g.z = nz; g.yaw = ny; }
@@ -5413,8 +5753,11 @@
       else if (sailFoul(w, g.x, g.z, ny, s) <= was) { g.yaw = ny; R.v *= Math.max(0, 1 - 3 * dt); }
       else R.v *= Math.max(0, 1 - 3 * dt);
     }
+    // Held up against the shore while standing off the tower: it turns the other way round.
+    if (g.quest === "cannon" && R.hunting) { R.stuck = Math.hypot(g.x - wasX, g.z - wasZ) < C.speed * 0.15 * dt ? (R.stuck || 0) + dt : 0; if (R.stuck > 1.5) { R.side = -R.side; R.stuck = 0; } }
     // A broadside from the side they lie off, one gun after another.
-    if (R.rip < 0 && R.hunting && s.screen.t <= 0 && d < RAID.range && Math.abs(Math.abs(rel) - Math.PI / 2) < RAID.abeam) {
+    const reach = g.quest === "cannon" ? TOWER_QUEST.range : RAID.range, abeam = g.quest === "cannon" ? TOWER_QUEST.abeam : RAID.abeam;
+    if (R.rip < 0 && R.hunting && s.screen.t <= 0 && d < reach && Math.abs(Math.abs(rel) - Math.PI / 2) < abeam) {
       const side = rel > 0 ? 1 : -1;
       for (let i = 0; i < R.guns.length; i++) if (R.guns[i].side === side && R.guns[i].wait <= 0) { R.rip = 0; R.ripSide = side; R.ripT = 0; break; }
     }
@@ -5439,10 +5782,15 @@
     if (R.hp > 0.01) { hud.toast(R.hp <= 1 ? "The raider is nearly done for!" : "A hit on the raider!"); return; }
     R.hp = 0; R.sink = 0; R.v = 0; R.rip = -1; w.boom = 0; w.boomN = 0;
     audio.plunge(w.at.x, L.SEA, w.at.z);
+    if (w.at.quest === "cannon") { cannonSunk(scene); return; }
     // Leif's raider: her sinking is what his quest asks.
-    if (w.at.quest === "sails") {
+    if (w.at.quest === "sails" && scene) {
       if (quests.stage("sails") === "helm") quests.advance("sails", "hunt");
-      if (quests.advance("sails", "report")) { banner("Quest updated", "Red Sails is sunk"); if (audio) audio.quest(); hud.toast("The red-sailed ship is sunk! Sail back to the shipyard and tell Leif."); return; }
+      const i = scene.redShips.indexOf(w);
+      if (quests.stage("sails") === "hunt" && !world.keepRedSunk.includes(i)) world.keepRedSunk.push(i);
+      const left = scene.redShips.length - world.keepRedSunk.length;
+      if (left > 0) { hud.toast(`A red-sailed ship is sunk! ${left} more to go.`); return; }
+      if (quests.advance("sails", "report")) { world.keepRedSunk = []; banner("Quest updated", "Red Sails are sunk"); if (audio) audio.quest(); hud.toast("All three red-sailed ships are sunk! Sail back to the shipyard and tell Leif."); return; }
     }
     hud.toast("The raider is sunk!");
   };
@@ -5468,17 +5816,23 @@
       shipEl.root.addEventListener("click", (e) => { const b = e.target.closest(".keep-ship-act"); if (b && scene && scene.sail) { shipAct(scene, scene.sail, +b.dataset.act); b.blur(); } });
       // The ship's four in the land's art (keep-icon-data.js), in place of their drawn pictures, laid as every icon is.
       shipEl.acts.forEach((b, i) => { const id = SHIP_ICONS[i], old = b.querySelector(".keep-arm-picture"); if (old && BL.keepIcons && BL.keepIcons[id]) old.replaceWith(picture(id, 70)); });
+      // Over each icon's circle, a pie of the time left: orange while it works, dark while it cannot be used again.
+      shipEl.pies = shipEl.acts.map((b) => { const pie = document.createElement("i"); pie.className = "keep-ship-pie"; pie.setAttribute("aria-hidden", "true"); b.querySelector(".keep-arm-picture").append(pie); return pie; });
+      shipEl.pieShown = [];
     }
     shipEl.root.hidden = !w;
     if (w) { shipEl.arms.dataset.helm = "true"; arms.fold(); } else delete shipEl.arms.dataset.helm;
     // At a helm the column is the ship's: the bananas and the player's health stand aside until they leave it.
     document.getElementById("keep-bananas").hidden = document.getElementById("keep-health").hidden = !!w;
-    shipEl.shown.length = 0;
+    shipEl.shown.length = 0; shipEl.pieShown.length = 0;
   };
-  // Each button's state and count, written only when what it reads changes.
+  // Each button's state and count, and its pie of the time left (`--left`, 0 to 1, in 200ths), written only when what it
+  // reads changes.
   const shipPaint = (S) => {
     for (let i = 0; i < SHIP_ACTS.length; i++) {
-      const a = S.acts[i], key = a.on > 0 ? -1 : Math.ceil(a.wait);
+      const a = S.acts[i], A = SHIP_ACTS[i], left = a.on > 0 ? a.on / A.time : a.wait > 0 ? a.wait / A.cool : 0, q = Math.ceil(left * 200);
+      if (shipEl.pieShown[i] !== q) { shipEl.pieShown[i] = q; shipEl.pies[i].style.setProperty("--left", String(q / 200)); }
+      const key = a.on > 0 ? -1 : Math.ceil(a.wait);
       if (shipEl.shown[i] === key) continue;
       shipEl.shown[i] = key;
       const el = shipEl.acts[i];
@@ -5656,7 +6010,8 @@
     if (R.mallet.parent !== hand) { if (R.mallet.parent) removeChild(R.mallet.parent, R.mallet); addChild(hand, R.mallet); R.mallet.position.y = -cave.traits.height * (P.forearmR ? 0.2 : 0.36); R.mallet.rotation.x = Math.PI / 2; }
     R.mallet.visible = true;
   };
-  const ESCORT = { speed: 8, accel: 3, turn: 0.8, follow: 0.7, catch: 24, catchAccel: 8, catchTurn: 1.5, catchFrom: 20 };
+  const ESCORT_BACK = { after: 5, time: 3, speed: 3, slow: 0.4 };
+  const ESCORT = { speed: 8, accel: 3, turn: 0.8, follow: 0.7, catch: 24, catchAccel: 8, catchTurn: 1.5, catchFrom: 20, hold: Math.PI / 4 };
   // How the great ships back out to their anchorage and come forward again: at most `speed`, gathering and losing way
   // at `accel`, so each eases out and in.
   const GUARD = { speed: 2.8, accel: 0.7 };
@@ -5668,7 +6023,8 @@
   // way, and near there to the heading wanted), keeps pace with a place that moves, and heaves and rolls a little as
   // it goes, its fires with it.
   const shipUpdate = (s, dt, elapsed) => {
-    const f = s.ferry, rowing = f.state === "paddling";
+    // The escorts keep with the rowboat only while it is out on the water (`escortSnap`).
+    const f = s.ferry, rowing = f.state === "paddling" && !!s.escorting;
     // Which way the boat is going (its bow, or its stern while it backs), changed only once it is truly under way the
     // other way, and the escorts' heading, eased round after it so a boat turning on the spot does not swing them
     // about; standing, they take its heading at once.
@@ -5677,6 +6033,13 @@
     if (!rowing || s.formYaw === undefined) s.formYaw = travel;
     else { let gap = travel - s.formYaw; gap = Math.atan2(Math.sin(gap), Math.cos(gap)); s.formYaw += clamp(gap, -FORM_TURN * dt, FORM_TURN * dt); }
     const hx = Math.sin(s.formYaw), hz = Math.cos(s.formYaw), px = hz, pz = -hx;
+    // The rowboat turning hard (its way more than `ESCORT.hold` off the escorts' heading): they stop going ahead and only
+    // come round, until it is going their way again.
+    let turnGap = travel - s.formYaw;
+    turnGap = Math.atan2(Math.sin(turnGap), Math.cos(turnGap));
+    const hold = rowing && Math.abs(turnGap) > ESCORT.hold;
+    // A raider attacking the rowboat: the escorts go to defend it.
+    const defending = rowing && !s.sail;
     // One on each side of it: each keeps the side it is on, the two changing sides only once they have truly passed
     // each other, so they never cross under the boat's bow as it turns about.
     if (s.escorts.length === 2) {
@@ -5690,7 +6053,13 @@
       if (w.sail && (g.role === "docked" || w.sail.away)) sailStep(s, w, dt);
       else if (g.role === "escort") {
         let tx, tz, tyaw;
-        if (rowing) {
+        const mark = defending ? attackerNear(s, f.x, f.z) : null;
+        escortGuns(s, w, mark, dt);
+        if (mark) {
+          // Off the raider's side toward the boat, the two a ship's length apart, broadside on to it.
+          const rx = f.x - mark.at.x, rz = f.z - mark.at.z, rd = Math.hypot(rx, rz) || 1, ux = rx / rd, uz = rz / rd, side = (w.slot || Math.sign(g.home.x)) * DEFEND_ESCORT.apart / 2;
+          tx = mark.at.x + ux * DEFEND_ESCORT.stand - uz * side; tz = mark.at.z + uz * DEFEND_ESCORT.stand + ux * side; tyaw = Math.atan2(-uz, ux);
+        } else if (rowing) {
           // A little ahead of it the way it is going and abreast of it, wherever it goes; a shore, a dock or a ship
           // holds it off (`shipFoul`) and it comes on again once the way is clear.
           const side = (w.slot || Math.sign(g.home.x)) * L.SHIP.side;
@@ -5702,7 +6071,7 @@
         const tv = Math.hypot(tvx, tvz);
         if (tv > M.speed) { tvx *= M.speed / tv; tvz *= M.speed / tv; }
         w.ttx = tx; w.ttz = tz;
-        const dx = tx - g.x, dz = tz - g.z, d = Math.hypot(dx, dz), catching = rowing && d > M.catchFrom, top = catching ? M.catch : M.speed;
+        const dx = tx - g.x, dz = tz - g.z, d = Math.hypot(dx, dz), catching = rowing && d > M.catchFrom && !(hold && !mark), top = catching ? M.catch : M.speed;
         const k = Math.min(top, d * 0.5) / (d || 1);
         let wx = tvx + dx * k, wz = tvz + dz * k;
         // Steered round the rowboat rather than at it, as its place lies past the boat, and kept off the other escort.
@@ -5717,28 +6086,50 @@
         if (wv > top) { wx *= top / wv; wz *= top / wv; }
         // Far off it faces the way it goes, turning about before it gathers way (never going stern first); keeping its
         // place by the boat it holds the boat's heading, and going home it holds its own way in until it is there.
+        // Held while the rowboat turns hard: no way ahead, only coming round to its heading.
+        const still = hold && !mark;
+        if (still) wx = wz = 0;
         const far = d > (rowing ? 6 : 1.5);
-        let gap = (far ? Math.atan2(wx, wz) : tyaw) - g.yaw;
+        let gap = (far && !still ? Math.atan2(wx, wz) : tyaw) - g.yaw;
         gap = Math.atan2(Math.sin(gap), Math.cos(gap));
         if (far && wv > 0.5) { const m = Math.max(0, Math.cos(gap)); wx *= m; wz *= m; }
         // Close by its place, little more than drifting into it, and never much stern first.
         else if (wv > 0.5) { let back = Math.atan2(wx, wz) - g.yaw; back = Math.atan2(Math.sin(back), Math.cos(back)); const m = Math.max(0.25, Math.cos(back)); wx *= m; wz *= m; }
         // Home, it comes to rest there before it turns to face the castle island.
         if (!far && !rowing) wx = wz = 0;
+        // Backing off (`ESCORT_BACK`), it gathers no way ahead: the astern below has the helm alone.
         const accel = catching ? M.catchAccel : M.accel;
-        w.vx += clamp(wx - w.vx, -accel * dt, accel * dt); w.vz += clamp(wz - w.vz, -accel * dt, accel * dt);
+        if (!(w.backT > 0)) { w.vx += clamp(wx - w.vx, -accel * dt, accel * dt); w.vz += clamp(wz - w.vz, -accel * dt, accel * dt); }
         // Turning the short way round would swing its bow or stern onto something (a shore, most often): it comes round
         // the long way instead, and keeps at it until the short way and the long way agree. A turn it cannot make leaves
         // it free to move on as it heads.
         if (w.spin) { w.spinT -= dt; if (w.spinT <= 0 || Math.sign(gap) === w.spin) w.spin = 0; }
         const rate = catching ? M.catchTurn : rowing ? M.follow : M.turn, turn = w.spin ? w.spin * rate * dt : clamp(gap, -rate * dt, rate * dt), nx = g.x + w.vx * dt, nz = g.z + w.vz * dt, ny = g.yaw + turn;
-        const was = shipFoul(w, g.x, g.z, g.yaw, s) + 1e-6, damp = Math.max(0, 1 - 3 * dt);
-        if (shipFoul(w, nx, nz, ny, s) <= was) { g.x = nx; g.z = nz; g.yaw = ny; }
+        const was = shipFoul(w, g.x, g.z, g.yaw, s) + 1e-6, damp = Math.max(0, 1 - 3 * dt), fromX = g.x, fromZ = g.z;
+        if (w.backT > 0) {
+          // Backing off after being held up: astern, her bow coming round toward where she is going, then on again.
+          w.backT -= dt;
+          const bvx = -Math.sin(g.yaw) * ESCORT_BACK.speed, bvz = -Math.cos(g.yaw) * ESCORT_BACK.speed, bt = clamp(gap, -M.turn * dt, M.turn * dt);
+          w.vx += clamp(bvx - w.vx, -M.accel * dt, M.accel * dt); w.vz += clamp(bvz - w.vz, -M.accel * dt, M.accel * dt);
+          const bx = g.x + w.vx * dt, bz = g.z + w.vz * dt;
+          if (shipFoul(w, bx, bz, g.yaw + bt, s) <= was) { g.x = bx; g.z = bz; g.yaw += bt; }
+          else if (shipFoul(w, bx, bz, g.yaw, s) <= was) { g.x = bx; g.z = bz; }
+          else if (shipFoul(w, g.x, g.z, g.yaw + bt, s) <= was) { g.yaw += bt; w.vx *= damp; w.vz *= damp; }
+          else { w.vx *= damp; w.vz *= damp; w.backT = 0; }
+        }
+        else if (shipFoul(w, nx, nz, ny, s) <= was) { g.x = nx; g.z = nz; g.yaw = ny; }
         else if (shipFoul(w, nx, nz, g.yaw, s) <= was) { g.x = nx; g.z = nz; }
         else if (shipFoul(w, g.x, g.z, ny, s) <= was) { g.yaw = ny; w.vx *= damp; w.vz *= damp; }
         else if (turn !== 0 && shipFoul(w, g.x, g.z, g.yaw - Math.sign(turn) * rate * dt, s) <= was) {
           g.yaw -= Math.sign(turn) * rate * dt; w.spin = -Math.sign(turn); w.spinT = 4; w.vx *= damp; w.vz *= damp;
         } else { w.vx *= damp; w.vz *= damp; }
+        // Held up `ESCORT_BACK.after` s on her way somewhere (making less than `slow` of way), she backs off for
+        // `time` s and tries again.
+        if (!(w.backT > 0)) {
+          const going = far && !still && wv > 0.5;
+          w.stuckT = going && Math.hypot(g.x - fromX, g.z - fromZ) < ESCORT_BACK.slow * dt ? (w.stuckT || 0) + dt : 0;
+          if (w.stuckT > ESCORT_BACK.after) { w.stuckT = 0; w.backT = ESCORT_BACK.time; w.spin = 0; }
+        }
       }
       else if (g.role === "raider") raidStep(s, w, dt);
       else if (g.role === "guard") {
@@ -5954,33 +6345,37 @@
       if (q.get("debug") === "1" && q.get("castle") === "shipyard") return { x: L.SHIPYARD.quay.x1 - 3, y: L.SHIPYARD.y, z: L.WEST.z, yaw: -Math.PI / 2 };
       if (q.get("debug") === "1" && q.get("castle") === "forge") return { x: L.ARMORY.quay.x0 + 3, y: L.ARMORY.y, z: L.WEST.z, yaw: Math.PI / 2 };
       if (q.get("debug") === "1" && q.get("castle") === "storj") { const d = L.STORJ.docks[0]; return { x: L.STORJ.x + 4, y: d.y, z: d.bank - d.face * 2.5, yaw: d.face > 0 ? 0 : Math.PI }; }
+      if (q.get("debug") === "1" && q.get("castle") === "outpost") { const P = L.OUTPOST.arms[1].pier; return { x: P.x1 - 2, y: L.OUTPOST.dock.y, z: (P.z0 + P.z1) / 2, yaw: -Math.PI / 2 }; }
+      if (q.get("debug") === "1" && q.get("castle") === "shards") return { x: L.SHARDS.dock.quay.x0 + 2.5, y: L.SHARDS.dock.y, z: L.SHARDS.z - 4, yaw: Math.PI / 2 };
       if (q.get("debug") === "1" && (q.get("castle") === "volcano" || q.get("castle") === "cbdc")) return { x: L.VOLCANO.dock.quay.x0 + 2.5, y: L.VOLCANO.dock.y, z: L.VOLCANO.z - 4, yaw: Math.PI / 2 };
       if (q.get("debug") === "1" && q.has("castle") && q.get("castle") !== "0") return { x: 0, y: QUAY.y, z: (QUAY.z0 + QUAY.z1) / 2, yaw: Math.PI };
     }
     if (place === "door") return { x: YARD.door.x, z: YARD.door.z + 3.0, yaw: 0 };
     // Back out of the volcano's cave, at its mouth, looking out over the court.
     if (place === "cave") return { x: L.VOLCANO.mouth.enter - 3.6, y: L.VOLCANO.court.y, z: L.VOLCANO.z, yaw: -Math.PI / 2 };
+    // Back up out of Shards' cave, in the court before its mouth, looking up the trench.
+    if (place === "shards") return { x: L.SHARDS.trench.court.x0 + 1.2, y: L.SHARDS.trench.floor, z: L.SHARDS.z, yaw: -Math.PI / 2 };
     // Fallen off the halls' rooftop: on into the yard from where it went over, still in the air.
     if (place === "drop" && world.keepDrop) { const d = world.keepDrop; world.keepDrop = null; return d; }
     // Up the tower's stair into its gallery: on the stair head coming up through its floor, looking up it at the
     // cannon and out of the opening.
-    const up = /^gallery-(\d)$/.exec(place || ""), g = up && L.GALLERIES[+up[1]];
+    const up = /^gallery-(\d+)$/.exec(place || ""), g = up && L.GALLERIES[+up[1]];
     if (g) {
       const W = L.GALLERY.well, along = W.arrive - g.inner, x = g.x + Math.sin(g.yaw) * along, z = g.z + Math.cos(g.yaw) * along;
       // The view close behind and over the climber's head, looking up the steps at the cannon.
       return { x, y: L.wellAt(x, z, g.floor - 1), z, yaw: g.yaw, pitch: 0.3, dist: 3.5 };
     }
-    const m = /^tower-(\d)$/.exec(place || ""), d = m && TOWER_DOORS[+m[1]];
-    if (d) { const out = d.front + r + 2.4; return { x: d.cx + d.dx * out, z: d.cz + d.dz * out, yaw: Math.atan2(d.dx, d.dz) }; }
+    const m = /^tower-(\d+)$/.exec(place || ""), d = m && TOWER_DOORS[+m[1]];
+    if (d) { const out = d.front + r + 2.4; return { x: d.cx + d.dx * out, y: d.y || 0, z: d.cz + d.dz * out, yaw: Math.atan2(d.dx, d.dz) }; }
     return ARRIVE;
   };
   // Which door into the halls a body `r` across at (x, z) has walked into: the keep's great door or a tower's.
-  const doorAt = (x, z, r) => {
+  const doorAt = (x, z, r, feet = 0) => {
     // The great door, from just before it; never from behind the keep, where the back gate and its bridge run.
     if (z - r < KEEP.front + 1.0 && z > KEEP.front - 3 && Math.abs(x - YARD.door.x) < 1.4) return "door";
     for (const d of TOWER_DOORS) {
       const ox = x - d.cx, oz = z - d.cz, out = ox * d.dx + oz * d.dz;
-      if (out > 0 && out < d.front + 0.4 + r && Math.abs(ox * d.dz - oz * d.dx) < d.half) return `tower-${d.i}`;
+      if (out > 0 && out < d.front + 0.4 + r && Math.abs(ox * d.dz - oz * d.dx) < d.half && Math.abs(feet - (d.y || 0)) < 1) return `tower-${d.i}`;
     }
     return null;
   };
@@ -6259,10 +6654,11 @@
     };
   };
 
-  // The knights met (`beamAt` the moment they first faced each other): the same orange beam as on a crystal taken,
-  // down on each knight at its size, for `BEAM_FOR` seconds.
+  // The knights met (`beamAt` the moment they first faced each other): the frost blade's rune, curtains of light and
+  // beam (the level 4 sword's, `knightAura` in the foe world) under each knight, for `BEAM_FOR` seconds.
   const beamUp = (s, t) => {
-    for (let i = 0; i < s.statues.length; i++) drawBeam(s.statues[i], STATUES[i].x, 0, STATUES[i].z, L.KNIGHT.top, t - s.beamAt, BEAM_FOR, t);
+    const since = t - s.beamAt, on = since >= 0 && since < BEAM_FOR;
+    for (let i = 0; i < s.statues.length; i++) if (s.foes) s.foes.knightAura(i, STATUES[i].x, STATUES[i].z, on);
   };
   // Lightning in the sky over the land now and then, silent: a bolt far off over the sea and the whole night lit for a
   // moment, flickering twice, somewhere within `ahead` rad of where the view looks. One every `every` s at random (five to fifteen minutes), counted on the page's clock
@@ -6364,6 +6760,7 @@
   const update = (dt, elapsed) => {
     const s = scene;
     clock = elapsed;
+    s.outpost.visible = Math.hypot(camera.position.x - L.OUTPOST.x, camera.position.z - L.OUTPOST.z) < OUTPOST_SEEN;
     if (s.foes) s.foes.unshake(camera);
     helmUnview(s);
     unflash(RENDER_OPTS);
@@ -6375,7 +6772,6 @@
     hullShow(s);
     shipUpdate(s, dt, elapsed);
     dripUpdate(s, dt);
-    arrowUpdate(s, dt, elapsed);
     guardUpdate(s, elapsed);
     crystalUpdate(s, elapsed, dt);
     snowUpdate(s, dt, elapsed);
@@ -6396,6 +6792,7 @@
     screenUpdate(s, dt);
     volcanoFace(s);
     questMarks(s, elapsed);
+    cannonTick(s, dt);
     s.foes.shake(camera);
     const drivenHere = people && people.player;
     BL.net.setBody(drivenHere ? drivenHere.traits.name : null);
@@ -6424,12 +6821,22 @@
     const lit = rules.solved("statues") && settled ? 1 : 0;
     if (lit !== s.lit) {
       s.lit = lit;
-      for (let i = 0; i < s.statues.length; i++) { const st = s.statues[i]; st.eyes[0].visible = !lit; st.eyes[1].visible = !!lit; st.light.tint = lit ? ORANGE : RED; }
+      // Met, their glow goes out: no light behind their visors and none on the ground.
+      for (let i = 0; i < s.statues.length; i++) { const st = s.statues[i]; st.eyes[0].visible = !lit; st.eyes[1].visible = false; st.light.tint = RED; st.light.want = lit ? 0 : 1; }
+    }
+    // Purple and pink dust rising off Shards' crystal clusters.
+    {
+      const S = L.SHARDS;
+      if (Math.hypot(camera.position.x - S.x, camera.position.z - S.z) < SHARD_DUST.near && (s.shardDust -= dt) <= 0) {
+        s.shardDust = SHARD_DUST.every * (0.5 + Math.random());
+        const c = S.clusters[(Math.random() * S.clusters.length) | 0], a = Math.random() * Math.PI * 2, r = 0.2 + Math.random() * 0.5 * c.size, cs = Math.cos(a), sn = Math.sin(a);
+        fx.spawnParticle(SHARD_DUST.bits[(Math.random() * SHARD_DUST.bits.length) | 0], c.x + cs * r, c.base + Math.random() * c.tall * 0.8, c.z + sn * r, cs * 0.1, 0.5 + Math.random() * 0.6, sn * 0.1, 1.6 + Math.random() * 1.2, 3, -0.4, -100);
+      }
     }
     // Fairy dust rising round each knight's feet, as off a fallen enemy's bananas: red, and orange once they have met.
     for (let i = 0; i < s.motes.length; i++) {
       const m = s.motes[i];
-      if ((m.next -= dt) > 0 || Math.hypot(camera.position.x - m.x, camera.position.z - m.z) > MOTE_NEAR) continue;
+      if (s.lit > 0 || (m.next -= dt) > 0 || Math.hypot(camera.position.x - m.x, camera.position.z - m.z) > MOTE_NEAR) continue;
       m.next = MOTE_EVERY * (0.6 + Math.random() * 0.8);
       const a = Math.random() * Math.PI * 2, r = MOTE_RING[0] + Math.random() * (MOTE_RING[1] - MOTE_RING[0]), tones = KNIGHT_DUST[s.lit > 0 ? 1 : 0];
       fx.spawnParticle(tones[(Math.random() * tones.length) | 0], m.x + Math.cos(a) * r, 0.15 + Math.random() * 0.5, m.z + Math.sin(a) * r, Math.cos(a) * 0.12, 0.6 + Math.random() * 0.7, Math.sin(a) * 0.12, 1.3 + Math.random() * 0.9, 3, -0.6, -100);
@@ -6467,18 +6874,9 @@
     lanterns.swing(s.swingers, elapsed);
     const who = drivenHere ? drivenHere.root.position : pilot.orbit.target;
     audio.listen(who.x, who.y, who.z);
-    // The place's music by where the visitor is: the courtyard's inside the castle's walls and up on a bridge's near
-    // half, a wing's from the bridge's middle out and all over the wing (the shipyard's to the west, the Armory &
-    // Forge's to the east), the shore's anywhere else outside the walls, none while they row (the
-    // rowing music has it); each line held `MUSIC_HOLD` m past it once crossed, so it does not flicker there; held as
-    // it is while they leave (the halls carry it on).
-    const playing = BL.keepAudio.music.playing, wing = who.x < 0 ? "shipyard" : "armory", ax = -Math.abs(who.x), B = L.WEST_BRIDGE, mid = (B.x0 + B.x1) / 2;
-    const inWing = playing === wing;
-    const onWay = L.westAt(who.x, who.z) && who.y > L.SEA + 1.5;
-    const placeSong = L.inWard(who.x, who.z) ? "yard"
-      : onWay ? (ax < mid + (inWing ? MUSIC_HOLD : -MUSIC_HOLD) ? wing : "yard")
-      : -ax > Math.abs(L.SHIPYARD.area) - (inWing ? MUSIC_HOLD : 0) && -ax < WING_FAR ? wing : "shore";
-    if (!leaving) BL.keepAudio.music.play(s.ferry.state === "paddling" || s.sail ? null : placeSong);
+    // The land's playlist wherever the visitor goes on foot, none while they row or sail (the sailing music has it);
+    // held as it is while they leave (the halls carry it on).
+    if (!leaving) BL.keepAudio.music.play(s.ferry.state === "paddling" || s.sail ? null : "land");
     beamUp(s, elapsed);
     if (s.nameAt >= 0 && elapsed >= s.nameAt) { s.nameAt = -1; banner("Welcome to", "Valhodl", true); }
     if (s.runAt >= 0 && elapsed >= s.runAt) { s.runAt = -1; banner("", "Run to the boat!"); }
@@ -6522,7 +6920,13 @@
       const stall = grounded && !guard && atMerchant(p.x, p.z, feet), seat = grounded && !guard && !stall && seatNear(p.x, p.z, feet);
       // Walked into, the crystal is taken.
       if (crystal < L.CRYSTAL.take) takeCrystal();
-      if (s.manned || s.sail) { hud.setAct("FIRE"); actPrompt = true; }
+      // At a ship's helm alongside a dock or a shore, Space steps off onto it (`shoreSpot`, asked a few times a second).
+      if (s.sail) {
+        const S = s.sail.sail;
+        if (elapsed - S.shoreAt > 0.2) { S.shoreAt = elapsed; S.ashore = !!pilot.player && shoreSpot(s.sail, pilot.player); }
+        hud.setAct(S.ashore ? "STEP OFF" : "FIRE"); actPrompt = true;
+        if (S.ashore && elapsed - s.hinted > 4) { s.hinted = elapsed; hud.hint(COARSE ? "Tap STEP OFF to go ashore" : "Space: step off onto the dock", 3200); }
+      } else if (s.manned) { hud.setAct("FIRE"); actPrompt = true; }
       else if (gun) { hud.setAct("CANNON"); actPrompt = true; }
       else if (wheel) {
         hud.setAct("HELM"); actPrompt = true;
@@ -6554,10 +6958,10 @@
       // The merchant breathes.
       s.merchant.position.y = L.ARMORY.y + 0.14 + Math.sin(elapsed * 1.6) * 0.012;
       // Into the halls through the great door or a tower's, walked into.
-      const below = !seated && feet - ground < 0.3 && L.galleryExit(p.x, p.z, feet), inside = below ? `towertop-${below.i}` : grounded && doorAt(p.x, p.z, drivenHere.bodyRadius || 0.4);
+      const below = !seated && feet - ground < 0.3 && L.galleryExit(p.x, p.z, feet), inside = below ? `towertop-${below.i}` : grounded && doorAt(p.x, p.z, drivenHere.bodyRadius || 0.4, feet);
       if (inside) { world.pilot = drivenHere.traits.name; BL.keepAudio.music.handoff(); leaving = go("keephalls", inside); if (leaving) BL.keepLink.handoff(); }
-      // In under the volcano's arch: underground, into its cave.
-      else if (grounded && L.caveAt(p.x, p.z)) { world.pilot = drivenHere.traits.name; BL.keepAudio.music.handoff(); leaving = go("keephalls", "cave"); if (leaving) BL.keepLink.handoff(); }
+      // In under the volcano's arch or Shards' lintel: underground, into its cave.
+      else if (grounded && L.caveAt(p.x, p.z)) { world.pilot = drivenHere.traits.name; BL.keepAudio.music.handoff(); leaving = go("keephalls", L.caveAt(p.x, p.z)); if (leaving) BL.keepLink.handoff(); }
       // Flown in through one of the keep's arches: on into the halls' level where it came in, still in the air.
       else if (!leaving && L.arcadeAt(feet) && Math.hypot(p.x - KEEP.x, p.z - KEEP.z) < KEEP.r - 0.8) {
         world.pilot = drivenHere.traits.name;
@@ -6577,7 +6981,7 @@
   // `from` m off and whole by `full`, on the overlay so the haze never hides it; RED SAILS over Leif's raider is
   // larger (`red`).
   const SKY_NAMES = { from: 70, full: 120, font: "400 14px 'Uncial Antiqua', Georgia, serif", red: "400 28px 'Uncial Antiqua', Georgia, serif", spacing: "1.5px", alpha: 0.5, at: [
-    { name: "PORTAL ISLAND", x: ISLET.x, y: 34, z: ISLET.z }, { name: "CASTLE ISLAND", x: KEEP.x, y: 96, z: KEEP.z }, { name: "CBDC", x: L.VOLCANO.cone.x, y: 62, z: L.VOLCANO.cone.z }, { name: "COLD STORJ", x: L.STORJ.x, y: 84, z: L.STORJ.z }, { name: "THE ARENA", x: L.ARENA_ISLE.x, y: 46, z: L.ARENA_ISLE.z }] };
+    { name: "PORTAL ISLAND", x: ISLET.x, y: 34, z: ISLET.z }, { name: "CASTLE ISLAND", x: KEEP.x, y: 96, z: KEEP.z }, { name: "CBDC", x: L.VOLCANO.cone.x, y: 62, z: L.VOLCANO.cone.z }, { name: "COLD STORJ", x: L.STORJ.x, y: 84, z: L.STORJ.z }, { name: "THE ARENA", x: L.ARENA_ISLE.x, y: 46, z: L.ARENA_ISLE.z }, { name: "SHARDS ISLAND", x: L.SHARDS.x, y: 30, z: L.SHARDS.z }, { name: "OUTPOST ISLAND", x: L.OUTPOST.x, y: 92, z: L.OUTPOST.z }] };
   const SKY_AT = { x: 0, y: 0, depth: 0 };
   const drawSkyNames = (ctx2d) => {
     const eye = camera.position;
@@ -6590,8 +6994,8 @@
       ctx2d.strokeText(n.name, SKY_AT.x, SKY_AT.y); ctx2d.fillText(n.name, SKY_AT.x, SKY_AT.y);
     }
     // And over Leif's raider while his quest wants her found, from nearer to: RED SAILS, in red.
-    const red = scene.redShip;
-    if (red && red.raid.sink < 0 && redWanted()) {
+    if (redWanted()) for (const red of scene.redShips) {
+      if (red.raid.sink >= 0 || red.at.z > 4000) continue;
       const k = clamp((Math.hypot(red.at.x - eye.x, red.at.z - eye.z) - 30) / 30, 0, 1);
       if (k > 0 && renderer.project(red.at.x, L.SEA + 16, red.at.z, SKY_AT)) { ctx2d.font = SKY_NAMES.red; ctx2d.letterSpacing = "3px"; ctx2d.lineWidth = 4; ctx2d.globalAlpha = k * 0.95; ctx2d.fillStyle = "#ff6a5a"; ctx2d.strokeText("RED SAILS", SKY_AT.x, SKY_AT.y); ctx2d.fillText("RED SAILS", SKY_AT.x, SKY_AT.y); }
     }
@@ -6626,6 +7030,7 @@
   const stay = () => { leaving = false; };
 
   const leave = () => {
+    if (scene && scene.cannon) { scene.cannon = null; quests.set("cannon", "tower"); }
     unflash(RENDER_OPTS);
     if (scene && scene.foes) scene.foes.undarken(RENDER_OPTS);
     world.keepState = rules.snapshot();

@@ -243,10 +243,14 @@
   const LANDING_DOOR = { thick: 0.55, half: 1.0, spring: 2.2, deep: 0.35 };
   const TOWER_KINDS = [
     { id: "rookery", name: "Rookery", n: 84 }, { id: "bell", name: "Bell tower", n: 84 }, { id: "clock", name: "Clock tower", n: 84 },
-    { id: "observatory", name: "Observatory", n: 84 }, { id: "battlements", name: "Battlements", n: 112 }, { id: "crown", name: "Crown chamber", n: 112, hidden: true }
+    { id: "observatory", name: "Observatory", n: 84 }, { id: "battlements", name: "Battlements", n: 112 }, { id: "crown", name: "Crown chamber", n: 112, hidden: true },
+    // Outpost Island's (keep-layout.js `OUTPOST.towers`), after the castle's six, in its galleries' order.
+    ...KL.OUTPOST.towers.map((t, j) => ({ id: `outpost-${j}`, name: "Outpost tower", n: t.tall ? 112 : 84, outpost: true }))
   ];
-  const TOWER_SPAN = 160;
-  const TOWERS = TOWER_KINDS.map((k, i) => ({ ...k, i, x: 200 + i * TOWER_SPAN, z: 0, top: k.n * U, tall: k.n > 84 }));
+  // The castle's towers' insides stand `TOWER_SPAN` apart from x 200, the caves past them; Outpost Island's from
+  // `OUTPOST_X`, past the caves.
+  const TOWER_SPAN = 160, CASTLE_TOWERS = 6, OUTPOST_X = 1600;
+  const TOWERS = TOWER_KINDS.map((k, i) => ({ ...k, i, x: i < CASTLE_TOWERS ? 200 + i * TOWER_SPAN : OUTPOST_X + (i - CASTLE_TOWERS) * TOWER_SPAN, z: 0, top: k.n * U, tall: k.n > 84 }));
   // The angle round from the stair's start, 0 to a turn.
   const around = (a) => { const u = (a - A0) % TAU; return u < 0 ? u + TAU : u; };
   // A window lighting each turn of a tower's stair: [angle, sill, height, half].
@@ -300,15 +304,81 @@
   // one side (`lava`); and off its far side three `paths`, each a bearing round the chamber's middle, `path.len` long
   // from `path.from` out, closing in a rockfall: the ways on to caves not yet dug. Its rock is cut in blocks `unit`
   // across (`grid`, the box of them about the mouth), and a body stands and flies in exactly the air those blocks leave.
-  const CAVE = { id: "cave", name: "Volcano Cave", cave: true, x: 200 + TOWER_KINDS.length * TOWER_SPAN, z: 0, unit: 2 * U,
+  const CAVE = { id: "cave", name: "Volcano Cave", cave: true, x: 200 + CASTLE_TOWERS * TOWER_SPAN, z: 0, unit: 2 * U,
     entry: { len: 22, half: 4.5, tall: 6.5, drop: 7.125 }, chamber: { at: 40, r: 18, tall: 12 }, lava: { at: 41, z: 10.5, rx: 7.5, rz: 4.2 },
     paths: [-0.72, 0, 0.72], path: { from: 15.5, len: 14, half: 2.7, tall: 4.6 }, grid: { x0: -4.125, x1: 73.875, z0: -27, z1: 27, y0: -11.25, y1: 8.25 } };
   CAVE.arrive = { x: CAVE.x + 3.6, z: CAVE.z, yaw: Math.PI / 2 };
+  // ---------- Shards' caves ----------
+  // Under Shards (keep-layout.js `SHARDS.mouth`), past the volcano's cave: in from its mouth at `x` toward +x, a
+  // tunnel `entry.len` long sloping `entry.drop` down into a round chamber `chamber.r` across its middle `chamber.at`
+  // in, walled `wall` high under a dome `tall` high; and off it, at each of the `tunnels`' bearings round its middle
+  // (0 straight on, away from the way in), a tunnel `tunnel.len` long, `half` either side and `tall` under its crown,
+  // ending in a round cave `room.r` across, `wall` high under its dome. A torch burns every `torch.every` metres down
+  // each tunnel on its walls by turns, and round the chamber between the tunnels (`torches`, [x, y, z, turn]). The
+  // chamber and the way in are `Shards`; each tunnel and its cave one of `caves`, named for a walker who comes to it.
+  // All of it is cut in blocks `unit` across from the amethyst (keep-halls-models.js `shardsCave`).
+  // Its blocks are the volcano's cave's size, each a step a walker takes up (keep-halls-layout.js `STEP`).
+  const SHARDS_CAVE = { id: "shards", name: "Shards", cave: true, x: CAVE.x + TOWER_SPAN, z: 0, unit: 2 * U,
+    entry: { len: 18, half: 2.6, tall: 6.5, drop: 4.125 }, chamber: { at: 28, r: 10, wall: 4.5, tall: 10.5 }, tunnels: [-2 * Math.PI / 3, -Math.PI / 3, 0, Math.PI / 3, 2 * Math.PI / 3],
+    tunnel: { len: 30, half: 2.0, tall: 5.2 }, room: { r: 5.5, wall: 4, tall: 7.5 }, torch: { every: 6, first: 3, y: 2.4 }, grid: { x0: -6, x1: 81, z0: -47.25, z1: 47.25, y0: -6, y1: 9 } };
+  SHARDS_CAVE.arrive = { x: SHARDS_CAVE.x + 3, z: SHARDS_CAVE.z, yaw: Math.PI / 2 };
+  SHARDS_CAVE.caves = SHARDS_CAVE.tunnels.map((a, i) => ({ id: `shards-${i + 1}`, name: `Shard Cave ${["I", "II", "III", "IV", "V"][i]}`, cave: true, arrive: SHARDS_CAVE.arrive }));
+  SHARDS_CAVE.torches = [];
+  {
+    const C = SHARDS_CAVE, H = C.chamber, P = C.tunnel, deep = -C.entry.drop;
+    C.tunnels.forEach((a, i) => {
+      const cs = Math.cos(a), sn = Math.sin(a);
+      for (let j = 0, along = H.r + C.torch.first; along < H.r + P.len; j++, along += C.torch.every) {
+        const side = j % 2 ? 1 : -1, across = side * (P.half - 0.05), lx = H.at + along * cs - across * sn, lz = along * sn + across * cs;
+        C.torches.push([C.x + lx, deep + C.torch.y, C.z + lz, Math.atan2(side * sn, -side * cs)]);
+      }
+    });
+    for (const deg of [-150, -90, -30, 30, 90, 150]) {
+      const a = deg * Math.PI / 180, r = H.r - 0.3;
+      C.torches.push([C.x + H.at + Math.cos(a) * r, deep + C.torch.y + 0.4, C.z + Math.sin(a) * r, Math.atan2(-Math.cos(a), -Math.sin(a))]);
+    }
+  }
+  const CAVES = [CAVE, SHARDS_CAVE];
   const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
-  const caveNear = (x, z) => x > CAVE.x + CAVE.grid.x0 - 2 && x < CAVE.x + CAVE.grid.x1 + 2 && Math.abs(z - CAVE.z) < CAVE.grid.z1 + 2;
+  /** The cave region (x, z) lies in (the volcano's `CAVE`, Shards' `SHARDS_CAVE`), or null. */
+  const caveNear = (x, z) => {
+    for (let i = 0; i < CAVES.length; i++) { const C = CAVES[i]; if (x > C.x + C.grid.x0 - 2 && x < C.x + C.grid.x1 + 2 && Math.abs(z - C.z) < C.grid.z1 + 2) return C; }
+    return null;
+  };
   // The cave's air over (lx, z) about its mouth, into `CAVE_AIR` (its floor, its roof, whether the floor is lava and
   // which path's end it is by, counted from 1); false in the rock.
   const CAVE_AIR = { floor: 0, ceil: 0, lava: false, end: 0 };
+  /** Which of Shards' caves (lx, z) about its mouth is in, counted from 1, or 0 in the chamber and the way in. */
+  const shardsRoom = (lx, z) => {
+    const C = SHARDS_CAVE, dx = lx - C.chamber.at;
+    if (Math.hypot(dx, z) < C.chamber.r + 0.5) return 0;
+    const a = Math.atan2(z, dx);
+    for (let i = 0; i < C.tunnels.length; i++) { const d = Math.atan2(Math.sin(a - C.tunnels[i]), Math.cos(a - C.tunnels[i])); if (Math.abs(d) < 0.5) return i + 1; }
+    return 0;
+  };
+  const shardsShape = (lx, z) => {
+    const C = SHARDS_CAVE, E = C.entry, H = C.chamber, P = C.tunnel, M = C.room, rough = KL.noise(lx * 0.21 + 37, z * 0.21 + 59) - 0.5, deep = -E.drop;
+    let floor = Infinity, ceil = -Infinity;
+    if (lx > C.grid.x0 + 0.5 && lx < E.len + 2) {
+      const u = clamp01(lx / E.len), half = E.half + rough * 0.4, k = z / half;
+      if (Math.abs(k) < 1) { floor = deep * KL.smooth(u); ceil = floor + E.tall * Math.pow(1 - k * k, 0.42) + rough * 0.5; }
+    }
+    const dx = lx - H.at, r = Math.hypot(dx, z), R = H.r + rough * 0.4;
+    if (r < R) { const k = r / R; floor = Math.min(floor, deep); ceil = Math.max(ceil, deep + H.wall + (H.tall - H.wall) * Math.sqrt(1 - k * k) + rough * 0.8); }
+    for (let i = 0; i < C.tunnels.length; i++) {
+      const a = C.tunnels[i], cs = Math.cos(a), sn = Math.sin(a), along = dx * cs + z * sn, across = z * cs - dx * sn;
+      if (along > H.r - 2 && along < H.r + P.len + 1) {
+        const half = P.half + rough * 0.25, k = across / half;
+        if (Math.abs(k) < 1) { floor = Math.min(floor, deep); ceil = Math.max(ceil, deep + P.tall * Math.pow(1 - k * k, 0.45) + rough * 0.4); }
+      }
+      const rr = Math.hypot(along - (H.r + P.len + M.r - 1), across), RR = M.r + rough * 0.6;
+      if (rr < RR) { const k = rr / RR; floor = Math.min(floor, deep); ceil = Math.max(ceil, deep + M.wall + (M.tall - M.wall) * Math.sqrt(1 - k * k) + rough * 0.6); }
+    }
+    if (floor === Infinity) return false;
+    const u = C.unit;
+    CAVE_AIR.floor = Math.round(floor / u) * u; CAVE_AIR.ceil = Math.round(ceil / u) * u; CAVE_AIR.lava = false; CAVE_AIR.end = 0;
+    return CAVE_AIR.ceil - CAVE_AIR.floor > 0.6;
+  };
   const caveShape = (lx, z) => {
     const C = CAVE, E = C.entry, H = C.chamber, P = C.path, rough = KL.noise(lx * 0.23 + 91, z * 0.23 + 17) - 0.5, deep = -E.drop;
     let floor = Infinity, ceil = -Infinity, end = 0;
@@ -339,9 +409,11 @@
   };
   // The same at any (x, z): the block's whose column it is in, so the air is exactly what the blocks leave.
   const caveAir = (x, z) => {
-    const G = CAVE.grid, u = CAVE.unit, lx = x - CAVE.x, lz = z - CAVE.z;
+    const C = caveNear(x, z);
+    if (!C) return false;
+    const G = C.grid, u = C.unit, lx = x - C.x, lz = z - C.z;
     if (lx < G.x0 || lx >= G.x1 || lz < G.z0 || lz >= G.z1) return false;
-    return caveShape(G.x0 + (Math.floor((lx - G.x0) / u) + 0.5) * u, G.z0 + (Math.floor((lz - G.z0) / u) + 0.5) * u);
+    return (C === CAVE ? caveShape : shardsShape)(G.x0 + (Math.floor((lx - G.x0) / u) + 0.5) * u, G.z0 + (Math.floor((lz - G.z0) / u) + 0.5) * u);
   };
   /** Whether a body with its feet at `feet` stands in the cave's lava at (x, z). */
   const lavaAt = (x, z, feet) => caveNear(x, z) && caveAir(x, z) && CAVE_AIR.lava && feet < CAVE_AIR.floor + 0.6;
@@ -382,7 +454,8 @@
   };
   const inRect = (x, z, x0, x1, z0, z1) => x >= x0 && x < x1 && z >= z0 && z < z1;
   const towerNear = (x, z) => {
-    const i = Math.round((x - 200) / TOWER_SPAN);
+    const i = x < OUTPOST_X - TOWER_SPAN / 2 ? Math.round((x - 200) / TOWER_SPAN) : CASTLE_TOWERS + Math.round((x - OUTPOST_X) / TOWER_SPAN);
+    if (i >= CASTLE_TOWERS && x < OUTPOST_X - TOWER_SPAN / 2) return null;
     if (i < 0 || i >= TOWERS.length) return null;
     const t = TOWERS[i], dx = x - t.x, dz = z - t.z;
     return dx * dx + dz * dz < (RO + 1.6) * (RO + 1.6) ? t : null;
@@ -494,7 +567,9 @@
   const placeAt = (x, z, feet) => {
     const t = towerNear(x, z);
     if (t) return t;
-    if (caveNear(x, z)) return CAVE;
+    const cave = caveNear(x, z);
+    if (cave === SHARDS_CAVE) { const i = shardsRoom(x - cave.x, z - cave.z); return i ? cave.caves[i - 1] : cave; }
+    if (cave) return cave;
     let best = null;
     for (let i = 0; i < ROOMS.length; i++) {
       const r = ROOMS[i];
@@ -517,12 +592,13 @@
       if (Math.abs(tb) < LANDING_DOOR.half && e > -0.45 && e < LANDING_DOOR.deep) return `gallery-${t.i}`;
     }
     // Back out of the cave's mouth.
-    if (caveNear(x, z)) return x - CAVE.x < 0.9 && feet < 2 ? "cave" : null;
+    const cave = caveNear(x, z);
+    if (cave) return x - cave.x < 0.9 && feet < 2 ? cave.id : null;
     if (feet > 1) return null;
     if (t) return z - t.z > RO + 0.35 && Math.abs(x - t.x) < TOWER_DOOR.half ? `tower-${t.i}` : null;
     return z > KC.z + RW - 0.35 && Math.abs(x) < KEEP.door.half ? "door" : null;
   };
 
-  BL.keepHallsLayout = { CAVE, caveNear, caveAir, CAVE_AIR, lavaAt, LEVEL_NAMES, TOWER_PROPS, U, T, STEP, RAIL, LEVELS, ROOF, SKY, K, OUT, KC, R, R_EYE, RW, STAIR, HOLES, ROOMS, ROOM, DOORS, STONES, SEGS, CELLS, WINDOWS, ARCADES, HEARTHS, PROPS, SIZE, BOXES, SEATS, FIRE_AT, HEARTH_AT, BREAST, TOWERS, TOWER_SPAN, RI, RO, R_IN, PER, DT, A0, DOOR_ANGLE, FLOOR_SECTOR, SLAB, DOME, TOWER_DOOR,
+  BL.keepHallsLayout = { CAVE, SHARDS_CAVE, CAVES, shardsRoom, caveNear, caveAir, CAVE_AIR, lavaAt, LEVEL_NAMES, TOWER_PROPS, U, T, STEP, RAIL, LEVELS, ROOF, SKY, K, OUT, KC, R, R_EYE, RW, STAIR, HOLES, ROOMS, ROOM, DOORS, STONES, SEGS, CELLS, WINDOWS, ARCADES, HEARTHS, PROPS, SIZE, BOXES, SEATS, FIRE_AT, HEARTH_AT, BREAST, TOWERS, TOWER_SPAN, RI, RO, R_IN, PER, DT, A0, DOOR_ANGLE, FLOOR_SECTOR, SLAB, DOME, TOWER_DOOR,
     ceilAt, inRoom, archTop, aroundK, treadOf, stairPart, around, columns, supportAt, ceilingAt, clearAt, airAt, placeAt, exitAt, ARRIVE, towerArrive, towerTopArrive, LANDING_DOOR };
 })();
