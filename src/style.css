@@ -1190,7 +1190,7 @@ body[data-active-scene="block"] .mode-hud {
    has it, in a chat too. */
 .cloud-foot-who { display: inline-flex; flex: 1 1 100%; align-items: center; justify-content: center; gap: 10px; min-width: 0; }
 .cloud-foot-who:not(:has(> :not([hidden]):not(:empty))) { display: none; }
-.cloud-foot-actions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
+.cloud-foot-actions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px; }
 .cloud-foot-actions .foot-button { white-space: nowrap; }
 /* Every panel's voice buttons, the island's and Ooga Chat's, at one width, the widest's, so no footer shifts: Mute or
    Unmute (shown and off until in voice) beside Join or Leave voice (and Joining…, Leaving…), wider only for a longer
@@ -1787,8 +1787,9 @@ body[data-active-scene="block"] .mode-hud {
 .players-link[hidden] { display: none; }
 /* In a hosted chat's voice (players.js `call`, call-v1): Ooga Chat's purple cloud where the voice mark would stand. */
 .call-mark { display: inline-flex; }
-/* The island's emoji bar is its room's, so a hosted chat's panel (cloud-panel.js `data-space`) offers none. */
-#cloud-panel[data-space] #cloud-reactions { display: none; }
+/* The island's emoji bar is its room's: with hosted chats on it stands in the list of chats (cloud-panel.js `data-space`,
+   "list"), over the visitor's Ooga as in every other tab, and gives way to the chat's own bar in a chat. */
+#cloud-panel[data-space="on"] #cloud-reactions { display: none; }
 #cloud-panel:not([data-space="on"]) #cloud-chat-reactions { display: none; }
 .call-mark[hidden] { display: none; }
 .call-mark svg { width: 12px; height: 12px; shape-rendering: crispEdges; }
@@ -2139,10 +2140,9 @@ body[data-active-scene="block"] .mode-hud {
   margin-top: 8px;
 }
 
-/* In a panel's foot the card stands as close as Ooga Chat's own panels put it, in every panel of both apps: 8px off the
-   panel's sides (through the island panel's 14px padding) and 6px from the list over it (the foot's own trim, above) and
-   the account row under it. */
-.panel-foot > .reactions { margin: 0 -6px; }
+/* In a panel's foot the card stands at the panel's own padding and gap, in every panel of both apps: 8px off the panel's
+   sides and 6px from the list over it and the account row under it. */
+.panel-foot > .reactions { margin: 0; }
 
 .reactions[hidden] { display: none; }
 
@@ -2159,16 +2159,16 @@ body[data-active-scene="block"] .mode-hud {
   gap: 6px 16px;
 }
 
-/* An island panel's foot with the account in it stands 6px from the list over it and from the panel's edge under it, as
-   in Ooga Chat's panels, through the island panel's 10px gap and bottom padding. */
-.sheet-content > .panel > .panel-foot:has(> .account, > .cloud-foot) { margin-block: -4px; }
+/* The island's panels keep as tight as Ooga Chat's (ooga-chat.css `.oc-panel`): 6px over and under and 8px at the sides,
+   their parts 6px apart, so every slab, the emoji bar and the footer share one width and one margin. */
+.sheet-content > .panel { gap: 6px; padding: 6px 8px; }
 .panel-foot > * { flex: 1 1 100%; min-width: 0; }
 .panel-foot > .account { flex: 1 1 100%; width: auto; }
 
 @container panel-foot (min-width: 960px) {
-  .panel-foot > * { flex: 0 1 auto; margin-top: 8px; }
+  .panel-foot > * { flex: 0 1 auto; }
   .panel-foot > .account { flex: 0 1 auto; }
-  .panel-foot > .reactions { flex-basis: 560px; margin: 8px 0 0; }
+  .panel-foot > .reactions { flex-basis: 560px; }
 }
 
 .reaction-bar {
