@@ -1,5 +1,5 @@
 // The emoji bar, the island's and Ooga Chat's alike (#655, #656), on X Spaces' pattern: a dark card of ten emoji (one row
-// where the panel is wide enough, else one row that scrolls under an edge chevron: style.css `.reactions`) and, past a divider, the raised hand
+// where the panel is wide enough, else one row that scrolls, by drag or under an edge chevron at each end: style.css `.reactions`) and, past a divider, the raised hand
 // pinned beside them. Nothing here reads anything at load but window.BL (the policy and emoji-data.js), so Ooga Chat
 // shares it; `create(net)` makes one set of bars over one connection, the island's net.js (reactions.js) or a page's
 // own of the same shape: `state` ({ me, reactions, room,
@@ -65,6 +65,17 @@
 
     // One bar: the grid of ten, the divider and the hand.
     const bars = [];
+    // Every bar's row stands at the same scroll (`offset`): one that scrolls moves the others, and one shown later (a
+    // tab opened) takes it up as it gets its size. A follower is moved with its snapping held off, since snapping
+    // would round each step of the leader's glide; it snaps again once the visitor reaches for it, from a snap point,
+    // since the leader came to rest on one.
+    let offset = 0;
+    const follow = (g) => {
+      if (Math.abs(g.scrollLeft - offset) < 1) return;
+      g.style.scrollSnapType = "none";
+      g.scrollLeft = offset;
+    };
+    const lead = (g) => { if (g.style.scrollSnapType) g.style.scrollSnapType = ""; };
     const makeBar = (host, handAllowed = null) => {
       const card = document.createElement("div"), grid = document.createElement("div"), divider = document.createElement("span"), hand = document.createElement("button");
       card.className = "reaction-bar"; card.setAttribute("role", "group"); card.setAttribute("aria-label", "Reactions");
@@ -79,29 +90,82 @@
       hand.dataset.slot = String(PERSISTENT);
       hand.type = "button"; hand.className = "reaction reaction-hand"; hand.setAttribute("aria-pressed", "false");
       // Where the bar is too narrow for the ten in a row (style.css: one row that scrolls), the row fades into the
-      // card's edge under a chevron while more lie to its right: a press scrolls on, a wheel scrolls it sideways.
-      const scroller = document.createElement("div"), more = document.createElement("button");
+      // card's edge under a chevron at each end that has more beyond it: a press pages that way, a wheel scrolls it
+      // sideways, and a mouse drags it as a finger does (the click that ends a drag is swallowed by the long press's
+      // move rule below).
+      const scroller = document.createElement("div"), more = document.createElement("button"), back = document.createElement("button");
       scroller.className = "reaction-scroll";
       more.type = "button"; more.className = "reaction-more"; more.hidden = true;
       more.setAttribute("aria-label", "More reactions");
       more.title = "More reactions";
       more.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
-      scroller.append(grid, more);
+      back.type = "button"; back.className = "reaction-more reaction-back"; back.hidden = true;
+      back.setAttribute("aria-label", "Earlier reactions");
+      back.title = "Earlier reactions";
+      back.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
+      scroller.append(grid, back, more);
       const overflow = () => grid.scrollWidth - grid.clientWidth;
-      const syncMore = () => { const hide = overflow() - grid.scrollLeft < 4; if (more.hidden !== hide) more.hidden = hide; };
-      grid.addEventListener("scroll", syncMore, { passive: true });
-      if (typeof ResizeObserver === "function") new ResizeObserver(syncMore).observe(grid);
-      more.addEventListener("click", () => {
-        grid.scrollBy({ left: grid.clientWidth * 0.8, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-      });
+      const syncMore = () => {
+        const end = overflow() - grid.scrollLeft < 4, start = grid.scrollLeft < 4;
+        if (more.hidden !== end) more.hidden = end;
+        if (back.hidden !== start) back.hidden = start;
+      };
+      grid.addEventListener("scroll", () => {
+        syncMore();
+        // A follower's own scroll (or one clamped short by a narrower row) is never passed back.
+        if (grid.style.scrollSnapType === "none" || Math.abs(grid.scrollLeft - offset) < 1 || !grid.clientWidth) return;
+        offset = grid.scrollLeft;
+        for (const other of bars) if (other.grid !== grid) follow(other.grid);
+      }, { passive: true });
+      if (typeof ResizeObserver === "function") new ResizeObserver(() => { follow(grid); syncMore(); }).observe(grid);
+      for (const type of ["pointerdown", "focusin"]) scroller.addEventListener(type, () => lead(grid));
+      const page = (dir) => grid.scrollBy({ left: dir * grid.clientWidth * 0.8, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      more.addEventListener("click", () => page(1));
+      back.addEventListener("click", () => page(-1));
       grid.addEventListener("wheel", (e) => {
+        lead(grid);
         if (overflow() < 4 || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
         e.preventDefault();
         grid.scrollLeft += e.deltaY;
       }, { passive: false });
+      // A mouse or pen drag (touch scrolls natively): past MOVE_PX the row follows the pointer with snapping held off,
+      // and on letting go it settles on the nearest cell, or on either end within half a cell of it. A press let go
+      // off the row before it dragged (never captured, so its pointerup went elsewhere) is dropped on its next move
+      // here, with the button no longer held.
+      let dragPointer = null, dragX = 0, dragLeft = 0, dragging = false;
+      grid.addEventListener("pointerdown", (e) => {
+        if (e.pointerType === "touch" || e.button !== 0 || e.isPrimary === false || overflow() < 4) return;
+        dragPointer = e.pointerId; dragX = e.clientX; dragLeft = grid.scrollLeft; dragging = false;
+      });
+      grid.addEventListener("pointermove", (e) => {
+        if (e.pointerId !== dragPointer) return;
+        if (!(e.buttons & 1)) { if (!dragging) dragPointer = null; return; }
+        const dx = e.clientX - dragX;
+        if (!dragging) {
+          if (Math.abs(dx) <= MOVE_PX) return;
+          dragging = true;
+          grid.dataset.dragging = "true";
+          grid.setPointerCapture(e.pointerId);
+        }
+        grid.scrollLeft = dragLeft - dx;
+      });
+      const endDrag = (e) => {
+        if (e.pointerId !== dragPointer) return;
+        dragPointer = null;
+        if (!dragging) return;
+        dragging = false;
+        const step = buttons[0].offsetWidth + (parseFloat(getComputedStyle(grid).columnGap) || 0);
+        const left = grid.scrollLeft;
+        delete grid.dataset.dragging;
+        grid.scrollLeft = left;
+        const max = overflow(), target = max - left < step / 2 ? max : left < step / 2 ? 0 : Math.round(left / step) * step;
+        if (step > 0) grid.scrollTo({ left: target, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      };
+      grid.addEventListener("pointerup", endDrag);
+      grid.addEventListener("pointercancel", endDrag);
       card.append(scroller, divider, hand);
       host.append(card);
-      const bar = { host, card, buttons, hand, handAllowed };
+      const bar = { host, card, grid, buttons, hand, handAllowed };
       bars.push(bar);
       return bar;
     };
