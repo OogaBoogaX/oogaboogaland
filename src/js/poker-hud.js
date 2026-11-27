@@ -62,6 +62,56 @@
     const soundChannel = BL.sound.channel("poker");
     let snapshot = null, lastIndex = -1, lastHand = -1, turnKey = "", focused = false, paused = false, audio = null, lastClock = null, lastHistory = "";
     let live = null;
+    const chairButton=by("chair-view"), look=by("chair-look");
+    let chairView=false, chairYaw=0, chairPitch=-.32, pointer=-1, lastX=0, lastY=0;
+    let inspectedChair=-1;
+    const chairPlayer=by("chair-player");
+    const showChairPlayer=seat=>{
+      if(seat===inspectedChair)return;
+      inspectedChair=seat;
+      const p=snapshot?.seats[seat];
+      chairPlayer.hidden=!p;
+      if(!p)return;
+      const cards=snapshot.result?.revealed && p.inHand && !p.folded && p.cards.length===2 && p.cards.every(Number.isInteger)
+        ? " · "+p.cards.map(R.cardName).join(" ") : "";
+      chairPlayer.textContent=p.name+" · "+chips(p.stack)+" chips"+(p.lastAction?" · "+p.lastAction:"")+cards;
+    };
+    const setChairView=on=>{
+      chairView=on;chairYaw=0;chairPitch=-.32;inspectedChair=-1;chairPlayer.hidden=true;
+      if(pointer>=0 && look.hasPointerCapture(pointer))look.releasePointerCapture(pointer);
+      pointer=-1;look.hidden=!on;
+      el.toggleAttribute("data-chair-view",on);
+      chairButton.setAttribute("aria-pressed",String(on));
+      if(on)look.focus({preventScroll:true});
+    };
+    const aimChair=(dx,dy)=>{
+      chairYaw=BL.math.clamp(chairYaw+dx,-2.4,2.4);
+      chairPitch=BL.math.clamp(chairPitch+dy,-.95,.52);
+    };
+    const lookStart=e=>{
+      if(e.button!==0 || pointer!==-1)return;
+      pointer=e.pointerId;lastX=e.clientX;lastY=e.clientY;look.setPointerCapture(pointer);
+    };
+    const lookMove=e=>{
+      if(e.pointerId!==pointer)return;
+      const scale=1.6/Math.max(180,look.clientWidth);
+      aimChair((lastX-e.clientX)*scale,(e.clientY-lastY)*scale);
+      lastX=e.clientX;lastY=e.clientY;
+    };
+    const lookEnd=()=>{pointer=-1;};
+    const lookKey=e=>{
+      switch(e.key){
+        case "ArrowLeft":aimChair(-.12,0);break;
+        case "ArrowRight":aimChair(.12,0);break;
+        case "ArrowUp":aimChair(0,.08);break;
+        case "ArrowDown":aimChair(0,-.08);break;
+        case "Home":chairYaw=0;chairPitch=-.32;break;
+        default:return;
+      }
+      e.preventDefault();e.stopPropagation();
+    };
+    look.addEventListener("pointerdown",lookStart);look.addEventListener("pointermove",lookMove);
+    look.addEventListener("lostpointercapture",lookEnd);look.addEventListener("keydown",lookKey);
     let filter = "all", viewBusy = false, lastLog = "", viewerId = null;
     const filterButtons = Array.from(el.querySelectorAll("[data-poker-filter]"));
     const dealer = el.querySelector(".poker-dealer"), endDeal = () => { dealTimer = 0; dealer.removeAttribute("data-dealing"); };
@@ -278,6 +328,7 @@
       else if (b.dataset.poker === "confirm-leave" && leaveDialog.open) {
         leaveDialog.close(); if (viewerId && snapshot.hand === leaveHand) action("depart");
       } else if (b.dataset.pokerAction === "walk") requestWalk();
+      else if (b===chairButton) setChairView(!chairView);
       else if (b.dataset.poker === "tools") openSheet("history");
       else if (b.dataset.poker === "close-sheet") closeSheet();
       else if (b.dataset.sheet) openSheet(b.dataset.sheet);
@@ -317,7 +368,7 @@
       const leaving = focused && !value;
       focused = !!value; focus.hidden = !focused; lobby.hidden = edge.hidden = focused;
       // The emote menu goes with the table view, however it was left (Walk the floor from the keyboard presses nothing outside it).
-      if (!focused) { if (leaveDialog.open) leaveDialog.close(); closeEmoteMenu(); closeSheet(); }
+      if (!focused) { setChairView(false); if (leaveDialog.open) leaveDialog.close(); closeEmoteMenu(); closeSheet(); }
       else if (snapshot && lastIndex >= 0) era.update(lastIndex,true);
       el.dataset.tableView = String(focused);
       if (focused) { document.body.dataset.pokerTableView = "true"; by("title").focus({ preventScroll: true }); }
@@ -330,6 +381,9 @@
       era.update(index,focused);
       if (leaveDialog.open && (switched || !own || leaveHand !== s.hand)) leaveDialog.close();
       viewerId = viewer;
+      if(chairView)inspectedChair=-2;
+      chairButton.hidden=index!==BL.pokerModels.LIGHTNING || !own || pendingStand;
+      if(chairView && chairButton.hidden)setChairView(false);
       by("voice-label").textContent = `Table ${index + 1} voice · spectators welcome`;
       const blocked = viewBusy || !!live && (live.busy || live.connection !== "live");
       paused = isPaused; const idle = (s.phase === "waiting" || s.phase === "showdown") && (!live || ["idle", "complete", "aborted"].includes(s.fairPhase)), fresh = switched || s.hand !== lastHand;
@@ -495,8 +549,10 @@
     const nowPlaying = text => { nowLine.hidden = text === null; if (text !== null && nowLine.textContent !== text) nowLine.textContent = text; };
     // The dealer's face, painted once a visit from the room's own gorilla (every table's dealer looks the same).
     const setDealer = agent => BL.hud.renderFaceIcon(by("dealer-face"), null, agent, 144);
-    return { update, countdown, requestWalk, setFocused, setLive, setDealer, setEmoteAvailable, closeEmoteMenu, showEmote, carry, nowPlaying, setConnecting(value) { viewBusy = !!value; setLive(live); }, notice: noticeText, get focused() { return focused; }, dispose() {
+    return { showChairPlayer, get chairView(){return chairView;}, get chairYaw(){return chairYaw;}, get chairPitch(){return chairPitch;}, update, countdown, requestWalk, setFocused, setLive, setDealer, setEmoteAvailable, closeEmoteMenu, showEmote, carry, nowPlaying, setConnecting(value) { viewBusy = !!value; setLive(live); }, notice: noticeText, get focused() { return focused; }, dispose() {
       if (leaveDialog.open) leaveDialog.close(); closeSheet(); phone.removeEventListener("change",seatButtons); sheet.removeEventListener("cancel",cancelSheet);
+      look.removeEventListener("pointerdown",lookStart);look.removeEventListener("pointermove",lookMove);
+      look.removeEventListener("lostpointercapture",lookEnd);look.removeEventListener("keydown",lookKey);
       delete el.dataset.pokerEra;
       carry(null); nowPlaying(null);
       clearTimeout(dealTimer); endDeal();

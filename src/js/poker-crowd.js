@@ -302,7 +302,7 @@
   // `hand`, `winner` and `allIn`, nothing else. The lounges' seats (`lounge` spots) hold residents, outside the cap:
   // one a seat (on the lite set the sofas' seats only), seated for good, sipping and watching the room. The smokers
   // among the members (`traits.outfit.cigar`) each carry a `smoke` batch.
-  const create = ({ root, fx, walkable, spots, publicState, others, day, cap, onStep = null, visitor = null, lite = false }) => {
+  const create = ({ root, fx, walkable, spots, publicState, others, day, cap, onStep = null, visitor = null, arrival = false, lite = false }) => {
     const C = BL.pokerCrowdModels, M = BL.models, Cr = BL.crew, GAIT = Cr.GAIT, TYPES = C.TYPES, LINES = C.LINES, Mth = BL.math;
     const TABLE_N = BL.pokerModels.TABLES.length;
     const paths = router(walkable), cast = C.castFor(day, Infinity);
@@ -469,6 +469,14 @@
         if(pickup){
           standAt(m,pickup); m.job="serve"; m.loop=1;
           settle(m,pickup.yaw,"serve",SERVE); return;
+        }
+      }
+      // One arriving guest crosses the sightline to the near dealer, then joins the ordinary rail crowd.
+      if(arrival && m.rig==="caveman"){
+        arrival=false;
+        const rail=nearest(railsBy[1],13,26);
+        if(rail && walkable(7.4,27.8,7.4,27.8,0,2,LEG)){
+          place(m,7.4,27.8,0);go(m,rail);return;
         }
       }
       if(m.rig==="caveman"){

@@ -37654,6 +37654,33 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
     await b.screenshot(join(process.env.POKER_SHOTS, "poker-floor.png"));
   }
 } }, pokerTellsStep, pokerTrip, pokerGloss] });
+scene("poker", { label: "chandeliers", query: "character=portlandhodl", steps: [{ name: "Ember Den block lighting", why: "regression: one socket block travels from the hourglass to the vault and fades on wall time, also in reduced motion", run: async b => {
+  await b.evaluate(`document.querySelector('[data-intro="poker"] .game-intro-go').click()`);
+  const show = await b.evaluate(`(() => {
+    const p = BL.scenes.poker.debug.poker, room = p.room, originalNow = Date.now, originalCalm = p.calm;
+    let now = Date.now(), height = Math.max(977750, room.hall.clock.height || 0);
+    const block = () => BL.mempool.parse(JSON.stringify({block:{height:++height,id:height.toString(16).padStart(64,"0")}}));
+    const sample = time => {
+      now = time;
+      __ooga.advance(.05,1/30);
+      return room.sparkle.reduce((mask,n) => n.geometry === n.amber ? mask | (1 << n.fixture) : mask,0);
+    };
+    try {
+      Date.now = () => now;
+      p.calm = false;
+      const start = now;
+      block(); sample(start);
+      const stages = [350,1150,4300,14600,15020].map(ms => sample(start + ms));
+      const dark = room.rays.every(n => !n.visible);
+      p.calm = true;
+      const next = now;
+      block(); sample(next);
+      return {stages, dark, calm:sample(next+350), end:sample(next+15020)};
+    } finally {Date.now = originalNow; p.calm = originalCalm;}
+  })()`);
+  record("poker lighting: three chandeliers light in order, hold into the last second, and clear on time", show.stages.join() === "4,6,7,7,0" && show.dark, JSON.stringify(show));
+  record("poker lighting: reduced motion lights all three fixtures together and ends on time", show.calm === 7 && show.end === 0, JSON.stringify(show));
+} }] });
 scene("poker", { label: "salons", query: "character=portlandhodl", steps: [{ name: "Ember Den room keys and return trips", why: "playthrough: use the room controls at walking height and revisit with the saved keys", run: async b => {
   await b.evaluate(`document.querySelector('[data-intro="poker"] .game-intro-go').click()`);
   const route = await b.evaluate(`(() => {
@@ -41668,6 +41695,16 @@ const pokerChecks = (BL) => {
       sample.height--; tick(0,5002); sample.height++; tick(0,5003);
       record("poker block clock: the first reading, duplicate and replay stay quiet; an advancing tip sets the displayed height and triggers one three-second event",
         quiet && lit && once && bells === 1 && clock.root.scale.x === 2 && clock.root.scale.y === 2 && clock.root.scale.z === 2);
+      const feed = BL.mempool;
+      try {
+        const socket = { connected: false, height: sample.height };
+        BL.mempool = { state: socket };
+        sample.height--; tick(0,5004);
+        const fallback = clock.height;
+        socket.connected = true; tick(0,5005);
+        record("poker block clock: reconnecting after a lagging fallback restores the socket height without a second chime",
+          fallback === sample.height && clock.height === socket.height && bells === 1);
+      } finally { BL.mempool = feed; }
       record("poker diamonds: three fixtures share their orange cuts and seven subtle rays each; the rays have no idle draw",
         new Set(room.sparkle.map(n=>n.amber)).size === 4 && room.sparkle.every(n=>n.amber.verts===n.prism.verts) &&
         room.rays.length === 21 && room.rays.every(n=>!n.visible && n.geometry.glass<0.1 && n.geometry.lightBeam>0));
@@ -48382,7 +48419,8 @@ const raceRigChecks = async () => {
     // Valhodl's wand charge adds uRelit and up to eight relit upright cylinders (uRelitCount, uRelitA, uRelitTop),
     // which keep the Ooga and the enemies near it lit while the land darkens (was 00d52eb4); the loop ends at once
     // with uRelitCount 0, as it is in every other scene and moment, so ordinary output is unchanged.
-    "58fe75f930579e85f2d4514bc115ec1e70a5568b3d46389249e3b2ba8b72e981",
+    // The casino chandeliers add a round-beam path to the glass shader. Flat shafts keep the axial fade.
+    "cbc0576a851f80ca74cd24c77db4bf5f3e13f1b1a81a93fac1cd79975b44ade9",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));

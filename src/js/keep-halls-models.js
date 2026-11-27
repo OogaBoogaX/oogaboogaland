@@ -795,7 +795,9 @@
     for (const s of [-1, 1]) { const a = A0 + FLOOR_SECTOR / 2 + s * 0.3, r = RI - 0.05; out.push([Math.cos(a) * r, H + 2.4, Math.sin(a) * r, 8, WARM, Math.atan2(-Math.cos(a), -Math.sin(a)), "torch"]); }
     return out.map((l) => [l[0] + t.x, l[1], l[2] + t.z, l[3], l[4], l[5], l[6]]);
   };
-  const lamps = cached(() => [...HALL_LAMPS, ...TOWERS.flatMap(towerLamps)]);
+  // Shards' caves': a torch on each of its places (keep-halls-layout.js `SHARDS_CAVE.torches`), reaching down the
+  // tunnel to the next.
+  const lamps = cached(() => [...HALL_LAMPS, ...TOWERS.flatMap(towerLamps), ...HL.SHARDS_CAVE.torches.map(([x, y, z, turnBy]) => wall(x, y, z, turnBy, 8.5))]);
 
   // ---------- out of the doors ----------
   // What a door shows of the night outside it, a quad facing back in: the yard's flags and the curtain over them with a
@@ -812,8 +814,11 @@
   // from the layout's own air, so what is drawn is what is walked: dark basalt banded with rust, a cinder floor, the
   // pool's lava, cracks glowing in the way in's walls, and at each path's rockfall a glow of its own colour.
   const CAVE_RGB = [null, "#0e0d0f", "#1b1a1d", "#232125", "#151417", "#3a221c", "#2a2422", "#ff5a14", "#ff7a22", "#3ad6c0", "#b06aff"].map((c) => c && BL.math.hexToRgb(c));
-  const cave = cachedSteps(function* (slice = null) {
-    const C = HL.CAVE, G = C.grid, u = C.unit, sx = Math.round((G.x1 - G.x0) / u), sy = Math.round((G.y1 - G.y0) / u), sz = Math.round((G.z1 - G.z0) / u), g = T.makeGrid(sx, sy, sz), d = g.data;
+  // A cave region (keep-halls-layout.js `CAVES`) carved out of solid blocks from the layout's own air: `kindOf` names
+  // each column of air from `HL.CAVE_AIR`, `floorOf` and `roofOf` the block under and over it by that, and `wallOf`
+  // every block of wall beside another column's air.
+  const carveCave = function* (C, palette, kindOf, floorOf, roofOf, wallOf, slice) {
+    const G = C.grid, u = C.unit, sx = Math.round((G.x1 - G.x0) / u), sy = Math.round((G.y1 - G.y0) / u), sz = Math.round((G.z1 - G.z0) / u), g = T.makeGrid(sx, sy, sz), d = g.data;
     const lo = new Int16Array(sx * sz), hi = new Int16Array(sx * sz), kind = new Uint8Array(sx * sz);
     d.fill(1);
     for (let x = 0; x < sx; x++) {
@@ -822,36 +827,61 @@
         const c = x * sz + z;
         if (!HL.caveAir(C.x + G.x0 + (x + 0.5) * u, C.z + G.z0 + (z + 0.5) * u)) { lo[c] = hi[c] = 0; continue; }
         const A = HL.CAVE_AIR;
-        lo[c] = Math.max(1, Math.round((A.floor - G.y0) / u)); hi[c] = Math.min(sy - 1, Math.round((A.ceil - G.y0) / u)); kind[c] = A.lava ? 1 : A.end ? 1 + A.end : 0;
+        lo[c] = Math.max(1, Math.round((A.floor - G.y0) / u)); hi[c] = Math.min(sy - 1, Math.round((A.ceil - G.y0) / u)); kind[c] = kindOf(A);
         for (let y = lo[c]; y < hi[c]; y++) d[(x * sy + y) * sz + z] = 0;
       }
     }
     // The stone that shows: under each floor, over each roof, and every wall beside the air.
-    const wall = (x, y, z) => (y + (x >> 3) + (z >> 3)) % 9 < 2 ? 5 : 2 + ((y >> 1) + (x >> 2)) % 3;
     for (let x = 0; x < sx; x++) {
       if ((x & 7) === 0) yield* pause(slice);
       for (let z = 0; z < sz; z++) {
         const c = x * sz + z;
-        if (hi[c] > lo[c]) { d[(x * sy + lo[c] - 1) * sz + z] = kind[c] === 1 ? 7 : 6; d[(x * sy + hi[c]) * sz + z] = 4; }
+        if (hi[c] > lo[c]) { d[(x * sy + lo[c] - 1) * sz + z] = floorOf(kind[c], x, z); d[(x * sy + hi[c]) * sz + z] = roofOf(x, z); }
         for (const [ax, az] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
           const nx = x + ax, nz = z + az;
           if (nx < 0 || nx >= sx || nz < 0 || nz >= sz) continue;
           const n = nx * sz + nz;
           for (let y = lo[n]; y < hi[n]; y++) {
             if (y >= lo[c] && y < hi[c]) continue;
-            const i = (x * sy + y) * sz + z, f = hash3(x, y, z), lx = G.x0 + (x + 0.5) * u;
-            // A path's rockfall glows through its gaps; the way in's walls are cracked with fire low down.
-            d[i] = kind[n] > 1 && f < 0.3 ? 6 + kind[n] : lx > 5 && lx < 19 && y - lo[n] < 5 && f < 0.07 ? 8 : wall(x, y, z);
+            d[(x * sy + y) * sz + z] = wallOf(x, y, z, kind[n], y - lo[n], G.x0 + (x + 0.5) * u);
           }
         }
       }
     }
-    const geo = yield* T.gridGeometrySteps(g, { unit: u, palette: CAVE_RGB, origin: { x: C.x + G.x0, y: G.y0, z: C.z + G.z0 } }, slice);
+    return yield* T.gridGeometrySteps(g, { unit: u, palette, origin: { x: C.x + G.x0, y: G.y0, z: C.z + G.z0 } }, slice);
+  };
+  // The basalt of a cave's walls, banded with rust.
+  const basalt = (x, y, z) => (y + (x >> 3) + (z >> 3)) % 9 < 2 ? 5 : 2 + ((y >> 1) + (x >> 2)) % 3;
+  const cave = cachedSteps(function* (slice = null) {
+    const geo = yield* carveCave(HL.CAVE, CAVE_RGB, (A) => A.lava ? 1 : A.end ? 1 + A.end : 0, (k) => k === 1 ? 7 : 6, () => 4,
+      // A path's rockfall glows through its gaps; the way in's walls are cracked with fire low down.
+      (x, y, z, k, up, lx) => { const f = hash3(x, y, z); return k > 1 && f < 0.3 ? 6 + k : lx > 5 && lx < 19 && up < 5 && f < 0.07 ? 8 : basalt(x, y, z); }, slice);
     for (const f of geo.faces) {
       if (f.color === CAVE_RGB[7]) { f.water = "lava"; f.emissive = 0.6; }
       else if (f.color === CAVE_RGB[8] || f.color === CAVE_RGB[9] || f.color === CAVE_RGB[10]) f.emissive = 0.85;
     }
     return geo;
+  });
+  // Shards' caves (keep-halls-layout.js `SHARDS_CAVE`), the same way and in the same dark basalt over a cinder floor.
+  const shardsCave = cachedSteps(function* (slice = null) {
+    return yield* carveCave(HL.SHARDS_CAVE, CAVE_RGB, () => 0, () => 6, () => 4, basalt, slice);
+  });
+  // A cluster of Merge Rock's quartz (repo-island-models.js `quartz`) standing in the middle of Shards' chamber and of
+  // each of its caves, lit from within, as the island's own are (keep-models.js `shardsCrystals`); WebGL alone.
+  const shardsCaveCrystals = cached(() => {
+    const RM = BL.repoIslandModels, C = HL.SHARDS_CAVE, H = C.chamber, P = C.tunnel, M = C.room, deep = -C.entry.drop, g = { verts: [], faces: [], lines: [] };
+    const light = [RM.CORE[1], RM.CORE[0], RM.CORE[2], RM.CORE[1]], hues = RM.HUES.map((h) => h.map((c, i) => c.map((v, ch) => v + (light[i][ch] - v) * 0.5)));
+    const sites = [[C.x + H.at, C.z, 1.6], ...C.tunnels.map((a) => { const d = H.r + P.len + M.r - 1; return [C.x + H.at + Math.cos(a) * d, C.z + Math.sin(a) * d, 1.1]; })];
+    sites.forEach(([x, z, size], k) => {
+      const rand = BL.math.mulberry32(BL.math.fnv1a(`shards-cave/${k}`)), hue = hues[k % hues.length], len = 1.4 + 2.2 * size, r = 0.18 + 0.2 * size;
+      RM.quartz(g, x, deep, z, 0, 1, 0, r, len, hue, rand, 6, 0.45);
+      for (let m = 0; m < 7; m++) {
+        const turn = m / 7 * TAU + rand() * 0.5, off = r * (1.2 + rand()), ox = Math.cos(turn), oz = Math.sin(turn), tilt = 0.35 + rand() * 0.5;
+        RM.quartz(g, x + ox * off, deep, z + oz * off, ox * tilt, 1, oz * tilt, r * (0.4 + rand() * 0.3), len * (0.3 + rand() * 0.4), hue, rand, 6, 0.45);
+      }
+    });
+    g.glass = RM.CRYSTAL.glass;
+    return models.noShadow(g);
   });
   const buildSteps = function* () {
     yield* BL.keepModels.buildSteps();
@@ -863,10 +893,12 @@
     yield* towerInside(0).steps(slice);
     yield* towerInside(1).steps(slice);
     yield* cave.steps(slice);
+    yield* shardsCave.steps(slice);
+    if (BL.repoIslandModels) { yield* pause(slice); shardsCaveCrystals(); }
     for (const p of HL.PROPS) { yield* pause(slice); prop(p); }
     for (const t of TOWERS) for (const [k, x, z, turnBy] of t.props) { yield* pause(slice); prop({ k, x, z, turn: turnBy }); }
     lamps(); torch(); floatCandle();
   };
 
-  BL.keepHallsModels = { cave, HEX, buildSteps, halls, liner, floors, towerLiner, towerInside, prop, torch, FLAME, lamps, glimpse, floatCandle };
+  BL.keepHallsModels = { cave, shardsCave, shardsCaveCrystals, HEX, buildSteps, halls, liner, floors, towerLiner, towerInside, prop, torch, FLAME, lamps, glimpse, floatCandle };
 })();

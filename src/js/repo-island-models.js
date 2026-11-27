@@ -807,5 +807,5 @@
     return result;
   };
 
-  BL.repoIslandModels = { ISLE, LIP, BRIDGE, PLAN, TIERS, CHUNK, STYLES, GROUND, CRYSTAL, crystals, gem, plan, designFor, pathAt, spot, rockSteps, bridge, signs, boardLines, nameBoard, chunkSteps, without };
+  BL.repoIslandModels = { ISLE, LIP, BRIDGE, PLAN, TIERS, CHUNK, STYLES, GROUND, CRYSTAL, HUES, CORE, quartz, crystals, gem, plan, designFor, pathAt, spot, rockSteps, bridge, signs, boardLines, nameBoard, chunkSteps, without };
 })();
