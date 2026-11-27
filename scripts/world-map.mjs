@@ -32,7 +32,8 @@ const WINDOW_PLACES = {
   dsb: { land: "dsb", zones: ["dsb-outside", "dsb-transit"] },
   poker: { land: "ember", zones: ["emberden", "ember-den"], path: "emberden", blurb: "A poker room of ten tables by the fire, reached through ₿IFRÖST.",
     objects: [{ cls: "Service", name: "poker service", note: "its tables run on a service of their own, not a Durable Object" }] },
-  keep: { land: "keep", zones: ["byzantine-keep", "byzantine-keep.halls"], frames: ["keep-yard", "keep-halls"], blurb: "Valhodl: islands in a dark sea under a night sky, reached through ₿IFRÖST: Portal Island, a rowboat over to Castle Island and its keep, the Shipyard, the Armory & Forge, CBDC, Shards and Outpost Island.",
+  keep: { land: "keep", zones: ["byzantine-keep"], path: "valhodl", frames: ["keep-yard"],
+    inside: { id: "keep-halls", name: "The Keep", via: "great door", path: "valhodl-keep", frames: ["keep-halls"] }, blurb: "Valhodl: islands in a dark sea under a night sky, reached through ₿IFRÖST: Portal Island, a rowboat over to Castle Island and its keep, the Shipyard, the Armory & Forge, CBDC, Shards and Outpost Island.",
     objects: [{ cls: "GameHost", prefix: "keep:" }] }
 };
 // The carnival machines' names (arcade-games.js keeps them inside each game's code).
@@ -103,7 +104,10 @@ export const buildTree = (BL = load()) => {
       });
       return node("dsb", w.name, { ...fields, ...at("dsb"), open: true, tint: w.tint, children: venues });
     }
-    return node(w.id, w.name, place.path ? { ...fields, ...href(place.path) } : fields);
+    // A land's inside with an address of its own (Valhodl's keep), under the land.
+    const inside = place.inside && node(place.inside.id, place.inside.name, { kind: "room", land: place.land, via: place.inside.via,
+      zones: [...new Set(place.inside.frames.flatMap((set) => zoneMap.FRAME_SETS[set].map((f) => f.zone)))], ...at(place.inside.path) });
+    return node(w.id, w.name, { ...fields, ...(place.path ? href(place.path) : {}), ...(inside ? { children: [inside] } : {}) });
   });
   const directory = caveDirectory.registry.entries.filter((e) => e.status === "open")
     .map((e) => node(`site-${e.id}`, e.name, { kind: "external", land: "external", via: "link", href: e.url, external: true, blurb: e.description }));
