@@ -19836,6 +19836,14 @@ const adaptiveQualityChecks = async () => {
   record("adaptive quality: warmup, transitions, a scene readying the next, background frames and isolated spikes do not lower quality", r.warmup && r.ignoresPauses && r.ignoresSpikes && r.fallback, JSON.stringify(r));
   record("adaptive quality: steps one tier at a time and stops at the lowest", r.bounded, JSON.stringify(r));
   record("adaptive quality: boot cost seeds the opening tier, only ever downward", r.bootFast && r.bootMedium && r.bootLow && r.bootOneWay && r.bootKeepsCoarse && r.bootMemory && r.memoryBoot, JSON.stringify(r));
+  const context = { window: { BL: { models: { particleGeometry: () => ({}) }, scene: {} } } };
+  runInNewContext(await readFile(join(root, "src/js/fx.js"), "utf8"), context);
+  const BL = context.window.BL;
+  const check = (ok, message) => record(`overlay: ${message}`, ok);
+  const capped = BL.fx.overlayDpr(3840, 2160, 2, 1.5);
+  check(Math.abs(3840 * 2160 * capped * capped - 2.6e6) < 1, "Overlay exceeds the pixel budget");
+  check(BL.fx.overlayDpr(390, 844, 3, 1.25) === 1.25, "Overlay ignores the tier DPR");
+  check(BL.fx.overlayDpr(390, 844, 3, 1.5) === 1.5, "Overlay ignores the device DPR");
 };
 // ---- Scenes ----
 // A scene is the unit of testing: one Chrome session running that scene's steps, side by side with the

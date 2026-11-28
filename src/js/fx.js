@@ -14,6 +14,9 @@
   const CONFETTI = ["#d8892b", "#22c55e", "#6f9fca", "#f3efe4", "#f5c542"].map((c) => models.particleGeometry(c, 0.09, 0.6));
   const SMOKE_TRAIL = models.particleGeometry("#c9cbce", 0.09, 0.15);
   const SCREEN = { x: 0, y: 0, depth: 0 };
+  const OVERLAY_PIXELS = 2.6e6;
+  const overlayDpr = (width, height, deviceDpr, tierDpr) => Math.min(deviceDpr, tierDpr,
+    Math.sqrt(OVERLAY_PIXELS / Math.max(1, width * height)));
   // Sleep marks span 11px to 23px, so the whole font range is a fixed table instead of per-frame strings.
   const ZZZ_FONTS = [];
   for (let size = 11; size <= 23; size++) ZZZ_FONTS[size] = `${size}px ui-monospace, monospace`;
@@ -295,7 +298,7 @@
       if (tickerVisible && !tickerVisible()) { ticker = null; return; }
       ticker = { text, t: 0, dur, image: null, dpr: 0 };
     };
-    let overlayW = 0, overlayH = 0, overlayDpr = 1;
+    let overlayW = 0, overlayH = 0, overlayRatio = 1;
     // The overlay's CSS size, read on resize rather than every frame: a per-frame read forces layout after the HUD writes.
     let cssW = overlay.clientWidth, cssH = overlay.clientHeight;
     const sizeObserver = new ResizeObserver(() => {
@@ -322,12 +325,13 @@
     const drawOverlay = (dt, drawExtra) => {
       visibility.begin();
       if (hud) hud.tooltip.beginFrame();
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const w = cssW, h = cssH;
-      if (w !== overlayW || h !== overlayH || dpr !== overlayDpr) {
+      const dpr = overlayDpr(w, h, window.devicePixelRatio || 1,
+        BL.glRenderer.QUALITY[renderer.quality]?.dpr || 1);
+      if (w !== overlayW || h !== overlayH || dpr !== overlayRatio) {
         overlayW = w;
         overlayH = h;
-        overlayDpr = dpr;
+        overlayRatio = dpr;
         overlay.width = Math.max(1, Math.round(w * dpr));
         overlay.height = Math.max(1, Math.round(h * dpr));
         overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -455,5 +459,5 @@
       }
     };
   };
-  BL.fx = { create, CONFETTI, beatsOf };
+  BL.fx = { create, overlayDpr, CONFETTI, beatsOf };
 })();
