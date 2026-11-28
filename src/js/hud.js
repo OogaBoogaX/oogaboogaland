@@ -2226,7 +2226,7 @@
       row.self = row.nextSelf;
       const button = row.voice;
       button.hidden = !row.look;
-      button.dataset.voice = row.look;
+      BL.nativeIcons.setVoiceLook(button, row.look);
       button.dataset.login = row.login;
       button.dataset.self = String(row.self);
       button.disabled = !row.login && !row.self;
