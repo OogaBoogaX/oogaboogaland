@@ -1,17 +1,7 @@
 {
   "version": 1,
   "lane": "daily",
-  "openedOn": "2026-11-21",
-  "round": "a2f922b4a88411122aabdfbb2d434702903d1ce6",
-  "entries": [
-    {
-      "pr": 859,
-      "head": "19240f706ce0f3ae950af96aca23bbb235028e19",
-      "author": "kitsboy",
-      "path": "src/characters/kitsboy.js",
-      "base": null,
-      "hash": "9de5e36ac6f62ee595ca3703be647d34d93b174cb0627ac6ba142823fafd17b0",
-      "lane": "daily"
-    }
-  ]
+  "openedOn": "2026-11-22",
+  "round": "62d339993afd93b5ea256a6da0efa32b2efa4d42",
+  "entries": []
 }
