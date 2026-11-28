@@ -1695,9 +1695,9 @@
     };
     if (managed) measureBody();
     // The new clanker's body (clanker-body.js): this rig becomes its driver, off the scene, and `root` the body's. The
-    // lab item is held on the left arm's socket, which follows that arm.
+    // lab item is held in the left hand's socket, which follows the drawn fist.
     const newBody = BL.clankerBody && BL.clankerBody.on && BL.clankerModel ? BL.clankerBody.attach({ root, hips, chest, torso, parts, state, managed }) : null;
-    armLHost = newBody ? newBody.socket("armL") : parts.armL;
+    armLHost = newBody ? newBody.socket("handL") : parts.armL;
     if (newBody && labPlaceholder) { removeChild(parts.armL, labPlaceholder); addChild(armLHost, labPlaceholder); }
     if (newBody) newBody.notePosed();
     // Only the form on show: the other set is released, so no scene keeps another
@@ -1752,11 +1752,20 @@
       set onIdle(fn) { onIdle = fn; },
       get walking() { return !!state.route; },
       // the new body: a socket that follows a driver part (`hips`, `chest`, `torso`, `head`, `jaw`, `armR`, `armL`,
-      // `legR`, `legL`), for what a scene hangs on it, and the new rig itself; without the body, the part itself
-      socket: (name) => newBody ? newBody.socket(name) : name === "hips" ? hips : name === "chest" ? chest : parts[name],
+      // `legR`, `legL`), for what a scene hangs on it, or a hand (`handR`, `handL`: the driver's arm's frame carried so
+      // its hand is in the drawn fist), for what it holds; and the new rig itself; without the body, the part itself
+      socket: (name) => newBody ? newBody.socket(name) : name === "hips" ? hips : name === "chest" ? chest : parts[name === "handR" ? "armR" : name === "handL" ? "armL" : name],
       get body() { return newBody; },
       // the head as drawn: the new rig's (whose vertices a nameplate stands over), or without the body the part itself
       get visualHead() { return newBody ? newBody.rig.head : parts.head; },
+      // any part as drawn (`head`, `chest`, `armR`…), and the middle of the drawn fist in the world (`armR` or `armL`,
+      // once the world is up to date); without the body, the part itself and its hand
+      drawn: (name) => newBody ? newBody.drawn(name) : name === "hips" ? hips : name === "chest" ? chest : parts[name],
+      grip: (side, out) => {
+        if (newBody) return newBody.grip(side, out);
+        const arm = parts[side], b = BL.scene.boundsOf(arm.geometry);
+        return BL.math.mat4.transformPoint(out, arm.world, b.center[0], b.min[1] + 0.08, b.center[2]);
+      },
       debug: {
         get form() { return state.form; },
         get gait() { return state.gait; },
