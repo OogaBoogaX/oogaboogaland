@@ -13,8 +13,8 @@
 // rate the device keeps up with (`interval`, from how long a frame takes, a sixtieth of a second at best), and asks the
 // chat for walkers' places a few times a second more for a viewer whose connection and device can take it (`hz`: 2, 4
 // or 6). Full screen (`fullscreen`, Ooga Chat's) moves the
-// view into a layer over the page, the chat's panel beside it (or under it on a tall narrow screen), in the browser's
-// own full screen where it has one. Its fold button (`fold`, stood in the chat's title by the page; `onFold`, `folded`) folds the
+// view into a layer filling the tab's window, the chat's panel beside it (or under it on a tall narrow screen).
+// Its fold button (`fold`, stood in the chat's title by the page; `onFold`, `folded`) folds the
 // view away, this browser's choice (localStorage `ooga-island-view-folded`): nothing drawn and no places asked for until
 // it is opened again. Who walks there and who sits on the clouds is a line for screen readers (`.iv-note`). Reads nothing at load but window.BL.
 // `create({ picture, faceOf(row), loadLive(), liveAllowed(), scenery, fullscreen, level(id, self) })` (`level` a speaker's voice level, 0 to 1, for the plates' microphones) returns `{ node, stage, update({
@@ -475,7 +475,7 @@
     }, { passive: false });
     reset.addEventListener("click", (e) => { if (e.detail) reset.blur(); live?.reset(); reset.hidden = true; changed(); });
     // --- full screen: the view over the page, the chat's panel beside it ---
-    let isFull = false, marker = null, host = null, browserFull = false;
+    let isFull = false, marker = null, host = null;
     // Full screen's split (`--iv-split`, the view's share of a tall screen's height; `--iv-side`, the panel's width
     // beside it on a wide one), dragged by the handle on the line between them (a layer of its own over both, so it
     // stands on that line rather than inside the view) and kept for this browser
@@ -542,7 +542,6 @@
         applySplit();
         hint(true);
         doc.classList.add("iv-full");
-        if (doc.requestFullscreen && !document.fullscreenElement) doc.requestFullscreen().then(() => { browserFull = true; }, () => {});
       } else {
         doc.classList.remove("iv-full");
         if (marker) { marker.replaceWith(node); marker = null; }
@@ -551,15 +550,12 @@
         hint(false);
         dragging = false;
         delete handle.dataset.drag;
-        if (browserFull && document.fullscreenElement) document.exitFullscreen().catch(() => {});
-        browserFull = false;
       }
       paint();
       resize();
       changed();
     };
     full.addEventListener("click", (e) => { if (e.detail) full.blur(); setFull(!isFull); });
-    const onFullChange = () => { if (browserFull && !document.fullscreenElement) { browserFull = false; setFull(false); } };
     const onKey = (e) => { if (e.key === "Escape" && isFull && !e.defaultPrevented) setFull(false); };
     fold.addEventListener("click", (e) => {
       if (e.detail) fold.blur();
@@ -570,7 +566,6 @@
       // The page says again whether the view is seen (and asks for places or stops), which redraws it.
       if (onFold) onFold(folded); else changed();
     });
-    document.addEventListener("fullscreenchange", onFullChange);
     document.addEventListener("keydown", onKey);
     const paint = () => {
       node.hidden = !shown;
@@ -676,7 +671,7 @@
     const self = { node, stage, fold, update, walk, looks, clouds, placed, get folded() { return folded; }, get perched() { return perched; },
       dispose() {
         setFull(false); shown = active = false; stop(); endLive(); sizes?.disconnect(); faces.clear(); plates.clear();
-        document.removeEventListener("fullscreenchange", onFullChange); document.removeEventListener("keydown", onKey);
+        document.removeEventListener("keydown", onKey);
         node.remove(); open.delete(self);
       },
       // The walkers' places a second this view asks the chat for: more for a viewer whose tier says they can take it.
