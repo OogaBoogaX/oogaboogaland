@@ -87,7 +87,8 @@
       replayState = state; syncGhost();
       recordGhost.setAttribute("aria-pressed", String(state === "on" || state === "loading"));
       recordGhost.setAttribute("aria-busy", String(state === "loading"));
-      recordGhost.title = state === "unavailable" ? "No winning replay yet" : state === "error" ? "Replay unavailable · retry"
+      // The button shows only under a record, so unavailable means that record's run left no replay to race.
+      recordGhost.title = state === "unavailable" ? "This record has no saved replay" : state === "error" ? "Replay unavailable · retry"
         : state === "loading" ? "Loading winning replay · click to cancel" : state === "on" ? "Hide global record ghost · G" : "Show global record ghost · historical route · G";
       recordGhost.setAttribute("aria-label", recordGhost.title);
     };

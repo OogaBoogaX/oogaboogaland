@@ -29,8 +29,15 @@
           if (geometry === undefined) {
             geometry = out.geometries.length; meshes.set(node.geometry, geometry);
             const mesh = BL.models.merge(node.geometry);
-            const faces = list => list.map(f => ({ i: [...f.i], color: [...f.color], emissive: Math.max(0, Math.min(1, f.emissive || 0)) }));
-            out.geometries.push({ verts: [...mesh.verts], faces: faces(mesh.faces), lines: faces(mesh.lines) });
+            const face = (f, i) => ({ i, color: [...f.color], emissive: Math.max(0, Math.min(1, f.emissive || 0)) });
+            // The codec takes at most eight corners a face, so a wider one (the modelled hands' palms) goes as fans of
+            // eight from its first corner: the triangles the renderers fan it into anyway (#897).
+            const fans = f => {
+              const pieces = [];
+              for (let k = 1; k + 1 < f.i.length; k += 6) pieces.push(face(f, [f.i[0], ...f.i.slice(k, k + 7)]));
+              return pieces;
+            };
+            out.geometries.push({ verts: [...mesh.verts], faces: mesh.faces.flatMap(fans), lines: mesh.lines.map(f => face(f, [...f.i])) });
           }
         }
         const p = node.position, s = node.scale, q = node.quaternion || quat.fromEuler(rotation, node.rotation.x, node.rotation.y, node.rotation.z);
