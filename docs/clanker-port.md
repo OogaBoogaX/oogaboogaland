@@ -65,7 +65,32 @@ Status of this design (next steps below):
   - walking off an edge climbs down, and running off jumps;
   - it grabs a wall from a jump or a fall.
 
-  All of that lives in `viewer.html` now. It has to move into `clanker-play.js` and `clankers.js`.
+  The driven gorilla now climbs by these rules in the game (`clankers.js`, the driven gorilla alone; see "Climbing in the game" below).
+
+## Climbing in the game
+
+The driven gorilla keeps the game's wall rectangles and every sweep they make (`climbClear`, `wallBodyClear`, `climbPoseClear`); the studio's rules choose when they start and which way they go:
+
+- **Large walls only** (`largeWallAhead`, `WALL_*` in `clankers.js`):
+  - from the ground it takes hold only of rock rising `WALL_RISE` (2.5 m) over its feet within `WALL_SPAN` (2 m) of where it first stands taller than a step, out of a jump's reach; a low ledge is jumped onto, and a hill it can walk it walks (it only ever takes hold where its walking step fails);
+  - from the air, rock rising `WALL_AIR_RISE` (2 m) over its feet the same way;
+  - walking off a top it climbs down only over a drop of 2.5 m within 2 m past the edge (`beginEdgeClimb`), and walks off any other.
+  - The studio's measure is sheerer (the 2.5 m within 0.12 m of the first riser). On the hub's voxel cliffs that turns their stepped faces, about 50 degrees in half-metre terraces, into hills: the "gorilla wall handoff" check runs back at such a face (beside the c1 mouth, 4 m from the ground to the cave roof) and must take hold of it, so the span is 2 m.
+- **Grabbing from the air:** a jump at a large wall takes hold of it, and so does a fall past one with the keys let go, unless the keys point away from it.
+- **Running off an edge** jumps from it, the run carrying it out (`beginDrivenJump`); walking off a large wall climbs down.
+- **The approach:** walking at a large wall it rises into the climb from 1.2 m out of its hold distance (`climbPresentation`'s `climbApproach`). It is shown only: the studio also slows the walk to 30% at the rock, but slowing the driver held a gorilla sliding along a cave wall to a crawl (the "gorilla stone core" check), so its pace is unchanged.
+- **The haul over a top goes by W and S both ways:**
+  - up the wall, W carries it over (the rectangle's crest handoff), S takes it back the way it came onto the wall, and no key holds it where it is;
+  - walking off a top, the walk takes it down over the edge until it is let go; then S goes on down, W takes it back up to stand on the top, and no key holds it.
+- **Shown only, on the new body** (`climbPresentation` writes `motion.climbApproach`, `climbLean`, `haul`, `haulTop`; `agent.js` keeps them, with `climbMove`, on its state; `clanker-body.js` poses them):
+  - the lean into rock set back at the hands' height, as above a lip (at most 30 degrees), turned about the hips;
+  - the hands working as hard as it moves (`climbMove`, eased from its travel on the rock);
+  - the haul in the studio's three parts, every part a function of how far over it is (0 hanging to 1 standing): hanging on (to 0.4) the arms come down onto the top, over (to 0.78) it goes forward onto all fours with its legs swung back down the wall (35 degrees), up (to the end) its feet come over and it takes its walking stance;
+  - and through the haul the body held with its higher fist on the top, the root never above it (eased in and out at the ends, at most 0.6 m).
+
+NPC gorillas keep the old rules and their planned routes (bed paths, cliffs, the mirror cave's entry), since their routes are planned against them; they show the climbing as before but for the stance and the hands' stroke.
+
+Not yet: the studio's fists pulled over the edge (the body brought forward so the further fist is 0.12 m past it), and its legs fitted to keep the feet on the wall while it comes over (a fixed swing stands in).
 
 ## Outfits (all made by `BL.agent.create`, agent.js:501)
 
@@ -170,7 +195,11 @@ These write rotations on `chest` and `parts.*` themselves, so each needs rewriti
   - The new climbing (grab, lean past a lip, the haul over a top) and dragging or throwing need fields there.
   - That is a protocol change, so the Worker has to deploy first, and the change must stay readable by older pages.
 - **npc-sync:** the host's frames carry the gorillas' plan and hit events (`npc-sync.js`), and followers replay them on their own rigs.
-- **island-world:** the island-world server GameHost is planned to run the gorillas next; its collision sizes have to match the new body.
+- **Climbing and dragging on the wire (`pose.gx`):** a page drawing the new body sends, with `g`, five whole numbers: the rise into a climb walking up to a wall, the lean into the rock, the haul over a top and the top over its feet, and 1 plus the throw's wind-up while dragging an Ooga (`GORILLA_EXTRA` in `worker/src/protocol.js`; the contract is in `docs/auth-and-presence.md`). The room relays it in its own `gxs` runs, so `g` and `gs` are unchanged and either side may deploy first: an older room drops `gx`, an older page ignores `gxs`, and a gorilla without it is drawn from `g` as before. `remote-players.js` hands it to the remote rig's motion, and the new body poses it as it poses the visitor's own.
+- **island-world:** the server's world (`worker/src/games/island.js`, `island-sim.js`) runs only the NPC Oogas today. It sends each working Ooga's gorilla the cave it goes ahead to (`clankers.plan`), and nothing else of the gorillas; each page walks, climbs and collides them itself, so nothing on the server depends on the old body. When it hosts gorillas it will need:
+  - their bodies' sizes from the new body, not the old rig: `BL.agent.footprint`, `bodyRadius`, `bodyHeight`, `bodyMinY`, the walking and climbing envelopes (`WALK_RADIUS`, `CLIMB_RADIUS`, `CLIMB_HEIGHT` in `clankers.js`) measured on the new rig scaled by 0.956;
+  - the climbing rules above (large walls, the haul both ways), and the sweeps they need on the server's own terrain;
+  - its rows to carry what `gx` carries for a driven gorilla (the climb, the lean, the haul), so every page poses them alike.
 
 ### Looks and effects layered on the rig
 - **Ghost look:** the NPC ghost look's tinted twins, one per source geometry (`npc-ghosts.js`). The new rig swaps meshes: 41 welds, the live sleeve, glyph-rain layers. Each needs a twin, or a material path.

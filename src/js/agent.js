@@ -567,6 +567,7 @@
       poundCharge: 0, takeoff: 0, landing: 0, crouch: 0, roll: 0, rollBlend: 0, rollAngle: 0, rollTarget: 0, rollSide: 0,
       smash: false, dragging: false, throwProgress: 0, hipOffsetZ: 0, sideAngle: 0, swim: 0, swimBlend: 0,
       climb: 0, climbBlend: 0, climbPose: NaN, climbStride: 0, climbDirection: 0, climbSide: 0,
+      climbMove: 0, climbLean: 0, climbApproach: 0, haul: NaN, haulTop: 0,
       groom: 0, groomBlend: 0, groomSide: 1, groomTime: 0, sitLook: 0, sitShift: 0,
       lab: false, labRunIn: false, coatSplit: false, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labReachGrip: geos.labFlask.labGripY, labPreviewItem: false, labSqueeze: false, labDie: false, labRoll: 0,
       labPalmLift: 0, labBench: null, labTouchArm: false, labTouchSide: 1,
@@ -1284,6 +1285,15 @@
       state.climbStride = motion ? motion.climbStride || 0 : 0;
       state.climbDirection = motion ? clamp(motion.climbDirection || 0, -1, 1) : 0;
       state.climbSide = motion ? clamp(motion.climbSide || 0, -1, 1) : 0;
+      // For the new body (clanker-body.js), which poses these itself: how hard the hands are moving on the rock (eased
+      // toward the travel asked for), the lean into rock set back at the hands' height (degrees), the rise into the
+      // climb while walking up to a wall, and the haul over a top (0 hanging on the wall to 1 standing on the top, NaN
+      // when none) with the top's height in the world.
+      state.climbMove = damp(state.climbMove, state.climb > 0 ? Math.min(1, Math.hypot(state.climbDirection, state.climbSide)) : 0, 9, dt);
+      state.climbLean = motion ? clamp(motion.climbLean || 0, 0, 30) : 0;
+      state.climbApproach = motion && !airborne ? clamp(motion.climbApproach || 0, 0, 1) : 0;
+      state.haul = motion && Number.isFinite(motion.haul) ? clamp(motion.haul, 0, 1) : NaN;
+      state.haulTop = motion && Number.isFinite(motion.haulTop) ? motion.haulTop : py;
       state.groom = motion && lounge === "sit" && state.speed <= 0.1 && !airborne && !state.roll && !state.climb ? clamp(motion.groom || 0, 0, 1) : 0;
       state.sitLook = motion && lounge === "sit" ? clamp(motion.sitLook || 0, -1, 1) : 0;
       state.sitShift = motion && lounge === "sit" ? clamp(motion.sitShift || 0, -1, 1) : 0;

@@ -404,6 +404,14 @@
   let npcFrame = null, inHub = false, hubSent = null, visibleSent = null;
   let zone = "outside", body = null, muted = false, call = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
   const gSent = new Float64Array(6);
+  // With a gorilla's locomotion, the new body's climbing and dragging (`gx`, worker/src/protocol.js GORILLA_EXTRA):
+  // each place's least and most, and what this page last sent.
+  const GORILLA_EXTRA = [[0, 100], [0, 30], [-1, 100], [-400, 400], [0, 101]], gxSent = new Int16Array(5);
+  const validExtra = (v, offset = 0) => { if (!v || v.length < offset + 5) return false;
+    for (let i = 0; i < 5; i++) { const n = v[offset + i]; if (!Number.isInteger(n) || n < GORILLA_EXTRA[i][0] || n > GORILLA_EXTRA[i][1]) return false; }
+    return true; };
+  const extraText = (v) => `,"gx":[${v[0]},${v[1]},${v[2]},${v[3]},${v[4]}]`;
+  let gxHas = false;
   let gKnown = false, poseHasG = false, jetSent = 0, weaponSent = 0, visualKnown = false, danceSent = -1;
   // A pose's visual state (crew.js `visualState`), each number between its low and high; an older page sends the
   // first 17 alone, without the body's own pose (`VISUAL_BODY` on).
@@ -554,17 +562,25 @@
     g[5] = Math.max(0, Math.min(1, values[offset + 5]));
     rec.g = g;
   };
+  // A gorilla's extra (gx) beside its locomotion; anything but a whole, bounded one is none.
+  const readGorillaExtra = (rec, values, offset = 0) => {
+    if (!rec.g || !Array.isArray(values) || !validExtra(values, offset)) { rec.gx = null; return; }
+    const v = rec.gxData || (rec.gxData = new Int16Array(5));
+    for (let i = 0; i < 5; i++) v[i] = values[offset + i];
+    rec.gx = v;
+  };
 
   const upsert = (p) => {
     if (!p || !Number.isSafeInteger(p.id) || p.id === state.selfId) return;
-    const rec = remotes.get(p.id) || { id: p.id, login: "", display: "", body: null, bodyKind: null, bodyName: null, zone: "outside", voice: false, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, x: 0, y: 0, z: 0, yaw: 0, poseZone: null, g: null, gData: null, jet: 0, weapon: 0 };
+    const rec = remotes.get(p.id) || { id: p.id, login: "", display: "", body: null, bodyKind: null, bodyName: null, zone: "outside", voice: false, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, x: 0, y: 0, z: 0, yaw: 0, poseZone: null, g: null, gData: null, gx: null, gxData: null, jet: 0, weapon: 0 };
     rec.login = String(p.login);
     rec.display = String(p.display || p.login);
     rec.body = typeof p.body === "string" ? p.body : null;
     rec.bodyKind = bodyKind(rec.body);
     rec.bodyName = bodyName(rec.body);
-    rec.g = null;
+    rec.g = rec.gx = null;
     if (Array.isArray(p.g) && p.g.length === 6) readGorillaPose(rec, p.g);
+    if (Array.isArray(p.gx) && p.gx.length === 5) readGorillaExtra(rec, p.gx);
     rec.jet = Number.isInteger(p.j) && p.j > 0 && p.j <= 7 ? p.j : 0;
     rec.weapon = Number.isInteger(p.w) && p.w > 0 && p.w <= 255 ? p.w : 0;
     rec.dance = danceOf(p.d);
@@ -710,7 +726,13 @@
       const gs = msg.gs;
       if (Array.isArray(gs)) for (let i = 0; i + 6 < gs.length; i += 7) {
         const rec = remotes.get(gs[i]);
-        if (rec) readGorillaPose(rec, gs, i + 1);
+        if (rec) { readGorillaPose(rec, gs, i + 1); rec.gx = null; }
+      }
+      // `gxs` the new body's extra for every gorilla whose page sends one (an older room or page, none).
+      const gxs = msg.gxs;
+      if (Array.isArray(gxs)) for (let i = 0; i + 5 < gxs.length; i += 6) {
+        const rec = remotes.get(gxs[i]);
+        if (rec) readGorillaExtra(rec, gxs, i + 1);
       }
       const js = msg.js;
       if (Array.isArray(js)) for (let i = 0; i + 1 < js.length; i += 2) {
@@ -814,7 +836,7 @@
         // Cached equipment/look survive reconnect; transient actions are reconciled by the next
         // live sample rather than replayed with a fresh room timestamp.
         if (visualKnown) { visualSent[3] &= 7; for (let i = 4; i < 15; i++) visualSent[i] = 0; for (let i = VISUAL_BODY; i < VISUAL_SIZE; i++) visualSent[i] = 0; }
-        const extra = state.bodyKind === "gorilla" && poseHasG ? `,"g":[${gSent[0]},${gSent[1].toFixed(3)},${gSent[2].toFixed(3)},${gSent[3].toFixed(3)},${gSent[4].toFixed(3)},${gSent[5].toFixed(3)}]`
+        const extra = state.bodyKind === "gorilla" && poseHasG ? `,"g":[${gSent[0]},${gSent[1].toFixed(3)},${gSent[2].toFixed(3)},${gSent[3].toFixed(3)},${gSent[4].toFixed(3)},${gSent[5].toFixed(3)}]` + (gxHas ? extraText(gxSent) : "")
           : (jetSent ? `,"j":${jetSent}` : "") + (weaponSent ? `,"w":${weaponSent}` : "") + (visualKnown ? `,"v":[${visualSent.join(",")}]` : "")
             + (state.dance && danceSent >= 0 ? `,"d":${danceSent}` : "")
             + (restKnown ? restActive ? `,"r":[${restSent.join(",")}]` : ',"r":0' : "");
@@ -835,7 +857,7 @@
       // A record the room held for this page still has its voice sessions: voice still up stays as it is.
       if (resumed) BL.voice.resumed(); else BL.voice.restart(true);
       if (restoredPose) poseAt = performance.now();
-      else { poseAt = 0; px = NaN; gKnown = poseHasG = false; }
+      else { poseAt = 0; px = NaN; gKnown = poseHasG = gxHas = false; }
     } else if (msg.t === "join") {
       const fresh = !!msg.p && !remotes.has(msg.p.id);
       upsert(msg.p);
@@ -858,7 +880,7 @@
         rec.body = typeof msg.name === "string" ? msg.name : null;
         rec.bodyKind = bodyKind(rec.body);
         rec.bodyName = bodyName(rec.body);
-        rec.g = null;
+        rec.g = rec.gx = null;
         rec.jet = rec.weapon = 0;
         rec.visual = null;
         rec.rest = undefined;
@@ -1427,7 +1449,7 @@
     state.bodyKind = bodyKind(name);
     state.bodyName = bodyName(name);
     poseAt = 0; px = NaN;
-    gKnown = poseHasG = false;
+    gKnown = poseHasG = gxHas = false;
     jetSent = weaponSent = 0; visualKnown = false; restKnown = restActive = false; danceSent = -1;
     sendBody();
     // The room starts another actor at full health.
@@ -1576,7 +1598,7 @@
 
   // Throttled to POSE_MS and skipped while nothing moved; a changed gorilla pose, jetpack or weapon also earns a report.
   // `dance` is the driven Ooga's dance number (0 to DANCE_MAX, the Block Party's), sent where the room takes it.
-  const sendPose = (x, y, z, yaw, g = null, jet = 0, weapon = 0, visual = null, rest = 0, dance = 0) => {
+  const sendPose = (x, y, z, yaw, g = null, jet = 0, weapon = 0, visual = null, rest = 0, dance = 0, gx = null) => {
     if (cabinetAnchor) {
       const at = cabinetAnchor;
       x = at.x; y = at.y; z = at.z; yaw = at.yaw; g = null; jet = weapon = 0; visual = null; rest = 0; dance = 0;
@@ -1597,6 +1619,7 @@
     yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
     if (state.bodyKind !== "gorilla") g = null;
     if (g) for (let i = 0; i < 6; i++) if (!Number.isFinite(g[i])) { g = null; break; }
+    if (!g || !validExtra(gx)) gx = null;
     if (state.bodyKind === "gorilla" || !Number.isInteger(jet) || jet < 0 || jet > 7) jet = 0;
     if (state.bodyKind === "gorilla" || !Number.isInteger(weapon) || weapon < 0 || weapon > 255) weapon = 0;
     if (state.bodyKind === "gorilla" || !validVisual(visual)) visual = null;
@@ -1610,6 +1633,8 @@
     // lets a silent/disconnected action expire without an extra timer or a new message type.
     if (visual && (visual[3] & 40 || visual[14] > 0) && now - poseAt >= 300) changed = true;
     if (g && !changed) for (let i = 0; i < 6; i++) if (g[i] !== gSent[i]) { changed = true; break; }
+    if (!changed && !!gx !== gxHas) changed = true;
+    if (gx && !changed) for (let i = 0; i < 5; i++) if (gx[i] !== gxSent[i]) { changed = true; break; }
     // Even when the complete pose is unchanged, remember that its cached locomotion is valid for reconnect.
     if (g) poseHasG = true;
     if (!changed && Math.abs(x - px) < 0.005 && Math.abs(y - py) < 0.005 && Math.abs(z - pz) < 0.005 && Math.abs(yaw - pyaw) < 0.01) return;
@@ -1621,7 +1646,9 @@
       for (let i = 0; i < 6; i++) gSent[i] = g[i];
       gKnown = true;
       extra = `,"g":[${g[0]},${g[1].toFixed(3)},${g[2].toFixed(3)},${g[3].toFixed(3)},${g[4].toFixed(3)},${g[5].toFixed(3)}]`;
+      if (gx) { gxSent.set(gx); extra += extraText(gx); }
     }
+    gxHas = !!gx;
     jetSent = jet; weaponSent = weapon; danceSent = dance;
     if (jet) extra += `,"j":${jet}`;
     if (dance >= 0) extra += `,"d":${dance}`;

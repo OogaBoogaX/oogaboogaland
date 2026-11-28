@@ -276,7 +276,7 @@
       // Measured as built, before it is placed: feet at the root's own height, as the crew measures its Oogas.
       const height = gorilla ? 0 : BL.crew.bodyHeightOf(cave);
       addChild(root, cave.root);
-      const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0 } : null;
+      const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0, climbApproach: 0, climbLean: 0, haul: NaN, haulTop: 0, dragging: false, throwProgress: 0 } : null;
       if (!gorilla) {
         cave.baseY = cave.root.position.y; cave.bodyHeight = height; cave.jetFuel = 1; cave.hopV = 0;
         if (cave.parts.dog) {
@@ -373,6 +373,11 @@
       motion.labRunIn = !(flags & 2);
       motion.office = !!(flags & 32);
       motion.officeRise = flags & 2 ? 1 : 0;
+      // The new body's climbing and dragging from its page's extra (net.js `gx`); an older page sends none.
+      const gx = sleeping ? null : rec.gx;
+      motion.climbApproach = gx ? gx[0] / 100 : 0; motion.climbLean = gx ? gx[1] : 0;
+      motion.haul = gx && gx[2] >= 0 ? gx[2] / 100 : NaN; motion.haulTop = entry.y + (gx ? gx[3] / 100 : 0);
+      motion.dragging = !!(gx && gx[4] > 0); motion.throwProgress = gx && gx[4] > 0 ? (gx[4] - 1) / 100 : 0;
       const speed = sleeping ? 0 : g ? g[1] : Math.hypot(entry.dx, entry.dz) / Math.max(dt, 1e-3);
       const lounge = sleeping ? g[3] < -0.5 ? "left" : g[3] > 0.5 ? "right" : "back" : "";
       entry.cave.poseManaged(dt, entry.x, entry.y, entry.z, entry.yaw, speed, !!(flags & 1), !!(flags & 2), lounge, motion);
