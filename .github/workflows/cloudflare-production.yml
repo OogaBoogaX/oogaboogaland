@@ -2,6 +2,11 @@ name: Deploy Cloudflare production
 
 on:
   workflow_dispatch:
+    inputs:
+      catalog_resume_sha:
+        description: Exact held release SHA to resume after a failed catalog-aware deployment (otherwise leave empty)
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -9,10 +14,19 @@ permissions:
 concurrency:
   group: cloudflare-production
   cancel-in-progress: false
+  queue: max
 
 jobs:
+  catalog:
+    if: github.ref == 'refs/heads/rock' && (vars.CHARACTER_CATALOG_PRODUCTION_RUNTIME_ENABLED == 'true' || inputs.catalog_resume_sha != '')
+    uses: ./.github/workflows/cloudflare-catalog-release.yml
+    with:
+      environment: production
+      target_sha: ${{ inputs.catalog_resume_sha || github.sha }}
+      resume: ${{ inputs.catalog_resume_sha != '' }}
+    secrets: inherit
   deploy:
-    if: github.ref == 'refs/heads/rock'
+    if: github.ref == 'refs/heads/rock' && vars.CHARACTER_CATALOG_PRODUCTION_RUNTIME_ENABLED != 'true' && inputs.catalog_resume_sha == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

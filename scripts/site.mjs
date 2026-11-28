@@ -3,27 +3,36 @@
 // route in src/js/routes.js gets a real page of its own: oogarally.html answers /oogarally with a 200, its own
 // title, description, canonical address and preview card, and the router opens the rally from the path.
 // Each is the whole built page with its own head. 404.html sends a miscased or slash-ended route
-// (/OogaRally/) to its address and anything else home; sitemap.xml and robots.txt list the routes, and
-// cards/ holds the card images from `npm run cards`; a route without an `image` uses home's. Modules tagged
+// (/OogaRally/) to its address and anything else home; map.html is the World Map, a page of its own
+// (scripts/distribution-map.mjs); sitemap.xml and robots.txt list the routes and the map, llms.txt
+// points an AI asked to make someone a character to docs/make-your-ooga.md, and cards/ holds the card images from `npm run cards`; a route without an `image` uses home's. Modules tagged
 // `data-defer` move out of the pages into js/<group>-<hash>.js (scripts/distribution-modules.mjs), fetched when needed.
+// The keyboard noise filter's worklet goes out as js/mic-filter-<hash>.js (scripts/distribution-mic.mjs).
 // `--audio-assets` and `--image-assets` write the DSB entrance recordings and the pictures in PICTURE_MODULES (the DSB
-// rooms', the whitepaper poster, Cloud Hopper's art) as same-origin files under audio/ and art/; `npm run build:site` and `npm run serve` pass both, and the portable page stays whole.
+// rooms', Cloud Hopper's art, the herald's views) as same-origin files under audio/ and art/; `npm run build:site` and `npm run serve` pass both, and the portable page stays whole.
 // `--page-assets`, last, moves the page's own script and stylesheet out of every route page into js/main-<hash>.js and
 // css/style-<hash>.css, with the jumbotron's snapshot, which every deploy rebakes, in its own
-// js/jumbotron-data-<hash>.js before the code (`externalizePage`), so the 23 pages share one cached copy. `--headers
-// <file>` writes that file as _headers plus one immutable rule per file under js/ and css/: exact paths, so a 404 there
+// js/jumbotron-data-<hash>.js before the code (`externalizePage`), so the 24 pages share one cached copy. The favicons go out as files too (favicon-32.png,
+// favicon-64.png, favicon.ico, apple-touch-icon.png and its -precomposed twin), so none of those addresses answers 404. `--headers
+// <file>` writes that file as _headers plus one immutable rule per file under js/, css/ and audio/ (all named by their
+// content hash): exact paths, so a 404 there
 // (a page from one deploy asking another) is never cached for a year. `npm run build:site` passes both.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
-import { externalizeAudio } from "./distribution-audio.mjs";
+import { externalizeAudio, externalizeLoungeTrack } from "./distribution-audio.mjs";
+import { stageIcons } from "./distribution-icons.mjs";
+import { MAP_ENTRY, stageMap } from "./distribution-map.mjs";
 import { PICTURE_MODULES, externalizeModules, externalizePage, externalizePictures } from "./distribution-modules.mjs";
 import { writeTerrainWorker } from "./distribution-terrain.mjs";
+import { writeMicFilter } from "./distribution-mic.mjs";
+import { writeKeepGeometry } from "./distribution-keep.mjs";
+import { catalogPageAttributes } from "./character-catalog-build.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const out = resolve(root, process.argv[2] || "untracked/site");
-const { deferred, block } = await import("./build.mjs");
+const { deferred, block, portableLounge } = await import("./build.mjs");
 
 const context = { window: {} };
 vm.runInNewContext(readFileSync(join(root, "src", "js", "routes.js"), "utf8"), context);
@@ -44,18 +53,28 @@ for (const source of mediaContext.BL.studioMedia.sources) for (const path of [so
   mediaFiles.add(path.slice(7));
 }
 for (const file of mediaFiles) copyFileSync(join(root, "src/media", file), join(out, "media", file));
+// Lecture recordings are never staged: the Worker serves /media/lectures/* from R2 (worker/src/lecture-audio.js), and
+// `npm run serve` answers them itself (scripts/serve.mjs).
 
 let shell = readFileSync(join(root, "oogaboogaland.html"), "utf8");
+// Search crawlers and browsers need fetchable favicon URLs: the portable page's exact PNG bytes at stable paths, with
+// /favicon.ico made from them and the existing Apple touch icon kept with its legacy alias (scripts/distribution-icons.mjs).
+shell = stageIcons(shell, out);
 if (process.argv.includes("--worker-page")) {
   const tag = '<html lang="en">';
   if (!shell.includes(tag)) throw new Error("oogaboogaland.html: expected <html lang=\"en\">");
-  shell = shell.replace(tag, '<html lang="en" data-worker-page="1">');
+  shell = shell.replace(tag, `<html lang="en" data-worker-page="1"${catalogPageAttributes(process.env)}>`);
 }
 if (process.argv.includes("--audio-assets")) shell = externalizeAudio(shell, root, out);
 const pictures = process.argv.includes("--image-assets");
 // A picture module outside every data-defer group stays in the page's own script and is rewritten there.
 const inlinePictures = pictures ? PICTURE_MODULES.filter((src) => ![...deferred.values()].some((sources) => sources.includes(src))) : [];
-shell = externalizeModules(shell, out, deferred, block, writeTerrainWorker(root, out), pictures ? (src, text) => PICTURE_MODULES.includes(src) ? externalizePictures(src, text, out) : text : undefined, inlinePictures);
+const hostedModule = (src, text) => {
+  if (process.argv.includes("--audio-assets") && src.startsWith("js/lounge-track-")) return externalizeLoungeTrack(src, text, out);
+  if (src === portableLounge) return "";
+  return pictures && PICTURE_MODULES.includes(src) ? externalizePictures(src, text, out) : text;
+};
+shell = externalizeModules(shell, out, deferred, block, writeTerrainWorker(root, out), hostedModule, [...inlinePictures, portableLounge], writeMicFilter(root, out), writeKeepGeometry(root, out));
 if (process.argv.includes("--page-assets")) shell = externalizePage(shell, out, block, ["js/jumbotron-data.js"]);
 if (shell.split("</title>").length !== 2 || shell.split("</head>").length !== 2) throw new Error("oogaboogaland.html: expected one <title> and one </head>");
 
@@ -89,6 +108,8 @@ for (const entry of list) {
   if (!existsSync(image)) throw new Error(`cards/${entry.image}.jpg is missing; run npm run cards`);
   copyFileSync(image, join(out, "cards", `${entry.image}.jpg`));
 }
+// The World Map (scripts/distribution-map.mjs): a page of its own, not the game's, at /map.
+stageMap(root, out, head(MAP_ENTRY));
 writeFileSync(join(out, "404.html"), `<!doctype html>
 <html lang="en">
 <head>
@@ -102,17 +123,36 @@ writeFileSync(join(out, "404.html"), `<!doctype html>
 `);
 writeFileSync(join(out, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${list.map((entry) => `  <url><loc>${urlOf(entry)}</loc></url>`).join("\n")}
+${[...list, MAP_ENTRY].map((entry) => `  <url><loc>${urlOf(entry)}</loc></url>`).join("\n")}
 </urlset>
 `);
 writeFileSync(join(out, "robots.txt"), `User-agent: *\nAllow: /\nSitemap: ${site}/sitemap.xml\n`);
+const repo = "https://github.com/OogaBoogaX/oogaboogaland";
+writeFileSync(join(out, "llms.txt"), `# ${name}
+
+> A floating island in the browser where cavemen, the Oogas, stand for the contributors of OogaBoogaX, with caves of projects and an arcade of games. Its source is ${repo}.
+
+## Make a character
+
+Anyone can have an Ooga of their own. If someone asks you to make them a character in ${name}, follow this guide in order: ${repo}/blob/rock/docs/make-your-ooga.md (as plain text: https://raw.githubusercontent.com/OogaBoogaX/oogaboogaland/rock/docs/make-your-ooga.md). It covers signing in with GitHub, the questions to ask and the pictures to ask for, showing the Ooga on their own computer in the character studio, and sending it as a pull request from their own account.
+
+What it takes: a free GitHub account, and an agent that can run commands on their computer (git, GitHub's gh and Node 22 or newer; the guide installs what is missing with their OK). An assistant that cannot run commands can still interview them and write the file, which they can add from the GitHub website.
+
+What happens after: a plain Ooga is merged the day after it is sent and a custom one when a maintainer has read it, and it appears on ${site} with the site's next deploy. From then on the sign-in button at the top right of ${site} (an arrow going in at a door) signs them in with GitHub and hands them their own Ooga to drive. Signing in needs an Ooga first: an account without one is sent back signed out, and can still explore.
+
+## More
+
+- [The World Map](${site}/map): every place in the world, how each is reached, and its address
+- [The repository](${repo})
+- [Rules for agents changing the game](${repo}/blob/rock/AGENTS.md)
+`);
 const headers = process.argv.indexOf("--headers");
 if (headers > 0) {
-  const files = ["js", "css"].flatMap((dir) => existsSync(join(out, dir)) ? readdirSync(join(out, dir)).sort().map((file) => `/${dir}/${file}`) : []);
+  const files = ["js", "css", "audio"].flatMap((dir) => existsSync(join(out, dir)) ? readdirSync(join(out, dir)).sort().map((file) => `/${dir}/${file}`) : []);
   // Cloudflare reads at most 100 rules from _headers.
   const rules = readFileSync(resolve(root, process.argv[headers + 1]), "utf8").trimEnd();
   if (files.length + rules.split("\n").filter((line) => line.startsWith("/")).length > 100) throw new Error("_headers: more than 100 rules");
   writeFileSync(join(out, "_headers"), `${rules}\n${files.map((path) => `\n${path}\n  Cache-Control: public, max-age=31536000, immutable`).join("")}\n`);
 }
 const kb = (n) => `${(n / 1024).toFixed(0)} KB`;
-console.log(`staged ${out}: ${list.length} pages of ${kb(shell.length)}, ${list.filter((entry) => entry.image).length} cards, sitemap.xml, robots.txt`);
+console.log(`staged ${out}: ${list.length} pages of ${kb(shell.length)}, ${list.filter((entry) => entry.image).length} cards, map.html, sitemap.xml, robots.txt, llms.txt`);

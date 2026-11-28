@@ -1,7 +1,24 @@
 name: Deploy Cloudflare staging
 
+# Every push to rock deploys staging: each merge, but not the artifact job's [skip ci] commit. Ooga Chat's staging
+# follows each such deploy (ooga-chat-staging.yml). By hand on any branch as before, until the next merge replaces it.
 on:
+  push:
+    branches: [rock]
   workflow_dispatch:
+    inputs:
+      catalog_preview:
+        description: Deploy this approved staging revision through the character catalog handoff
+        type: boolean
+        default: false
+      catalog_resume_sha:
+        description: Exact held release SHA to resume after a failed catalog-aware deployment (otherwise leave empty)
+        type: string
+        required: false
+      catalog_replace_held_sha:
+        description: Exact unpublished failed target to replace with this revision while keeping its publication fence
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -9,9 +26,20 @@ permissions:
 concurrency:
   group: cloudflare-staging
   cancel-in-progress: false
+  queue: max
 
 jobs:
+  catalog:
+    if: vars.CHARACTER_CATALOG_STAGING_RUNTIME_ENABLED == 'true' || inputs.catalog_preview || inputs.catalog_resume_sha != '' || inputs.catalog_replace_held_sha != ''
+    uses: ./.github/workflows/cloudflare-catalog-release.yml
+    with:
+      environment: staging
+      target_sha: ${{ inputs.catalog_resume_sha || github.sha }}
+      resume: ${{ inputs.catalog_resume_sha != '' }}
+      replace_held_target: ${{ inputs.catalog_replace_held_sha }}
+    secrets: inherit
   deploy:
+    if: vars.CHARACTER_CATALOG_STAGING_RUNTIME_ENABLED != 'true' && !inputs.catalog_preview && inputs.catalog_resume_sha == '' && inputs.catalog_replace_held_sha == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

@@ -3,7 +3,7 @@
   const BL = window.BL;
   const create = (changed, notice) => {
     let worker = null, identity = "", revision = 0, fairness = null, connected = false, failed = false;
-    let selected = 0, account = null;
+    let selected = 0, account = null, departing = false;
     let connection = "connecting", deadline = null, nextRequest = 0, pendingRequest = 0, transientNotice = false;
     const lifetime = new AbortController();
     const snapshots = Array.from({ length: 10 }, () => BL.pokerRules.create().snapshot());
@@ -33,7 +33,7 @@
         if (m.type === "connection") { connection = m.status; changed(); }
         if (m.type === "fatal") { failed = true; connection = "failed"; fairness = { ...fairness, phase: "failed" }; changed(); notice(m.message); }
         if (m.type === "state") {
-          const p = m.packet; fairness = p.fairness; connection = "live"; deadline = p.deadline;
+          const p = m.packet; departing = !!p.departing; fairness = p.fairness; connection = "live"; deadline = p.deadline;
           if (pendingRequest && p.acknowledged >= pendingRequest) pendingRequest = 0;
           if (transientNotice) { transientNotice = false; notice(""); }
           for (let i = 0; i < 10; i++) { snapshots[i] = { ...p.tables[i].state, fairPhase: p.tables[i].phase }; phases[i] = p.tables[i].phase; }
@@ -46,7 +46,7 @@
       };
       worker.postMessage({ type: "connect", table, account });
     };
-    return { tables, connect, action, get identity() { return identity; }, get table() { return selected; }, get account() { return account; }, get fairness() { return fairness; }, get connection() { return connection; }, get busy() { return !!pendingRequest; }, get deadline() { return deadline; }, get connected() { return connected && !failed; },
+    return { tables, connect, action, get identity() { return identity; }, get table() { return selected; }, get account() { return account; }, get departing() { return departing; }, get fairness() { return fairness; }, get connection() { return connection; }, get busy() { return !!pendingRequest; }, get deadline() { return deadline; }, get connected() { return connected && !failed; },
       disconnect(message) { worker?.terminate(); connected = false; failed = true; connection = "failed"; fairness = { ...fairness, phase: "failed" }; changed(); notice(message); },
       dispose() { lifetime.abort(); worker?.terminate(); worker = null; connected = false; } };
   };

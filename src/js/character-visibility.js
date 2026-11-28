@@ -3,7 +3,7 @@
   "use strict";
   const BL = window.BL = window.BL || {}, { mat4 } = BL.math, { boundsOf } = BL.scene;
   const UP = { x: 0, y: 1, z: 0 }, VERTICES = 64, FRAGMENTS = 1024, EPS = 1e-10;
-  const meshes = new WeakMap(), sourceVertices = new WeakMap();
+  const meshes = new WeakMap(), sourceVertices = new WeakMap(), builds = new WeakMap();
   // A witness can lazily bake another actor sharing its source mesh. Keep that bake's cursor separate from
   // the visible-face cursor held across exposed(), so nested blocker queries cannot overwrite its polygon.
   const bakeCursors = new WeakMap(), visibleCursors = new WeakMap();
@@ -51,15 +51,38 @@
         if (same && at === mesh.indices.length && mesh.vertices === source.verts) { meshes.set(geometry, mesh); return mesh; }
       }
     }
+    const pending = startMesh(geometry);
+    pending.slice.until = Infinity;
+    let next;
+    do { next = pending.steps.next(); } while (!next.done);
+    mesh = next.value;
+    builds.delete(geometry);
+    if (trackSource) sourceVertices.set(geometry, new Float64Array(mesh.vertices));
+    meshes.set(geometry, mesh); return mesh;
+  };
+  // Idle warming can pause a large bake; a query finishes that same exact
+  // builder synchronously if it is needed before warming completes.
+  const startMesh = geometry => {
+    let pending = builds.get(geometry);
+    if (!pending) {
+      const slice = { until: Infinity };
+      pending = { slice, steps: buildMesh(geometry, slice) };
+      builds.set(geometry, pending);
+    }
+    return pending;
+  };
+  const buildMesh = function* (geometry, slice) {
     const vertices = geometry.verts, nodes = [];
     let count = 0;
     for (let index = 0; index < geometry.faces.length; index++) {
+      if (!(index & 511) && slice.until !== Infinity && performance.now() >= slice.until) yield;
       const face = readFace(geometry, index);
       if (face.visibility !== false && face.i.length > 2) count += face.i.length - 2;
     }
     const indices = new Uint32Array(count * 3), boxes = new Float64Array(count * 6), order = new Uint32Array(count);
     let n = 0;
     for (let index = 0; index < geometry.faces.length; index++) {
+      if (!(index & 511) && slice.until !== Infinity && performance.now() >= slice.until) yield;
       const face = readFace(geometry, index);
       if (face.visibility === false) continue;
       for (let i = 1; i + 1 < face.i.length; i++) {
@@ -70,14 +93,41 @@
         n++;
       }
     }
-    const keys = new Float64Array(count * 3), scratch = BL.math.sortScratch(count);
+    const keys = new Float64Array(count * 3);
     let ordered = true;
     for (let i = 0; i < count; i++) for (let axis = 0; axis < 3; axis++) { const k = keys[i * 3 + axis] = boxes[i * 6 + axis] + boxes[i * 6 + axis + 3]; if (k !== k) ordered = false; }
-    // `sorted` is the axis the range already lies in order on (its parent's, when no key is NaN), where the stable
-    // sort would move nothing.
-    const build = (from, to, sorted) => {
+    let scratch = null;
+    // The BVH needs two equal-sized spatial halves, not a fully sorted range at
+    // every level. Partition around the median in place; equal keys still make
+    // progress. A bounded selection budget retains the sort fallback for unusual
+    // inputs, while ordinary bakes avoid repeated full sorts and their scratch.
+    const partition = function* (from, to, middle, axis) {
+      let lo = from, hi = to - 1, budget = 2 * Math.ceil(Math.log2(to - from));
+      while (lo < hi) {
+        if (slice.until !== Infinity && performance.now() >= slice.until) yield;
+        if (!ordered || --budget < 0) {
+          if (!scratch) scratch = BL.math.sortScratch(count);
+          BL.math.sortByKey(order, lo, hi + 1, keys, 3, axis, scratch);
+          return;
+        }
+        const a = keys[order[lo] * 3 + axis], b = keys[order[(lo + hi) >>> 1] * 3 + axis], c = keys[order[hi] * 3 + axis];
+        const pivot = a < b ? b < c ? b : Math.max(a, c) : a < c ? a : Math.max(b, c);
+        let left = lo, right = hi;
+        while (left <= right) {
+          if (!(left & 511) && slice.until !== Infinity && performance.now() >= slice.until) yield;
+          while (keys[order[left] * 3 + axis] < pivot) left++;
+          while (keys[order[right] * 3 + axis] > pivot) right--;
+          if (left <= right) { const id = order[left]; order[left++] = order[right]; order[right--] = id; }
+        }
+        if (middle <= right) hi = right;
+        else if (middle >= left) lo = left;
+        else return;
+      }
+    };
+    const build = function* (from, to) {
       let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
       for (let i = from; i < to; i++) {
+        if (!(i & 511) && slice.until !== Infinity && performance.now() >= slice.until) yield;
         const o = order[i] * 6;
         x0 = Math.min(x0, boxes[o]); y0 = Math.min(y0, boxes[o + 1]); z0 = Math.min(z0, boxes[o + 2]);
         x1 = Math.max(x1, boxes[o + 3]); y1 = Math.max(y1, boxes[o + 4]); z1 = Math.max(z1, boxes[o + 5]);
@@ -89,15 +139,14 @@
         let axis = 0;
         if (box[4] - box[1] > box[3] - box[0]) axis = 1;
         if (box[5] - box[2] > box[axis + 3] - box[axis]) axis = 2;
-        if (axis !== sorted) BL.math.sortByKey(order, from, to, keys, 3, axis, scratch);
-        const middle = (from + to) >>> 1, next = ordered ? axis : -1; node.left = build(from, middle, next); node.right = build(middle, to, next);
+        const middle = (from + to) >>> 1;
+        yield* partition(from, to, middle, axis);
+        node.left = yield* build(from, middle); node.right = yield* build(middle, to);
       }
       return index;
     };
-    if (count) build(0, count, -1);
-    mesh = { vertices, indices, order, nodes };
-    if (trackSource) sourceVertices.set(geometry, new Float64Array(vertices));
-    meshes.set(geometry, mesh); return mesh;
+    if (count) yield* build(0, count);
+    return { vertices, indices, order, nodes };
   };
   const create = ({ root, renderer, camera, occluded = null, renderOpts = null }) => {
     let records = new WeakMap(), memo = new WeakMap();
@@ -493,9 +542,8 @@
       result.x = Math.max(0, Math.min(width, result.x)); result.y = Math.max(0, Math.min(height, result.y));
       return result;
     };
-    // Warm small meshes within the idle budget. A large synchronous BVH build
-    // cannot be interrupted, so leave it to the exact on-demand path rather than
-    // starting seconds of work in an idle callback between scene frames.
+    // Optional warming shares the frame with input and rendering. Cap each
+    // callback's budget at two milliseconds; larger trees yield at checkpoints.
     let warming = 0, msPerTriangle = 0.01;
     const warm = () => {
       if (warming || typeof requestIdleCallback === "undefined") return;
@@ -509,17 +557,32 @@
       collect(root);
       const slice = (deadline) => {
         warming = 0;
+        const until = performance.now() + Math.min(2, deadline.timeRemaining());
         while (pending.length) {
+          const remaining = Math.min(deadline.timeRemaining(), until - performance.now());
+          if (remaining <= 0) break;
           const geometry = pending[pending.length - 1];
           if (meshes.has(geometry)) { pending.pop(); continue; }
-          let triangles = 0;
-          for (let index = 0; index < geometry.faces.length; index++) {
-            const face = readFace(geometry, index);
-            if (face.visibility !== false && face.i.length > 2) triangles += face.i.length - 2;
+          const existing = builds.get(geometry);
+          let triangles = existing?.triangles ?? 0;
+          if (!existing) {
+            for (let index = 0; index < geometry.faces.length; index++) {
+              const face = readFace(geometry, index);
+              if (face.visibility !== false && face.i.length > 2) triangles += face.i.length - 2;
+            }
           }
           const estimated = triangles * msPerTriangle + 1;
-          if (estimated > 8) { pending.pop(); continue; }
-          if (estimated > deadline.timeRemaining()) break;
+          if (estimated > remaining || existing) {
+            // Ownership wrappers retain meshOf's exact source-sharing checks.
+            if (geometry.matrixSourceGeometry) { pending.pop(); continue; }
+            const work = startMesh(geometry);
+            work.triangles = triangles;
+            work.slice.until = until;
+            const next = work.steps.next();
+            if (next.done) { meshes.set(geometry, next.value); builds.delete(geometry); pending.pop(); }
+            else break;
+            continue;
+          }
           const start = performance.now();
           meshOf(geometry);
           pending.pop();

@@ -11,7 +11,7 @@
 // baked set's nodes. A theme's `inside` list and `ceiling` lamp runs in scene-hub.js furnish the room behind
 // a mouth from the kit's pieces.
 //
-// Beyond sets: `palm(v)` three swaying cartoon palm meshes (not voxels) placed as their own nodes (`palmTrunk(v, y)` their trunk's middle and radius at a height), `islet(v)` the terraced sea stacks on the horizon (variant 1 has a sea arch), `motes(opts)` a
+// Beyond sets: `palm(v)` three swaying cartoon palm meshes (not voxels) placed as their own nodes (`palmTrunk(v, y)` their trunk's middle and radius at a height), `islet(v, clear)` the terraced sea stacks on the horizon (variant 1 has a sea arch; `clear` a twin that sheds most of the fog), `motes(opts)` a
 // fixed field of glowing dust that wraps round the view (`update(elapsed, x, z)`), `flock(opts)` one
 // instanced batch of wheeling gulls and `fleet(opts)` log rafts on the sea, each with `update(elapsed)`.
 //
@@ -67,7 +67,6 @@
   // several times cheaper to fill and probe than string-keyed voxel maps.
   const KEY = (x, y, z) => ((x + 2048) * 4096 + (y + 2048)) * 4096 + (z + 2048);
   const BOLT = ["...##", "..##.", ".##..", "#####", "..##.", ".##..", "##..."];
-  const INVADER = ["..#..#..", "...##...", "..####..", ".#.##.#.", "########", "#.####.#", "#.#..#.#", "...##..."];
   // EntropyLab reference sampled at 48 x 72: quarter-size pixels preserve the leaf, liquid and die.
   const LAB_BANNER = [
     "................................................",
@@ -636,26 +635,28 @@
       box(SOLID, 5, 9, 13, 14, 1, 3, 2);
       for (let k = 0; k < 4; k++) box(GLOW, 5 + k, 5 + k, 15, 17 + (k & 1) * 2, 2, 2, COLORS[k % 3]);
     }),
+    // The terminal stands straight on the ground, its keyboard in front of it.
     terminal: () => author((put, box) => {
-      crateShell(box, 12, false, 1);
-      box(SOLID, -6, 5, 12, 23, -5, 4, (x, y) => y === 12 || y === 23 ? 5 : 6);
-      for (let y = 14; y <= 21; y++) box(y & 1 ? GLOW : SOLID, -4, 3, y, y, 5, 5, y & 1 ? 31 : 36);
-      box(SOLID, -5, 4, 12, 12, 6, 8, 5);
+      box(SOLID, -6, 5, 0, 11, -5, 4, (x, y) => y === 0 || y === 11 ? 5 : 6);
+      for (let y = 2; y <= 9; y++) box(y & 1 ? GLOW : SOLID, -4, 3, y, y, 5, 5, y & 1 ? 31 : 36);
+      box(SOLID, -5, 4, 0, 0, 6, 8, 5);
     }),
+    // The board's green, 36 by 22 cells inside its frame, is the face chalkboard.js draws on (its BOARD_W, BOARD_H
+    // and BOARD_Y); the easel behind it leans back to a pole.
     chalkboard: () => author((put, box) => {
-      for (let y = 0; y <= 29; y++) {
-        const z = Math.round(-2 - y * 3 / 29);
+      for (let y = 0; y <= 33; y++) {
+        const z = Math.round(-2 - y * 3 / 33);
         box(SOLID, -1, 0, y, y, z, z + 1, 2);
       }
-      for (const side of [-1, 1]) for (let y = 0; y <= 17; y++) {
-        const x = side < 0 ? Math.round(-1 - 8 * (1 - y / 17)) : Math.round(8 * (1 - y / 17));
-        const z = Math.round(-10 + y * 6 / 17);
+      for (const side of [-1, 1]) for (let y = 0; y <= 20; y++) {
+        const x = side < 0 ? Math.round(-1 - 12 * (1 - y / 20)) : Math.round(12 * (1 - y / 20));
+        const z = Math.round(-12 + y * 8 / 20);
         box(SOLID, x, x + 1, y, y, z, z + 1, 2);
       }
-      box(SOLID, -13, 12, 10, 26, -2, -2, (x, y) => x === -13 || x === 12 || y === 10 || y === 26 ? 2 : 34);
-      box(SOLID, -14, 13, 9, 9, -2, 2, 1);
-      box(SOLID, -10, -6, 10, 11, 1, 2, 5);
-      box(SOLID, 6, 9, 10, 10, 1, 1, 35);
+      box(SOLID, -19, 18, 7, 30, -2, -2, (x, y) => x === -19 || x === 18 || y === 7 || y === 30 ? 2 : 34);
+      box(SOLID, -20, 19, 6, 6, -2, 2, 1);
+      box(SOLID, -16, -12, 7, 8, 1, 2, 5);
+      box(SOLID, 12, 15, 7, 7, 1, 1, 35);
     }),
     // The mirror cave: black monoliths running with green glyphs, and rune stones.
     monolith: (v) => author((put, box) => {
@@ -722,22 +723,21 @@
       for (const cx of [-8, 7]) for (let y = 0; y <= 5; y++) disc((x, yy, z) => put(SOLID, x, yy, z, y === 5 ? 1 : 2), 2.4, y, cx, 0);
       box(SOLID, -12, 11, 6, 8, -2, 1, (x, y) => y === 8 ? 1 : 2);
     }),
-    // Ooga Arcade: a cabinet with a lit screen and a coconut for a stick (0 timber, 1 stone).
-    cabinet: (v) => author((put, box) => {
-      const BODY = v & 1 ? [20, 21, 22] : [0, 1, 2], SCREEN = [30, 40][v & 1], PAINT = v & 1 ? 18 : 19;
-      const side = (x, y, z) => (x === -6 || x === 5) && (z === -5 || z === 4) ? BODY[2] : (y >> 2) & 1 ? BODY[1] : BODY[0];
-      box(SOLID, -6, 5, 0, 11, -5, 4, side);
-      box(SOLID, -6, 5, 12, 13, -5, 6, BODY[2]);
-      box(SOLID, -3, -3, 14, 15, 4, 4, 5);
-      put(SOLID, -3, 16, 4, 48);
-      put(SOLID, 1, 14, 4, 19);
-      put(SOLID, 3, 14, 4, 18);
-      box(SOLID, -6, 5, 14, 23, -5, 2, side);
-      for (let x = -6; x <= 5; x++) for (let y = 14; y <= 23; y++) {
-        const lit = x >= -4 && x <= 3 && y >= 15 && y <= 22 && INVADER[22 - y][x + 4] === "#";
-        put(lit ? GLOW : SOLID, x, y, 3, lit ? SCREEN : x < -4 || x > 3 || y < 15 || y > 22 ? BODY[2] : 36);
-      }
-      box(SOLID, -6, 5, 24, 27, -5, 4, (x, y, z) => y === 27 ? BODY[2] : z === 4 && (x + y) % 3 === 0 ? 16 : PAINT);
+    // Ooga Arcade's yard, outside its mouth.
+    // A joystick the size of an Ooga: a red ball on a steel stick, its yellow-rimmed base set with two buttons.
+    bigJoystick: () => author((put, box) => {
+      box(SOLID, -6, 5, 0, 1, -6, 5, (x, y, z) => y === 1 && (x === -6 || x === 5 || z === -6 || z === 5) ? 18 : 5);
+      box(SOLID, -1, 0, 2, 12, -1, 0, 38);
+      for (let k = -4; k <= 4; k++) disc((x, y, z) => put(SOLID, x, y, z, x < -1 && y > 17 && z > 0 ? 16 : 19), Math.sqrt(18.2 - k * k), 16 + k);
+      disc((x, y, z) => put(SOLID, x, y, z, 19), 1.6, 2, 3, 3);
+      disc((x, y, z) => put(SOLID, x, y, z, 18), 1.6, 2, -3, 3);
+    }),
+    // A leaning pile of gold tokens, each pressed with a darker rim.
+    tokenStack: () => author((put) => {
+      const stack = (cx, cz, n, lean) => {
+        for (let y = 0; y < n * 2; y++) disc((x, yy, z, d) => put(SOLID, x, yy, z, d > 3.2 ? 59 : 18), 4.2, y, cx + ((y >> 1) % 3 === 2 ? lean : 0), cz);
+      };
+      stack(-2, 0, 4, 1); stack(5, 3, 2, -1); stack(1, -6, 1, 0);
     }),
     // B.C.A.: a standing abacus of banana and ivory beads on brass rods, and a lectern with the open ledger and
     // a spike of receipts.
@@ -898,9 +898,29 @@
     }
     return { verts: out, faces: src.faces, lines: src.lines };
   };
+  // A piece baked alone at the origin, unturned, once a kind and variant: what a loose piece (physics.js) draws, with
+  // its box in metres (`bounds`: min x, y, z then max x, y, z) over everything it draws.
+  const LOOSE = new Map();
+  const loosePiece = (kind, variant) => {
+    const key = `${kind}:${variant}`;
+    let baked = LOOSE.get(key);
+    if (baked) return baked;
+    baked = set().put(kind, 0, 0, 0, 0, variant).build();
+    const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+    for (const geo of [baked.solid, baked.hang, baked.glow, baked.swing, baked.swingGlow, baked.lampGlow, baked.swingLampGlow]) {
+      if (!geo) continue;
+      const v = geo.verts;
+      for (let i = 0; i < v.length; i += 3) for (let k = 0; k < 3; k++) { box[k] = Math.min(box[k], v[i + k]); box[k + 3] = Math.max(box[k + 3], v[i + k]); }
+    }
+    baked.bounds = box;
+    LOOSE.set(key, baked);
+    return baked;
+  };
   const set = () => {
     // Mesh pieces placed so far: kind, then the cell origin and quarter turns.
     const meshes = [], paintParts = [], glowParts = [];
+    // Pieces placed loose: drawn and moved on their own, never baked into the set (`build`'s `loose`).
+    const loose = [];
     // Layers 3 and 4 hold what hangs from a cable (lantern bodies and other glow); 5 and 6 hold lantern glass.
     // The hanging layers swing without moving the cable or the posts.
     const layers = [new Map(), new Map(), new Map(), new Map(), new Map(), new Map(), new Map()], lights = [];
@@ -923,7 +943,11 @@
       // decorative face never absorbs an adjacent structural face's tag.
       layers[layer].set(k, c | (layer === SOLID && ragePass ? RAGE_PASS : 0));
     };
-    const put = (kind, x, y, z, turns = 0, variant = 0) => {
+    const put = (kind, x, y, z, turns = 0, variant = 0, isLoose = false) => {
+      if (isLoose) {
+        loose.push({ kind, variant, x: Math.round(x / U) * U, y: Math.round(y / U) * U, z: Math.round(z / U) * U, turns: ((turns % 4) + 4) % 4, baked: loosePiece(kind, variant) });
+        return set;
+      }
       const piece = pieceOf(kind, variant), mesh = MESHES[kind];
       const ragePass = RAGE_PASS_PIECES.has(kind);
       const ox = Math.round(x / U), oy = Math.round(y / U), oz = Math.round(z / U), q = ((turns % 4) + 4) % 4;
@@ -1053,7 +1077,7 @@
         glow = noShadow(merge(...glowParts));
         glowParts.length = 0;
       }
-      const out = { solid, hang, glow, swing: bake(3), swingGlow: bake(4), lampGlow: bake(5), swingLampGlow: bake(6), lights: Float32Array.from(lights), picks: picks.splice(0) };
+      const out = { solid, hang, glow, swing: bake(3), swingGlow: bake(4), lampGlow: bake(5), swingLampGlow: bake(6), lights: Float32Array.from(lights), picks: picks.splice(0), loose: loose.splice(0) };
       for (const layer of layers) layer.clear();
       lights.length = steps.length = 0;
       return out;
@@ -1207,9 +1231,14 @@
   const palm = BL.models.variants((v) => BL.models.foliageLods(palmGeometry(v), palmGeometry(v, 1)));
   // The islands on the horizon: terraced sea stacks on the island's own grid mesher, two metres a cell, a sand
   // ring at the waterline, rock cliffs and grass tops; variant 1 has a sea arch through it. Built once a page.
-  const islets = [];
-  const islet = (v) => {
-    if (islets[v]) return islets[v];
+  // `clear` is a twin that takes ISLET_PIERCE of the fog off itself, for a scene whose haze would otherwise paint
+  // the stacks in the horizon's colour well before the sea under them hazes at all: the sea hazes later, and into
+  // the darker sky below the horizon, so fully hazed stacks stood pale on blue water at noon, orange at dusk and
+  // brighter than the sea at night.
+  const islets = [], ISLET_PIERCE = 0.8;
+  const islet = (v, clear = false) => {
+    const slot = clear ? v + 3 : v;
+    if (islets[slot]) return islets[slot];
     const u = 2, S = 40, H = 16 + v * 5, grid = BL.terrain.makeGrid(S, H, S), rand = mulberry32(1200 + v * 7);
     const bumps = Array.from({ length: 6 }, () => [rand() * S, rand() * S, 4 + rand() * 6]);
     const heightAt = (x, z) => {
@@ -1228,7 +1257,8 @@
     }
     const geo = BL.terrain.gridGeometry(grid, { unit: u, palette: [null, ...RGB], origin: { x: -S * u / 2, y: 0, z: -S * u / 2 } });
     geo.castShadow = false;
-    islets[v] = geo;
+    if (clear) geo.fogPierce = ISLET_PIERCE;
+    islets[slot] = geo;
     return geo;
   };
   // The nodes for a baked set: solid (for the caller's collision), hang, decorative glow, lantern glow and swinging layers. All
@@ -1360,7 +1390,9 @@
       figure.scale.x = figure.scale.z = size;
       figure.scale.y = size / 0.85;
       figure.position.x = seated ? -0.3 : 0.3;
-      figure.position.y = deck + figure.scale.y * passenger.traits.height * 5 / 16 * (seated ? 0.4 : 1);
+      // Standing on the deck from the hip the build stands it at; seated, its thighs tipped forward so the hip is
+      // about four tenths of that over the deck.
+      figure.position.y = deck + figure.scale.y * passenger.root.position.y * (seated ? 0.4 : 1);
       figure.position.z = -0.65;
       figure.rotation.y = seated ? -0.12 : 0.12;
       passenger.parts.club.visible = false;
@@ -1432,5 +1464,5 @@
     }
     const geometry=merge(...bits);studioCache.set(kind,geometry);return geometry;
   };
-  BL.dressing = { U, PALETTE, KIT, LIGHT_RGB, COIL_LIGHT, studio, set, coilRig, motes, palm, palmTrunk, islet, nodes, flock, fleet };
+  BL.dressing = { LAB_LOGO: LAB_BANNER, U, PALETTE, KIT, loosePiece, LIGHT_RGB, COIL_LIGHT, studio, set, coilRig, motes, palm, palmTrunk, islet, nodes, flock, fleet };
 })();

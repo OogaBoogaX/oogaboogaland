@@ -1,11 +1,84 @@
+
 (() => {
   "use strict";
+
   const BL = window.BL;
+  const { geometry, pushVert, face } = BL.models;
+  const { hexToRgb } = BL.math;
+
+  const boulderGeometry = (h) => {
+    const geo = geometry();
+    const u = h / 16;
+
+    const rings = [
+      { y: 1, r: 1.7 },
+      { y: 2, r: 2.5 },
+      { y: 4, r: 3.1 },
+      { y: 6, r: 2.8 },
+      { y: 7, r: 1.9 }
+    ];
+
+    const segments = 8;
+    const colors = ["#777777", "#686868", "#929292", "#555555"];
+    const vertices = [];
+
+    for (let r = 0; r < rings.length; r++) {
+      const ring = [];
+
+      for (let i = 0; i < segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        const wobble = 1 + 0.08 * Math.sin(i * 4 + r * 2);
+
+        ring.push(pushVert(
+          geo,
+          Math.cos(angle) * rings[r].r * wobble * u,
+          rings[r].y * u,
+          Math.sin(angle) * rings[r].r * wobble * u
+        ));
+      }
+
+      vertices.push(ring);
+    }
+
+    const bottom = pushVert(geo, 0, 0.5 * u, 0);
+    const top = pushVert(geo, 0, 7.5 * u, 0);
+
+    for (let i = 0; i < segments; i++) {
+      const next = (i + 1) % segments;
+
+      face(
+        geo,
+        [bottom, vertices[0][i], vertices[0][next]],
+        hexToRgb(colors[i % 4])
+      );
+
+      for (let r = 0; r < rings.length - 1; r++) {
+        face(geo, [
+          vertices[r][i],
+          vertices[r + 1][i],
+          vertices[r + 1][next],
+          vertices[r][next]
+        ], hexToRgb(colors[(i + r) % 4]));
+      }
+
+      face(
+        geo,
+        [
+          vertices[rings.length - 1][i],
+          top,
+          vertices[rings.length - 1][next]
+        ],
+        hexToRgb(colors[(i + 2) % 4])
+      );
+    }
+
+    return geo;
+  };
 
   BL.characters.add({
     handle: "Global-DSB",
     joined: 1761945600,
-    lastCommit: 1761945600,
+    lastCommit: 1795350000,
 
     look: {
       bald: true,
@@ -14,98 +87,71 @@
       noBrow: true,
       noPupils: true,
       face: "none",
-      hatY: 12,
       height: 1.10,
-      skin: "#3a1a12",
-      hair: "#1a0a08",
-      fur: "#2a120c",
-      eyeColor: "#ff2200",
-      eyeGlow: 0.85
+      skin: "#ed3025",
+      hair: "#ed3025",
+      fur: "#ed3025",
+      eyeColor: "#ffffff",
+      eyeGlow: 0
     },
 
     voice: {
-      poke: "Global nonsense incoming.",
+      poke: "GLOBAL LOVES CAVEMAN LAND!",
       idle: [
-        "Hotter than the chain.",
-        "Spikes up.",
-        "Bitcoin or burn.",
-        "No mercy, only magma.",
-        "Skull stays lit.",
-        "DSB does not cool down."
+        "Global loves rocks!",
+        "Global is happy!",
+        "Where is Global's boulder?",
+        "Global likes red!",
+        "Global smash big rock!",
+        "Global wants cookies!",
+        "Caveman Global is here!"
       ]
     },
 
     dress: {
       skull(k, v) {
-        const rock   = k.color("#3a1a12");
-        const rockLt = k.color("#5c2a18");
-        const lava   = k.color("#ff3a00");
-        const lavaHi = k.color("#ffaa22");
-        const black  = k.color("#0a0504");
+        const red = k.color("#ed3025");
+        const dark = k.color("#b91d18");
+        const orange = k.color("#ff8c00");
 
-        v.fill(0, 6, 0, 6, 0, 5, rock);
-        v.fill(1, 1, 2, 5, 3, 3, lava);
-        v.fill(5, 5, 2, 5, 3, 3, lava);
-        v.fill(2, 4, 1, 1, 4, 4, lavaHi);
-        v.fill(1, 2, 3, 4, 5, 5, black);
-        v.fill(4, 5, 3, 4, 5, 5, black);
+        const redJ = k.jit(red, dark, 0.08);
+
+        v.fill(-1, 7, 0, 7, -1, 5, redJ);
+
+        v.fill(2, 4, 5, 7, 6, 7, orange);
+
         return true;
       },
 
       eyes(k, v) {
-        const glow = k.color("#ff2200");
-        const core = k.color("#ffee44");
+        const white = k.color("#ffffff");
+        const black = k.color("#080808");
+
         for (const x of [1, 5]) {
-          v.set(x, 3, 5, glow);
-          v.set(x, 3, 6, core);
-          k.eyeCells.push([x, 3]);
+          v.set(x, 5, 5, white);
+          v.set(x, 5, 6, black);
+          k.eyeCells.push([x, 5]);
         }
-        k.headEmissive = { [glow]: 0.9, [core]: 1 };
+
         return true;
       },
 
-      crown(k, v) {
-        const helm   = k.color("#0d0d10");
-        const helmLt = k.color("#2a2a30");
-        const spike  = k.color("#111114");
-        const btc    = k.color("#f7931a");
-        const heart  = k.color("#ff2244");
-        const bone   = k.color("#e8e0d0");
+      torso(k, v) {
+        const red = k.color("#ed3025");
+        const dark = k.color("#b91d18");
+        const redJ = k.jit(red, dark, 0.08);
 
-        v.fill(-1, 7, 5, 8, -1, 6, helm);
-        v.fill(0, 6, 8, 9, 0, 5, helmLt);
+        v.fill(0, 7, 0, 7, 0, 5, redJ);
 
-        for (const x of [0, 2, 4, 6]) {
-          v.set(x, 10, 2, spike);
-          v.set(x, 11, 2, spike);
-        }
-        v.set(1, 10, 3, spike);
-        v.set(5, 10, 3, spike);
-
-        v.fill(2, 4, 6, 7, 6, 6, btc);
-        v.set(3, 5, 6, btc);
-        v.set(3, 8, 6, btc);
-
-        v.set(1, 6, 6, heart);
-        v.set(5, 6, 6, heart);
-        v.set(2, 5, 6, heart);
-        v.set(4, 5, 6, heart);
-
-        v.set(0, 6, 5, bone);
-        v.set(6, 6, 5, bone);
+        return true;
       },
 
-      torso(k, v) {
-        const rock   = k.color("#2a120c");
-        const rockLt = k.color("#4a2218");
-        const lava   = k.color("#ff3a00");
-        const lavaHi = k.color("#ff8800");
-
-        v.fill(0, 8, 0, 7, 0, 5, k.jit(rock, rockLt, 0.3));
-        v.fill(2, 2, 1, 6, 5, 5, lava);
-        v.fill(6, 6, 2, 5, 5, 5, lavaHi);
-        v.set(4, 4, 5, lava);
-        v.set(3, 6, 5, lavaHi);
+      club(k) {
+        return {
+          default: boulderGeometry(k.h),
+          rest: { x: 0, y: Math.PI / 2, z: 0.24 },
+          carry: { x: 0, y: Math.PI / 2, z: 0.95 }
+        };
       }
     }
   });

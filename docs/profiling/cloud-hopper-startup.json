@@ -1,0 +1,1324 @@
+{
+  "base": "e6d69aa4d9d93f1c90bf0a28c8899189d3f160a0",
+  "harnessSHA256": "fdf814e1def151cf4ed5a823990e57cfd1a4abfa7d23f246bf0d40dc41aa315e",
+  "order": "10 alternating A/B/B/A pairs; each fresh browser runs cold then warm",
+  "network": "local HTTP gzip, native CPU, requested 1920x1080 Chrome window, DPR 1",
+  "notes": [
+    "Resources exclude the navigation HTML and are read after ten seconds; they are not a complete navigation transfer total.",
+    "Input is held through two displayed frames, then released. The subsequent ten seconds are idle, not a continuous walk.",
+    "Heap is unforced and GC-sensitive, not retained residency.",
+    "Chrome reports the OS compatibility token 10_15_7 in its user agent; see environment OS separately.",
+    "Original batch omitted inner viewport/render dimensions; a later diagnostic with matching launch settings measured 1920x993. Updated harness records dimensions explicitly."
+  ],
+  "runs": [
+    {
+      "variant": "before",
+      "run": "baseline-first-play-01.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "cold",
+      "readyMs": 5602.700000047684,
+      "input": {
+        "at": 5643.5,
+        "accepted": true,
+        "distance": 0.15666754997362647
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 189,
+      "startupBlockingAbove50Ms": 284,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 619940254,
+      "subresourceTransfer": 2408859,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-01.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "warm",
+      "readyMs": 4577.199999928474,
+      "input": {
+        "at": 4607.399999976158,
+        "accepted": true,
+        "distance": 0.06990984164631767
+      },
+      "postInputIdle": {
+        "frames": 601,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 183,
+      "startupBlockingAbove50Ms": 453,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 810314238,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-02.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "cold",
+      "readyMs": 5555.599999904633,
+      "input": {
+        "at": 5599.199999928474,
+        "accepted": true,
+        "distance": 0.13640232625505266
+      },
+      "postInputIdle": {
+        "frames": 603,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 186,
+      "startupBlockingAbove50Ms": 267,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 615857573,
+      "subresourceTransfer": 2408859,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-02.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "warm",
+      "readyMs": 4543.799999952316,
+      "input": {
+        "at": 4589.700000047684,
+        "accepted": true,
+        "distance": 0.06990425843983061
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.700000000000728,
+        "p99": 16.800000000000182,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 182,
+      "startupBlockingAbove50Ms": 460,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 799685197,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-03.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "cold",
+      "readyMs": 5681.399999976158,
+      "input": {
+        "at": 5729,
+        "accepted": true,
+        "distance": 0.06990425843983429
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.700000000000728,
+        "p99": 16.800000000000182,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 188,
+      "startupBlockingAbove50Ms": 298,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 629984152,
+      "subresourceTransfer": 2408859,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-03.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "warm",
+      "readyMs": 4574.600000023842,
+      "input": {
+        "at": 4603.899999976158,
+        "accepted": true,
+        "distance": 0.06990984164631767
+      },
+      "postInputIdle": {
+        "frames": 601,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 188,
+      "startupBlockingAbove50Ms": 447,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 538408478,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-04.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "cold",
+      "readyMs": 5605.099999904633,
+      "input": {
+        "at": 5654.399999976158,
+        "accepted": true,
+        "distance": 0.06990425843983429
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 182,
+      "startupBlockingAbove50Ms": 260,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 632686074,
+      "subresourceTransfer": 2408859,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-04.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "warm",
+      "readyMs": 4538.600000023842,
+      "input": {
+        "at": 4588.700000047684,
+        "accepted": true,
+        "distance": 0.07031313617866604
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.799999999999272,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 185,
+      "startupBlockingAbove50Ms": 443,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 800107288,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-05.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "cold",
+      "readyMs": 5563,
+      "input": {
+        "at": 5615.300000071526,
+        "accepted": true,
+        "distance": 0.1364023262550526
+      },
+      "postInputIdle": {
+        "frames": 603,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 186,
+      "startupBlockingAbove50Ms": 267,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 635925340,
+      "subresourceTransfer": 2408859,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-05.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "warm",
+      "readyMs": 4675.299999952316,
+      "input": {
+        "at": 4703.799999952316,
+        "accepted": true,
+        "distance": 0.06990425843983435
+      },
+      "postInputIdle": {
+        "frames": 601,
+        "p95": 16.799999999999272,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 179,
+      "startupBlockingAbove50Ms": 436,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 514293067,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-06.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "cold",
+      "readyMs": 5551.700000047684,
+      "input": {
+        "at": 5599.400000095367,
+        "accepted": true,
+        "distance": 0.06990984164631767
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.799999999999272,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 191,
+      "startupBlockingAbove50Ms": 307,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 630272946,
+      "subresourceTransfer": 2408859,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-06.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "warm",
+      "readyMs": 4555.100000023842,
+      "input": {
+        "at": 4587.700000047684,
+        "accepted": true,
+        "distance": 0.07031313617866604
+      },
+      "postInputIdle": {
+        "frames": 601,
+        "p95": 16.799999999999272,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 199,
+      "startupBlockingAbove50Ms": 468,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 501147742,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-07.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "cold",
+      "readyMs": 5736,
+      "input": {
+        "at": 5780.400000095367,
+        "accepted": true,
+        "distance": 0.15666754997362647
+      },
+      "postInputIdle": {
+        "frames": 601,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 188,
+      "startupBlockingAbove50Ms": 271,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 635102774,
+      "subresourceTransfer": 2408859,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-07.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "warm",
+      "readyMs": 4629,
+      "input": {
+        "at": 4669.899999976158,
+        "accepted": true,
+        "distance": 0.06990425843983435
+      },
+      "postInputIdle": {
+        "frames": 603,
+        "p95": 16.799999999999272,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 232,
+      "startupBlockingAbove50Ms": 516,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 834922500,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-08.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "cold",
+      "readyMs": 5780.399999976158,
+      "input": {
+        "at": 5823,
+        "accepted": true,
+        "distance": 0.15615242288156334
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.799999999999272,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 203,
+      "startupBlockingAbove50Ms": 276,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 609721330,
+      "subresourceTransfer": 2408859,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-08.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "warm",
+      "readyMs": 4590.599999904633,
+      "input": {
+        "at": 4622.799999952316,
+        "accepted": true,
+        "distance": 0.07031313617866979
+      },
+      "postInputIdle": {
+        "frames": 601,
+        "p95": 16.799999999999272,
+        "p99": 16.800000000000182,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 184,
+      "startupBlockingAbove50Ms": 450,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 569008175,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-09.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "cold",
+      "readyMs": 5609.800000071526,
+      "input": {
+        "at": 5659.700000047684,
+        "accepted": true,
+        "distance": 0.1364074621969317
+      },
+      "postInputIdle": {
+        "frames": 603,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 184,
+      "startupBlockingAbove50Ms": 281,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 643234060,
+      "subresourceTransfer": 2408859,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-09.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "warm",
+      "readyMs": 4562,
+      "input": {
+        "at": 4609.200000047684,
+        "accepted": true,
+        "distance": 0.06990984164631767
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 202,
+      "startupBlockingAbove50Ms": 448,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 849659928,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-10.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "cold",
+      "readyMs": 5530.200000047684,
+      "input": {
+        "at": 5569.700000047684,
+        "accepted": true,
+        "distance": 0.15678404642809773
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.799999999999272,
+        "p99": 16.800000000000182,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 186,
+      "startupBlockingAbove50Ms": 254,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 612810280,
+      "subresourceTransfer": 2408859,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "before",
+      "run": "baseline-first-play-10.json",
+      "manifestSHA256": "97f43f8c8eeb8cab5c14dcc17401f9883ee0b0534ee126c34c40c63240b81f7d",
+      "cache": "warm",
+      "readyMs": 4615.800000071526,
+      "input": {
+        "at": 4660.100000023842,
+        "accepted": true,
+        "distance": 0.1364023262550526
+      },
+      "postInputIdle": {
+        "frames": 603,
+        "p95": 16.700000000000728,
+        "p99": 16.800000000000182,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 190,
+      "startupBlockingAbove50Ms": 464,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 528494671,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-01.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "cold",
+      "readyMs": 5508.5,
+      "input": {
+        "at": 5551.099999904633,
+        "accepted": true,
+        "distance": 0.15666754997362647
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 189,
+      "startupBlockingAbove50Ms": 273,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 617233807,
+      "subresourceTransfer": 2294875,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-01.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "warm",
+      "readyMs": 4484.299999952316,
+      "input": {
+        "at": 4511.799999952316,
+        "accepted": true,
+        "distance": 0.06990425843983435
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.700000000000728,
+        "p99": 16.800000000000182,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 197,
+      "startupBlockingAbove50Ms": 446,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 467074073,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-02.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "cold",
+      "readyMs": 5540.5,
+      "input": {
+        "at": 5580.699999928474,
+        "accepted": true,
+        "distance": 0.15729975756236592
+      },
+      "postInputIdle": {
+        "frames": 601,
+        "p95": 16.700000000000728,
+        "p99": 16.800000000000182,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 184,
+      "startupBlockingAbove50Ms": 271,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 399878517,
+      "subresourceTransfer": 2294875,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-02.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "warm",
+      "readyMs": 4511,
+      "input": {
+        "at": 4538.900000095367,
+        "accepted": true,
+        "distance": 0.06990984164631767
+      },
+      "postInputIdle": {
+        "frames": 601,
+        "p95": 16.700000000000728,
+        "p99": 16.800000000000182,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 185,
+      "startupBlockingAbove50Ms": 454,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 605172710,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-03.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "cold",
+      "readyMs": 5590.899999976158,
+      "input": {
+        "at": 5630.700000047684,
+        "accepted": true,
+        "distance": 0.15666754997362542
+      },
+      "postInputIdle": {
+        "frames": 601,
+        "p95": 16.700000000000728,
+        "p99": 16.800000000000182,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 182,
+      "startupBlockingAbove50Ms": 308,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 620418890,
+      "subresourceTransfer": 2294875,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-03.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "warm",
+      "readyMs": 4564.199999928474,
+      "input": {
+        "at": 4604.100000023842,
+        "accepted": true,
+        "distance": 0.06990425843983435
+      },
+      "postInputIdle": {
+        "frames": 603,
+        "p95": 16.799999999999272,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 189,
+      "startupBlockingAbove50Ms": 440,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 502233125,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-04.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "cold",
+      "readyMs": 5566,
+      "input": {
+        "at": 5615.800000071526,
+        "accepted": true,
+        "distance": 0.1364074621969317
+      },
+      "postInputIdle": {
+        "frames": 603,
+        "p95": 16.799999999999272,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 187,
+      "startupBlockingAbove50Ms": 281,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 611548888,
+      "subresourceTransfer": 2294875,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-04.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "warm",
+      "readyMs": 4451.200000047684,
+      "input": {
+        "at": 4491.600000023842,
+        "accepted": true,
+        "distance": 0.07031313617866979
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.700000000000728,
+        "p99": 16.800000000000182,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 186,
+      "startupBlockingAbove50Ms": 450,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 489351093,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-05.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "cold",
+      "readyMs": 5564,
+      "input": {
+        "at": 5604.599999904633,
+        "accepted": true,
+        "distance": 0.15678404642809773
+      },
+      "postInputIdle": {
+        "frames": 601,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 189,
+      "startupBlockingAbove50Ms": 274,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 622147498,
+      "subresourceTransfer": 2294875,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-05.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "warm",
+      "readyMs": 4480.699999928474,
+      "input": {
+        "at": 4523,
+        "accepted": true,
+        "distance": 0.13640232625505266
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.799999999999272,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 176,
+      "startupBlockingAbove50Ms": 435,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 489892330,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-06.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "cold",
+      "readyMs": 5560.399999976158,
+      "input": {
+        "at": 5587.100000023842,
+        "accepted": true,
+        "distance": 0.06950166243483336
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 185,
+      "startupBlockingAbove50Ms": 252,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 626275000,
+      "subresourceTransfer": 2294875,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-06.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "warm",
+      "readyMs": 4645,
+      "input": {
+        "at": 4676,
+        "accepted": true,
+        "distance": 0.07031313617866604
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.700000000000728,
+        "p99": 16.800000000000182,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 186,
+      "startupBlockingAbove50Ms": 480,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 776180979,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-07.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "cold",
+      "readyMs": 5629.200000047684,
+      "input": {
+        "at": 5671.300000071526,
+        "accepted": true,
+        "distance": 0.15678404642809773
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 194,
+      "startupBlockingAbove50Ms": 293,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 598804578,
+      "subresourceTransfer": 2294875,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-07.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "warm",
+      "readyMs": 4481.899999976158,
+      "input": {
+        "at": 4505.899999976158,
+        "accepted": true,
+        "distance": 0.06990984164631774
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.799999999999272,
+        "p99": 16.800000000000182,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 181,
+      "startupBlockingAbove50Ms": 452,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 495691769,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-08.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "cold",
+      "readyMs": 5712.100000023842,
+      "input": {
+        "at": 5742.300000071526,
+        "accepted": true,
+        "distance": 0.06990984164631767
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.700000000000728,
+        "p99": 16.800000000000182,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 192,
+      "startupBlockingAbove50Ms": 282,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 630822262,
+      "subresourceTransfer": 2294875,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-08.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "warm",
+      "readyMs": 4535.399999976158,
+      "input": {
+        "at": 4559.700000047684,
+        "accepted": true,
+        "distance": 0.06990984164631767
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.700000000000728,
+        "p99": 16.800000000000182,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 177,
+      "startupBlockingAbove50Ms": 443,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 516988499,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-09.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "cold",
+      "readyMs": 5545.899999976158,
+      "input": {
+        "at": 5592.399999976158,
+        "accepted": true,
+        "distance": 0.07031313617866979
+      },
+      "postInputIdle": {
+        "frames": 603,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 191,
+      "startupBlockingAbove50Ms": 282,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 618544779,
+      "subresourceTransfer": 2294875,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-09.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "warm",
+      "readyMs": 4469.600000023842,
+      "input": {
+        "at": 4497.5,
+        "accepted": true,
+        "distance": 0.06990425843983435
+      },
+      "postInputIdle": {
+        "frames": 601,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 179,
+      "startupBlockingAbove50Ms": 459,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 840777232,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-10.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "cold",
+      "readyMs": 5624.600000023842,
+      "input": {
+        "at": 5666.300000071526,
+        "accepted": true,
+        "distance": 0.15615242288156334
+      },
+      "postInputIdle": {
+        "frames": 602,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 190,
+      "startupBlockingAbove50Ms": 289,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 630986101,
+      "subresourceTransfer": 2294875,
+      "requests": 10,
+      "logs": []
+    },
+    {
+      "variant": "after",
+      "run": "candidate-first-play-10.json",
+      "manifestSHA256": "6f126473cc0e7db59c560a9ff32d00818140a7f943c6e9db9d4d26bc8266b9b4",
+      "cache": "warm",
+      "readyMs": 4484.199999928474,
+      "input": {
+        "at": 4526.599999904633,
+        "accepted": true,
+        "distance": 0.06990425843983061
+      },
+      "postInputIdle": {
+        "frames": 603,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000109,
+        "over33": 0,
+        "over50": 0
+      },
+      "startupLongestTaskMs": 188,
+      "startupBlockingAbove50Ms": 452,
+      "postInputLongTasks": [],
+      "usedHeapAfterTenSeconds": 458998432,
+      "subresourceTransfer": 8243,
+      "requests": 8,
+      "logs": []
+    }
+  ],
+  "runtime": {
+    "node": "v24.22.1",
+    "arch": "arm64",
+    "chromeArch": "arm64"
+  },
+  "environment": {
+    "browser": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+    "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)",
+    "dpr": 1,
+    "memory": 32,
+    "quality": "medium"
+  },
+  "acceptanceFollowup": {
+    "date": "2026-11-05",
+    "sourceHead": "8e4d32361dcfe464ba93bcdd7955e1b3b6249873",
+    "repair": "Restore keyboard focus to the world canvas when a Cloud Hopper card closes into gameplay.",
+    "runs": [
+      {
+        "command": "ONLY='cloud hopper fixed camera,cloud hopper island framing,hub hosted optional game' LANES=1 CHROME_ARCH=arm64 node test/run.mjs hub",
+        "passed": 439,
+        "total": 441,
+        "failed": [
+          "Cloud Hopper framing",
+          "hosted interrupted-ascent return"
+        ],
+        "cameraAssertionsPassed": 3
+      },
+      {
+        "command": "ONLY='hub hosted optional game' LANES=1 CHROME_ARCH=arm64 node test/run.mjs hub",
+        "passed": 435,
+        "total": 435,
+        "notes": "After focus repair; before standalone no-canvas fallback. Game-canvas branch unchanged by fallback."
+      },
+      {
+        "command": "CHROME_ARCH=arm64 node test/run.mjs cloud-hopper-record",
+        "passed": 31,
+        "total": 31,
+        "notes": "Final HUD source; browser viewport emulation, not real devices."
+      }
+    ],
+    "checks": {
+      "build": "pass",
+      "touchedJavaScriptSyntax": "pass",
+      "fullSuite": "not run",
+      "factoryLifecycle": "not run: STOP",
+      "performance": "not remeasured"
+    },
+    "stopped": {
+      "framing": {
+        "streak": 2,
+        "last": "2026-11-05T19:38:09.961Z"
+      },
+      "parentFactoryLifecycle": {
+        "streak": 3,
+        "last": "2026-10-12T17:46:42.144Z"
+      }
+    },
+    "sourceSHA256": {
+      "test/run.mjs": "eecceea7e15b4da3eafe2a5137a8e0e33a2703589a5ed9430229103af13609de",
+      "src/js/cloud-hopper-hud.js": "81a26aab5e09426f7cd93f71c6be781fa74ba37b09fdeb89ecec2cb0fb08b919"
+    },
+    "logs": {
+      "478-acceptance.log": "FAIL hub hosted: first play excludes Cloud Hopper, its failed cabinet load retains control and retry opens the same Ooga then returns safely \u00b7 {\"cold\":{\"absent\":true,\"scene\":\"hub\",\"frames\":19},\"refused\":true,\"kept\":true,\"opened\":true,\"actor\":\"portlandhodl\",\"interrupted\":true,\"returned\":false,\"returnedActor\":\"portlandhodl\",\"asked\":3}\nFAIL Cloud Hopper framing: results reject held keys, deliberate replay retains the selected view and island framing, and racing releases the camera \u00b7 {\"opened\":true,\"ascent\":{\"x\":0.5,\"y\":0.4064223528906129,\"front\":true,\"centreError\":720,\"gap\":330.42137290006826,\"phase\":\"lifting\",\"mode\":\"orbit\",\"cloudClear\":false,\"actorVisible\":true},\"settled\":{\"x\":0.5,\"y\":0.4064223528906129,\"front\":true,\"centreError\":720,\"gap\":330.42137290006826,\"phase\":\"lifting\",\"mode\":\"orbit\",\"cloudClear\":false,\"actorVisible\":true},\"rows\":[{\"name\":\"shoulder\",\"dq\":false,\"instant\":{\"x\":0.9385265365993404,\"y\":1.3411520710322105,\"front\":true,\"centreError\":1351.47821270305,\"gap\":1090.356633749187,\"phase\":\"lifting\",\"mode\":\"shoulder\",\"cloudClear\":false,\"actorVisible\":false},\"later\":{\"x\":0.9385265365993404,\"y\":1.3411520710322105,\"front\":true,\"centreError\":1351.47821270305,\"gap\":1090.356633749187,\"phase\":\"lifting\",\"mode\":\"shoulder\",\"cloudClear\":false,\"actorVisible\":false}},{\"name\":\"first-person\",\"dq\":false,\"instant\":{\"x\":1.2903103073977458,\"y\":1.564587575323702,\"front\":true,\"centreError\":1858.0468426527539,\"gap\":1272.0096987381696,\"phase\":\"lifting\",\"mode\":\"first-person\",\"cloudClear\":false,\"actorVisible\":false},\"later\":{\"x\":1.2903103073977458,\"y\":1.564587575323702,\"front\":true,\"centreError\":1858.0468426527539,\"gap\":1272.0096987381696,\"phase\":\"lifting\",\"mode\":\"first-person\",\"cloudClear\":false,\"actorVisible\":false}}],\"keys\":[{\"label\":\"sprint\",\"passed\":false},{\"label\":\"held sprint\",\"passed\":false},{\"label\":\"sprint release\",\"passed\":false},{\"label\":\"held jump\",\"passed\":false},{\"label\":\"orphan jump release\",\"passed\":false},{\"label\":\"held enter\",\"passed\":false},{\"label\":\"shift enter\",\"passed\":false},{\"label\":\"shift space\",\"passed\":false},{\"label\":\"shift space release\",\"passed\":false},{\"label\":\"fresh enter\",\"passed\":false},{\"label\":\"fresh space\",\"passed\":false},{\"label\":\"space repeat\",\"passed\":false},{\"label\":\"fresh space release\",\"passed\":false},{\"label\":\"tab\",\"passed\":false},{\"label\":\"back tab\",\"passed\":false}],\"manual\":{\"x\":1.2903103073977458,\"y\":1.564587575323702,\"front\":true,\"centreError\":1858.0468426527539,\"gap\":1272.0096987381696,\"phase\":\"lifting\",\"mode\":\"first-person\",\"cloudClear\":false,\"actorVisible\":false}}\n\n439/441 checks passed in 1.4 min\n\nSTOP \u00b7 these failed this run and the last; do not try another fix, hand them to the maintainer with untracked/test-ledger.json:\n  Cloud Hopper framing: results reject held keys, deliberate replay retains the selected view and island framing, and racing releases the camera (2 runs since 2026-11-05T07:50:37.000Z)\n",
+      "478-interruption.log": "\n435/435 checks passed in 0.7 min\n",
+      "478-hud.log": "Global tier only. Name scenes to test them too: npm test -- hub lab race drop orbit mine dsb factory hangar bifrost timechain poker arcade skee hoops shy claw hockey billiards darts pinball ride invaders snake pong stampede flap breaker dash stacker | full\n\n31/31 checks passed in 0.0 min\n"
+    },
+    "draft": true,
+    "characterIntake": "Intentionally pending while draft"
+  },
+  "resumedAcceptance": {
+    "date": "2026-11-05",
+    "sourceHead": "fc82ebc66c683195d37809ad5be5d26c556b3715",
+    "maintainerAuthorized": [
+      "Cloud Hopper framing",
+      "Factory lifecycle"
+    ],
+    "changes": "Camera and framing fixture cleanup calls cancel instead of requesting the real Arcade scene exit. No runtime or Factory change.",
+    "runs": [
+      {
+        "command": "ONLY='cloud hopper fixed camera,cloud hopper island framing,factory lifecycle' LANES=1 CHROME_ARCH=arm64 node test/run.mjs hub factory",
+        "environment": "sandbox",
+        "passed": 433,
+        "total": 435,
+        "note": "Chrome application-registration aborts before both browser assertions"
+      },
+      {
+        "command": "ONLY='cloud hopper fixed camera,cloud hopper island framing,factory lifecycle' LANES=1 CHROME_ARCH=arm64 node test/run.mjs hub factory",
+        "environment": "browser access",
+        "passed": 440,
+        "total": 441,
+        "note": "Camera and framing pass. Factory fixture TypeError before retention measurements; experiment reverted."
+      },
+      {
+        "command": "ONLY='cloud hopper fixed camera,cloud hopper island framing' LANES=1 CHROME_ARCH=arm64 node test/run.mjs hub",
+        "environment": "browser access",
+        "passed": 439,
+        "total": 439,
+        "note": "Final framing-only patch"
+      }
+    ],
+    "checks": {
+      "build": "pass",
+      "touchedJavaScriptSyntax": "pass",
+      "fullSuite": "not run",
+      "performance": "not remeasured"
+    },
+    "factoryStop": {
+      "streak": 2,
+      "first": "2026-11-05T19:56:31.320Z",
+      "last": "2026-11-05T19:57:43.030Z",
+      "detail": "TypeError: Cannot read properties of null (reading 'setPileLevel')",
+      "nextInvestigation": "Use active Lab __ooga.setPileLevel instead of released hub.debug; requires renewed maintainer clearance",
+      "experiment": "archived locally and reverted"
+    },
+    "ledgerHistory": {
+      "478-ledger-before-resume.json": {
+        "hub hosted optional game": {
+          "streak": 1,
+          "first": "2026-11-05T07:38:50.164Z",
+          "last": "2026-11-05T07:38:50.164Z",
+          "detail": "TypeError: Cannot read properties of undefined (reading 'weapon')\n    at <anonymous>:2:52\n    at <anonymous>:3:122"
+        },
+        "Cloud Hopper framing: results reject held keys, deliberate replay retains the selected view and island framing, and racing releases the camera": {
+          "streak": 2,
+          "first": "2026-11-05T07:50:37.000Z",
+          "last": "2026-11-05T19:38:09.961Z",
+          "detail": "{\"opened\":true,\"ascent\":{\"x\":0.5,\"y\":0.4064223528906129,\"front\":true,\"centreError\":720,\"gap\":330.42137290006826,\"phase\":\"lifting\",\"mode\":\"orbit\",\"cloudClear\":false,\"actorVisible\":true},\"settled\":{\"x\":0.5,\"y\":0.4064223528906129,\"front\":true,\"centreError\":720,\"gap\":330.42137290006826,\"phase\":\"lifting\",\"mode\":\"orbit\",\"cloudClear\":false,\"actorVisible\":true},\"rows\":[{\"name\":\"shoulder\",\"dq\":false,\"instant\":{\"x\":0.9385265365993404,\"y\":1.3411520710322105,\"front\":true,\"centreError\":1351.47821270305,\"gap\":1090.356633749187,\"phase\":\"lifting\",\"mode\":\"shoulder\",\"cloudClear\":false,\"actorVisible\":false},\"lat"
+        },
+        "soak: factory cycles: one bounded node survives six round trips, each left mid-show, the hall's subscription released, without retaining scene nodes, targets or DOM": {
+          "streak": 1,
+          "first": "2026-11-05T07:50:37.000Z",
+          "last": "2026-11-05T07:50:37.000Z",
+          "detail": "{\"visits\":[{\"same\":true,\"subscriptions\":2,\"lines\":14,\"places\":14,\"hall\":2,\"away\":0,\"lighter\":true,\"inFlight\":12,\"geometry\":{\"ok\":true,\"complete\":true,\"structure\":true,\"generation\":true,\"capacity\":1153,\"keep\":246,\"outside\":[1161,1161],\"retired\":[]}},{\"same\":true,\"subscriptions\":2,\"lines\":14,\"places\":14,\"hall\":2,\"away\":0,\"lighter\":true,\"inFlight\":12,\"geometry\":{\"ok\":true,\"complete\":true,\"structure\":true,\"generation\":true,\"capacity\":1153,\"keep\":246,\"outside\":[1161,1161],\"retired\":[]}},{\"same\":true,\"subscriptions\":2,\"lines\":14,\"places\":14,\"hall\":2,\"away\":0,\"lighter\":true,\"inFlight\":12,\"geometry\":{"
+        }
+      },
+      "478-parent-ledger-before-resume.json": {
+        "factory lifecycle": {
+          "streak": 3,
+          "first": "2026-10-04T04:47:46.442Z",
+          "last": "2026-10-12T17:46:42.144Z",
+          "detail": "Error: Scene travel did not settle: {\"wanted\":\"hub\",\"scene\":\"hub\",\"accepted\":true,\"trail\":[{\"state\":\"lab:false\",\"at\":119.30000007152557,\"frames\":188},{\"state\":\"lab:true\",\"at\":261.8000000715256,\"frames\":189},{\"state\":\"hub:true\",\"at\":9695.5,\"frames\":191}],\"framesTotal\":4,\"hidden\":false,\"focus\":true,\"requested\":true,\"tweens\":0,\"framesSinceSwap\":0,\"swap\":9696}\n    at tick (<anonymous>:1:883)"
+        }
+      },
+      "478-ledger-after-resumed-attempt.json": {
+        "hub hosted optional game": {
+          "streak": 1,
+          "first": "2026-11-05T07:38:50.164Z",
+          "last": "2026-11-05T07:38:50.164Z",
+          "detail": "TypeError: Cannot read properties of undefined (reading 'weapon')\n    at <anonymous>:2:52\n    at <anonymous>:3:122"
+        },
+        "soak: factory cycles: one bounded node survives six round trips, each left mid-show, the hall's subscription released, without retaining scene nodes, targets or DOM": {
+          "streak": 1,
+          "first": "2026-11-05T07:50:37.000Z",
+          "last": "2026-11-05T07:50:37.000Z",
+          "detail": "{\"visits\":[{\"same\":true,\"subscriptions\":2,\"lines\":14,\"places\":14,\"hall\":2,\"away\":0,\"lighter\":true,\"inFlight\":12,\"geometry\":{\"ok\":true,\"complete\":true,\"structure\":true,\"generation\":true,\"capacity\":1153,\"keep\":246,\"outside\":[1161,1161],\"retired\":[]}},{\"same\":true,\"subscriptions\":2,\"lines\":14,\"places\":14,\"hall\":2,\"away\":0,\"lighter\":true,\"inFlight\":12,\"geometry\":{\"ok\":true,\"complete\":true,\"structure\":true,\"generation\":true,\"capacity\":1153,\"keep\":246,\"outside\":[1161,1161],\"retired\":[]}},{\"same\":true,\"subscriptions\":2,\"lines\":14,\"places\":14,\"hall\":2,\"away\":0,\"lighter\":true,\"inFlight\":12,\"geometry\":{"
+        },
+        "cloud hopper fixed camera": {
+          "streak": 1,
+          "first": "2026-11-05T19:56:31.320Z",
+          "last": "2026-11-05T19:56:31.320Z",
+          "detail": "Chrome did not start at /Applications/Google Chrome.app/Contents/MacOS/Google Chrome: signal SIGABRT"
+        },
+        "factory lifecycle": {
+          "streak": 2,
+          "first": "2026-11-05T19:56:31.320Z",
+          "last": "2026-11-05T19:57:43.030Z",
+          "detail": "TypeError: Cannot read properties of null (reading 'setPileLevel')\n    at <anonymous>:1:21"
+        }
+      }
+    },
+    "logs": {
+      "478-resumed-acceptance.log": "RETRY cloud hopper fixed camera \u00b7 Chrome did not start at /Applications/Google Chrome.app/Contents/MacOS/Google Chrome: signal SIGABRT \u00b7 running the session again on a fresh Chrome\nFAIL cloud hopper fixed camera \u00b7 Chrome did not start at /Applications/Google Chrome.app/Contents/MacOS/Google Chrome: signal SIGABRT\nRETRY factory lifecycle \u00b7 Chrome did not start at /Applications/Google Chrome.app/Contents/MacOS/Google Chrome: signal SIGABRT \u00b7 running the session again on a fresh Chrome\nFAIL factory lifecycle \u00b7 Chrome did not start at /Applications/Google Chrome.app/Contents/MacOS/Google Chrome: signal SIGABRT\n\n2 sessions retried after an infrastructure error:\n  cloud hopper fixed camera \u00b7 Chrome did not start at /Applications/Google Chrome.app/Contents/MacOS/Google Chrome: signal SIGABRT\n  factory lifecycle \u00b7 Chrome did not start at /Applications/Google Chrome.app/Contents/MacOS/Google Chrome: signal SIGABRT\n\n433/435 checks passed in 0.4 min\n",
+      "478-resumed-browser-acceptance.log": "FAIL factory lifecycle \u00b7 TypeError: Cannot read properties of null (reading 'setPileLevel')\n    at <anonymous>:1:21\n\n440/441 checks passed in 0.8 min\n\nSTOP \u00b7 these failed this run and the last; do not try another fix, hand them to the maintainer with untracked/test-ledger.json:\n  factory lifecycle (2 runs since 2026-11-05T19:56:31.320Z)\n",
+      "478-framing-final.log": "\n439/439 checks passed in 0.6 min\n"
+    },
+    "sourceSHA256": {
+      "test/run.mjs": "d313b263a676d3d37638fe1f1a9c9fe1263e01089e0d4ac947f90a6302472d32"
+    },
+    "draft": true
+  },
+  "integration20261108": {
+    "date": "2026-11-08",
+    "sourceHead": "c389232bc76da04bbb1a78836fffa97e4c32870a",
+    "upstream": "5e5ad247117835ce676a79cd951d390084551de0",
+    "draft": false,
+    "changes": [
+      "Preserve upstream Whitepaper and Goldbug removals and pet-reaction debug hook while retaining deferred Cloud Hopper setup.",
+      "Provide explicit browser-only selection without changing normal/full checks or failure tracking."
+    ],
+    "runs": [
+      {
+        "command": "npm run build",
+        "result": "pass"
+      },
+      {
+        "command": "node --check (touched JavaScript files)",
+        "result": "pass"
+      },
+      {
+        "command": "node --test worker/test/cloud-hopper-replays.test.mjs",
+        "passed": 14,
+        "total": 14
+      },
+      {
+        "command": "CHROME_ARCH=arm64 LANES=1 node test/run.mjs cloud-hopper-record",
+        "passed": 31,
+        "total": 31
+      },
+      {
+        "command": "ONLY='cloud hopper fixed camera,cloud hopper island framing,hub hosted optional game' LANES=1 CHROME_ARCH=arm64 node test/run.mjs --browser-only hub",
+        "passed": 8,
+        "total": 8
+      }
+    ],
+    "notRun": [
+      "Factory",
+      "stopped local checks",
+      "local global/full tier",
+      "performance measurements",
+      "physical-device checks"
+    ],
+    "sourceSHA256": {
+      "test/run.mjs": "b29bcf867628b042a7ecbeaf5b367c6f5e7517f01f2f20bf906db178e773fda3",
+      "src/js/scene-hub.js": "fd888ad40ac0757a5bc479ce977d1d28f10c5ca643bc66e5ca67af2e18ec8e87",
+      "src/js/deferred.js": "bb70a61c108b530a6fcdc1004e1374c3610bbdc832f38e332798b7e4b9259b69",
+      "src/index.html": "5f486c564d9db84dc8437fb6e307fa30e68f4b3762f873e348158e045ca2cc04"
+    },
+    "historicalEvidence": "All previous benchmark and acceptance sections are preserved as historical results, not this integration."
+  }
+}

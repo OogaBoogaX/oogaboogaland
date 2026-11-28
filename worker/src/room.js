@@ -3,7 +3,7 @@
 // session; nothing a client sends can change its identity. Ported from the OBL-Audio prototype:
 // hibernatable sockets with attachments, a snapshot at most 15 times a second while anything moves, an
 // alarm sweeping silent sockets once a minute, and one socket per player, where a newer one kicks the older with `replaced`.
-// Every claim on an Ooga or gorilla passes `claimRefusal` against the cast the build writes (characters.gen.json).
+// Every claim on an Ooga or gorilla passes `claimRefusal` against this Room's accepted character catalog.
 // Voice: the room alone talks to the Realtime SFU (the secret stays here), decides who hears whom
 // (`voicePeers`: both driving a body in the same place) and re-checks it on every pull, so a page never
 // learns another player's session and cannot pull a voice it may not hear.
@@ -19,104 +19,288 @@
 // Chat: each line is named from the session, rate limited per account across awake-room reconnects, sent to every socket and kept in a
 // ring of the last CHAT_KEEP in memory alone, which a joiner gets after `welcome`. No durable chat storage: a room
 // that hibernates, restarts or is redeployed wakes with an empty ring, and the lines are gone.
+// Private conversations (#188): who invited whom, who talks to whom and whom each blocked live in the attachments
+// (`pm`), so a woken room keeps them, and each account's blocks and rate limits outlive its reconnects while the room is
+// awake (`pmAccounts`); the frames pass straight through and are never kept.
+// Reactions: an emoji goes to the sender's zone and is never kept; the raised hand lives on the record and its
+// attachment, so a woken room still shows it, and goes to everyone on a change. One bucket a record limits both.
+// Voice links: each account's asks live in the room's storage, so a link outlives reconnects, sleep and deploys (see
+// Voice links in protocol.js). Nothing runs for them while idle.
+// The inspector (inspect-report.js): while INSPECTOR_IDS names an account, the room reports joins, drops with what
+// caused them, zone and host changes and voice failures as they happen, and its state with the time since its last
+// report, riding snapshots and the sweep; it adds no timer. Off, every call returns at once.
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
-  NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
-  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST,
-  GHOST_MAGIC, GHOST_FRAME_MAX, GHOST_FRAME_HZ, GHOST_FRAME_BURST, inGhostArena, ghostCandidate, watchesGhost,
+  CABINETS, hockey, block, BLOCK, duel, tessQueue, CLOSE_KICK, CLOSE_PROTOCOL, CLOSE_ERROR, CLOSE_RECONNECT, HOLD_MS, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, MEMBER_SWEEP_MS, CLEANUP_MS, TICK_HZ,
+  NPC_FRAME_MAX, NPC_HZ, PROP_MAGIC, PROP_FEATURE, PROP_FRAME_MAX, PROP_HZ, POSE_SAVE_MS, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
+  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, ROOM_LOCK_FEATURE, PIN_PASS_MS, PIN_TRIES, PIN_WAIT_MS, CONTROL_FRAMES, CONTROL_HZ, CONTROL_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, HAND_EMOJI_FEATURE, REACT_HZ, REACT_BURST,
+  GHOST_MAGIC, inGhostArena, watchesGhost, DANCE_FEATURE,
+  CHALK, CHALK_HZ, CHALK_BURST, CHALK_IDLE_MS, CHALK_SAVE_MS, CHALK_TELL_MS, CHALK_FEATURE,
   WALLET_CAP, WALLET_HZ, WALLET_BURST,
+  PM_FEATURE, PM_HZ, PM_BURST, PM_INVITE_HZ, PM_INVITE_BURST, PM_CONTROL_HZ, PM_CONTROL_BURST, PM_INVITES, PM_BLOCKS, PM_ACCOUNT_KEEP,
+  callFeatures, callOn, LINK_FEATURE, LINK_HZ, LINK_BURST, LINK_WANTS, LINK_ACCOUNTS, voiceLinked, restoreLinks, storedLinks, linkView, inVoice,
   chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
-  BLEND, BLEND_HZ,
+  BLEND, BLEND_HZ, seenTogether, inspectReporter, INSPECT_FEATURE, worldReporter, audienceRoom, commonsRoom, chatMembersRoom, roomCatalog, equipmentRoom, sessionGone, cleanupPass,
+  copyRoom, COPY_FEATURE, TRAVEL_FEATURE,
 } from "./protocol.js";
 import { sha256Hex } from "./crypto.js";
 import { getPlayer } from "./db.js";
 import { deliverHighscores } from "./highscore-store.js";
-import { sfuClient } from "./sfu.js";
+import { sfuClient, turnCredentials } from "./sfu.js";
 import { STUDIO_TRANSPORT, STUDIO_ZONE, studioState, studioHostAllowed, studioCanSpeak, studioPosition, studioSeatAllowed, studioSource } from "./studio-policy.js";
 import CAST_ROWS from "./characters.gen.json";
 
-const CAST = castIndex(CAST_ROWS);
+// The voice cleanup queue's bound (`shedCleanup`).
+const CLEANUP_JOBS_MAX = 64;
+// A held player's socket while its page is away (`hold`): anything written to it goes nowhere, as to a socket closing,
+// so every path that sends to a player or saves its attachment needs no word about holds.
+const GONE = Object.freeze({ readyState: 3, send() { throw new Error("held"); }, serializeAttachment() {}, deserializeAttachment() { return null; }, close() {} });
+
+// Only explicit validation failures may discard a stored value; I/O and handler faults never do.
+class InvalidStoredValue extends TypeError {}
+// A stored voice cleanup job as queueClose writes it; any other shape could never run.
+const cleanupJob = (job) => !!job && typeof job === "object" && typeof job.session === "string" && job.session.length > 0
+  && Array.isArray(job.mids) && job.mids.every((mid) => typeof mid === "string")
+  && (job.midVersions === undefined || (!!job.midVersions && typeof job.midVersions === "object" && !Array.isArray(job.midVersions)))
+  && (job.at == null || Number.isFinite(job.at)) && (job.revision === undefined || Number.isFinite(job.revision))
+  && (job.inspectUntil === undefined || Number.isFinite(job.inspectUntil));
+
+// How long each of the World Map's two load windows runs (`countLoad`), short enough that the map's CPU follows a
+// change within a refresh or two, and the name its counts give Ooga Chat's community members, who report no zone.
+const LOAD_MS = 2000, LOAD_CHAT = "ooga-chat";
+// A chat's copy reports nothing to the World Map: its players stand in a copy, not on the island.
+const NO_WORLD = Object.freeze({ on: false, changed() {}, tick() {}, watch: () => null, stats: () => ({ on: false }) });
 
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    // A hosted chat's copy of its zone (room-copy.js), `chat:<id>`, or null for the island itself.
+    this.copy = copyRoom.of(ctx && ctx.id && ctx.id.name);
+    this.catalog = roomCatalog.create(env, CAST_ROWS, castIndex, () => Date.now());
+    this.inspect = inspectReporter(ctx, env, "Room", () => ctx.id.name, (detail) => this.inspectState(detail));
+    // The World Map's live layer (world-report.js): who stands where, told to WorldWatch as it changes.
+    this.world = this.copy ? NO_WORLD : worldReporter(ctx, env, () => this.worldView());
+    this.flushDue = 0;
     this.players = new Map();
+    // Accounts on a hosted chat's stage (docs/ooga-chat-hosts.md), GitHub id -> chat id: their island voice gives way.
+    this.chatVoices = new Map();
+    // Travellers in a chat's copy, GitHub id -> { chat, at, character }: their seats kept (room-copy.js).
+    this.away = new Map();
+    // Each live hosted chat's title and counts, as the chat last said (room-chat-members.js), for every page's Online Oogas.
+    this.chatRosters = new Map();
+    // Each player socket to its record, so a message finds its sender without reading the socket's attachment. Rebuilt
+    // from the sockets on every wake, as `players` is; a record leaves both together (`drop`).
+    this.sockets = new Map();
+    this.poseTimer = 0;
     this.highscoreRevisions = new Map();
     this.studio = studioState();
     this.cleanupJobs = [];
+    // The EntropyLab chalkboard (chalk-board.js), who holds it ({ id, session, at }) and when it last went to storage.
+    this.chalk = CHALK.board();
+    this.chalkEditor = null;
+    this.chalkTimer = 0;
+    this.chalkDirty = false;
+    this.chalkStored = false;
     this.spawnSlot = 0;
     this.dirty = false;
     this.flushTimer = 0;
-    this.sfu = sfuClient(env);
+    // A copy has no voice: its speakers speak in their chat.
+    this.sfu = this.copy ? null : sfuClient(env, (ms, failed) => {
+      this.inspect.count("sfu");
+      this.inspect.count("sfuMs", ms);
+      this.inspect.peak("sfuMax", ms);
+      if (failed) this.inspect.count("sfuFail");
+    });
     this.hostId = 0;
     this.followers = 0;
     this.lastNpc = null;
-    // The arcade's ghost arena: its own hunt's host, how many follow it, and its last state frame.
-    this.ghostHostId = 0;
-    this.ghostFollowers = 0;
-    this.lastGhost = null;
+    this.catalogRevision = null;
+    this.catalogGeneration = 0;
+    this.catalogRoster = null;
     this.chat = chatLog();
     this.chatId = 0;
     this.chatAccepted = new Map();
     this.chatBuckets = new Map();
+    this.pmAccounts = new Map();
+    this.links = new Map();
+    // Until the stored voice links load, the island's word to the Audience waits (room-audience.js `world`): sent sooner,
+    // it would name no linked partner and close every pull a partner in Ooga Chat holds.
+    this.linksReady = false;
     this.doorQueue = [];
     this.doorActive = null;
     this.doorPasses = new Map();
     this.doorId = 0;
+    // Locked Sphere rooms by number: { pin, passes: id -> ms the way in stays open }. Every page hears which rooms are
+    // locked; only the players inside one hear its PIN. Every occupant's socket attachment carries its room's lock so
+    // hibernation keeps it.
+    this.roomLocks = new Map();
+    this.pinTries = new Map();
     this.sweepAt = 0;
     this.cleanupAt = 0;
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     // The pile's sound loop started once, for good: every page plays it at (now - loopEpoch), so all
     // hear the same crackle at the same moment. Stored, so a woken or redeployed room keeps the phase.
     this.loopEpoch = 0;
+    // Each stored key is restored on its own (`restoring`): a throw inside this block resets the object, and the same
+    // stored value would then fail every wake and every connect after it.
     ctx.blockConcurrencyWhile(async () => {
-      this.studio = (await ctx.storage.get("studio")) || this.studio;
-      if (!studioSource(this.studio.source)) { this.studio.source = studioState().source; this.studio.position = 0; this.studio.playing = false; this.studio.at = Date.now(); this.studio.revision++; this.studio.playbackRevision = (this.studio.playbackRevision || 0) + 1; await ctx.storage.put("studio", this.studio); }
-      this.studio.position = studioPosition(this.studio, this.studio.at);
-      const seated = id => { const p = this.players.get(id); return !!p && p.zone === STUDIO_ZONE && !!p.body && Number.isInteger(p.studioSeat) && !p.studioRevoked && !(this.studio.restrictedIds || []).includes(id); };
-      this.studio.hands = [...new Set((Array.isArray(this.studio.hands) ? this.studio.hands : []).filter(seated))].slice(0, MAX_PLAYERS);
-      this.studio.invited = this.studio.mode === "qa" ? [...new Set((Array.isArray(this.studio.invited) ? this.studio.invited : []).filter(seated))].slice(0, MAX_PLAYERS) : [];
-      this.cleanupJobs = (await ctx.storage.get("voiceCleanup")) || [];
-      const stored = await ctx.storage.get(["loopEpoch", "sweepAt"]);
-      this.loopEpoch = stored.get("loopEpoch") || Date.now();
-      this.sweepAt = stored.get("sweepAt") || Date.now() + SWEEP_MS;
-      await ctx.storage.put("loopEpoch", this.loopEpoch);
-      await ctx.storage.put("sweepAt", this.sweepAt);
-      if (this.studio.hostId && (!this.players.has(this.studio.hostId) || this.players.get(this.studio.hostId).zone !== STUDIO_ZONE || !studioHostAllowed(env, this.studio.hostId))) this.suspendStudio();
+      if (this.catalog.enabled) {
+        await this.restoring(roomCatalog.key, (saved) => this.catalog.restore(saved));
+        await this.restoring(null, () => this.catalog.refresh(ctx.storage));
+        // A catalog outage is not a revocation. Never compare restored players
+        // to an embedded cast that predates their accepted characters.
+        this.catalogChanged();
+        const cast = this.catalog.current();
+        if (cast) for (const p of this.players.values()) if (!ownedBody(cast, p.login, p.contributor, p.id)) this.evict(p, "revoked");
+      }
+      await this.restoring("hockeyLimitsV1", (saved) => {
+        if (saved !== undefined && !hockey.validLimits(saved)) throw new InvalidStoredValue("hockey limits are not their shape");
+        return hockey.loadLimits(this, saved);
+      });
+      await this.restoring(null, () => hockey.restore(this), () => { this.hockeyTables = [null, null, null]; });
+      await this.restoring(null, () => block.restore(this), () => { this.blockMatch = null; this.blockSeen = new Map(); });
+      await this.restoring("tessQueue", (stored) => tessQueue.restore(this, stored), () => { this.tessQueue = { entries: [], pose: null }; });
+      await this.restoring("studio", async (studio) => {
+        if (studio !== undefined && (!studio || typeof studio !== "object" || Array.isArray(studio))) throw new InvalidStoredValue("studio is not an object");
+        this.studio = studio || studioState();
+        if (!studioSource(this.studio.source)) { this.studio.source = studioState().source; this.studio.position = 0; this.studio.playing = false; this.studio.at = Date.now(); this.studio.revision++; this.studio.playbackRevision = (this.studio.playbackRevision || 0) + 1; await ctx.storage.put("studio", this.studio); }
+        this.studio.position = studioPosition(this.studio, this.studio.at);
+        const seated = id => { const p = this.players.get(id); return !!p && p.zone === STUDIO_ZONE && !!p.body && Number.isInteger(p.studioSeat) && !p.studioRevoked && !(this.studio.restrictedIds || []).includes(id); };
+        this.studio.hands = [...new Set((Array.isArray(this.studio.hands) ? this.studio.hands : []).filter(seated))].slice(0, MAX_PLAYERS);
+        this.studio.invited = this.studio.mode === "qa" ? [...new Set((Array.isArray(this.studio.invited) ? this.studio.invited : []).filter(seated))].slice(0, MAX_PLAYERS) : [];
+      }, () => { this.studio = studioState(); });
+      await this.restoring("voiceCleanup", (jobs) => {
+        if (jobs !== undefined && (!Array.isArray(jobs) || !jobs.every(cleanupJob))) throw new InvalidStoredValue("voiceCleanup is not a list of jobs");
+        this.cleanupJobs = jobs || [];
+      });
+      // Ooga Chat's speakers the island's open outdoor grants hear (#666), as the Audience last sent them.
+      await this.restoring("chatVoices", (stored) => {
+        this.chatVoices = new Map((Array.isArray(stored) ? stored : []).filter((e) => Array.isArray(e) && Number.isSafeInteger(e[0]) && typeof e[1] === "string"));
+      }, () => { this.chatVoices = new Map(); });
+      await this.restoring("chatMembers", (stored) => chatMembersRoom.restore(this, stored), () => { this.chatRosters = new Map(); });
+      await this.restoring("chatSources", (sources) => { this.chatSources = audienceRoom.cleanSources(sources); },
+        () => { this.chatSources = []; });
+      // The clouds Ooga Chat speakers sit on (#668), as the Audience last sent them, at their revision.
+      await this.restoring("clouds", (clouds) => {
+        this.clouds = audienceRoom.cleanClouds(this, clouds && clouds.list);
+        this.cloudsRev = clouds && Number.isSafeInteger(clouds.revision) ? clouds.revision : 0;
+      }, () => { this.clouds = []; this.cloudsRev = 0; });
+      await this.restoring("voiceLinks", (links) => { this.links = restoreLinks(links); });
+      if (this.copy) await this.restoring("copy", (saved) => copyRoom.restore(this, saved));
+      else await this.restoring("away", (stored) => copyRoom.restoreAway(this, stored), () => { this.away = new Map(); });
+      // The links are here, and the players (rebuilt from their sockets below, which ran at the first await above): outdoor
+      // grants held over a wake or a redeploy are checked again, taken back if the switch is now off, and the island's
+      // word, held back until now, goes with every linked partner in it.
+      this.linksReady = true;
+      audienceRoom.restore(this);
+      await this.restoring("chalk", async (chalk) => {
+        const marks = chalk && CHALK.restore(chalk.marks);
+        // A board stored before the board grew (no `v`) is widened as it loads; the next save stores it widened.
+        if (marks) this.chalk = CHALK.board(chalk.v === CHALK.VERSION ? marks : CHALK.widen(marks));
+        this.chalkStored = chalk !== undefined;
+        // Older versions stored the original drawing too; it can always be rebuilt locally.
+        if (this.chalkStored && CHALK.preset(this.chalk) === "original") {
+          await ctx.storage.delete("chalk");
+          this.chalkStored = false;
+        }
+      }, () => { this.chalk = CHALK.board(); this.chalkStored = false; });
+      // Restore without rewriting unchanged values on every hibernation wake. The alarm persists
+      // a new sweep deadline when it actually advances; the pile loop's phase is initialized once.
+      for (const key of ["loopEpoch", "sweepAt"]) {
+        await this.restoring(key, async (value) => {
+          if (value !== undefined && !Number.isFinite(value)) throw new InvalidStoredValue(key + " is not a number");
+          this[key] = value || (key === "loopEpoch" ? Date.now() : Date.now() + SWEEP_MS);
+          if (!value) await ctx.storage.put(key, this[key]);
+        }, () => { this[key] = key === "loopEpoch" ? Date.now() : Date.now() + SWEEP_MS; });
+      }
+      await this.restoring(null, () => {
+        if (this.studio.hostId && (!this.players.has(this.studio.hostId) || this.players.get(this.studio.hostId).zone !== STUDIO_ZONE || !studioHostAllowed(env, this.studio.hostId))) this.suspendStudio();
+      });
+      if (env.EQUIPMENT_ENABLED === "1") await this.restoring(null, () => equipmentRoom.refreshAll(this, true));
       // Stored cleanup retries from an alarm due now, never inside this block: several bounded SFU calls can accumulate, and a
       // block past 30 s resets the island's only room, presence and voice with it.
       if (this.sfu && this.cleanupJobs.length) {
         this.cleanupAt = Date.now();
-        const set = await ctx.storage.getAlarm();
-        if (set === null || set > this.cleanupAt) await ctx.storage.setAlarm(this.cleanupAt);
+        await this.restoring(null, () => this.scheduleAlarm());
       }
     });
-    // A woken room rebuilds its roster from the attachments its sockets carry.
+    // A woken room rebuilds its roster from the attachments its sockets carry. The runtime still lists a socket that is
+    // closing, newest first, and a half-open one can stay closing for minutes: it must never take a player's record from
+    // the socket that replaced it, or bring back a player evicted.
     for (const ws of ctx.getWebSockets()) {
+      if (ws.readyState > 1) continue;
       const a = ws.deserializeAttachment();
-      if (a) this.players.set(a.id, this.record(ws, a));
+      // Ooga Chat's community members (room-commons.js) have no player record.
+      if (a && a.community) { commonsRoom.restore(this, ws, a, Date.now()); continue; }
+      if (a) { const p = this.record(ws, a); this.players.set(a.id, p); this.sockets.set(ws, p); }
     }
     // Old guest sockets can survive a deployment in hibernated attachments.
     // Use the ordinary departure path so peers drop their presence and voice.
-    for (const p of this.players.values()) if (!ownedBody(CAST, p.login, p.contributor)) this.evict(p, "revoked");
+    if (!this.catalog.enabled) for (const p of this.players.values()) if (!ownedBody(this.catalog.current(), p.login, p.contributor, p.id)) this.evict(p, "revoked");
+    // A conversation stands only while both ends are here and hold each other; an invite only to someone here.
+    for (const p of this.players.values()) {
+      const pm = p.pm && typeof p.pm === "object" ? p.pm : {};
+      const here = (id) => Number.isSafeInteger(id) && id !== p.id && this.players.has(id);
+      p.pm = { inv: Array.isArray(pm.inv) ? pm.inv.filter(here).slice(-PM_INVITES) : [], open: here(pm.open) ? pm.open : 0,
+        blocked: Array.isArray(pm.blocked) ? pm.blocked.filter((id) => Number.isSafeInteger(id)).slice(-PM_BLOCKS) : [] };
+    }
+    for (const p of this.players.values()) if (p.pm.open && this.players.get(p.pm.open).pm.open !== p.id) p.pm.open = 0;
     this.restoreDoor();
-    this.hostId = electHost(this.players.values());
-    this.followers = npcFollowers(this.players.values(), this.hostId);
-    this.ghostHostId = electHost(this.players.values(), 0, ghostCandidate);
-    this.ghostFollowers = npcFollowers(this.players.values(), this.ghostHostId, watchesGhost);
+    this.hostId = electHost(this.players.values(), 0, (p) => this.npcEligible(p));
+    this.followers = npcFollowers(this.players.values(), this.hostId, (p) => this.npcEligible(p));
+    this.inspect.woke(this.players.size);
   }
 
   record(ws, a) {
-    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hp: 100, ko: false, g: null, j: 0, w: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], blendTo: null, blendK: 0, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, ghostBucket: { tokens: GHOST_BURST, at: Date.now() }, ghostFrameBucket: { tokens: GHOST_FRAME_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: Date.now() };
+    if (this.env?.EQUIPMENT_ENABLED === "1") a = { ...a, equipment: equipmentRoom.saved(this, a.equipment, a.login, a.id), equipmentReady: !!a.equipment };
+    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], roomLock: null, blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, savedAt: 0, posePending: false, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: a.joinedAt || Date.now() };
+  }
+
+  // Read once, then restore that snapshot. Only a value rejected by explicit validation is deleted; a failed write or an
+  // unexpected handler error keeps it. A read that fails is rethrown: the object resets and the next request tries again,
+  // since running on a default would save that default over the stored value at the key's next write.
+  async restoring(key, step, reset = null) {
+    let stored;
+    if (key) {
+      try { stored = await this.ctx.storage.get(key); } catch (unread) {
+        this.failed("restore", null, unread, { key, dropped: false, unread: true });
+        throw unread;
+      }
+    }
+    try { await step(stored); return; } catch (error) {
+      let dropped = false;
+      if (key && error instanceof InvalidStoredValue) {
+        try { await this.ctx.storage.delete(key); dropped = true; }
+        catch (again) { this.failed("restore", null, again, { key, dropped: false }); }
+      }
+      this.failed("restore", null, error, { key: key || "", dropped });
+      if (dropped) {
+        try { await step(undefined); return; } catch (again) { this.failed("restore", null, again, { key, dropped: false }); }
+      }
+      if (reset) reset();
+    }
+  }
+
+  // A fault, counted and on the inspector each time, and in the Worker's log once per kind of fault for the object's life.
+  // Only where it failed is logged (the error's name and stack frames), never its message, which can carry what a player sent.
+  failed(where, p, error, fields) {
+    const name = (error && error.name) || "Error";
+    this.inspect.count("errors");
+    this.inspect.event("error", p, { where, name, ...fields });
+    const kind = where + ":" + (fields.t || fields.key) + ":" + name;
+    this.logged ||= new Set();
+    if (this.logged.has(kind) || this.logged.size >= 64) return;
+    this.logged.add(kind);
+    const frames = String((error && error.stack) || "").split("\n").slice(1, 5).map((line) => line.trim()).join(" | ");
+    console.error("room: " + kind + (fields.dropped ? " (stored value dropped)" : fields.unread ? " (unread, room reset)" : "") + " at " + frames);
   }
 
   // Retain account debt across socket records, only while awake. Reclaim fully replenished
   // inactive accounts on demand; at capacity refuse new debt rather than evict depleted buckets.
   chatBucketFor(id, now) {
     for (const [account, bucket] of this.chatBuckets) {
-      if (!this.players.has(account) && bucket.tokens + (now - bucket.at) * CHAT_HZ / 1000 >= CHAT_BURST) this.chatBuckets.delete(account);
+      if (!this.players.has(account) && !commonsRoom.has(this, account) && bucket.tokens + (now - bucket.at) * CHAT_HZ / 1000 >= CHAT_BURST) this.chatBuckets.delete(account);
     }
     let bucket = this.chatBuckets.get(id);
     if (!bucket && this.chatBuckets.size < CHAT_BUCKET_KEEP) {
@@ -127,24 +311,70 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK };
+    const equipment = this.env?.EQUIPMENT_ENABLED === "1" ? { equipment: p.equipment || null, equipmentSession: p.equipmentSession || null } : {};
+    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, block: p.block || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, resumeKey: p.resumeKey, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, d: p.d, voice: p.voice, muted: p.muted, call: !!p.call, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, props: !!p.props, ...(p.catalogRoster ? { catalogRoster: p.catalogRoster } : {}), visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm, audienceZone: p.audienceZone || null, outdoor: p.outdoor || null, ...(p.travel ? { travel: true } : {}), ...equipment, ...duel.saved(p) };
   }
 
   view(p) {
-    return { id: p.id, login: p.login, display: p.display, body: p.body, zone: p.zone, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, voice: !!p.voice.track, muted: p.muted, hp: p.hp, ko: p.ko, blendTo: p.blendTo, blendK: p.blendK };
+    return { id: p.id, login: p.login, display: p.display, body: p.body, zone: p.zone, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, d: p.d, voice: inVoice(p), muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, blendTo: p.blendTo, blendK: p.blendK,
+      ...(this.inCall(p) ? { call: true } : {}) };
   }
 
+  // Every message the room sends goes through here, players' and Ooga Chat members' alike, so the inspector's `out` and
+  // `outBytes` are the room's whole outbound traffic (text counted by its length, a binary frame by its bytes).
+  // The one place the room writes to a socket; a test scans the room's files for any other.
   send(ws, msg) {
+    let data;
     try {
-      ws.send(typeof msg === "string" || msg instanceof ArrayBuffer ? msg : JSON.stringify(msg));
+      data = typeof msg === "string" || msg instanceof ArrayBuffer ? msg : JSON.stringify(msg);
+      ws.send(data);
     } catch {
       // A socket closing under us is dropped by its close event.
+      return false;
     }
+    this.inspect.count("out");
+    this.inspect.count("outBytes", typeof data === "string" ? data.length : data.byteLength);
+    const to = this.sockets.get(ws);
+    this.countLoad(to ? to.zone : LOAD_CHAT, false);
+    return true;
+  }
+
+  // One message in from, or one send out to, a socket in `zone`, for the World Map's CPU estimate (world.js). Two
+  // windows of LOAD_MS turn over as they are counted or read, so nothing runs on a timer and an idle room sleeps.
+  countLoad(zone, inbound, now = Date.now()) {
+    const load = this.turnLoad(now);
+    let row = load.now.get(zone);
+    if (!row) { row = { in: 0, out: 0 }; load.now.set(zone, row); }
+    if (inbound) row.in++; else row.out++;
+  }
+
+  // The load's windows, the current one turned over once it has run LOAD_MS; the one before is kept with how long it
+  // ran, however long a quiet room left it open, so a rate is always the true average over the span it reports.
+  // The windows are made at their first count (`this.load`, memory only, gone with hibernation like the rest).
+  turnLoad(now) {
+    const load = this.load || (this.load = { at: now, now: new Map(), was: new Map(), wasMs: 0 });
+    if (now - load.at >= LOAD_MS) {
+      const was = load.was;
+      load.was = load.now;
+      load.wasMs = now - load.at;
+      was.clear();
+      load.now = was;
+      load.at = now;
+    }
+    return load;
   }
 
   broadcast(msg, except = null) {
     const text = JSON.stringify(msg);
     for (const p of this.players.values()) if (p.ws !== except) this.send(p.ws, text);
+    // The Commons and Online Oogas for Ooga Chat's contributors, without positions (room-commons.js).
+    commonsRoom.relay(this, msg);
+  }
+
+  // Whether this Room's own cast and contributor rule give the account an Ooga (an Ooga Chat member is vouched for).
+  memberOwns(login, id) {
+    const cast = this.catalog.current();
+    return !!cast && !!ownedBody(cast, login, true, id);
   }
 
   broadcastZone(zone, msg) {
@@ -162,6 +392,10 @@ export class Room extends DurableObject {
       } else p.door = null;
       p.passes = Array.isArray(p.passes) ? p.passes.filter((x) => x && DOOR_ROOM.test(x.door) && x.exp > now && p.body && p.zone === x.door) : [];
       for (const pass of p.passes) this.doorPasses.set(pass.cycle, { ...pass, id: p.id });
+      if (p.roomLock && this.roomOf(p.zone) === p.roomLock.room) this.roomLocks.set(p.roomLock.room, { pin: p.roomLock.pin, passes: new Map() });
+      else p.roomLock = null;
+      if (p.pinTries && (p.pinTries.until > now || now - p.pinTries.at <= PIN_WAIT_MS)) this.pinTries.set(p.id, p.pinTries);
+      p.pinTries = undefined;
     }
     queued.sort((a, b) => a.door.at - b.door.at || a.id - b.id);
     active.sort((a, b) => a.door.at - b.door.at || a.id - b.id);
@@ -178,6 +412,8 @@ export class Room extends DurableObject {
       p.ws.serializeAttachment(this.attachment(p));
       this.replayDoor(p);
     }
+    // A lease that ran out while the room slept has no alarm left to pass the doors on.
+    if (!this.doorActive) this.grantDoor(now);
   }
 
   doorCycle(p) {
@@ -196,14 +432,114 @@ export class Room extends DurableObject {
     }
   }
 
+  // A numbered room's zone's number (0–9), or -1.
+  roomOf(zone) {
+    const match = DOOR_ROOM.exec(zone);
+    return match ? Number(match[1]) : -1;
+  }
+
+  lockedRooms() {
+    return [...this.roomLocks.keys()].sort((a, b) => a - b);
+  }
+
+  // A locked room lets in whoever is holding a pass; everyone else needs the PIN.
+  mayEnter(p, room, now) {
+    const lock = this.roomLocks.get(room);
+    return !lock || (lock.passes.get(p.id) || 0) > now;
+  }
+
+  // Every occupant carries the lock, so whichever socket a hibernated room wakes with still has it.
+  shareRoomLock(room, lock) {
+    for (const o of this.players.values()) if (this.roomOf(o.zone) === room) {
+      o.roomLock = lock ? { room, pin: lock.pin } : null;
+      o.ws.serializeAttachment(this.attachment(o));
+      if (lock) this.send(o.ws, { t: "door", op: "room-pin", room, pin: lock.pin });
+    }
+  }
+
+  // Nobody left inside: the room opens by itself.
+  freeEmptyRoom(room) {
+    if (room < 0 || !this.roomLocks.has(room)) return;
+    for (const o of this.players.values()) if (this.roomOf(o.zone) === room) return;
+    this.roomLocks.delete(room);
+    this.broadcast({ t: "door", op: "locks", rooms: this.lockedRooms() });
+  }
+
+
+  // A pass is spent on walking in; the new occupant holds the lock with everyone else inside.
+  roomZoneChanged(p, from) {
+    const entered = this.roomOf(p.zone), left = this.roomOf(from), lock = entered >= 0 ? this.roomLocks.get(entered) : null;
+    if (lock) {
+      lock.passes.delete(p.id); p.roomLock = { room: entered, pin: lock.pin };
+      this.send(p.ws, { t: "door", op: "room-pin", room: entered, pin: lock.pin });
+    } else p.roomLock = null;
+    if (left !== entered) this.freeEmptyRoom(left);
+  }
+
+  // Whether this player has run out of tries; a wrong PIN counts one, a right one forgives them. The tally is the
+  // player's, not the socket's: it outlives a reconnect, and rides the socket's attachment through hibernation. A tally
+  // is forgotten a wait's length after its last wrong try, so the map holds only the players trying lately.
+  pinRefused(p, now) {
+    const tries = this.pinTries.get(p.id);
+    return !!tries && tries.until > now;
+  }
+
+  pinWrong(p, now) {
+    for (const [id, old] of this.pinTries) if (old.until <= now && now - old.at > PIN_WAIT_MS) this.pinTries.delete(id);
+    const tries = this.pinTries.get(p.id) || { count: 0, until: 0, at: 0 };
+    tries.count++; tries.at = now;
+    if (tries.count >= PIN_TRIES) { tries.count = 0; tries.until = now + PIN_WAIT_MS; }
+    this.pinTries.set(p.id, tries);
+    p.ws.serializeAttachment(this.attachment(p));
+  }
+
+  pinRight(p) {
+    if (this.pinTries.delete(p.id)) p.ws.serializeAttachment(this.attachment(p));
+  }
+
+  roomLockMessage(p, msg, now) {
+    const reply = (ok, reason = "") => this.send(p.ws, { t: "door", op: "lock-result", action: msg.op, room: msg.room, ok, reason });
+    const lock = this.roomLocks.get(msg.room);
+    if (msg.op === "lock") {
+      if (!p.body || this.roomOf(p.zone) !== msg.room) return reply(false, "wrong-room");
+      if (lock) return reply(false, "already-locked");
+      const made = { pin: msg.pin, passes: new Map() };
+      this.roomLocks.set(msg.room, made);
+      this.shareRoomLock(msg.room, made);
+      this.broadcast({ t: "door", op: "locks", rooms: this.lockedRooms() });
+      return reply(true);
+    }
+    if (msg.op === "unlock") {
+      // Anyone inside may open it.
+      if (!p.body || this.roomOf(p.zone) !== msg.room) return reply(false, "wrong-room");
+      if (!lock) return reply(true);
+      this.roomLocks.delete(msg.room);
+      this.shareRoomLock(msg.room, null);
+      this.broadcast({ t: "door", op: "locks", rooms: this.lockedRooms() });
+      return reply(true);
+    }
+    if (this.pinRefused(p, now)) return reply(false, "wait");
+    if (!p.body || p.zone !== DOOR_ZONE) return reply(false, "not-at-door");
+    if (!lock) return reply(true);
+    if (lock.pin !== msg.pin) { this.pinWrong(p, now); return reply(false, "wrong"); }
+    this.pinRight(p);
+    lock.passes.set(p.id, now + PIN_PASS_MS);
+    return reply(true);
+  }
+
   async doorMessage(p, msg) {
     const now = Date.now();
     if (!takeToken(p.doorBucket, DOOR_HZ, now, DOOR_BURST)) {
       this.send(p.ws, { t: "door", op: "denied", reason: "rate" });
       return;
     }
+    if (msg.op === "lock" || msg.op === "unlock" || msg.op === "try") {
+      this.roomLockMessage(p, msg, now);
+      return;
+    }
     if (msg.op === "ask") {
       if (!p.body || p.zone !== DOOR_ZONE) { this.send(p.ws, { t: "door", op: "denied", reason: "not-at-door" }); return; }
+      if (msg.dir === "in" && !this.mayEnter(p, msg.room, now)) { this.send(p.ws, { t: "door", op: "denied", reason: "locked" }); return; }
       if (p.door) { this.send(p.ws, { t: "door", op: "denied", reason: "already-waiting" }); return; }
       if (this.doorQueue.length >= MAX_PLAYERS) { this.send(p.ws, { t: "door", op: "denied", reason: "full" }); return; }
       p.door = { phase: "queued", dir: msg.dir, room: msg.room, at: now, exp: Number.MAX_SAFE_INTEGER };
@@ -286,7 +622,8 @@ export class Room extends DurableObject {
 
   // Binding-only notification. No new timers, sockets or storage writes in the room.
   async refreshHighscores(game = null) {
-    if (!this.env.DB || !this.players.size) return;
+    // A copy never takes a board's revision: delivered there, the island would never hear it.
+    if (this.copy || !this.env.DB || !this.players.size) return;
     await deliverHighscores(this.env.DB, board => {
       if (!this.players.size) return false;
       if (board.revision > (this.highscoreRevisions.get(board.game) ?? -1)) {
@@ -297,68 +634,321 @@ export class Room extends DurableObject {
     }, game);
   }
 
+  // Binding-only account API. Saving in the hosted Studio never opens or replaces a room socket.
+  equipmentFor(id, tokenHash, command = null) { return equipmentRoom.request(this, id, tokenHash, command); }
+  equipmentCharacter(login, id) {
+    const cast = this.catalog.current();
+    if (!cast) throw Object.assign(new Error("Equipment character authority unavailable"), { code: "catalog_unavailable" });
+    return ownedBody(cast, login, true, id);
+  }
+  equipmentVisible(a, b) { return seenTogether(a, b); }
+  async forgetEquipment(id) {
+    // Deletion committed first. Even if the account was immediately recreated, its old socket
+    // must not keep the deleted choice. A newer socket caught by delayed cleanup reconnects.
+    const p = this.players.get(id);
+    if (p) this.evict(p, "revoked");
+  }
+
   async fetch(request) {
     const path = new URL(request.url).pathname;
+    // A copy has no voice and no Ooga Chat members.
+    if (this.copy && (path.startsWith("/voice/") || path === "/community")) return new Response("Not found", { status: 404 });
+    const cleanup = ["/voice/leave", "/voice/unpublish", "/voice/close"].includes(path);
+    if (this.catalog.enabled && !cleanup) { await this.catalog.refresh(this.ctx.storage); this.catalogChanged(); }
     if (path.startsWith("/voice/")) return this.voiceRequest(path.slice("/voice/".length), request);
+    const cast = this.catalog.current();
+    if (!cast) return new Response("Character catalog unavailable", { status: 503, headers: { "cache-control": "no-store", "retry-after": "60" } });
+    // Ooga Chat's contributors, through the private bridge alone: the public `/room` never has this path.
+    if (path === "/community") return commonsRoom.connect(this, request, (login, id) => this.memberOwns(login, id), Date.now());
     if (request.headers.get("upgrade") !== "websocket") return new Response("Expected WebSocket", { status: 426 });
     const who = playerFromHeaders(request.headers);
-    if (!who || !ownedBody(CAST, who.login, who.contributor)) return new Response("Contributors with an Ooga only", { status: 403 });
+    if (!who || !ownedBody(cast, who.login, who.contributor, who.id)) return new Response("Contributors with an Ooga only", { status: 403 });
+    if (this.env.EQUIPMENT_ENABLED === "1") {
+      const session = request.headers.get("x-player-equipment-session");
+      if (!/^[a-f0-9]{64}$/.test(session || "")) return new Response("Session required", { status: 403 });
+      who.equipmentSession = session;
+    }
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server, [String(who.id)]);
+    // A copy admits only the chat's speakers, on the chat's word now (room-copy.js).
+    if (this.copy) {
+      const { ok, reason } = await copyRoom.admit(this, who.id);
+      if (!ok) {
+        this.inspect.event("refused", who, { reason });
+        this.send(server, { t: "kick", reason });
+        server.close(CLOSE_KICK, reason);
+        return new Response(null, { status: 101, webSocket: client });
+      }
+    }
 
-    const older = this.players.get(who.id);
-    if (older) this.evict(older, "replaced");
-    if (this.players.size >= MAX_PLAYERS) {
+    // The same page back with the key its last welcome gave (`hold`) takes its record again; any other connection of the
+    // account replaces it. The key is no credential: the session already lets this account replace its record.
+    const older = this.players.get(who.id), key = new URL(request.url).searchParams.get("resume");
+    const back = !!older && !!key && key === older.resumeKey;
+    if (back) this.reclaim(older);
+    else if (older) this.evict(older, "replaced");
+    // The account's last connection's outdoor grants are taken back before this one's welcome (#667).
+    await audienceRoom.settled(this, who.id);
+    const admitted = this.catalog.current();
+    if (!admitted || !ownedBody(admitted, who.login, who.contributor, who.id)) {
+      server.close(CLOSE_KICK, admitted ? "revoked" : "catalog-unavailable");
+      return new Response(null, { status: 101, webSocket: client });
+    }
+    if (back && this.players.get(who.id) === older) {
+      if (this.env.EQUIPMENT_ENABLED === "1") {
+        try { if (!await equipmentRoom.refresh(this, older)) { server.close(CLOSE_KICK, "revoked"); return new Response(null, { status: 101, webSocket: client }); } }
+        catch { server.close(CLOSE_ERROR, "equipment-unavailable"); return new Response(null, { status: 101, webSocket: client }); }
+        if (this.players.get(who.id) !== older) { server.close(CLOSE_KICK, "replaced"); return new Response(null, { status: 101, webSocket: client }); }
+      }
+      this.resume(older, server, who);
+      await this.ensureSweep();
+      return new Response(null, { status: 101, webSocket: client });
+    }
+    // Seats kept for travellers in a chat's copy count as taken, but never against the traveller's own return.
+    if (this.players.size + copyRoom.awayOthers(this, who.id) >= MAX_PLAYERS) {
+      this.inspect.event("full", who);
       this.send(server, { t: "kick", reason: "full" });
       server.close(CLOSE_KICK, "full");
       return new Response(null, { status: 101, webSocket: client });
     }
 
+    const returning = !this.copy && copyRoom.returned(this, who.id);
     const spawn = spawnPoint(this.spawnSlot++);
-    const p = this.record(server, { ...who, connectionToken: crypto.randomUUID(), body: null, x: spawn.x, y: 0, z: spawn.z, yaw: spawn.yaw });
+    const p = this.record(server, { ...who, connectionToken: crypto.randomUUID(), resumeKey: crypto.randomUUID(), body: null, x: spawn.x, y: 0, z: spawn.z, yaw: spawn.yaw });
+    const kept = this.pmAccounts.get(p.id);
+    if (kept) p.pm.blocked = kept.blocked.slice();
     server.serializeAttachment(this.attachment(p));
     // An owner arriving takes either body back from whoever holds it.
-    const own = ownedBody(CAST, p.login, p.contributor);
+    const own = ownedBody(admitted, p.login, p.contributor, p.id);
     if (own) for (const o of this.players.values()) if (o.body && bodyName(o.body).toLowerCase() === own) this.release(o, "owner-here");
     this.players.set(p.id, p);
-
-    const others = [];
-    for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: ["door", CHAT_FEATURE] });
-    // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
-    this.send(server, { t: "chat-history", messages: this.chat.list() });
-    this.broadcast({ t: "join", p: this.view(p) }, server);
-    this.sendStudio(p);
+    this.sockets.set(server, p);
+    if (this.env.EQUIPMENT_ENABLED === "1") {
+      // A read that fails admits the player in their own look: a fresh record has no saved choice to protect, and the
+      // sweep reads it again. A cosmetic read never keeps anyone off the island.
+      try { if (!await equipmentRoom.refresh(this, p, false)) return new Response(null, { status: 101, webSocket: client }); }
+      catch { /* retried at the next sweep */ }
+      if (this.players.get(p.id) !== p) { server.close(CLOSE_KICK, "replaced"); return new Response(null, { status: 101, webSocket: client }); }
+    }
+    this.world.changed();
+    if (this.inspect.on) this.inspect.event("join", p, { replaced: !!older });
+    this.welcome(p, false);
+    // Back from a chat's copy: other pages beam the Ooga in.
+    this.broadcast({ t: "join", p: this.view(p), ...(returning ? { travel: true } : {}) }, server);
+    chatMembersRoom.players(this);
+    if (this.env.EQUIPMENT_ENABLED === "1") equipmentRoom.changed(this, p);
+    if (this.copy) copyRoom.walking(this);
+    else this.sendStudio(p);
     this.updateVoice();
     await this.ensureSweep();
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  byWs(ws) {
-    const a = ws.deserializeAttachment();
-    const p = a && this.players.get(a.id);
-    return p && p.ws === ws ? p : null;
+  // Everything a page hears as its socket opens, a new record's or a resumed one's (`resumed`, its voice kept).
+  welcome(p, resumed) {
+    const server = p.ws, others = [];
+    const catalog = this.catalog.metadata();
+    for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
+    const shared = [...(this.env?.EQUIPMENT_ENABLED === "1" ? ["equipment-v1"] : []), ...(this.catalog.enabled ? ["character-catalog-v1"] : []), ...(this.inspect.on ? [INSPECT_FEATURE] : [])];
+    // A copy offers exactly these; a check pins them, so an island feature never reaches a copy by default.
+    const copied = this.copy && [...callFeatures(this.env), REACT_FEATURE, HAND_EMOJI_FEATURE, DANCE_FEATURE, ...copyRoom.cloudFeatures(this), ...shared, COPY_FEATURE];
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, resume: p.resumeKey, ...(resumed ? { resumed: true } : {}), tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(),
+      ...(copied ? { features: copied } : { features: [PROP_FEATURE, tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, DANCE_FEATURE, CHAT_FEATURE, ...callFeatures(this.env), ...chatMembersRoom.features(this), PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, duel.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...audienceRoom.features(this), ...(copyRoom.copies(this.env) ? [TRAVEL_FEATURE] : []), ...shared] }),
+      // The account speaks from Ooga Chat on another device: this page's own voice waits for the visitor's word.
+      ...(audienceRoom.elsewhere(this, p.id) || this.onChatStage(p.id) && !p.call ? { voiceElsewhere: true } : {}), ...(catalog ? { catalog } : {}),
+      // A copy says whose and of what; the island, who is away in one.
+      ...(this.copy ? { copy: { chat: this.copy.chat, zone: this.copy.zone } } : { ...copyRoom.awayWelcome(this), ...chatMembersRoom.welcome(this) }) });
+    if (this.copy) copyRoom.welcome(this, p);
+    else {
+      // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
+      this.send(server, { t: "chat-history", messages: this.chat.list() });
+      this.sendCabinets(server);
+      this.sendLinks(p);
+      this.send(server, { t: "chalk-board", marks: this.chalk.marks, editor: this.chalkEditor ? this.chalkEditor.id : 0 });
+      audienceRoom.welcome(this, p);
+      duel.welcome(this, p);
+    }
+    if (this.env.EQUIPMENT_ENABLED === "1") equipmentRoom.welcome(this, p);
   }
 
+  // A socket lost without a word, or closed by its page to come straight back (CLOSE_RECONNECT): the player stays HOLD_MS,
+  // standing where they were and heard as they were, so nobody else sees them leave and come back. Their page, coming
+  // back with its welcome's key, takes the record again (`resume`); anything else, or nobody by then, ends it (`expire`).
+  // What only this connection held goes now, as the page lets go of it at its own close: a cabinet, a match, a duel, the
+  // doorway, the chalk, the Studio, a private conversation, the Tess queue's turn and an outdoor grant (#667: no public
+  // grant outlives its connection). They host no NPCs while away. `detail` is the close's, for the inspector.
+  hold(p, detail) {
+    if (this.players.get(p.id) !== p || p.held) return;
+    const step = (t, fn) => { try { fn(); } catch (error) { this.failed("hold", p, error, { t }); } };
+    this.sockets.delete(p.ws);
+    // A wake never rebuilds the player from the socket it lost (the constructor reads attachments).
+    try { p.ws.serializeAttachment(null); } catch { /* already closed */ }
+    p.ws = GONE;
+    p.held = { at: Date.now(), detail, timer: setTimeout(() => this.expire(p), HOLD_MS) };
+    if (this.inspect.on) step("inspect", () => this.inspect.event("hold", p, { ...detail, zone: p.zone, on: Date.now() - p.joinedAt, voice: inVoice(p) }));
+    step("cabinet", () => this.releaseCabinet(p));
+    step("hockey", () => hockey.leave(this, p.id));
+    step("block", () => block.leave(this, p.id));
+    step("duel", () => duel.leave(this, p));
+    step("door", () => this.cancelDoor(p));
+    step("passes", () => this.clearPasses(p));
+    step("studio", () => this.leaveStudio(p));
+    step("chalk", () => this.chalkLetGo(p));
+    step("pm", () => this.privateLeave(p));
+    step("tess", () => tessQueue.presence(this, p, true));
+    step("audience", () => audienceRoom.hold(this, p));
+    step("host", () => this.electHost());
+    step("world", () => this.world.changed());
+  }
+
+  // Its page is back for the record: a hold goes on until `resume`; a socket still open (half-open, or the page's own
+  // close not here yet) is ended quietly, its close finding no record, and held as a lost one would be.
+  reclaim(p) {
+    if (p.held) return;
+    const was = p.ws;
+    this.hold(p, { code: 0, said: "resumed", clean: false });
+    try { was.close(CLOSE_KICK, "resumed"); } catch { /* already closed */ }
+  }
+
+  // The held record on its page's new socket: the same Ooga, place and voice sessions, a new connection token, and a new
+  // key for the next time. Nobody else hears anything; the page hears a welcome that says so.
+  resume(p, server, who) {
+    clearTimeout(p.held.timer);
+    const away = Date.now() - p.held.at;
+    p.held = null;
+    p.ws = server;
+    p.login = who.login; p.display = who.display; p.contributor = who.contributor;
+    if (this.env.EQUIPMENT_ENABLED === "1") p.equipmentSession = who.equipmentSession;
+    p.connectionToken = crypto.randomUUID();
+    p.resumeKey = crypto.randomUUID();
+    p.seenAt = Date.now();
+    // Its voice list is sent again whatever it was; its outdoor grants went with the hold, and it asks again as a new
+    // connection does.
+    p.sent = null;
+    p.outdoor = null;
+    // A resumed socket must report the roster its page actually booted before hosting again.
+    if (this.catalog.enabled) p.catalogRoster = null;
+    server.serializeAttachment(this.attachment(p));
+    this.sockets.set(server, p);
+    if (this.inspect.on) this.inspect.event("resume", p, { away });
+    this.welcome(p, true);
+    if (this.env.EQUIPMENT_ENABLED === "1") equipmentRoom.changed(this, p);
+    if (!this.copy) {
+      this.rearrive(p);
+      tessQueue.presence(this, p);
+      this.sendStudio(p);
+    }
+    this.electHost();
+    this.updateVoice();
+    this.world.changed();
+  }
+
+  // What arriving in its zone sends (the `zone` handler's), sent again to a resumed page: its own close forgot it all,
+  // and its `zone` repeats the zone the record already has, which the room takes as no change. The locked room's PIN
+  // while the room is still locked, the air hockey tables, a Block Frenzy match, and a doorway crossing under way.
+  rearrive(p) {
+    const lock = p.roomLock && this.roomOf(p.zone) === p.roomLock.room ? this.roomLocks.get(p.roomLock.room) : null;
+    if (lock) this.send(p.ws, { t: "door", op: "room-pin", room: p.roomLock.room, pin: lock.pin });
+    hockey.arrive(this, p);
+    block.arrive(this, p);
+    this.replayDoor(p);
+  }
+
+  // Not back in time: the leave everyone else would have heard at the close.
+  expire(p) {
+    if (this.players.get(p.id) !== p || !p.held) return;
+    const detail = p.held.detail;
+    this.drop(p, "closed", { ...detail, held: true });
+  }
+
+  // The map first; a socket it does not hold (an Ooga Chat member's) is looked up by its attachment, as before the map,
+  // and a player found that way is kept in the map.
+  byWs(ws) {
+    const known = this.sockets.get(ws);
+    if (known) return this.players.get(known.id) === known ? known : null;
+    const a = ws.deserializeAttachment();
+    const p = a && this.players.get(a.id);
+    if (!p || p.ws !== ws) return null;
+    this.sockets.set(ws, p);
+    return p;
+  }
+
+  // A message whose handling throws, at once or in the promise it returns, ends the socket that sent it and nothing else:
+  // uncaught, it would reach the runtime, which may reset the object and drop every player and Ooga Chat member with it.
   webSocketMessage(ws, message) {
+    let out;
+    try { out = this.handleMessage(ws, message); } catch (error) { this.messageFailed(ws, message, error); return; }
+    if (out && typeof out.then === "function") return out.catch((error) => this.messageFailed(ws, message, error));
+    return out;
+  }
+
+  messageFailed(ws, message, error, type = null) {
+    let p = null, member = false, t = type || (typeof message === "string" ? "text" : "binary");
+    try { p = this.byWs(ws); member = !p && commonsRoom.closed(this, ws); } catch { /* an attachment that cannot be read */ }
+    if (typeof message === "string") try { const msg = parseClientMessage(message); if (msg && msg.t) t = msg.t; } catch { /* named "text" */ }
+    this.failed("message", p, error, { t, member });
+    if (p) {
+      // drop runs each of its steps alone, so a helper's fault cannot stop it; this is the last resort should drop itself fail.
+      try { this.drop(p, "failed", { code: CLOSE_ERROR }); } catch (again) {
+        this.failed("message", p, again, { t: "drop" });
+        if (this.players.get(p.id) === p) this.players.delete(p.id);
+        this.sockets.delete(ws);
+      }
+    }
+    try { ws.serializeAttachment(null); } catch { /* a failed attachment must not prevent the close */ }
+    try { ws.close(CLOSE_ERROR, "server error"); } catch { /* already closed */ }
+  }
+
+  handleMessage(ws, message) {
     const p = this.byWs(ws);
-    if (!p) return;
-    if (!ownedBody(CAST, p.login, p.contributor)) { this.evict(p, "revoked"); return; }
+    if (!p) {
+      const a = ws.deserializeAttachment();
+      if (a && a.community) { this.countLoad(LOAD_CHAT, true); return commonsRoom.message(this, ws, parseClientMessage(typeof message === "string" ? message : ""), Date.now()); }
+      return;
+    }
+    this.countLoad(p.zone, true);
+    this.inspect.count("in");
+    this.inspect.count("inBytes", typeof message === "string" ? message.length : message.byteLength);
+    if (this.catalog.enabled && this.catalogRoster !== this.catalog.roster()) this.catalogChanged();
+    const cast = this.catalog.current();
+    if (cast && !ownedBody(cast, p.login, p.contributor, p.id)) { this.evict(p, "revoked"); return; }
     if (typeof message !== "string") {
-      if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === GHOST_MAGIC) this.ghostFrame(p, message);
+      // A copy relays no NPC, prop or game frames.
+      if (this.copy) return;
+      if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === BLOCK.MAGIC) block.frame(this, p, message);
+      else if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === GHOST_MAGIC) return; // HALLOWEEN: a page from before the hunt ran on the server (game-host.js)
+      else if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === PROP_MAGIC) this.propFrame(p, message);
       else this.npcFrame(p, message);
       return;
     }
     const msg = parseClientMessage(typeof message === "string" ? message : "");
     if (msg === false) {
-      this.drop(p, "protocol");
+      this.drop(p, "protocol", { code: CLOSE_PROTOCOL });
       ws.close(CLOSE_PROTOCOL, "unreadable message");
       return;
     }
     p.seenAt = Date.now();
     if (!msg) return;
+    if (this.copy && copyRoom.refuses(this, msg)) return;
+    // Once a connection, after a rejoin: why the page's last socket ended, as the page saw it (net.js).
+    if (msg.t === "back") {
+      if (!p.backSaid) { p.backSaid = true; this.inspect.event("back", p, { why: msg.why, code: msg.code, clean: msg.clean, down: msg.down }); }
+      return;
+    }
+    if (msg.t === "cabinet") { this.cabinetMessage(p, msg); return; }
+    // While playing, the room owns the floor pose and body, regardless of game-scene reports.
+    if (p.cabinet && ["pose", "zone", "body", "blend", "hp", "shot", "swing", "prop", "hockey", "bf", "duel"].includes(msg.t)) return;
+    if (msg.t === "tess-guide") { tessQueue.message(this, p, msg); return; }
+    if (msg.t === "bf") { block.message(this, p, msg); return; }
+    // Duels save their own attachments as they change (duel.js).
+    if (msg.t === "duel") { duel.message(this, p, msg); return; }
+    if (msg.t === "hockey") { hockey.message(this, p, msg); ws.serializeAttachment(this.attachment(p)); return; }
+    if (CONTROL_FRAMES.has(msg.t)) {
+      if (!p.controlBucket) p.controlBucket = { tokens: CONTROL_BURST, at: p.seenAt };
+      if (!takeToken(p.controlBucket, CONTROL_HZ, p.seenAt, CONTROL_BURST)) return;
+    }
     if (msg.t === "studio") {
       this.studioMessage(p, msg);
     } else if (msg.t === "pose") {
@@ -369,44 +959,85 @@ export class Room extends DurableObject {
       const ooga = !!p.body && !p.body.startsWith("gorilla:");
       p.j = ooga && msg.j ? msg.j : 0;
       p.w = ooga && msg.w ? msg.w : 0;
-      if (Number.isInteger(p.studioSeat) && !studioSeatAllowed(p, p.studioSeat, this.players.values())) { delete p.studioSeat; this.removeStudioSpeaker(p.id); this.studio.revision++; this.persistStudio(); this.enforceStudio(); }
+      p.v = ooga && msg.v ? msg.v : null; p.va = p.v ? p.seenAt : 0;
+      p.r = ooga ? msg.r : undefined;
+      p.d = ooga ? msg.d : undefined;
+      if (p.duelRec) duel.pose(this, p);
+      const seatLost = Number.isInteger(p.studioSeat) && !studioSeatAllowed(p, p.studioSeat, this.players.values());
+      if (seatLost) { delete p.studioSeat; this.removeStudioSpeaker(p.id); this.studio.revision++; this.persistStudio(); this.enforceStudio(); }
+      if (this.chalkEditor && this.chalkEditor.id === p.id && this.chalkRefusal(p)) this.chalkLetGo(p);
       this.dirty = true;
       this.scheduleFlush();
+      // The room's busiest message: its fields reach the attachment at most once a second, or with any other change, and
+      // never later than a second after the last pose (`savePoses`), so a woken room still knows where everyone stands.
+      // Nothing else a pose changes is in the attachment unless it took away a Studio seat, which is saved at once.
+      if (!seatLost && p.seenAt - p.savedAt < POSE_SAVE_MS) { this.saveLater(p); return; }
+    } else if (msg.t === "prop") {
+      // A follower's own round, blow or poke at a loose prop, for the island's host alone, which simulates the props
+      // (src/js/prop-sync.js); nothing says who sent it and nothing is kept.
+      const host = this.players.get(this.hostId);
+      if (!this.npcEligible(p) || !p.props || !host || host === p || !this.npcEligible(host) || !host.props) return;
+      if (!takeToken(p.propInBucket || (p.propInBucket = { tokens: SHOT_BURST, at: p.seenAt }), SHOT_HZ, p.seenAt, SHOT_BURST)) return;
+      this.send(host.ws, JSON.stringify({ t: "prop", k: msg.k, a: msg.a }));
+      return;
     } else if (msg.t === "hub") {
-      if (msg.on === p.inHub) return;
+      p.props = msg.on && msg.props === true;
+      const roster = msg.on ? msg.roster || null : null;
+      if (msg.on === p.inHub && roster === p.catalogRoster) return;
+      p.catalogRoster = roster;
       p.inHub = msg.on;
+      tessQueue.presence(this, p);
       this.electHost();
       // A page arriving on the island catches up with the NPCs at once rather than at the next frame.
-      if (p.inHub && p.id !== this.hostId && this.lastNpc) this.send(p.ws, this.lastNpc);
+      if (this.npcEligible(p) && p.id !== this.hostId && this.lastNpc && this.send(p.ws, this.lastNpc)) { this.inspect.count("npcOut"); this.inspect.count("npcBytes", this.lastNpc.byteLength); }
     } else if (msg.t === "visible") {
-      // HALLOWEEN: a page hidden in the ghost arena hands its hosting on; shown again, it comes back a follower.
+      // A page hidden in a Block Frenzy match hands its hosting on; shown again, it comes back a guest (block.js).
       if (msg.on === p.visible) return;
       p.visible = msg.on;
-      this.electGhostHost();
+      tessQueue.presence(this, p);
+      this.inspect.event("visible", p, { visible: msg.on });
+      block.visibility(this, p);
     } else if (msg.t === "zone") {
       if (msg.name === p.zone) return;
+      const room = this.roomOf(msg.name);
+      if (room >= 0 && !this.mayEnter(p, room, Date.now())) { this.send(p.ws, { t: "door", op: "denied", reason: "locked" }); return; }
       if (msg.name !== DOOR_ZONE) this.cancelDoor(p);
       if (msg.name !== p.zone) this.clearPasses(p);
-      const leavingStudio = p.zone === STUDIO_ZONE;
+      const leavingStudio = p.zone === STUDIO_ZONE, from = p.zone;
+      if (msg.name !== "arcade.hall") hockey.leave(this, p.id);
+      if (msg.name !== BLOCK.ZONE) block.leave(this, p.id);
       p.zone = msg.name;
+      duel.check(this, p);
+      tessQueue.presence(this, p);
+      this.inspect.event("zone", p, { from, to: p.zone });
+      this.world.changed();
+      this.roomZoneChanged(p, from);
+      hockey.arrive(this, p);
+      block.arrive(this, p);
       p.pokerVoice = null;
-      // A crossing belongs to the zone it started from; the page reports the next one after its zone (everyone resets
-      // theirs on this broadcast).
-      p.blendTo = null; p.blendK = 0;
-      this.electGhostHost();
-      // A page walking into the ghost arena or its hallway catches up with its hunt (a lobby open, a hunt on) at once.
-      if (watchesGhost(p) && p.id !== this.ghostHostId && this.lastGhost) this.send(p.ws, this.lastGhost);
+      if (this.chalkEditor && this.chalkEditor.id === p.id && this.chalkRefusal(p)) this.chalkLetGo(p);
+      // A crossing belongs to the zone it started from (everyone resets theirs on this broadcast). A zone that is the
+      // place being crossed into turns it round, so the same places stay heard: off a crossing's far end that is none,
+      // and across the arcade hallway's midpoint (#422) the same crossing seen from its other end. Else the page reports
+      // its next one after its zone.
+      // Between two zones of the main world it stands as it is: there a crossing is a level, whatever the zone.
+      if (!BLEND.world(from) || !BLEND.world(p.zone)) {
+        const across = p.blendTo && BLEND.place(p.zone) === BLEND.place(p.blendTo) && BLEND.STEPS - p.blendK > 0;
+        p.blendTo = across ? BLEND.place(from) : null; p.blendK = across ? BLEND.STEPS - p.blendK : 0;
+      }
       if (leavingStudio) this.leaveStudio(p);
       this.walletsArrive(p);
       if (p.zone === STUDIO_ZONE) { this.enforceStudio(); this.sendStudio(p); }
       this.broadcast({ t: "zone", id: p.id, name: p.zone });
-      // The page let go of every voice when it moved, so it always hears where it is now, changed list or not.
+      if (this.env.EQUIPMENT_ENABLED === "1") equipmentRoom.moved(this, p, from);
+      if (p.blendTo) this.broadcast({ t: "blend", id: p.id, to: p.blendTo, k: p.blendK }, p.ws);
+      // A page that moved groups let go of every voice, so it always hears where it is now, changed list or not.
       p.sent = null;
       this.enforceStudio(); this.updateVoice();
       this.replayDoor(p);
     } else if (msg.t === "blend") {
-      // Only toward a group adjacent to the player's own (#392); a step anywhere else is no crossing.
-      const to = msg.to && BLEND.adjacent(p.zone, msg.to) ? msg.to : null, k = to ? msg.k : 0;
+      // Only a crossing the player's zone has (#392, `BLEND.crossable`); a step anywhere else is no crossing.
+      const to = msg.to && BLEND.crossable(p.zone, msg.to) ? msg.to : null, k = to ? msg.k : 0;
       if (to === p.blendTo && k === p.blendK) return;
       if (!takeToken(p.blendBucket, BLEND_HZ, p.seenAt)) return;
       // Who may hear whom changes only when a place is gained or lost: starting or ending a crossing, or reaching an end.
@@ -416,7 +1047,7 @@ export class Room extends DurableObject {
       this.broadcast({ t: "blend", id: p.id, to, k }, p.ws);
       if (replan) this.updateVoice();
     } else if (msg.t === "poker-voice") {
-      if (p.zone !== "ember-den" || msg.table === p.pokerVoice) return;
+      if (BLEND.group(p.zone) !== "emberden" || msg.table === p.pokerVoice) return;
       p.pokerVoice = msg.table;
       p.sent = null;
       // Also closes the receiver's tracks for players at the table it left.
@@ -431,21 +1062,62 @@ export class Room extends DurableObject {
       if (msg.on === p.muted) return;
       p.muted = msg.on;
       this.voiceState(p);
+    } else if (msg.t === "call") {
+      // In a hosted chat's voice (docs/ooga-chat-hosts.md): the page has paused its island voice; others show the mark.
+      if (!callOn(this.env) || msg.on === !!p.call) return;
+      p.call = msg.on;
+      this.broadcast({ t: "call", id: p.id, on: this.inCall(p) }, p.ws);
+    } else if (msg.t === "travel") {
+      // Its page leaves for a chat's copy and closes next: that close is a leave that keeps its seat (`drop`).
+      if (!copyRoom.copies(this.env)) return;
+      p.travel = true;
     } else if (msg.t === "chat") {
       // Nothing in the attachment changes.
       return this.say(p, msg.text, msg.clientId);
+    } else if (msg.t === "pm") {
+      // Saves each attachment it changes itself.
+      return this.privateMessage(p, msg);
+    } else if (msg.t === "react") {
+      // A reaction over a driven body, for the players who can see it to draw; nothing is kept.
+      if (!p.body || !this.reactToken(p)) return;
+      const out = JSON.stringify({ t: "react", id: p.id, e: msg.e });
+      for (const other of this.players.values()) if (other !== p && seenTogether(other.zone, p.zone)) this.send(other.ws, out);
+      // Speaking outdoors, Ooga Chat's audience sees it too (#668).
+      audienceRoom.islandReaction(this, p, msg.e);
+      return;
+    } else if (msg.t === "hand") {
+      if (msg.on === p.hand && (!msg.on || msg.tone === p.handTone && msg.e === p.handEmoji)) return;
+      // Over the bucket the change is refused, and the sender hears the hand the room still holds, so its page never
+      // shows one nobody else sees.
+      if (!this.reactToken(p)) {
+        this.send(p.ws, { t: "hand", id: p.id, on: p.hand, tone: p.handTone, e: p.handEmoji });
+        return;
+      }
+      p.hand = msg.on;
+      p.handTone = msg.tone;
+      p.handEmoji = msg.e;
+      this.broadcast({ t: "hand", id: p.id, on: p.hand, tone: p.handTone, e: p.handEmoji }, p.ws);
+      // An outdoor speaker's hand is in Ooga Chat's roster too (#668).
+      audienceRoom.world(this);
+    } else if (msg.t === "outdoor") {
+      // Ooga Chat's outdoor handshake (room-audience.js): each frame in order, the grant saved on the attachment there.
+      if (msg.op === "enter" && !cast) { audienceRoom.sendOutdoor(this, p, { op: "refused", epoch: msg.epoch, reason: "unavailable" }); return; }
+      return audienceRoom.outdoor(this, p, msg);
+    } else if (msg.t === "audience-view" || msg.t === "audience-resync") {
+      // Ooga Chat's panel (room-audience.js): its zone rides the attachment, saved there.
+      return audienceRoom.view(this, p, msg.zone, msg.t === "audience-resync");
+    } else if (msg.t === "link") {
+      // Nothing in the attachment changes: asks live in storage, by account.
+      return this.linkMessage(p, msg);
+    } else if (msg.t === "link-all") {
+      return this.linkAllMessage(p);
     } else if (msg.t === "door") {
       return this.doorMessage(p, msg);
+    } else if (msg.t === "chalk") {
+      return this.chalkMessage(p, msg);
     } else if (msg.t === "wallet") {
       // Nothing in the attachment changes: a room that sleeps forgets the wallets, which end within a minute anyway.
       return this.walletMessage(p, msg);
-    } else if (msg.t === "ghost") {
-      // HALLOWEEN: a follower in the ghost arena tells its hunt's host; nobody else hears it, nothing is kept.
-      if (!inGhostArena(p) || !p.body || p.id === this.ghostHostId) return;
-      if (!p.ghostBucket) p.ghostBucket = { tokens: GHOST_BURST, at: p.seenAt };
-      if (!takeToken(p.ghostBucket, GHOST_HZ, p.seenAt, GHOST_BURST)) return;
-      const host = this.players.get(this.ghostHostId);
-      if (host && inGhostArena(host)) this.send(host.ws, { ...msg, from: p.id });
     } else if (msg.t === "shot" || msg.t === "swing") {
       // A driven Ooga's own shot or strike, for the players in its zone to draw; nothing is hit and nothing is kept.
       if (!p.body || p.body.startsWith("gorilla:")) return;
@@ -454,11 +1126,18 @@ export class Room extends DurableObject {
         : p.swingBucket || (p.swingBucket = { tokens: burst, at: p.seenAt });
       if (!takeToken(bucket, shot ? SHOT_HZ : SWING_HZ, p.seenAt, burst)) return;
       const out = JSON.stringify(shot ? { t: "shot", id: p.id, a: msg.a } : { t: "swing", id: p.id });
-      for (const other of this.players.values()) if (other !== p && other.zone === p.zone) this.send(other.ws, out);
+      // HALLOWEEN (#422): one fired in the ghost arena also reaches its hallway's spectators (`watchesGhost`), who see and
+      // hear the hunt; one from the hallway stays there.
+      const arena = inGhostArena(p);
+      for (const other of this.players.values()) if (other !== p && (arena ? watchesGhost(other) : seenTogether(other.zone, p.zone))) this.send(other.ws, out);
       return;
     } else if (msg.t === "body") {
       if (msg.name === p.body) return;
-      const refusal = claimRefusal(CAST, p.login, msg.name, this.players.values(), p.contributor);
+      if (msg.name !== null && !cast) { this.send(ws, { t: "release", name: msg.name, reason: "catalog-unavailable" }); return; }
+      hockey.leave(this, p.id);
+      block.leave(this, p.id);
+      duel.leave(this, p);
+      const refusal = claimRefusal(cast, p.login, msg.name, this.players.values(), p.contributor, p.id);
       if (refusal) {
         this.send(ws, { t: "release", name: msg.name, reason: refusal });
         if (p.body === null) return;
@@ -467,64 +1146,186 @@ export class Room extends DurableObject {
         p.body = msg.name;
       }
       if (!p.body) { this.cancelDoor(p); this.clearPasses(p); }
+      this.chalkLetGo(p);
       // Another body, or none: its normalized health is reported afresh.
       p.hp = 100;
       p.ko = false;
       p.g = null;
-      p.j = p.w = 0;
+      p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined; p.d = undefined;
       if (!p.body) this.leaveStudio(p);
       this.broadcast({ t: "body", id: p.id, name: p.body });
+      if (this.env.EQUIPMENT_ENABLED === "1") equipmentRoom.changed(this, p);
       this.enforceStudio(); this.updateVoice();
     }
+    // A zone, body or crossing that no longer matches an open outdoor grant takes it back (#667).
+    audienceRoom.check(this, p);
     ws.serializeAttachment(this.attachment(p));
+    p.savedAt = p.seenAt;
+    p.posePending = false;
+  }
+
+  // One timer for the room, armed by the first pose held back and gone once it fires: every player still holding one
+  // is saved then. The room cannot hibernate while it is pending, a second at most after the last pose.
+  saveLater(p) {
+    p.posePending = true;
+    if (this.poseTimer) return;
+    this.poseTimer = setTimeout(() => this.savePoses(), POSE_SAVE_MS);
+  }
+
+  savePoses() {
+    this.poseTimer = 0;
+    const now = Date.now();
+    for (const p of this.players.values()) {
+      if (!p.posePending) continue;
+      p.posePending = false;
+      try {
+        p.ws.serializeAttachment(this.attachment(p));
+        p.savedAt = now;
+      } catch (error) {
+        // A deferred save has the same socket-local failure policy as an immediate message save.
+        // Keep flushing the other players, even if this socket's attachment can no longer be written.
+        this.messageFailed(p.ws, null, error, "pose");
+      }
+    }
   }
 
   // The prototype's note stands: on this compatibility date close handlers must not call ws.close().
-  webSocketClose(ws) {
+  // A clean close is a leave; one without a close frame, or the page's own CLOSE_RECONNECT, is held for its page (`hold`).
+  webSocketClose(ws, code, reason, wasClean) {
+    if (commonsRoom.closed(this, ws)) return;
     const p = this.byWs(ws);
-    if (p) this.drop(p, "closed");
+    if (!p) return;
+    // Gone to a chat's copy, however the socket closed: no hold, its seat kept instead.
+    if (p.travel) this.drop(p, "travel", { code, said: reason, clean: wasClean });
+    else if (code === CLOSE_RECONNECT || wasClean === false) this.hold(p, { code, said: reason, clean: wasClean });
+    else this.drop(p, "closed", { code, said: reason, clean: wasClean });
   }
 
-  webSocketError(ws) {
+  webSocketError(ws, error) {
+    if (commonsRoom.closed(this, ws)) return;
     const p = this.byWs(ws);
-    if (p) this.drop(p, "error");
+    const detail = { error: String((error && error.message) || error || "") };
+    if (p && p.travel) this.drop(p, "travel", detail);
+    else if (p) this.hold(p, detail);
   }
 
-  drop(p, reason) {
+  sendCabinets(ws = null) {
+    const seats = [];
+    for (const p of this.players.values()) if (p.cabinet) seats.push({ id: p.cabinet.id, player: p.id, name: p.display || p.login });
+    const message = { t: "cabinets", seats };
+    if (ws) this.send(ws, message); else this.broadcast(message);
+  }
+
+  releaseCabinet(p) {
+    if (!p.cabinet) return;
+    p.cabinet = null;
+    p.ws.serializeAttachment(this.attachment(p));
+    this.sendCabinets();
+  }
+
+  cabinetMessage(p, msg) {
+    if (msg.op === "leave") {
+      if (p.cabinet?.id === msg.id && p.cabinet.q === msg.q) this.releaseCabinet(p);
+      return;
+    }
+    const reply = reason => this.send(p.ws, { t: "cabinet", id: msg.id, q: msg.q, ok: !reason, reason });
+    p.cabinetBucket ||= { tokens: 3, at: Date.now() };
+    if (!takeToken(p.cabinetBucket, 2, Date.now(), 3)) { reply("Please wait before trying again"); return; }
+    const seat = CABINETS.get(msg.id);
+    if (!p.body || p.zone !== (seat.outdoor ? OUTSIDE : "arcade.hall") || p.ko) { reply("Stand in the arcade with your Ooga first"); return; }
+    if (p.cabinet) { reply(p.cabinet.id === msg.id && p.cabinet.q === msg.q ? null : "You already have a cabinet open"); return; }
+    for (const other of this.players.values()) if (other.cabinet?.id === msg.id) { reply("This cabinet is occupied"); return; }
+    // No await between checking and assigning: concurrent requests have exactly one winner.
+    const at = seat.outdoor ? CABINETS.slot(msg.slot) : seat;
+    p.cabinet = { id: msg.id, q: msg.q };
+    p.x = at.x; p.y = at.y; p.z = at.z; p.yaw = at.yaw; p.g = null; p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined; p.d = undefined;
+    p.blendTo = null; p.blendK = 0;
+    audienceRoom.check(this, p);
+    // A seat drops the player's duel frames and poses (above), so a duel or challenge under way ends here.
+    duel.leave(this, p);
+    p.ws.serializeAttachment(this.attachment(p));
+    this.dirty = true;
+    this.scheduleFlush();
+    this.sendCabinets();
+    reply(null);
+  }
+
+  // `detail`: what the close said, for the inspector's line (a close code, its reason, whether it was clean).
+  // Each step runs alone (`step`): one that throws is counted and logged and the rest still run, so the record always goes
+  // and the others always hear the leave, a new NPC host and their voice lists. A message whose handler failed ends here,
+  // often in the same helper that failed it, and so do a close and a socket error.
+  drop(p, reason, detail = null) {
     if (this.players.get(p.id) !== p) return;
-    this.cancelDoor(p);
-    this.clearPasses(p);
-    this.leaveStudio(p);
-    this.background(this.clearVoice(p));
+    if (p.held) { clearTimeout(p.held.timer); p.held = null; }
+    const step = (t, fn) => { try { fn(); } catch (error) { this.failed("drop", p, error, { t }); } };
+    if (this.inspect.on) step("inspect", () => this.inspect.event("leave", p, { reason, ...detail, zone: p.zone, on: Date.now() - p.joinedAt, heard: Date.now() - this.heardAt(p), voice: inVoice(p) }));
+    step("cabinet", () => this.releaseCabinet(p));
+    step("hockey", () => hockey.leave(this, p.id));
+    step("block", () => block.leave(this, p.id));
+    step("duel", () => duel.leave(this, p));
+    step("door", () => this.cancelDoor(p));
+    step("passes", () => this.clearPasses(p));
+    step("studio", () => this.leaveStudio(p));
+    step("chalk", () => this.chalkLetGo(p));
+    step("voice", () => this.background(this.clearVoice(p)));
+    step("pm", () => this.privateLeave(p));
     this.players.delete(p.id);
-    this.broadcast({ t: "leave", id: p.id, reason });
-    this.electHost();
-    this.electGhostHost();
-    this.updateVoice();
+    this.sockets.delete(p.ws);
+    if (this.env?.EQUIPMENT_ENABLED === "1") step("equipment", () => equipmentRoom.left(this, p));
+    // The chat hears who walks its copy now; a traveller from the island keeps its seat.
+    let away = null;
+    if (this.copy) step("walking", () => copyRoom.walking(this));
+    else if (reason === "travel") step("away", () => { away = copyRoom.depart(this, p); });
+    step("world", () => this.world.changed());
+    step("audience", () => audienceRoom.leave(this, p));
+    step("tess", () => tessQueue.presence(this, p, true, reason === "revoked"));
+    // A dropped socket can come straight back in; the last one out frees the room.
+    step("lock", () => {
+      const lockedIn = this.roomOf(p.zone), held = this.roomLocks.get(lockedIn);
+      if (held) held.passes.set(p.id, Date.now() + PIN_PASS_MS);
+      this.freeEmptyRoom(lockedIn);
+    });
+    // Gone to a chat's copy: other pages beam that Ooga out and keep its NPC hidden.
+    step("leave", () => { this.broadcast({ t: "leave", id: p.id, reason, ...(away ? { character: away.character } : {}) }); chatMembersRoom.players(this); });
+    step("host", () => this.electHost());
+    step("voices", () => this.updateVoice());
     if (!this.players.size && this.flushTimer) {
       clearTimeout(this.flushTimer);
       this.flushTimer = 0;
     }
+    if (!this.players.size && this.poseTimer) {
+      clearTimeout(this.poseTimer);
+      this.poseTimer = 0;
+    }
+    if (this.copy && !this.players.size) copyRoom.stopWalk(this);
   }
 
   release(p, reason) {
+    this.releaseCabinet(p);
+    hockey.leave(this, p.id);
+    block.leave(this, p.id);
+    duel.leave(this, p);
     this.cancelDoor(p);
     this.clearPasses(p);
     this.send(p.ws, { t: "release", name: p.body, reason });
     p.body = null;
     p.g = null;
-    p.j = p.w = 0;
+    p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined; p.d = undefined;
     this.leaveStudio(p);
+    this.chalkLetGo(p);
+    audienceRoom.check(this, p);
     p.ws.serializeAttachment(this.attachment(p));
     this.broadcast({ t: "body", id: p.id, name: null });
+    if (this.env?.EQUIPMENT_ENABLED === "1") equipmentRoom.changed(this, p);
     this.updateVoice();
   }
 
   // An explicit kick before the close: a server-initiated close alone can leave the client in CLOSING.
   evict(p, reason) {
-    this.drop(p, reason);
+    this.drop(p, reason, { code: CLOSE_KICK });
     this.send(p.ws, { t: "kick", reason });
     try {
+      p.ws.serializeAttachment(null);
       p.ws.close(CLOSE_KICK, reason);
     } catch {
       // Already closed.
@@ -535,27 +1336,41 @@ export class Room extends DurableObject {
   // room can hibernate between bursts (a running interval would keep it awake, and billed, for good).
   scheduleFlush() {
     if (this.flushTimer) return;
+    this.flushDue = Date.now() + 1000 / TICK_HZ;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = 0;
+      // How late the timer fired: the room's one sign of being too busy to keep its own pace.
+      this.inspect.peak("late", Date.now() - this.flushDue);
       this.snapshot();
+      this.inspect.tick();
+      this.world.tick();
     }, 1000 / TICK_HZ);
   }
 
   snapshot() {
     if (!this.dirty) return;
     this.dirty = false;
-    const ps = [], gs = [], js = [], weapons = [];
+    this.inspect.count("snapshots");
+    const ps = [], gs = [], js = [], weapons = [], visuals = [], rests = [], dances = [];
     for (const p of this.players.values()) {
       ps.push(p.id, p.x, p.y, p.z, p.yaw);
       if (p.g) gs.push(p.id, ...p.g);
       if (p.j) js.push(p.id, p.j);
       if (p.w) weapons.push(p.id, p.w);
+      if (p.v) visuals.push([p.id, p.va, ...p.v]);
+      if (p.r !== undefined) rests.push(p.r === 0 ? [p.id, 0] : [p.id, ...p.r]);
+      if (p.d !== undefined) dances.push(p.id, p.d);
     }
     const state = { t: "state", now: Date.now(), ps };
     if (gs.length) state.gs = gs;
     if (js.length) state.js = js;
     if (weapons.length) state.ws = weapons;
+    if (visuals.length) state.vs = visuals;
+    if (rests.length) state.rs = rests;
+    if (dances.length) state.ds = dances;
     this.broadcast(state);
+    // The chat's island view hears where its walkers stand and, when it changes, how they look (room-copy.js).
+    if (this.copy) { copyRoom.walked(this); copyRoom.looked(this); }
   }
 
   // A line from a player, named by the session's login and display name; over the rate its sender is told.
@@ -565,7 +1380,8 @@ export class Room extends DurableObject {
     // Only the fingerprint outlives the visible ring. After the async hash, the identity check,
     // dedup lookup and acceptance run synchronously, so simultaneous retries cannot both accept.
     const fingerprint = key ? await sha256Hex(text) : null;
-    if (this.players.get(p.id) !== p) return;
+    // A player, or an Ooga Chat member (room-commons.js), still here after the hash.
+    if (this.players.get(p.id) !== p && !commonsRoom.live(this, p)) return;
     if (key && this.chatAccepted.has(key)) {
       this.send(p.ws, this.chatAccepted.get(key) === fingerprint
         ? { t: "chat-ack", clientId } : { t: "chat-rejected", clientId, reason: "conflict" });
@@ -589,50 +1405,267 @@ export class Room extends DurableObject {
     if (key) this.send(p.ws, { t: "chat-ack", clientId });
   }
 
+  // A private conversation (#188): invites, the conversation itself, and its sealed frames relayed as they come. The
+  // room never reads a frame; it checks only that both ends still hold the conversation and the sender's rate.
+  privateMessage(p, msg) {
+    const now = p.seenAt, q = this.players.get(msg.to), to = msg.to;
+    const tell = (x, m) => this.send(x.ws, { t: "pm", ...m });
+    const account = this.pmAccount(p);
+    if (msg.op === "data") {
+      if (!q || p.pm.open !== q.id || q.pm.open !== p.id) return tell(p, { op: "refused", to, n: msg.n, reason: "closed" });
+      if (!takeToken(account.data, PM_HZ, now, PM_BURST)) return tell(p, { op: "refused", to, n: msg.n, reason: "rate" });
+      tell(q, { op: "data", from: p.id, d: msg.d });
+      return tell(p, { op: "ok", to, n: msg.n });
+    }
+    if (msg.op === "invite") {
+      if (!q || q === p) return tell(p, { op: "refused", to, reason: "offline" });
+      if (q.pm.blocked.includes(p.id) || p.pm.blocked.includes(q.id)) return tell(p, { op: "refused", to, reason: "unavailable" });
+      if (p.pm.open || q.pm.open) return tell(p, { op: "refused", to, reason: "busy" });
+      if (!takeToken(account.invite, PM_INVITE_HZ, now, PM_INVITE_BURST)) return tell(p, { op: "refused", to, reason: "rate" });
+      // Two who invited each other are talking.
+      if (q.pm.inv.includes(p.id)) return this.privateOpen(p, q);
+      p.pm.inv = [...p.pm.inv.filter((id) => id !== q.id), q.id].slice(-PM_INVITES);
+      this.saveAttachment(p);
+      tell(q, { op: "invite", from: p.id });
+      return tell(p, { op: "inviting", to });
+    }
+    // The rest are held to their own rate: past it, an accept is refused and the others do nothing.
+    if (!takeToken(account.control, PM_CONTROL_HZ, now, PM_CONTROL_BURST)) return msg.op === "accept" ? tell(p, { op: "refused", to, reason: "rate" }) : undefined;
+    if (msg.op === "accept") {
+      if (!q) return tell(p, { op: "refused", to, reason: "offline" });
+      if (!q.pm.inv.includes(p.id)) return tell(p, { op: "refused", to, reason: "withdrawn" });
+      if (p.pm.open || q.pm.open) return tell(p, { op: "refused", to, reason: "busy" });
+      return this.privateOpen(q, p);
+    }
+    if (msg.op === "decline" || msg.op === "block") {
+      if (q && q.pm.inv.includes(p.id)) {
+        q.pm.inv = q.pm.inv.filter((id) => id !== p.id);
+        this.saveAttachment(q);
+        tell(q, { op: "declined", from: p.id });
+      }
+      if (msg.op === "block") {
+        if (p.pm.open === to) this.privateClose(p, "ended");
+        // Someone blocked already, with no invite out to them, changes nothing, and nothing is written.
+        if (p.pm.blocked.includes(to) && !p.pm.inv.includes(to)) return;
+        p.pm.inv = p.pm.inv.filter((id) => id !== to);
+        p.pm.blocked = [...p.pm.blocked.filter((id) => id !== to), to].slice(-PM_BLOCKS);
+        account.blocked = p.pm.blocked.slice();
+        this.saveAttachment(p);
+      }
+      return;
+    }
+    // end: the conversation, or an invite not yet answered.
+    if (p.pm.open === to) return this.privateClose(p, "ended");
+    if (p.pm.inv.includes(to)) {
+      p.pm.inv = p.pm.inv.filter((id) => id !== to);
+      this.saveAttachment(p);
+      if (q) tell(q, { op: "withdrawn", from: p.id });
+    }
+  }
+
+  // An account's blocks and rate limits, kept across its reconnects while the room is awake. At PM_ACCOUNT_KEEP the
+  // oldest account no longer here makes room; a woken room starts afresh, with each socket's blocks in its attachment.
+  pmAccount(p) {
+    let a = this.pmAccounts.get(p.id);
+    if (!a) {
+      if (this.pmAccounts.size >= PM_ACCOUNT_KEEP) for (const id of this.pmAccounts.keys()) if (!this.players.has(id)) { this.pmAccounts.delete(id); break; }
+      a = { blocked: p.pm.blocked.slice(), data: { tokens: PM_BURST, at: p.seenAt }, invite: { tokens: PM_INVITE_BURST, at: p.seenAt },
+        control: { tokens: PM_CONTROL_BURST, at: p.seenAt } };
+      this.pmAccounts.set(p.id, a);
+    }
+    return a;
+  }
+
+  privateOpen(a, b) {
+    a.pm.inv = a.pm.inv.filter((id) => id !== b.id);
+    b.pm.inv = b.pm.inv.filter((id) => id !== a.id);
+    a.pm.open = b.id; b.pm.open = a.id;
+    this.saveAttachment(a); this.saveAttachment(b);
+    this.send(a.ws, { t: "pm", op: "open", with: b.id });
+    this.send(b.ws, { t: "pm", op: "open", with: a.id });
+  }
+
+  // Ends `p`'s conversation at both ends.
+  privateClose(p, reason) {
+    const q = this.players.get(p.pm.open);
+    if (q && q.pm.open === p.id) {
+      q.pm.open = 0;
+      this.saveAttachment(q);
+      this.send(q.ws, { t: "pm", op: "closed", from: p.id, reason });
+    }
+    this.send(p.ws, { t: "pm", op: "closed", from: p.pm.open, reason });
+    p.pm.open = 0;
+    this.saveAttachment(p);
+  }
+
+  // A player leaving ends their conversation and every invite to or from them, each told it was a leave, not a no.
+  privateLeave(p) {
+    for (const q of this.players.values()) {
+      if (q === p) continue;
+      let changed = false;
+      if (q.pm.open === p.id) { q.pm.open = 0; changed = true; this.send(q.ws, { t: "pm", op: "closed", from: p.id, reason: "left" }); }
+      if (q.pm.inv.includes(p.id)) { q.pm.inv = q.pm.inv.filter((id) => id !== p.id); changed = true; this.send(q.ws, { t: "pm", op: "declined", from: p.id, reason: "left" }); }
+      if (p.pm.inv.includes(q.id)) this.send(q.ws, { t: "pm", op: "withdrawn", from: p.id, reason: "left" });
+      if (changed) this.saveAttachment(q);
+    }
+  }
+
+  saveAttachment(p) { p.ws.serializeAttachment(this.attachment(p)); }
+
+  // The asker's own socket hears why (`refused`, `all`); the account's other sockets, its island player and its Ooga
+  // Chat members (room-commons.js), hear the same asks and links without it. An island socket also hears `app`, its
+  // linked partners in Ooga Chat, who can hear it wherever it is, so Online Oogas shows each of them with the link.
+  sendLinks(p, refused, all, n) {
+    const view = linkView(this.links, p.id), app = audienceRoom.partners(this, p.id), q = this.players.get(p.id);
+    this.send(p.ws, { t: "links", ...view, ...(p.community ? {} : { app }), ...(refused ? { refused } : {}), ...(all ? { all, n } : {}) });
+    if (q && q !== p) this.send(q.ws, { t: "links", ...view, app });
+    commonsRoom.links(this, p.id, { t: "links", ...view }, p);
+  }
+  // Account `id`'s asks and links, to every socket it has here: on the island, in Ooga Chat, or both.
+  tellLinks(id) {
+    const q = this.players.get(id);
+    if (q) this.sendLinks(q);
+    else commonsRoom.links(this, id, { t: "links", ...linkView(this.links, id) });
+  }
+  linkViewOf(id) { return linkView(this.links, id); }
+
+  saveLinks() { if (this.ctx && this.ctx.storage) this.background(this.ctx.storage.put("voiceLinks", storedLinks(this.links))); }
+
+  // One player asking for a voice link or taking their ask back. Only the asker is told, unless that made or broke a
+  // link: then the other is told too, and who hears whom changes (`enforceStudio` closes what may no longer be heard).
+  linkMessage(p, msg) {
+    if (msg.to === p.id) return;
+    if (!p.linkBucket) p.linkBucket = { tokens: LINK_BURST, at: p.seenAt };
+    if (!takeToken(p.linkBucket, LINK_HZ, p.seenAt, LINK_BURST)) return;
+    const wants = this.links.get(p.id);
+    if (!!wants?.has(msg.to) === msg.on) return;
+    if (msg.on && !this.players.has(msg.to)) return;
+    if (msg.on && (wants ? wants.size >= LINK_WANTS : this.links.size >= LINK_ACCOUNTS)) return this.sendLinks(p, "full");
+    const was = voiceLinked(this.links, p.id, msg.to);
+    if (!msg.on) {
+      wants.delete(msg.to);
+      if (!wants.size) this.links.delete(p.id);
+    } else if (wants) wants.add(msg.to);
+    else this.links.set(p.id, new Set([msg.to]));
+    this.saveLinks();
+    this.sendLinks(p);
+    if (was === voiceLinked(this.links, p.id, msg.to)) return;
+    this.tellLinks(msg.to);
+    this.enforceStudio();
+    audienceRoom.world(this);
+  }
+
+  // The L key: link with everyone in the room who has asked this player and has not been asked back, as far as the
+  // limits allow, or with nobody waiting take back every ask of this player's. One token, however many it changes; only
+  // those whose link was made or broken are told.
+  linkAllMessage(p) {
+    if (!p.linkBucket) p.linkBucket = { tokens: LINK_BURST, at: p.seenAt };
+    if (!takeToken(p.linkBucket, LINK_HZ, p.seenAt, LINK_BURST)) return;
+    let wants = this.links.get(p.id);
+    const waiting = [];
+    for (const id of this.players.keys()) if (id !== p.id && this.links.get(id)?.has(p.id) && !wants?.has(id)) waiting.push(id);
+    if (waiting.length) {
+      if (!wants && this.links.size >= LINK_ACCOUNTS) return this.sendLinks(p, "full");
+      if (!wants) this.links.set(p.id, wants = new Set());
+      const fits = waiting.slice(0, LINK_WANTS - wants.size);
+      for (const id of fits) wants.add(id);
+      if (!fits.length) return this.sendLinks(p, "full");
+      this.saveLinks();
+      this.sendLinks(p, fits.length < waiting.length ? "full" : undefined, "linked", fits.length);
+      for (const id of fits) this.tellLinks(id);
+    } else if (wants) {
+      const broken = [...wants].filter((id) => voiceLinked(this.links, p.id, id));
+      this.links.delete(p.id);
+      this.saveLinks();
+      this.sendLinks(p, undefined, "unlinked", wants.size);
+      for (const id of broken) this.tellLinks(id);
+    } else return this.sendLinks(p, undefined, "none", 0);
+    this.enforceStudio();
+    audienceRoom.world(this);
+  }
+
+  // An account deleted (`DELETE /api/me`, through the Worker's binding alone): its asks, and every ask of it, go.
+  async forgetVoiceLinks(id) {
+    const told = [];
+    let changed = this.links.delete(id);
+    for (const [other, wants] of this.links) {
+      if (!wants.delete(id)) continue;
+      changed = true;
+      told.push(other);
+      if (!wants.size) this.links.delete(other);
+    }
+    if (!changed) return;
+    await this.ctx.storage.put("voiceLinks", storedLinks(this.links));
+    for (const other of told) this.tellLinks(other);
+    this.enforceStudio();
+    audienceRoom.world(this);
+  }
+
+  // One bucket a record for reactions and the hand, made full on first use.
+  reactToken(p) {
+    if (!p.reactBucket) p.reactBucket = { tokens: REACT_BURST, at: p.seenAt };
+    return takeToken(p.reactBucket, REACT_HZ, p.seenAt, REACT_BURST);
+  }
+
   // Also after any page's `hub` flag changes: the host sends frames only while someone follows.
+  // A player held over a lost socket (`hold`) neither hosts nor follows until its page is back.
+  npcEligible(p) {
+    if (this.copy || !p.inHub || p.held) return false;
+    return !this.catalog.enabled || !!p.catalogRoster && p.catalogRoster === this.catalog.roster();
+  }
+
+  // Called only when an accepted catalog changes or expires. Cosmetics may change the
+  // revision without changing binary NPC indices; only the roster discards cached frames.
+  catalogChanged() {
+    if (!this.catalog.enabled) return;
+    const catalog = this.catalog.metadata(), roster = catalog?.roster || null;
+    if (this.catalogRevision === (catalog?.revision || null) && this.catalogGeneration === (catalog?.generation || 0) && this.catalogRoster === roster) return;
+    if (this.catalogRoster !== roster) this.lastNpc = null;
+    this.catalogRevision = catalog?.revision || null;
+    this.catalogGeneration = catalog?.generation || 0;
+    this.catalogRoster = roster;
+    this.broadcast({ t: "catalog", catalog });
+    this.electHost();
+  }
+
   electHost() {
-    const id = electHost(this.players.values(), this.hostId);
-    const followers = npcFollowers(this.players.values(), id);
+    const here = [...this.players.values()];
+    const eligible = (p) => this.npcEligible(p);
+    const id = electHost(here, this.hostId, eligible);
+    const followers = npcFollowers(here, id, eligible);
     if (id === this.hostId && followers === this.followers) return;
+    if (this.inspect.on && id !== this.hostId) this.inspect.event("host", null, { login: id ? this.players.get(id).login : "", followers });
+    if (id !== this.hostId) this.lastNpc = null;
     this.hostId = id;
     this.followers = followers;
-    if (!id) this.lastNpc = null;
     this.broadcast({ t: "host", id, followers });
   }
 
-  // The ghost arena's host, among the visible pages in it, by the NPC host's rule, followed by every other page in the
-  // arena or its hallway; every page hears who it is. The
-  // kept frame goes with a change of host, and when nobody follows, since the host then stops sending and the frame
-  // would hand the next page in a hunt that has moved on (it sends again within a quarter second of a follower).
-  electGhostHost() {
-    const id = electHost(this.players.values(), this.ghostHostId, ghostCandidate);
-    const followers = npcFollowers(this.players.values(), id, watchesGhost);
-    if (id !== this.ghostHostId || !followers) this.lastGhost = null;
-    if (id === this.ghostHostId && followers === this.ghostFollowers) return;
-    this.ghostHostId = id;
-    this.ghostFollowers = followers;
-    this.broadcast({ t: "ghost-host", id, followers });
-  }
-
-  // A binary frame led by GHOST_MAGIC is the arena hunt's state: taken only from its host while in the arena, capped
-  // in size and rate, kept for the next page to walk in, and relayed unchanged to every other page in the arena or its
-  // hallway.
-  ghostFrame(p, data) {
-    if (p.id !== this.ghostHostId || !inGhostArena(p) || data.byteLength > GHOST_FRAME_MAX) return;
-    if (!takeToken(p.ghostFrameBucket, GHOST_FRAME_HZ, Date.now(), GHOST_FRAME_BURST)) return;
-    if (this.ghostFollowers) this.lastGhost = data;
-    for (const q of this.players.values()) if (q !== p && watchesGhost(q)) this.send(q.ws, data);
+  // The host's frame of the island's loose props that move (src/js/prop-sync.js): taken only from the current host,
+  // capped in size and rate, and relayed unchanged to the other pages showing the island that read them. Nothing is
+  // kept: the host says where everything is whenever its followers change.
+  propFrame(p, data) {
+    if (p.id !== this.hostId || !this.npcEligible(p) || data.byteLength > PROP_FRAME_MAX) return;
+    const now = Date.now();
+    if (!takeToken(p.propBucket || (p.propBucket = { tokens: PROP_HZ, at: now }), PROP_HZ, now)) return;
+    p.seenAt = now;
+    for (const q of this.players.values()) if (q !== p && this.npcEligible(q) && q.props) this.send(q.ws, data);
   }
 
   // A binary frame is the NPC host's poses: taken only from the current host, capped in size and rate,
   // and relayed unchanged to every other page showing the island.
   npcFrame(p, data) {
-    if (p.id !== this.hostId || !p.inHub) return;
+    if (p.id !== this.hostId || !this.npcEligible(p)) return;
     if (!(data instanceof ArrayBuffer) || data.byteLength > NPC_FRAME_MAX) return;
     if (!takeToken(p.npcBucket, NPC_HZ, Date.now())) return;
     p.seenAt = Date.now();
     this.lastNpc = data;
-    for (const q of this.players.values()) if (q !== p && q.inHub) this.send(q.ws, data);
+    // The largest outbound stream at a full room, so its frames and bytes are also counted on their own.
+    this.inspect.count("npc");
+    let relayed = 0;
+    for (const q of this.players.values()) if (q !== p && this.npcEligible(q) && this.send(q.ws, data)) relayed++;
+    this.inspect.count("npcOut", relayed);
+    this.inspect.count("npcBytes", relayed * data.byteLength);
   }
 
   // Tells each player whom to hear, with each one's publication (`gens`: a microphone published again is
@@ -641,29 +1674,160 @@ export class Room extends DurableObject {
   // voice session opened, announced or left.
   updateVoice() {
     if (!this.sfu) return;
-    const desired = voicePeers([...this.players.values()], this.studio);
+    const desired = this.voicePlan();
+    // Who hears a speaker without publishing is on no list of the speaker's own, so count them for it.
+    const quiet = new Map();
+    for (const q of this.players.values()) if (q.voice.sub && !q.voice.track) for (const id of desired.get(q.id) || []) quiet.set(id, (quiet.get(id) || 0) + 1);
     for (const p of this.players.values()) {
       const peers = desired.get(p.id) || [];
-      const gens = peers.map((id) => this.players.get(id).voice.gen || 0);
+      const reopened = p.voice.reopened || {}, gens = peers.map((id) => { const src = this.voiceSource(id), gen = src ? src.gen : 0;
+        return gen < 0 ? gen - (reopened[id] || 0) : gen + (reopened[id] || 0); });
       // Receiving attendees do not publish tracks. Their receive sessions, rather
       // than the list of speakers this player hears, keep a Studio microphone live.
+      // A linked partner's does too, wherever that partner is, since it hears from anywhere.
       let listeners;
       if (p.zone === STUDIO_ZONE) {
         listeners = 0;
-        for (const q of this.players.values()) if (q !== p && q.zone === STUDIO_ZONE && q.voice && q.voice.sub) listeners++;
+        for (const q of this.players.values()) if (q !== p && q.voice && q.voice.sub && (q.zone === STUDIO_ZONE || voiceLinked(this.links, p.id, q.id))) listeners++;
+        listeners += audienceRoom.ears(this, p.id);
       }
-      const sig = peers.map((id, i) => `${id}:${gens[i]}`).join(",") + (listeners === undefined ? "" : `|${listeners}`);
+      // Someone back from an earlier session with the microphone closed, or a linked partner in a Studio audience.
+      // Linked partners hearing it from Ooga Chat count too.
+      const ears = p.zone === STUDIO_ZONE ? 0 : (quiet.get(p.id) || 0) + audienceRoom.ears(this, p.id);
+      const sig = peers.map((id, i) => `${id}:${gens[i]}`).join(",") + (listeners === undefined ? "" : `|${listeners}`) + (ears ? `+${ears}` : "");
       if (p.sent === sig) continue;
       p.sent = sig;
       p.ws.serializeAttachment(this.attachment(p));
-      this.send(p.ws, { t: "voice", peers, gens, ...(listeners === undefined ? {} : { listeners }) });
+      this.send(p.ws, { t: "voice", peers, gens, ...(listeners === undefined ? {} : { listeners }), ...(ears ? { ears } : {}) });
     }
+  }
+
+  // Ooga Chat speakers join the plan for island players with an open outdoor grant (room-audience.js).
+  voicePlan() { return audienceRoom.addSources(this, voicePeers([...this.players.values()], this.studio, this.links)); }
+
+  // Presence is not a microphone: an account may stand on the island while speaking from Ooga Chat. Only a live
+  // island publication wins. Negative chat generations distinguish handoffs even when both clocks issued the same count.
+  voiceSource(id) {
+    const v = this.players.get(id)?.voice;
+    if (v && v.pub && v.track) return { session: v.pub, track: v.track, gen: v.gen || 0 };
+    const s = audienceRoom.sourceOf(this, id);
+    return s ? { session: s.session, track: s.track, gen: -(s.gen || 0) - 1 } : null;
   }
 
   // Every other page's roster shows who is in voice (a live microphone) and who muted it: sent on a change only.
   voiceState(p) {
-    this.broadcast({ t: "vstate", id: p.id, voice: !!p.voice.track, muted: p.muted }, p.ws);
+    this.broadcast({ t: "vstate", id: p.id, voice: inVoice(p), muted: p.muted }, p.ws);
+    audienceRoom.world(this);
+    // Back in island voice while a chat holds the account's stage (Switch here): the chat gives it up.
+    if (inVoice(p) && this.onChatStage(p.id)) this.later(this.takeVoiceBack(p));
   }
+
+  /**
+   * Back in island voice while a chat holds the account's stage (Switch here): the chat gives it up, and only once it
+   * has is the account's entry dropped, so a call that fails is tried again by the sweep.
+   */
+  async takeVoiceBack(p) {
+    const chat = this.chatVoices.get(p.id);
+    if (!chat || !this.env || !this.env.AUDIENCE) return;
+    try { await this.env.AUDIENCE.getByName(`chat:${chat}`).yieldVoice(`gh:${p.id}`); } catch { return; }
+    if (this.chatVoices.get(p.id) !== chat) return;
+    this.chatVoices.delete(p.id);
+    this.keepChatVoices();
+    if (this.players.get(p.id) !== p) return;
+    if (!audienceRoom.elsewhere(this, p.id)) this.send(p.ws, { t: "voice-elsewhere", on: false });
+    this.broadcast({ t: "call", id: p.id, on: this.inCall(p) });
+  }
+
+  /** In a hosted chat: this page said so (`call`), or the account holds a chat's stage from another device. */
+  inCall(p) { return !!p.call || this.onChatStage(p.id); }
+  onChatStage(id) { return !!this.chatVoices && this.chatVoices.has(id); }
+  keepChatVoices() { this.later(this.ctx.storage.put("chatVoices", [...this.chatVoices])); }
+  later(task) { if (this.ctx.waitUntil) this.ctx.waitUntil(task); else task.catch(() => {}); }
+
+  /**
+   * A hosted chat says GitHub account `id` took (`on`) or left its stage (docs/ooga-chat-hosts.md). One voice an account:
+   * its island voice ends as Ooga Chat's took it (`voice-moved`), every page shows its Ooga in a call, and its own page
+   * hears that its voice is elsewhere (`voice-elsewhere`), whose Switch here takes it back (`voiceState`).
+   */
+  async chatVoice(id, chat, on) {
+    if (!Number.isSafeInteger(id) || typeof chat !== "string" || !callOn(this.env)) return { ok: false };
+    // Off that chat's stage: a seat kept while it walked the chat's copy goes.
+    if (!on) copyRoom.stageLeft(this, id, chat);
+    if (on) this.chatVoices.set(id, chat);
+    else if (this.chatVoices.get(id) === chat) this.chatVoices.delete(id);
+    else return { ok: true };
+    this.keepChatVoices();
+    const p = this.players.get(id);
+    if (!p) return { ok: true };
+    if (on && inVoice(p)) {
+      await this.clearVoice(p);
+      p.muted = false;
+      this.saveAttachment(p);
+      this.send(p.ws, { t: "voice-moved" });
+      this.broadcast({ t: "vstate", id: p.id, voice: false, muted: false }, p.ws);
+      this.updateVoice();
+    }
+    // A page that is itself in the chat has paused its own voice already: it needs no Switch here.
+    if (!p.call) this.send(p.ws, { t: "voice-elsewhere", on });
+    this.broadcast({ t: "call", id: p.id, on: this.inCall(p) });
+    return { ok: true };
+  }
+
+  // A chat's copy (room-copy.js), from its chat: GitHub account `id` sent home (`stage`: off the stage; `removed`).
+  copyRevoke(id, reason) {
+    const p = this.copy && Number.isSafeInteger(id) && this.players.get(id);
+    if (p) this.evict(p, copyRoom.reason(reason));
+    return { ok: !!this.copy };
+  }
+
+  // The chat ended: everyone home, and the copy keeps nothing.
+  async copyEnd() {
+    if (!this.copy) return { ok: false };
+    this.copy.ending = true;
+    copyRoom.stopWalk(this);
+    for (const p of [...this.players.values()]) this.evict(p, "chat-ended");
+    await this.ctx.storage.deleteAll();
+    await this.ctx.storage.deleteAlarm();
+    return { ok: true };
+  }
+
+  // The chat's clouds in its copy: every speaker not walking it, a seat each.
+  copyClouds(list) { return this.copy ? copyRoom.clouds(this, list) : null; }
+
+  // A hosted chat's members now (audience.js `reportMembers`), an empty list as it ends: every page's Online Oogas hears.
+  chatMembers(chat, title, speakers, listeners, ids, people) { return chatMembersRoom.update(this, chat, title, speakers, listeners, ids, people); }
+
+  // Ooga Chat's audience (audience.js) sends each change of a zone a panel here watches, and its speakers' publications.
+  audienceDelta(delta) { audienceRoom.delta(this, delta); }
+  audienceSources(list) { return audienceRoom.sources(this, list); }
+  // Ooga Chat took an account's voice on the visitor's word: the island's page leaves voice first.
+  audienceHandoff(id) { return audienceRoom.handoff(this, id); }
+  // The outdoor handshake's answers from the Audience (#667): confirmed retirements, and each zone's listeners.
+  audienceConfirmed(ids) { audienceRoom.confirmed(this, ids); }
+  // Ooga Chat's reactions and clouds (#668).
+  audienceReaction(event) { audienceRoom.reaction(this, event); }
+  audienceClouds(list) { return audienceRoom.clouds(this, list); }
+  // An Ooga Chat account's access ended (#670): its community sockets close.
+  communityRevoke(id, reason) { return commonsRoom.revoke(this, id, reason); }
+  // An account renamed (renames.js, from the island's account API or Ooga Chat's Commons name field): its records here and
+  // its Commons members take the new name, every page and member is told (`renamed`), and Ooga Chat's audience hears the
+  // island's speakers again with it. Lines already said keep the name they were said under.
+  renamed(id, display) {
+    id = Number(id);
+    if (!Number.isSafeInteger(id) || id <= 0 || typeof display !== "string" || !display || display.length > 50) return { renamed: 0 };
+    let n = 0;
+    for (const p of this.players.values()) {
+      if (p.id !== id || p.display === display) continue;
+      p.display = display;
+      try { p.ws.serializeAttachment(this.attachment(p)); } catch { /* held or closing: the next join reads the account */ }
+      n++;
+    }
+    commonsRoom.rename(this, id, display);
+    this.broadcast({ t: "renamed", id, display });
+    audienceRoom.world(this);
+    return { renamed: n };
+  }
+  audienceListeners(counts) { audienceRoom.listeners(this, counts); }
 
   // /voice/<op> from the Worker, which checked the session and set x-player-id. Ops: session (a publish
   // or receive session), publish (the mic's offer), live (the publishing connection is up: only now is the
@@ -675,7 +1839,34 @@ export class Room extends DurableObject {
     const p = this.players.get(Number(request.headers.get("x-player-id")));
     if (!p) return new Response(JSON.stringify({ error: "join the island first" }), { status: 409, headers: { "content-type": "application/json" } });
     if (!p.connectionToken || request.headers.get("x-room-token") !== p.connectionToken) return new Response(JSON.stringify({ error: "connection replaced" }), { status: 409, headers: { "content-type": "application/json" } });
+    if (op === "ice") {
+      const cast = this.catalog.current();
+      if (!cast) return new Response(JSON.stringify({ error: "character catalog unavailable" }), { status: 503, headers: { "cache-control": "no-store", "content-type": "application/json" } });
+      if (!ownedBody(cast, p.login, p.contributor, p.id)) {
+        this.evict(p, "revoked");
+        return new Response(JSON.stringify({ error: "contributors with an Ooga only" }), { status: 403, headers: { "cache-control": "no-store", "content-type": "application/json" } });
+      }
+      // Authenticated and rate-limited at the Worker, then bound to the current room connection.
+      // Keep minting out of the SFU operation queue so a relay outage cannot hold up voice signalling.
+      const data = await turnCredentials(this.env).catch(() => null);
+      if (this.players.get(p.id) !== p || p.connectionToken !== request.headers.get("x-room-token"))
+        return new Response(null, { status: 409, headers: { "cache-control": "no-store" } });
+      const current = this.catalog.current();
+      if (!current || !ownedBody(current, p.login, p.contributor, p.id))
+        return new Response(null, { status: 503, headers: { "cache-control": "no-store" } });
+      return new Response(JSON.stringify(data || {}), { headers: {
+        "cache-control": "no-store", "content-type": "application/json", "x-content-type-options": "nosniff",
+      } });
+    }
     const result = (p.voiceQueue || Promise.resolve()).catch(() => {}).then(() => this.voiceOperation(op, request, p));
+    if (this.inspect.on) result.then((res) => {
+      this.inspect.count("voiceOps");
+      // A failed SFU call has its own line (`voice-fail`); refusals by the room are counted and logged here.
+      if (res.status >= 400 && res.status !== 502) {
+        this.inspect.count("voiceRefused");
+        if (res.status !== 409) res.clone().json().then((data) => this.inspect.event("voice-refused", p, { op, status: res.status, error: String(data.error || "") })).catch(() => {});
+      }
+    }, () => {});
     p.voiceQueue = result.then(() => {}, () => {});
     // A browser timeout must not cancel the work that later requests are queued behind.
     this.background(p.voiceQueue);
@@ -684,10 +1875,14 @@ export class Room extends DurableObject {
 
   async voiceOperation(op, request, expected) {
     const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
+    const started = Date.now();
     if (!this.sfu) return json({ error: "voice is not configured" }, 503);
     const p = this.players.get(Number(request.headers.get("x-player-id")));
     if (!p || p !== expected) return json({ error: "connection replaced" }, 409);
-    if (!ownedBody(CAST, p.login, p.contributor)) {
+    const cast = this.catalog.current();
+    const cleanup = ["leave", "unpublish", "close"].includes(op);
+    if (!cast && !cleanup) return json({ error: "character catalog unavailable" }, 503);
+    if (cast && !ownedBody(cast, p.login, p.contributor, p.id)) {
       this.evict(p, "revoked");
       return json({ error: "contributors with an Ooga only" }, 403);
     }
@@ -698,11 +1893,15 @@ export class Room extends DurableObject {
       // No body.
     }
     if (this.players.get(p.id) !== p || (p.connectionToken && request.headers.get("x-room-token") !== p.connectionToken)) return json({ error: "connection replaced" }, 409);
-    if ((this.cleanupJobs || []).length >= 64 && !["leave", "unpublish", "close"].includes(op)) return json({ error: "media cleanup backlog; try later" }, 503);
-    const was = !!p.voice.track;
+    if (!["leave", "unpublish", "close"].includes(op) && !(await this.shedCleanup())) return json({ error: "media cleanup backlog; try later" }, 503);
+    const was = inVoice(p);
     const voice = p.voice;
     let generation = voice.version || 0;
-    const current = () => this.players.get(p.id) === p && p.voice === voice && (voice.version || 0) === generation;
+    const current = () => {
+      const authority = this.catalog.current();
+      return this.players.get(p.id) === p && p.voice === voice && (voice.version || 0) === generation
+        && (cleanup || authority && !!ownedBody(authority, p.login, p.contributor, p.id));
+    };
     if (this.studio && this.studio.hostId && !studioHostAllowed(this.env, this.studio.hostId)) this.suspendStudio();
     const mayPublish = () => p.zone !== STUDIO_ZONE || studioCanSpeak(this.studio, p);
     try {
@@ -712,15 +1911,22 @@ export class Room extends DurableObject {
         await this.clearVoiceKind(p, kind);
         generation = voice.version || 0;
         const { sessionId } = await this.sfu.newSession();
-        if (!current() || (kind === "pub" && !mayPublish())) return json({ error: "connection or permission changed" }, 409);
+        if (!current() || (kind === "pub" && !mayPublish())) {
+          // Nobody will hold it: swept, as any session given up, rather than left open at the SFU.
+          await this.queueClose(sessionId, [], true, true);
+          return json({ error: "connection or permission changed" }, 409);
+        }
         p.voice[kind] = sessionId;
         if (kind === "pub") p.voice.track = p.voice.pending = null;
+        // A receive session the page opened by itself to overhear the public conversation (voice.js `overhear`), until a
+        // session of the visitor's own replaces it or a microphone is published over it.
+        p.voice.passive = kind === "sub" ? body.passive === true && !p.voice.pub : false;
         // A restarted client cleared its local list, even if the room's list
         // and audience count have not changed since its previous receiver.
         if (kind === "sub") p.sent = null;
         p.ws.serializeAttachment(this.attachment(p));
         this.updateVoice();
-        if (was && !p.voice.track) this.voiceState(p);
+        if (was !== inVoice(p)) this.voiceState(p);
         return json({ ok: true });
       }
       if (op === "publish") {
@@ -752,19 +1958,21 @@ export class Room extends DurableObject {
         p.voice.gen = Math.max(Date.now(), (p.voice.gen || 0) + 1);
         p.ws.serializeAttachment(this.attachment(p));
         this.updateVoice();
-        if (!was) this.voiceState(p);
+        if (was !== inVoice(p)) this.voiceState(p);
         return json({ ok: true });
       }
       if (op === "pull") {
         if (!p.voice.sub || !Array.isArray(body.ids)) return json({ error: "bad pull" }, 400);
-        const allowed = new Set(voicePeers([...this.players.values()], this.studio).get(p.id) || []);
+        const allowed = new Set(this.voicePlan().get(p.id) || []);
         if (Object.keys(p.voice.mids || {}).length >= 64) return json({ error: "close old subscriptions first" }, 409);
         const tracks = [], requested = new Map();
         for (const id of [...new Set(body.ids.slice(0, 64))]) {
-          const q = this.players.get(id);
-          if (!allowed.has(id) || !q || !q.voice.pub || !q.voice.track) continue;
-          tracks.push({ location: "remote", sessionId: q.voice.pub, trackName: q.voice.track });
-          requested.set(q.voice.pub, { id, track: q.voice.track });
+          const src = this.voiceSource(id);
+          // An Ooga Chat speaker the plan allows is pulled by the Audience's reference, never by anything the page sent.
+          const pub = src && src.session, track = src && src.track;
+          if (!allowed.has(id) || !pub || !track) continue;
+          tracks.push({ location: "remote", sessionId: pub, trackName: track });
+          requested.set(pub, { id, track, gen: src.gen });
         }
         if (!tracks.length) return json({ tracks: [], requiresImmediateRenegotiation: false });
         if (Object.keys(p.voice.mids || {}).length + tracks.length > 64) return json({ error: "close old subscriptions first" }, 409);
@@ -779,11 +1987,12 @@ export class Room extends DurableObject {
         // only the tracks still eligible (same publisher session and track) and close every other one, through
         // the retried cleanup queue, before its descriptor reaches the page.
         const live = current() && p.voice.sub === receivingSession;
-        const allowedNow = live ? new Set(voicePeers([...this.players.values()], this.studio).get(p.id) || []) : new Set();
+        const allowedNow = live ? new Set(this.voicePlan().get(p.id) || []) : new Set();
         const kept = [], close = [];
         for (const t of res.tracks || []) {
-          const asked = requested.get(t.sessionId), q = asked && this.players.get(asked.id);
-          if (live && asked && allowedNow.has(asked.id) && q && q.voice.pub === t.sessionId && q.voice.track === asked.track) {
+          const asked = requested.get(t.sessionId), src = asked && this.voiceSource(asked.id);
+          const still = !!src && src.session === t.sessionId && src.track === asked.track && src.gen === asked.gen;
+          if (live && asked && allowedNow.has(asked.id) && still) {
             kept.push({ id: asked.id, mid: t.mid, errorCode: t.errorCode });
           } else if (typeof t.mid === "string" && !t.errorCode) close.push(t.mid);
         }
@@ -818,19 +2027,23 @@ export class Room extends DurableObject {
         await this.clearVoiceKind(p, "pub");
         p.ws.serializeAttachment(this.attachment(p));
         this.enforceStudio(); this.updateVoice();
-        if (was) this.voiceState(p);
+        if (was !== inVoice(p)) this.voiceState(p);
         return json({ ok: true });
       }
       if (op === "leave") {
+        // A page restarting its voice says why (voice.js), so a dropped connection is told from someone leaving voice.
+        if (body.why === "failed" || body.why === "disconnected") this.inspect.event("voice-restart", p, { why: body.why });
         await this.clearVoice(p);
         p.ws.serializeAttachment(this.attachment(p));
         this.updateVoice();
-        if (was) this.voiceState(p);
+        if (was !== inVoice(p)) this.voiceState(p);
         return json({ ok: true });
       }
       return json({ error: "unknown voice op" }, 404);
     } catch (err) {
-      // Return a bounded public error; SDP and upstream session identifiers never enter logs.
+      // Return a bounded public error; SDP and upstream session identifiers never enter logs, nor the inspector's line,
+      // which keeps the SFU's status and error code alone.
+      if (this.inspect.on) this.inspect.event("voice-fail", p, { op, status: Number.isInteger(err && err.status) ? err.status : 0, code: String((err && err.code) || (err && err.name) || ""), ms: Date.now() - started });
       return json({ error: "the voice service did not answer" }, 502);
     }
   }
@@ -839,6 +2052,97 @@ export class Room extends DurableObject {
     if (!this.studio) return;
     const seats = [...this.players.values()].filter(q => q.zone === STUDIO_ZONE && Number.isInteger(q.studioSeat)).map(q => ({ id: q.id, seat: q.studioSeat }));
     this.send(p.ws, { t: "studio-state", state: { ...this.studio, duration: (studioSource(this.studio.source) || {}).duration || 0, cleanupPending: !!(this.cleanupJobs && this.cleanupJobs.length), seats, allowedHost: studioHostAllowed(this.env, p.id), canSpeak: studioCanSpeak(this.studio, p) } });
+  }
+
+  // The chalkboard (chalk-board.js, CHALK_HZ in protocol.js): why this player may not write on it now, or null.
+  chalkRefusal(p) {
+    if (!p.body || p.body.startsWith("gorilla:") || p.zone !== OUTSIDE) return "away";
+    return CHALK.near(p.x, p.y, p.z) ? null : "away";
+  }
+
+  chalkMessage(p, msg) {
+    const C = CHALK, now = p.seenAt, editor = this.chalkEditor, holding = !!editor && editor.id === p.id;
+    if (msg.k === "drop") {
+      if (holding) this.chalkLetGo(p);
+      return;
+    }
+    if (!p.chalkBucket) p.chalkBucket = { tokens: CHALK_BURST, at: now };
+    const paced = takeToken(p.chalkBucket, CHALK_HZ, now, CHALK_BURST), refusal = this.chalkRefusal(p);
+    const other = editor && !holding ? this.players.get(editor.id) : null, taken = !!other && now - editor.at < CHALK_IDLE_MS;
+    if (msg.k === "take") {
+      if (refusal || taken || !paced) return this.send(p.ws, { t: "chalk-refused", why: refusal || (taken ? "busy" : "wait"), ...(taken && !refusal ? { name: other.display || other.login } : {}) });
+      if (holding) { editor.at = now; return this.send(p.ws, { t: "chalk-lock", id: p.id }); }
+      this.chalkGrant(p, now);
+      return;
+    }
+    // An edit over the rate is dropped unanswered, and a holder's page is then behind the room: its next edit gets the
+    // board back instead of being applied.
+    if (!paced) {
+      if (holding) p.chalkBehind = true;
+      return;
+    }
+    // An edit from a page that does not hold the board: the room slept and forgot the holder, or the page lost it and
+    // has not heard yet. A free board goes back to an Ooga still standing at it; otherwise the page gets the board
+    // as it is and who holds it.
+    if (!holding) {
+      if (refusal || taken) return this.chalkTell(p, editor && other ? editor.id : 0, now);
+      this.chalkGrant(p, now);
+    } else if (refusal) return this.chalkLetGo(p);
+    const held = this.chalkEditor;
+    held.at = now;
+    if (p.chalkBehind) return this.chalkResync(p, now);
+    // Older pages may still send repeated wipes. They need no relay, save or timer.
+    if (msg.k === "wipe" && C.preset(this.chalk) === msg.to) return;
+    if (C.apply(this.chalk, msg, held.session)) return this.chalkResync(p, now);
+    this.broadcast({ ...msg, id: p.id }, p.ws);
+    this.chalkDirty = true;
+    if (msg.k === "wipe") this.chalkSave();
+    else if (!this.chalkTimer) this.chalkTimer = setTimeout(() => { this.chalkTimer = 0; this.chalkSave(); }, CHALK_SAVE_MS);
+  }
+
+  chalkGrant(p, now) {
+    if (this.chalkEditor) this.chalkSave();
+    this.chalkEditor = { id: p.id, session: CHALK.session(this.chalk), at: now };
+    this.broadcast({ t: "chalk-lock", id: p.id });
+  }
+
+  // The board as the room has it, to one page, at most once every CHALK_TELL_MS; whether it went.
+  chalkTell(p, editor, now) {
+    if (now - (p.chalkToldAt || 0) < CHALK_TELL_MS) return false;
+    p.chalkToldAt = now;
+    this.send(p.ws, { t: "chalk-board", marks: this.chalk.marks, editor });
+    return true;
+  }
+
+  // The holder's page and the room disagree: the room's board wins, and the holder starts a fresh line. Until it can
+  // be told, the holder stays behind and its edits are not applied.
+  chalkResync(p, now) {
+    p.chalkBehind = !this.chalkTell(p, p.id, now);
+    if (!p.chalkBehind) this.chalkEditor.session = CHALK.session(this.chalk);
+  }
+
+  chalkLetGo(p) {
+    if (!this.chalkEditor || this.chalkEditor.id !== p.id) return;
+    this.chalkEditor = null;
+    this.chalkSave();
+    this.broadcast({ t: "chalk-lock", id: 0 });
+  }
+
+  // At most one write every CHALK_SAVE_MS while someone writes (a short timer after an edit, which also keeps the
+  // room awake until its last edit is stored), and one at once on a wipe or when the holder lets go.
+  chalkSave() {
+    if (this.chalkTimer) { clearTimeout(this.chalkTimer); this.chalkTimer = 0; }
+    if (!this.chalkDirty) return;
+    this.chalkDirty = false;
+    if (!this.ctx || !this.ctx.storage) return;
+    if (CHALK.preset(this.chalk) === "original") {
+      if (this.chalkStored) this.background(this.ctx.storage.delete("chalk"));
+      this.chalkStored = false;
+    } else {
+      // An empty marks array is the blank marker; absence means the original board.
+      this.background(this.ctx.storage.put("chalk", { marks: this.chalk.marks, v: CHALK.VERSION }));
+      this.chalkStored = true;
+    }
   }
 
   // DSB Land's free hardware wallets (WALLET_CAP in protocol.js). A player's live ones, a little past their end so a
@@ -1006,11 +2310,18 @@ export class Room extends DurableObject {
         this.send(p.ws, { t: "studio-mic-revoked" });
       }
     }
-    const desired = voicePeers([...this.players.values()], this.studio);
+    const desired = this.voicePlan();
     for (const p of this.players.values()) {
       const allowed = new Set(desired.get(p.id));
       const mids = Object.keys(p.voice.mids || {}).filter(mid => !allowed.has(p.voice.mids[mid]));
-      if (mids.length) { this.background(this.queueClose(p.voice.sub, mids)); for (const mid of mids) delete p.voice.mids[mid]; p.ws.serializeAttachment(this.attachment(p)); }
+      if (mids.length) {
+        this.background(this.queueClose(p.voice.sub, mids));
+        // The page cannot see this close: a speaker back in its list with the same publication must still read as new, or it is never pulled again.
+        const reopened = p.voice.reopened ||= {};
+        for (const id of Object.keys(reopened)) if (!this.players.has(Number(id))) delete reopened[id];
+        for (const mid of mids) { reopened[p.voice.mids[mid]] = (reopened[p.voice.mids[mid]] || 0) + 1; delete p.voice.mids[mid]; }
+        p.ws.serializeAttachment(this.attachment(p));
+      }
     }
     this.updateVoice();
   }
@@ -1036,57 +2347,104 @@ export class Room extends DurableObject {
     if (!this.sfu || !session || (!mids.length && !inspect)) return;
     if (!this.cleanupJobs) this.cleanupJobs = [];
     const existing = this.cleanupJobs.find(job => job.session === session);
-    if (existing) { existing.at = Date.now(); existing.revision = (existing.revision || 0) + 1; existing.mids = [...new Set(existing.mids.concat(mids))]; existing.midVersions = existing.midVersions || {}; for (const mid of mids) existing.midVersions[mid] = existing.revision; existing.inspect = existing.inspect || inspect; if (inspect) existing.inspectUntil = Date.now() + 20000; }
+    // A merge keeps the job's `at`, when it was first queued: refreshed on every merge, a busy session's job that the SFU
+    // kept refusing never reached CLEANUP_MS.
+    if (existing) { existing.revision = (existing.revision || 0) + 1; existing.mids = [...new Set(existing.mids.concat(mids))]; existing.midVersions = existing.midVersions || {}; for (const mid of mids) existing.midVersions[mid] = existing.revision; existing.inspect = existing.inspect || inspect; if (inspect) existing.inspectUntil = Date.now() + 20000; }
     else this.cleanupJobs.push({ session, at: Date.now(), revision: 0, mids: [...new Set(mids)], midVersions: Object.fromEntries(mids.map(mid => [mid, 0])), inspect, inspectUntil: inspect ? Date.now() + 20000 : 0 });
     if (this.ctx && this.ctx.storage) await this.ctx.storage.put("voiceCleanup", this.cleanupJobs);
     for (const p of this.players.values()) if (p.zone === STUDIO_ZONE) this.sendStudio(p);
     // Persist and arm the retry before upstream I/O. Retired sessions never hold up a new one.
     if (!this.cleanupAt) this.cleanupAt = Date.now() + SWEEP_MS;
     if (this.ctx && this.ctx.storage) await this.ensureSweep();
-    if (deferred) this.background(this.retryCleanup(session));
+    if (deferred) this.background(this.retryCleanup(session, true));
     else await this.retryCleanup(session);
   }
 
-  async retryCleanup(session = null) {
+  // A full queue lets go of its oldest jobs for sessions no player holds any more, rather than refuse everyone's voice
+  // while the SFU stops answering. The page closed those connections (a restart or a leave tears both down), so nothing
+  // flows on them, and the SFU ends them in time. A session still held, or one a cleanup run has in hand, is kept: only
+  // a queue full of those refuses. True when there is room.
+  async shedCleanup() {
+    const jobs = this.cleanupJobs || [];
+    if (jobs.length < CLEANUP_JOBS_MAX) return true;
+    const held = new Set();
+    for (const p of this.players.values()) { if (p.voice.pub) held.add(p.voice.pub); if (p.voice.sub) held.add(p.voice.sub); }
+    const busy = this.cleanupTasks || new Map();
+    const free = jobs.filter(job => !held.has(job.session) && !busy.has(job.session)).sort((a, b) => (a.at || 0) - (b.at || 0));
+    const shed = free.slice(0, jobs.length - CLEANUP_JOBS_MAX + 1);
+    if (!shed.length) return false;
+    // In place: a cleanup run walking the queue checks each job is still in it before taking it.
+    for (const job of shed) jobs.splice(jobs.indexOf(job), 1);
+    if (this.ctx && this.ctx.storage) await this.ctx.storage.put("voiceCleanup", this.cleanupJobs);
+    return true;
+  }
+
+  // One job: inspect the session if asked, close its mids, and leave the queue once the SFU confirms. Never throws.
+  async cleanupOne(job, background) {
+    const tasks = this.cleanupTasks ||= new Map();
+    // Taken out only while still in the queue: a shed (`shedCleanup`) or another run may have taken it already.
+    const done = () => { const i = this.cleanupJobs.indexOf(job); if (i >= 0) this.cleanupJobs.splice(i, 1); };
+    if (!this.cleanupJobs.includes(job)) return;
+    // Only the same SFU session waits: another player's cleanup cannot stall this request.
+    while (tasks.has(job.session)) await tasks.get(job.session);
+    if (!this.cleanupJobs.includes(job)) return;
+    // A job the SFU has refused for CLEANUP_MS since it was first queued is given up, so a room nobody is in stops
+    // waking for it.
+    if (Date.now() - (job.at ??= Date.now()) > CLEANUP_MS) { done(); return; }
+    let finished;
+    tasks.set(job.session, new Promise(resolve => { finished = resolve; }));
+    this.cleanupAttempt = { at: Date.now(), operation: job.inspect ? "inspect" : "close", finished: 0, status: 0 };
+    const attempt = this.cleanupAttempt;
+    try {
+      const revision = job.revision || 0;
+      let inspected = !job.inspect;
+      if (job.inspect) {
+        const priorVersions = { ...(job.midVersions || {}) };
+        try {
+          const state = await this.sfu.getSession(job.session, background);
+          const inactive = new Set((state.tracks || []).filter(t => t.status === "inactive").map(t => t.mid));
+          job.mids = job.mids.filter(mid => !inactive.has(mid) || (job.midVersions || {})[mid] !== priorVersions[mid]);
+          // Only a session nobody holds any more is swept for what is left. On a live one that would close every voice
+          // it still receives, with no page any the wiser: one listener gone deaf to everybody.
+          const held = [...this.players.values()].some(p => p.voice.sub === job.session || p.voice.pub === job.session);
+          if (!held) job.mids = [...new Set(job.mids.concat((state.tracks || []).filter(t => t.status !== "inactive" && typeof t.mid === "string").map(t => t.mid)))];
+          inspected = true;
+        } catch (err) {
+          attempt.status = Number(err.status) || 0;
+          if (sessionGone(err)) throw err;
+          // An inspection timeout must not prevent closing MIDs we already own. Keep the inspection pending,
+          // even if those closes succeed: the timed-out allocation may still have left other tracks behind.
+        }
+      }
+      const mids = job.mids.slice();
+      const versions = { ...(job.midVersions || {}) };
+      if (mids.length) attempt.operation = "close";
+      const res = mids.length ? await this.sfu.closeTracks(job.session, mids, background) : { tracks: [] };
+      // Cloudflare's close_track_error confirms an absent/already-closed track. Other errors and missing rows retry.
+      const succeeded = new Set((Array.isArray(res.tracks) ? res.tracks : []).filter(t => t && typeof t.mid === "string" && (!t.errorCode || t.errorCode === "close_track_error")).map(t => t.mid));
+      job.mids = job.mids.filter(mid => !succeeded.has(mid) || (job.midVersions || {})[mid] !== versions[mid]);
+      for (const mid of succeeded) if (!job.mids.includes(mid) && job.midVersions) delete job.midVersions[mid];
+      // A close this pass sent that the SFU did not confirm; a mid queued while it was on its way is simply next.
+      if (mids.some(mid => job.mids.includes(mid))) job.inspect = true;
+      // A concurrent queue may have appended/reallocated owned MIDs while upstream was pending.
+      if (!inspected || (job.revision || 0) !== revision || job.mids.length || (job.inspect && Date.now() < job.inspectUntil)) return;
+      done();
+    } catch (err) {
+      attempt.status = Number(err.status) || 0;
+      // A session the SFU says is gone owns no tracks and needs no further retry.
+      if (sessionGone(err)) done();
+      // Other failures retain ownership for the existing room alarm.
+    } finally { attempt.finished = Date.now(); tasks.delete(job.session); finished(); }
+  }
+
+  async retryCleanup(session = null, background = !session) {
     if (!this.sfu || !this.cleanupJobs || !this.cleanupJobs.length) return;
     if (!session && this.cleanupRunning) return this.cleanupRunning;
-    const tasks = this.cleanupTasks ||= new Map();
     const running = (async () => {
-      for (const job of [...this.cleanupJobs]) {
-        if (!this.cleanupJobs.includes(job) || (session && job.session !== session)) continue;
-        // Only the same SFU session waits: another player's cleanup cannot stall this request.
-        while (tasks.has(job.session)) await tasks.get(job.session);
-        if (!this.cleanupJobs.includes(job)) continue;
-        // A job the SFU has refused for CLEANUP_MS is given up, so a room nobody is in stops waking for it.
-        if (Date.now() - (job.at ??= Date.now()) > CLEANUP_MS) { this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1); continue; }
-        let finished;
-        tasks.set(job.session, new Promise(resolve => { finished = resolve; }));
-        try {
-          const revision = job.revision || 0;
-          if (job.inspect) {
-            const priorVersions = { ...(job.midVersions || {}) };
-            const state = await this.sfu.getSession(job.session);
-            const inactive = new Set((state.tracks || []).filter(t => t.status === "inactive").map(t => t.mid));
-            job.mids = job.mids.filter(mid => !inactive.has(mid) || (job.midVersions || {})[mid] !== priorVersions[mid]);
-            job.mids = [...new Set(job.mids.concat((state.tracks || []).filter(t => t.status !== "inactive" && typeof t.mid === "string").map(t => t.mid)))];
-          }
-          const mids = job.mids.slice();
-          const versions = { ...(job.midVersions || {}) };
-          const res = mids.length ? await this.sfu.closeTracks(job.session, mids) : { tracks: [] };
-          // Only explicit per-track successes relinquish ownership. Missing/malformed rows retry.
-          const succeeded = new Set((Array.isArray(res.tracks) ? res.tracks : []).filter(t => t && typeof t.mid === "string" && !t.errorCode).map(t => t.mid));
-          job.mids = job.mids.filter(mid => !succeeded.has(mid) || (job.midVersions || {})[mid] !== versions[mid]);
-          for (const mid of succeeded) if (!job.mids.includes(mid) && job.midVersions) delete job.midVersions[mid];
-          if (job.mids.length) job.inspect = true;
-          // A concurrent queue may have appended/reallocated owned MIDs while upstream was pending.
-          if ((job.revision || 0) !== revision || job.mids.length || (job.inspect && Date.now() < job.inspectUntil)) continue;
-          this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1);
-        } catch (err) {
-          // A confirmed absent upstream session owns no tracks and needs no further retry.
-          if (err.status === 404) this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1);
-          // Other failures retain ownership for the existing room alarm.
-        } finally { tasks.delete(job.session); finished(); }
-      }
+      // A request waits for its own session's job alone; a wake's pass is bounded in time and runs a few jobs at once
+      // (`cleanupPass`), what is left waiting for the next wake, which starts with the jobs this one never reached.
+      if (session) for (const job of this.cleanupJobs.filter(job => job.session === session)) await this.cleanupOne(job, background);
+      else await cleanupPass(this.cleanupJobs, job => this.cleanupOne(job, background));
       // Remaining jobs retry at the next wake: at most a sweep interval away, and sooner if another wake comes first.
       if (!this.cleanupJobs.length) this.cleanupAt = 0;
       else if (!this.cleanupAt || this.cleanupAt <= Date.now()) this.cleanupAt = Date.now() + SWEEP_MS;
@@ -1110,8 +2468,10 @@ export class Room extends DurableObject {
   }
 
   async ensureSweep() {
-    if (!this.sweepAt) {
-      this.sweepAt = Date.now() + SWEEP_MS;
+    // A player arriving while only Commons members were here brings the five-minute sweep back to one a minute.
+    const due = Date.now() + SWEEP_MS;
+    if (!this.sweepAt || this.players.size && this.sweepAt > due) {
+      this.sweepAt = due;
       await this.ctx.storage.put("sweepAt", this.sweepAt);
     }
     await this.scheduleAlarm();
@@ -1127,9 +2487,10 @@ export class Room extends DurableObject {
   // retry of pending media cleanup, which still runs after the last player left, but only with an SFU to run
   // it and for at most CLEANUP_MS. null: nothing to wake for.
   nextAlarm(now = Date.now()) {
-    const here = this.players.size > 0;
+    const here = this.players.size > 0 || commonsRoom.size(this) > 0;
     const cleanup = this.sfu && this.cleanupJobs && this.cleanupJobs.length ? (this.cleanupAt || now + SWEEP_MS) : Infinity;
-    const next = Math.min(here ? this.sweepAt || now + SWEEP_MS : Infinity, here ? this.nextDoorExpiry() : Infinity, cleanup);
+    const next = Math.min(here ? this.sweepAt || now + SWEEP_MS : Infinity, here ? this.nextDoorExpiry() : Infinity, cleanup, tessQueue.deadline(this),
+      audienceRoom.retryDue(this));
     return Number.isFinite(next) ? next : null;
   }
 
@@ -1137,7 +2498,14 @@ export class Room extends DurableObject {
     const next = this.nextAlarm();
     if (next === null) return;
     const set = await this.ctx.storage.getAlarm();
-    if (set === null || set > next) await this.ctx.storage.setAlarm(next);
+    this.alarmRegisteredAt = set;
+    const now = Date.now();
+    // An old registered deadline is not proof that its callback will run: platform retries are finite. A wake or
+    // new cleanup job repairs an alarm overdue by a sweep interval instead of preserving that stale deadline forever.
+    if (set === null || set > next || set < now - SWEEP_MS) {
+      this.alarmRegisteredAt = Math.max(next, now);
+      await this.ctx.storage.setAlarm(this.alarmRegisteredAt);
+    }
   }
 
   expireDoors(now) {
@@ -1155,17 +2523,29 @@ export class Room extends DurableObject {
 
   // Sockets silent past STALE_MS, auto-answered pings included, are evicted as stale.
   async alarm() {
+    this.alarmStarted = Date.now();
+    hockey.sweep(this);
+    block.sweep(this);
+    duel.sweep(this);
+    tessQueue.sweep(this);
+    // Ooga Chat's audience told again what it missed, and grants still closing asked about again (#667).
+    await audienceRoom.retry(this);
+    // A chat that did not give an account's voice back when its island voice went live is asked again.
+    if (this.chatVoices) for (const p of [...this.players.values()]) if (inVoice(p) && this.onChatStage(p.id)) await this.takeVoiceBack(p);
     const now = Date.now();
-    // Cleanup retries run on every wake, not only at sweep time.
-    await this.retryCleanup();
     const sweepDue = !this.sweepAt || now >= this.sweepAt;
     this.expireDoors(now);
     // A cancelled lease can leave its earlier alarm in place. Before the recorded sweep deadline that wake only
     // expires door state and reschedules; it must not turn account reads and stale checks into a high-frequency poll.
     if (sweepDue) {
+      if (this.catalog.enabled) { await this.restoring(null, () => this.catalog.refresh(this.ctx.storage)); this.catalogChanged(); }
+      const cast = this.catalog.current();
       try { await this.refreshHighscores(); } catch { /* Pending D1 revisions survive until the next sweep. */ }
+      if (this.env.EQUIPMENT_ENABLED === "1") {
+        try { await equipmentRoom.refreshAll(this); } catch { /* Durable choices survive a failed read; retry at the next sweep. */ }
+      }
       for (const p of [...this.players.values()]) {
-        if (!ownedBody(CAST, p.login, p.contributor)) { this.evict(p, "revoked"); continue; }
+        if (cast && !ownedBody(cast, p.login, p.contributor, p.id)) { this.evict(p, "revoked"); continue; }
         // The existing operator D1 ban also ends active presence at the next successful sweep.
         // Retry on a later alarm if D1 is unavailable; never infer a ban from a failed read.
         if (this.env.DB) {
@@ -1174,14 +2554,102 @@ export class Room extends DurableObject {
           if (this.players.get(p.id) !== p) continue;
           if (player !== undefined && (!player || player.banned_at)) { this.evict(p, "revoked"); continue; }
         }
-        const pinged = this.ctx.getWebSocketAutoResponseTimestamp(p.ws);
-        const last = Math.max(p.seenAt, pinged ? pinged.getTime() : 0);
-        if (now - last > STALE_MS) this.evict(p, "stale");
+        // A held player has no socket to go stale: its hold ends it.
+        if (!p.held && now - this.heardAt(p) > STALE_MS) this.evict(p, "stale");
       }
-      this.sweepAt = now + SWEEP_MS;
+      await commonsRoom.sweep(this, now, (login, id) => !cast || !!ownedBody(cast, login, true, id), STALE_MS);
+      // A copy asks its chat who may still walk it; the island lets kept seats go past their time.
+      if (this.copy) await copyRoom.sweep(this);
+      else {
+        copyRoom.sweepAway(this, now);
+        // A chat that ended without its last word reaching here leaves every page's Online Oogas.
+        if (this.players.size) await chatMembersRoom.sweep(this);
+      }
+    }
+    // Cleanup retries run on every wake, not only at sweep time, and last: a pass is bounded (`cleanupPass`), and the
+    // sweep's account and stale checks never wait behind an SFU slow to answer.
+    await this.retryCleanup();
+    // The next sweep is counted from this wake's completion, so a pass that ran long never leaves it overdue.
+    if (sweepDue) {
+      this.sweepAt = Date.now() + (this.players.size || !commonsRoom.size(this) ? SWEEP_MS : MEMBER_SWEEP_MS);
       await this.ctx.storage.put("sweepAt", this.sweepAt);
     }
     const next = this.nextAlarm();
-    if (next !== null) await this.ctx.storage.setAlarm(next);
+    if (next !== null) { await this.ctx.storage.setAlarm(next); this.alarmRegisteredAt = next; }
+    this.alarmFinished = Date.now();
+    this.inspect.tick();
+    this.world.tick();
+  }
+
+  // When the room last heard from a player: a message, or a ping the runtime answered without waking it.
+  heardAt(p) {
+    const pinged = p.ws === GONE ? null : this.ctx.getWebSocketAutoResponseTimestamp(p.ws);
+    return Math.max(p.seenAt, pinged ? pinged.getTime() : 0);
+  }
+
+  // The room as the inspector shows it; `detail` adds a row per player while someone watches. No positions, chat,
+  // tokens, session descriptions or SFU ids.
+  inspectState(detail) {
+    const zones = {}, rows = detail ? [] : undefined;
+    let hub = 0, hidden = 0, driving = 0, speaking = 0, listening = 0, pulled = 0, maxPulled = 0, attachMax = 0;
+    for (const p of this.players.values()) {
+      zones[p.zone] = (zones[p.zone] || 0) + 1;
+      if (p.inHub) hub++;
+      if (!p.visible) hidden++;
+      if (p.body) driving++;
+      const hears = Object.keys(p.voice.mids || {}).length, voice = p.voice.track ? "speaking" : p.voice.sub ? "listening" : "off";
+      if (voice === "speaking") speaking++; else if (voice === "listening") listening++;
+      pulled += hears;
+      maxPulled = Math.max(maxPulled, hears);
+      if (!detail) continue;
+      attachMax = Math.max(attachMax, JSON.stringify(this.attachment(p)).length);
+      rows.push({ id: p.id, login: p.login, zone: p.zone, body: p.body || null, hub: p.inHub, visible: p.visible, since: p.joinedAt,
+        heard: this.heardAt(p), voice, muted: p.muted, pulled: hears, host: p.id === this.hostId });
+    }
+    const host = this.players.get(this.hostId);
+    return { status: this.players.size ? "live" : "empty", players: this.players.size, maxPlayers: MAX_PLAYERS, sockets: this.ctx.getWebSockets().length,
+      zones, hub, hidden, driving, host: host ? host.login : null, followers: this.followers, speaking, listening, pulled, maxPulled, pullCap: 64,
+      cleanup: this.cleanupJobs.length, cleanupCap: CLEANUP_JOBS_MAX, doors: this.doorQueue.length + (this.doorActive ? 1 : 0), tickHz: TICK_HZ,
+      cleanupAttempt: this.cleanupAttempt || null, cleanupBusy: this.cleanupTasks ? this.cleanupTasks.size : 0,
+      alarmStarted: this.alarmStarted || 0, alarmFinished: this.alarmFinished || 0,
+      alarmRegisteredAt: this.alarmRegisteredAt || 0,
+      flushPending: !!this.flushTimer, alarmAt: this.nextAlarm(), attachMax: detail ? attachMax : undefined, rows };
+  }
+
+  // The Inspector, when a viewer connects: report now, with the rows.
+  inspectWatch(until) {
+    this.inspect.watch(until);
+  }
+
+  // WorldWatch asking as a map viewer connects (world-report.js `watch`): the view now, and reports from now on.
+  worldWatch() {
+    return this.world.watch();
+  }
+
+  // The World Map's live layer (/api/world, world.js): who stands in which zone, by the names the players tab shows,
+  // the room's sockets, and each zone's messages in and sends out a second over the span `load.seconds` says (the
+  // current load window and the one before it). From memory alone: no storage, D1 or positions.
+  worldView() {
+    const zones = {}, now = Date.now();
+    let held = 0;
+    for (const p of this.players.values()) {
+      (zones[p.zone] || (zones[p.zone] = [])).push({ display: p.display || p.login, login: p.login });
+      if (p.held) held++;
+    }
+    const L = this.turnLoad(now);
+    const ms = Math.max(1, now - L.at + L.wasMs), rate = (n) => Math.round(n * 100000 / ms) / 100, rates = {};
+    for (const [zone, counts] of [...L.was, ...L.now]) {
+      const sum = rates[zone] || (rates[zone] = { in: 0, out: 0 });
+      sum.in += counts.in;
+      sum.out += counts.out;
+    }
+    for (const sum of Object.values(rates)) { sum.in = rate(sum.in); sum.out = rate(sum.out); }
+    // Every socket the runtime still holds is counted, and `closing` is what is neither a connected player nor a
+    // member: a connection the room has let go of (replaced by the account's newer one, kicked, refused, or reclaimed
+    // by its page coming back) whose close the page has not finished, usually because the page itself is gone. A
+    // player `held` over a lost socket (`hold`) is still a player, standing where they were, with no socket at all.
+    const sockets = this.ctx.getWebSockets().length, commons = commonsRoom.size(this);
+    return { name: this.ctx.id.name || "", sockets, players: this.players.size, held, maxPlayers: MAX_PLAYERS, commons,
+      closing: Math.max(0, sockets - (this.players.size - held) - commons), zones, load: { seconds: Math.round(ms) / 1000, zones: rates } };
   }
 }

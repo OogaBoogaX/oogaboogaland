@@ -4,32 +4,38 @@
 // this is and loads the code, or sends the visitor to the keypad outside instead.
 //
 // A visit is shared (signed in, the room's own zone) or solo (a private copy: no presence or voice). The keypad's
-// commit on this page decides it (`world.sphereVisit`, used once); a reload or a step through history finds the last
-// visit this tab made (sessionStorage) and repeats it only as it was: shared needs the same account still signed in,
+// commit on this page decides it (`world.sphereVisit`, used once); a reload, a step through history or a page opened
+// again later finds the last visit this browser made (localStorage, with the jetpack as it was) and repeats it only as
+// it was: shared needs the same account still signed in,
 // and solo is repeated only while still signed out. Otherwise a signed-out visitor gets a solo copy, while a signed-in
 // one (back from signing in, say), or one whose account could not be looked up, goes to the keypad outside with the
-// room chosen, so a solo visit never turns shared and joining a shared room is always a deliberate Enter.
+// room chosen, so a solo visit never turns shared and joining a shared room is always a deliberate Enter. Signing out
+// inside a shared room leaves the visitor standing where they are: the room turns into their solo copy (`keep` writes
+// the visit again as it now is). The visit's age runs from when the page last hid, so a reload of a long stay, or the
+// next day's visit, still finds it.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const ROOMS = BL.timechainRooms;
-  const VISIT_KEY = "ooga-sphere-visit", VISIT_AGE = 30 * 60 * 1000;
+  const VISIT_KEY = "ooga-sphere-visit", VISIT_AGE = 7 * 24 * 60 * 60 * 1000;
   const stored = () => {
     try {
-      const raw = window.sessionStorage.getItem(VISIT_KEY);
+      const raw = window.localStorage.getItem(VISIT_KEY);
       if (!raw || raw.length > 512) return null;
       const v = JSON.parse(raw), age = Date.now() - v.at;
-      if (!v || !ROOMS.parse(v.room) || v.mode !== "shared" && v.mode !== "solo" || !Number.isFinite(age) || age < 0 || age > VISIT_AGE) return null;
+      if (!v || ROOMS.parse(v.room) === null || v.mode !== "shared" && v.mode !== "solo" || !Number.isFinite(age) || age < 0 || age > VISIT_AGE) return null;
       if (v.login !== null && (typeof v.login !== "string" || v.login.length > 64)) return null;
       if (v.character !== null && (typeof v.character !== "string" || v.character.length > 40)) return null;
-      return { room: v.room, mode: v.mode, login: v.login, character: v.character, guided: false };
+      const j = v.jetpack, jetpack = j && typeof j.equipped === "boolean" && Number.isFinite(j.fuel) && j.fuel >= 0 && j.fuel <= 1 ? { equipped: j.equipped, fuel: j.fuel } : null;
+      return { room: v.room, mode: v.mode, login: v.login, character: v.character, guided: false, jetpack };
     } catch {
       return null;
     }
   };
   const store = (v) => {
     try {
-      window.sessionStorage.setItem(VISIT_KEY, JSON.stringify({ room: v.room, mode: v.mode, login: v.mode === "shared" ? v.login : null, character: v.character || null, at: Date.now() }));
+      const j = v.jetpack, jetpack = j ? { equipped: !!j.equipped, fuel: j.fuel } : null;
+      window.localStorage.setItem(VISIT_KEY, JSON.stringify({ room: v.room, mode: v.mode, login: v.mode === "shared" ? v.login : null, character: v.character || null, jetpack, at: Date.now() }));
     } catch {
       // Storage refused: a reload simply asks again at the keypad.
     }
@@ -47,7 +53,7 @@
     // Null to go ahead (or a promise of it while the code loads), or where to arrive instead.
     prepare(place, ctx) {
       const id = ROOMS.parse(place), world = ctx.world, me = BL.net.state.me;
-      if (!id) return { scene: "hub", place: "timechain" };
+      if (id === null) return { scene: "hub", place: "timechain" };
       const fresh = world.sphereVisit && world.sphereVisit.room === id ? world.sphereVisit : null;
       world.sphereVisit = null;
       let v = fresh || stored();
@@ -60,7 +66,9 @@
         v = { room: id, mode: "solo", login: null, character: null, guided: false };
       }
       pending = v;
-      const loading = BL.deferred.load("timechain");
+      // The Genesis Museum's code, models, map and whitepaper pages are a group of their own on the rooms' group, so
+      // only a visit to that room downloads them.
+      const loading = BL.deferred.load(ROOMS.get(id).kind === "genesis" ? "timechain-genesis" : "timechain");
       return loading ? loading.then(() => null) : null;
     },
     enter(ctx) {
@@ -73,8 +81,13 @@
     overlay: (dt) => impl.overlay(dt),
     onDonation: (donation, bananas) => impl.onDonation(donation, bananas),
     onKey: (e) => impl.onKey(e),
-    onLootCleared: () => {},
     stay: () => { if (impl) impl.stay(); },
+    // As the page hides: the visit as it now is, its jetpack as the Ooga wears it where the room allows one.
+    keep: () => {
+      if (!visit) return;
+      if (impl) visit.jetpack = impl.jetpack();
+      store(visit);
+    },
     leave() {
       const out = impl.leave();
       impl = null;
@@ -84,6 +97,8 @@
     stats: () => impl.stats(),
     liveGeometry: (set) => impl.liveGeometry(set)
   };
+  window.addEventListener("pagehide", scene.keep);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") scene.keep(); });
   BL.scenes = BL.scenes || {};
   BL.scenes.timechain = scene;
 })();

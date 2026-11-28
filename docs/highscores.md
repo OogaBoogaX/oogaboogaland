@@ -27,7 +27,6 @@ them. Every duplicate has its own record.
 | Hoop Shot | `hoops-1`, `hoops-2` | Highest score |
 | Coconut Toss | `shy-1` | Highest score |
 | Claw | `claw-1` through `claw-3` | Highest score |
-| Air Hockey | `hockey-1` through `hockey-3` | Highest score |
 | Pool | `billiards-1`, `billiards-2` | Highest score |
 | Darts | `darts-1`, `darts-2` | Highest score |
 | Pinball | `pinball-1`, `pinball-2` | Highest score |
@@ -42,7 +41,7 @@ not submit scores.
 The existing displays determine the record type. Each Cloud Hopper level has an attributed board; the single
 board from before the levels keeps its records, retired (`retired: true` in the registry: reads answer, writes
 are refused with 400, and the identity triggers still move or remove its names).
-The other games keep unattributed bests, with independent entries for each physical
+The other games retain unattributed bests, with independent entries for each physical
 machine or Rally track/mode. A race's finishing order is that race's podium, not an
 all-time record for its simulated opponents.
 
@@ -73,7 +72,9 @@ Each Cloud Hopper board retains the all-time top 1,024 personal bests, so its JS
 bounded. Migration `0007_cloud_hopper_runs.sql` also retains up to 1,024 distinct finishes per
 level in `cloud_hopper_runs`. Its public `runs` array contains the fastest ten, ordered by
 milliseconds, first achievement, numeric account ID and run ID; multiple rows may name the
-same player. Personal bests remain eligible if their run fell outside retained history and
+same player. Each run also has a public `id`, the SHA-256 hex fingerprint of
+`JSON.stringify([game, playerId, runId])`; raw replay tickets and numeric account IDs remain private.
+Personal bests remain eligible if their run fell outside retained history and
 other accounts are later removed. The list and revision are read in one SQL snapshot.
 The migration imports only existing bests and leaves their scores, timestamps and replay
 pointers intact. It cannot reconstruct overwritten historical finishes. A newcomer enters
@@ -82,19 +83,56 @@ existing player. Its SQL update and removal of the last entry are one D1 batch t
 Machine dictionaries are bounded by the registry's fixed machine IDs. The retained run
 history is bounded; there is no per-frame telemetry table.
 
+The eight retro video cabinets plus Drop, Orbit and Mine also publish an attributed top-ten
+run board. `highscoreRules.cabinets` is their eleven-game allowlist. Migration
+`0008_cabinet_runs.sql` adds `cabinet_runs`, retaining the best 1,024 distinct finishes per
+game. The additive public `runs` array uses the same `{id, username, score, achieved}` shape
+as Cloud Hopper, ordered by score descending, achievement ascending, numeric account ID,
+then run ID. Repeated usernames are allowed. The existing machine record and its meaning
+remain unchanged; historical machine scores lack an owner, so the migration does not
+invent attributed rows. Physical multiplayer machines do not gain run boards.
+
+New cabinet clients send one UUID `runId` per completed signed-in run. A duplicate identity
+cannot update either the accepted run or machine record. Legacy requests without `runId`
+still improve the machine record only. Both writes and their session checks share a D1
+transaction. Non-record finishes can enter the leaderboard and increment its revision,
+notifying live clients through the same durable outbox. Names follow renames, reused names
+lose the prior account's attribution, and account deletion removes its runs while retaining
+the unattributed machine record. No scores are uploaded from local saves.
+
+## The cave's cabinets and what is played (#554)
+
+The Arcade's cave on the island shows the four most played of the twelve seat cabinets. Score data cannot answer that:
+`game_highscores` keeps only each machine's record and `cabinet_runs`/`cloud_hopper_runs` only each board's best 1,024
+distinct finishes, so a play that does not reach a board leaves no trace, and signed-out plays leave none at all. So
+`0010_cabinet_plays.sql` adds `cabinet_plays(game, day, plays)`: one counter per game per UTC day, nothing about who
+played. `POST /api/arcade-plays/<id>` counts one when a cabinet leaves its menu for a run, from a same-site page, under
+`HIGHSCORE_LIMITER` per address; `GET /api/arcade-plays` returns the last 30 days as `{plays, windowDays}`, shared through
+the edge cache for 30 seconds. Each write is one atomic upsert in a D1 batch that also drops days past the window, so
+the table stays bounded and simultaneous plays never lose a count. `/api/me` advertises `arcadePlays`.
+
+A game's cave cabinet and its hall cabinet are two machines of one game: separate seats (`<id>@out` beside `<id>`, see
+Arcade cabinets in `auth-and-presence.md`) that submit to the one shared board and machine ID. Scores from players
+finishing at nearly the same time are compared and replaced inside SQL as described below; a run's replay pointer is
+published in the same transaction as its score and only for the current winner, so two near-simultaneous winners cannot
+pair the wrong recording (`worker/test/cloud-hopper-replays.test.mjs`).
+
 ## API and client lifecycle
 
 - `GET /api/highscores/<game>` is public and returns `{game, highscores, achieved,
-  scoreType, direction, unit, version, revision}`. Reads do not create players or sessions.
-- `GET /api/highscores/arcade` returns `{boards, refreshAfterMs}` for the 17 Arcade
-  machine kinds in `highscoreRules.arcade`, using one indexed `IN` query. A public-only
+  scoreType, direction, unit, version, revision}` plus `runs` for Cloud Hopper levels and
+  the eleven cabinet leaderboards. Reads do not create players or sessions.
+- `GET /api/highscores/arcade` returns `{boards, refreshAfterMs}` for the 16 Arcade
+  machine kinds in `highscoreRules.arcade`, using one indexed `IN` query with the retro run
+  lists in the same SQL snapshot. A public-only
   synthetic Cache API entry shares that snapshot at the current Cloudflare data center
   for 30 seconds; concurrent misses share work within an isolate. Cookie and authorization
   headers are never copied into the key or response. Missing rows and failures are not cached.
 - `GET /api/highscores/arcade-live` returns the same public boards directly from D1,
   bypassing the edge snapshot. Both snapshot routes are GET-only and use the public read
   limiter. The signed-in client chooses the fresh route; it contains no account-specific data.
-- `POST /api/highscores/<game>` accepts `{machine, score, version, playerId}`. The Worker
+- `POST /api/highscores/<game>` accepts `{machine, score, version, playerId}` and optional
+  `runId` for Cloud Hopper levels and the eleven cabinet boards. The Worker
   resolves identity from the existing session. `playerId` is only a guard against a
   different account's cookie replacing the account that began the run; a mismatch is 409.
   For level boards, an optional UUID `runId` identifies one completed run. The page reuses
@@ -216,7 +254,8 @@ browser networking; they do not replace a two-player staging smoke test or CI at
 ## Wrangler and rollout
 
 The existing migration directory and deploy workflows apply `0004_highscore_notifications.sql` and
-`0005_cloud_hopper_levels.sql`, `0006_cloud_hopper_replays.sql` and `0007_cloud_hopper_runs.sql`
+`0005_cloud_hopper_levels.sql`, `0006_cloud_hopper_replays.sql`, `0007_cloud_hopper_runs.sql`,
+`0008_cabinet_runs.sql` and `0010_cabinet_plays.sql`
 before the Worker. These add the level rows, replay registry and bounded run history. No
 `d1 create`, new database binding, secret, Durable Object or scheduled job is needed.
 The configs add limiter namespaces `2006` on staging and `1006` in production; the local
@@ -245,3 +284,12 @@ otherwise.
 When a scoring rule changes incompatibly, bump its shared registry version and use a new
 migration to reset that game's dictionaries and increase `revision`. Keep `revision`
 monotonic across resets. Do not silently reinterpret existing scores under new rules.
+
+Air Hockey is scoreless for leaderboard purposes: its points are match goals only. Local bests are ignored, its public GET/POST highscore route is unavailable, and aggregate Arcade snapshots omit it. Historical D1 rows remain stored without being served or updated.
+
+Completed eligible Cloud Hopper runs appear immediately in provisional score order with “saving...”.
+Pending uploads are separate from confirmed records and never select a winning ghost. Confirmed
+responses reconcile the server order, with public run fingerprints preventing duplicate rows when
+a live read beats the upload response. Failed uploads retain a labelled local time outside the
+shared ranking; at most ten pending/failed notices per level are held for the current account.
+Account changes clear these notices, and level watches detach on leaving.

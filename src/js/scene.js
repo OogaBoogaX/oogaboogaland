@@ -8,6 +8,7 @@
     poseYaw: 0,
     poseLean: 0,
     poseLeanY: 0,
+    poseTip: 0,
     scale: { x: 1, y: 1, z: 1 },
     geometry: null,
     glow: 1,
@@ -65,13 +66,24 @@
         m[i + 1] = s * x + c * y + (i === 12 ? pivot : 0);
       }
     }
+    // A body tipped forward (+) or back (-) about the hips, the root's origin, in the parent's frame: the upper-body
+    // parts turned together about its side axis, as `poseLean` rolls them about its front one.
+    if (node.poseTip) {
+      const m = node.local, c = Math.cos(node.poseTip), s = Math.sin(node.poseTip);
+      for (let i = 0; i < 16; i += 4) {
+        const y = m[i + 1], z = m[i + 2];
+        m[i + 1] = c * y - s * z;
+        m[i + 2] = s * y + c * z;
+      }
+    }
   };
   const updateWorld = (node, parentWorld) => {
     if (!node.visible) return;
     updateLocal(node);
     if (parentWorld) mat4.multiply(node.world, parentWorld, node.local);
     else node.world.set(node.local);
-    for (const child of node.children) updateWorld(child, node.world);
+    const children = node.children;
+    for (let i = 0; i < children.length; i++) updateWorld(children[i], node.world);
   };
   const traverseVisible = (node, fn) => {
     if (!node.visible) return;
@@ -104,6 +116,19 @@
   const hiddenFromCamera = (node) => {
     for (let n = node; n; n = n.parent) if (n.cameraHidden) return true;
     return false;
+  };
+  // Hides a node from the camera for as long as any owner asks, and shows it as it was once the last lets go, so
+  // owners hiding one head (the pilot's first person, a doorway's walk into the eyes, a view's handoff) can let go in
+  // any order without one putting back a flag another had changed.
+  const hideFromCamera = (node, owner, on) => {
+    let owners = node.cameraOwners;
+    if (on) {
+      if (!owners) owners = node.cameraOwners = new Set();
+      if (owners.has(owner)) return;
+      if (!owners.size) node.cameraHiddenBefore = node.cameraHidden;
+      owners.add(owner);
+      node.cameraHidden = true;
+    } else if (owners && owners.delete(owner) && !owners.size) node.cameraHidden = node.cameraHiddenBefore;
   };
   const hiddenFromCutaway = (node) => {
     for (let n = node; n; n = n.parent) if (n.cutawayWholeHidden) return true;
@@ -167,5 +192,5 @@
     for (const tw of tweens) tw.alive = false;
     tweens.length = 0;
   };
-  BL.scene = { createNode, addChild, removeChild, updateLocal, updateWorld, traverseVisible, createCamera, cameraProjection, boundsOf, matrixModeOf, hiddenFromCamera, hiddenFromCutaway, addTween, stepTweens, tweenCount, clearTweens };
+  BL.scene = { createNode, addChild, removeChild, updateLocal, updateWorld, traverseVisible, createCamera, cameraProjection, boundsOf, matrixModeOf, hiddenFromCamera, hideFromCamera, hiddenFromCutaway, addTween, stepTweens, tweenCount, clearTweens };
 })();

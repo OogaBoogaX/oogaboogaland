@@ -1,4 +1,4 @@
-// Shared replay I/O is opt-in and outside the frame loop. Four immutable recordings at most stay in memory.
+// Shared replay I/O is opt-in (remembered in this browser) and outside the frame loop. Four immutable recordings at most stay in memory.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {}, codec = BL.cloudHopperReplayCodec, cache = new Map();
@@ -52,12 +52,21 @@
       return recording;
     } catch { return null; }
   };
+  // The ghost's on or off is the player's choice, kept in this browser, so the next run starts as the last one did.
+  const WANT_KEY = "ooga-cloud-hopper-ghost";
   const create = ({ onBoard, onState, onPlay, onHide }) => {
     let latest = null, shown = null, game = null, version = 1, frozen = false, enabled = false, epoch = 0, controller = null;
+    let wanted = false;
+    try { wanted = localStorage.getItem(WANT_KEY) === "1"; } catch { /* Off when storage is unavailable. */ }
+    const want = on => {
+      wanted = on;
+      try { if (on) localStorage.setItem(WANT_KEY, "1"); else localStorage.removeItem(WANT_KEY); } catch { /* This page keeps it. */ }
+    };
     const pointer = () => shown?.replay?.courseVersion === version ? shown.replay : null;
     const stop = () => { epoch++; controller?.abort(); controller = null; enabled = false; onHide(); };
     const state = name => onState(name || (pointer() ? "off" : "unavailable"));
-    const show = board => { stop(); shown = board; onBoard(board); state(); };
+    // An attempt under way loads the shown winner by itself while the player has chosen the ghost.
+    const show = board => { stop(); shown = board; onBoard(board); state(); if (frozen && wanted) enable(); };
     const select = (id, courseVersion, board = null) => {
       game = id; version = courseVersion; frozen = false; latest = board; show(board);
     };
@@ -70,10 +79,10 @@
     };
     const start = () => { frozen = true; show(latest); };
     const end = () => { frozen = false; show(latest); };
-    const toggle = async () => {
-      if (enabled) { stop(); state(); return; }
+    // Loads the shown winner's recording, when there is one, and hands it on to play.
+    const enable = async () => {
       const reference = pointer();
-      if (!reference) return;
+      if (enabled || !reference) return;
       enabled = true; state("loading");
       const generation = ++epoch, pending = new AbortController(); controller = pending;
       const timer = window.setTimeout(() => pending.abort(), 30000);
@@ -85,8 +94,14 @@
       // This attempt retains its winner even when a newer board arrives mid-run.
       onPlay({ ...recording, username: reference.username }); state("on");
     };
+    // `wanted` changes at once; the promise settles once a recording turned on has loaded (or failed to).
+    const toggle = async () => {
+      if (enabled) { want(false); stop(); state(); return; }
+      if (!pointer()) return;
+      want(true); await enable();
+    };
     const clear = () => { stop(); latest = shown = null; frozen = false; state("unavailable"); };
-    return { select, update, start, end, toggle, clear, get frozen() { return frozen; }, get enabled() { return enabled; } };
+    return { select, update, start, end, toggle, clear, get frozen() { return frozen; }, get enabled() { return enabled; }, get wanted() { return wanted; } };
   };
   BL.cloudHopperReplays = { startTicket, submit, create };
 })();

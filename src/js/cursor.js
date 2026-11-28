@@ -11,7 +11,8 @@
     let canvasLeft = 0, canvasTop = 0, canvasWidth = 1, canvasHeight = 1;
     let pointerId = 1, buttons = 0, blockedButtons = 0, suppressClick = false;
     let captured = null, hovered = null, hoverButton = null, pendingMove = null;
-    let hoverSheet = null;
+    let hoverSheet = null, modal = null;
+    const home = element.parentElement;
     let aimAnimation = null, reticleAnimation = null, aimProgress = 0, aimBase = 0, visualBase = 0;
     let aimFromX = 0, aimFromY = 0, aimToX = 0, aimToY = 0;
     const locked = () => document.pointerLockElement === canvas;
@@ -142,6 +143,7 @@
       setHoverButton(null);
       element.hidden = true;
       document.body.classList.remove("carry-cursor-active");
+      if (modal) { home.appendChild(element); modal = null; }
     };
     const start = (clientX = null, clientY = null, show = true, capture = true) => {
       endAim();
@@ -161,6 +163,11 @@
         pointer(hover(e), "pointermove", e, -1, 0);
       } else if (capture) requestLock();
     };
+    // A modal lives in the top layer: keep its centered pointer in that layer too.
+    const startModal = (dialog) => {
+      stop(); modal = dialog; modal.appendChild(element);
+      start(null, null, true, false);
+    };
     const placeCanvas = (localX, localY, width, height) => {
       x = canvasLeft + localX * canvasWidth / Math.max(1, width);
       y = canvasTop + localY * canvasHeight / Math.max(1, height);
@@ -170,7 +177,7 @@
         setHoverButton(target.closest(INTERACTIVE), target);
       }
     };
-    const nativeControl = (target) => target.matches("input, select, textarea") || !!target.closest("dialog:modal");
+    const nativeControl = (target) => target.matches("input, select, textarea") || !!target.closest("dialog:modal") && target.closest("dialog:modal") !== modal;
     const focusNative = (target) => {
       stop(); unlock();
       target.focus({ preventScroll: true });
@@ -209,7 +216,7 @@
         if (button === 0 && original && (original === under || original.contains(under))) {
           mouse(original, "click", e, 0, held);
           // Modal fields need the native cursor and ordinary text input.
-          if (active && document.querySelector("dialog:modal")) { stop(); unlock(); }
+          if (active && document.querySelector("dialog:modal") && document.querySelector("dialog:modal") !== modal) { stop(); unlock(); }
         }
       }
     };
@@ -227,6 +234,8 @@
       if (e.type === "pointerdown" && e.button === 2) blockedButtons &= ~BUTTON_MASK[2];
       blockedButtons &= buttons;
       if (!locked()) {
+        // Escape, a denied capture or a tab switch returns the ordinary system cursor.
+        if (modal) { stop(); unlock(); suppressClick = false; return; }
         if (e.target !== canvas) {
           // A denied lock never creates an offset native cursor. HUD controls
           // remain usable; a canvas press only retries capture.
@@ -367,8 +376,8 @@
       window.removeEventListener("wheel", onWheel, true);
       window.removeEventListener("resize", onResize);
     };
-    return { start, stop, placeCanvas, beginAim, updateAim, rebaseAim, endAim, resume, dispose, element,
-      get active() { return active; }, get visible() { return visible; }, get x() { return x; }, get y() { return y; } };
+    return { start, startModal, stop, placeCanvas, beginAim, updateAim, rebaseAim, endAim, resume, dispose, element,
+      get modal() { return modal; }, get active() { return active; }, get visible() { return visible; }, get x() { return x; }, get y() { return y; } };
   };
   BL.cursor = { create };
 })();

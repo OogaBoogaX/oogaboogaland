@@ -1,25 +1,48 @@
 // Builds one self-contained page; module order comes from src/index.html. A module tagged `data-defer="<group>"` is
-// inlined here like any other, so the portable page and file:// keep working; `deferred` names each group's modules,
+// inlined here like any other (but a hosted-only group, see `hostedOnly`), so the portable page and file:// keep working; `deferred` names each group's modules,
 // which scripts/site.mjs moves out of the hosted pages into one same-origin file that loads only when needed.
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
+import { runInNewContext } from "node:vm";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeCharacters } from "./characters.mjs";
+import { hostedOnly } from "./distribution-modules.mjs";
+import { writeEquipmentHats } from "./equipment-hats.mjs";
+import { writeWardrobe } from "./equipment-wardrobe.mjs";
+import { catalogBaseline, catalogContinuation } from "./character-catalog-build.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path) => readFileSync(join(root, "src", path), "utf8");
 const sha256 = (text) => `'sha256-${createHash("sha256").update(text, "utf8").digest("base64")}'`;
 
+// Refuse an invalid destination registry before it can be staged or published. No page or network is needed.
+runInNewContext(read("js/cave-directory.js"), { window: {}, URL });
+
 writeCharacters();
+writeEquipmentHats();
+writeWardrobe();
 let html = read("index.html");
 
-const cssTag = /<link rel="stylesheet" href="([^"]+)">/;
-const cssMatch = html.match(cssTag);
-if (!cssMatch) throw new Error("index.html: stylesheet link not found");
-const css = read(cssMatch[1]).trim().replace(/\r\n/g, "\n");
-html = html.replace(cssTag, `<style>\n${css}\n</style>`);
+// The source links its touch icon beside index.html; the single-file page has no file beside it (opened from disk it
+// asked for a missing apple-touch-icon.png), so it carries the icon's bytes, as it carries its favicons. Site staging
+// links the staged file again (scripts/distribution-icons.mjs).
+const touchTag = /<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon\.png">/;
+if (!touchTag.test(html)) throw new Error("index.html: apple-touch-icon link not found");
+html = html.replace(touchTag, () => `<link rel="apple-touch-icon" sizes="180x180" href="data:image/png;base64,${readFileSync(join(root, "src", "apple-touch-icon.png")).toString("base64")}">`);
+
+// The stylesheets join in link order (native.css, the look the Ooga Chat app shares, then style.css) into one block.
+const cssTag = /^[ \t]*<link rel="stylesheet" href="([^"]+)">\r?\n/gm;
+const sheets = [...html.matchAll(cssTag)].map((m) => m[1]);
+if (!sheets.length) throw new Error("index.html: stylesheet link not found");
+const css = sheets.map((path) => read(path).trim().replace(/\r\n/g, "\n")).join("\n\n");
+let firstSheet = true;
+html = html.replace(cssTag, (tag) => {
+  if (!firstSheet) return "";
+  firstSheet = false;
+  return `${tag.match(/^[ \t]*/)[0]}<style>\n${css}\n</style>\n`;
+});
 
 const scriptTag = /^[ \t]*<script src="([^"]+)"(?: data-defer="([a-z-]+)")?><\/script>\r?\n/gm;
 const tags = [...html.matchAll(scriptTag)];
@@ -34,7 +57,10 @@ const latin1 = (code) => code.replace(/[^\x00-\xff]/g, (ch) => `\\u${ch.charCode
 // Escape </script inside inlined JS: a literal closing tag would end the block early. `block` is also how
 // scripts/site.mjs finds a deferred module in the page.
 export const block = (src) => latin1(`// ---- ${src} ----\n${read(src).trim().replace(/\r\n/g, "\n")}`).replace(/<\/script/gi, "<\\/script");
-const js = sources.map(block).join("\n\n");
+// A hosted-only group (scripts/distribution-modules.mjs `hostedOnly`) stays out of the portable page.
+const portable = new Set(tags.filter(([, , group]) => !group || !hostedOnly(group)).map((m) => m[1]));
+export const portableLounge = "js/lounge-portable.js";
+const js = catalogContinuation([...sources.filter((src) => portable.has(src)), portableLounge], block, catalogBaseline(root));
 // A module tagged `data-early` runs where it stands, before the page's one script arrives (the loading curtain's
 // line). Its block opens as `<script data-early>`, so the distribution steps still find the page's script as the
 // first `<script>`, and its hash follows that script's in the policy, which they rewrite.
@@ -76,3 +102,8 @@ const kb = (n) => `${(n / 1024).toFixed(0)} KB`;
 const sizes = sources.map((src) => [src, read(src).trim().length]).sort((a, b) => b[1] - a[1]);
 for (const [src, bytes] of sizes.slice(0, 8)) console.log(`  ${kb(bytes).padStart(9)}  ${src}`);
 console.log(`built ${out} (${kb(html.length)}, gzip ${kb(gzipSync(html).length)}, ${sources.length} scripts, js ${kb(js.length)}, css ${kb(css.length)})`);
+
+if (process.argv.includes("--offline-core")) {
+  const { writeOfflineCore } = await import("./offline-lounge.mjs");
+  writeOfflineCore(root, html, js, block);
+}

@@ -1,7 +1,7 @@
 // Scene-only arcade geometry. Shared island props and their model-cache owners stay in arcade-models.js.
 (() => {
   "use strict";
-  const { BANANA, BANANA_LEAF_TONES, BARK, BL, BONE, BONE_INK, CABINETS, CLAW, DART, DOT, EARTH_BLACK, EARTH_CHALK, EARTH_OCHRE, EARTH_RED, EMBER_GLOW, FAME, FAME_ROW, FAME_W, FRAMES, GAMES, GLASS_DK, GLYPH_H, GLYPH_W, GRID_H, GRID_W, HALL, HAUNT, HOCKEY, HOOP, LAYOUT, MAMMOTH_AT, MARK, MAT_Y, METER_LEN, METER_WINDOW, MEZZ, MEZZ_POSTS, NUTS, PALETTES, PICTOS, PIN, PIXEL, POOL, POOL_COLORS, POSTER_SCALE, PRIZES, PRIZE_SHELF, RETRO, RIDE_BEAT, RIDE_Y, ROPE, SCREEN, SHY, SIGN_FRAME, SKEE, SPOTS, SPOT_Y, STAGE, TIMBER_DK, TIMBER_LT, TRACKING, WHEEL_COST, WHEEL_VALUES, along, at, bake, bananaLeaf, band, beam, bevelBox, blaze, boneTusk, box, cached, ccw, centred, daubDot, daubHand, daubPoly, daubStroke, daubTaper, daubZigzag, dots, earth, face, facing, flame, geometry, grid, hexToRgb, hide, lathe, leafBlade, line, merge, mirror, moved, mulberry32, nut, oval, pictograph, prism, pushVert, rect, ring, scaled, shaded, sideShape, signBinding, stone, strip, text, textWidth, tikiMouth, tint, titleBones, torus, tuck, turn, turnedX, turnedY, turnedZ, unshadowed, variants, zigzag } = window.BL.arcadeModelsSceneKit;
+  const { BANANA, BANANA_LEAF_TONES, BARK, BL, BONE, BONE_INK, CABINETS, CLAW, DART, DOT, EARTH_BLACK, EARTH_CHALK, EARTH_OCHRE, EARTH_RED, EMBER_GLOW, FAME, FAME_ROW, FAME_W, FRAMES, GAMES, GLASS_DK, GLYPH_H, GLYPH_W, GRID_H, GRID_W, HALL, HAUNT, BLOCK_HALL, HOCKEY, HOOP, LAYOUT, MAMMOTH_AT, MARK, MAT_Y, METER_LEN, METER_WINDOW, MEZZ, MEZZ_POSTS, NUTS, PALETTES, PICTOS, PIN, PIXEL, POOL, POOL_COLORS, POSTER_SCALE, PRIZES, PRIZE_SHELF, RETRO, RIDE_BEAT, RIDE_Y, ROPE, SCREEN, SHY, SIGN_FRAME, SKEE, SPOTS, SPOT_Y, STAGE, TIMBER_DK, TIMBER_LT, TRACKING, WHEEL_COST, WHEEL_VALUES, along, at, bake, bananaLeaf, band, beam, bevelBox, blaze, boneTusk, box, cached, ccw, centred, daubDot, daubHand, daubPoly, daubStroke, daubTaper, daubZigzag, dots, earth, face, facing, flame, geometry, grid, hexToRgb, hide, lathe, leafBlade, line, merge, mirror, moved, mulberry32, nut, oval, pictograph, prism, pushVert, rect, ring, scaled, shaded, sideShape, signBinding, stone, strip, text, textWidth, tikiMouth, tint, titleBones, torus, tuck, turn, turnedX, turnedY, turnedZ, unshadowed, variants, zigzag, paving, flagstone, clipped } = window.BL.arcadeModelsSceneKit;
   // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
   const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
 
@@ -107,7 +107,7 @@
   // The flagstone walks, [x0, x1, z0, z1]: in from the tunnel to the stone circle round the stage, from behind the
   // jackpot wheel's footing to the claws and along the gallery street under the deck, and out to the shy, the food
   // court and the snack bar, the skee lanes and the hoops.
-  const WALKS = [[-2.3, 2.3, -2.4, HALL.front + 4], [-1.6, 1.6, -21.4, -14.4], [-9.7, 9.7, -21.2, -18.7], [-12.9, -5.4, -7.8, -5.8], [-15.8, -2.6, 0.2, 1.9], [2.2, 9.4, -2.7, -1.9], [7.4, 12.4, -1.9, 3.8]];
+  const WALKS = [[-2.3, 2.3, -2.4, HALL.front + 0.4], [-1.6, 1.6, -21.4, -14.4], [-9.7, 9.7, -21.2, -18.7], [-12.9, -5.4, -7.8, -5.8], [-15.8, -2.6, 0.2, 1.9], [2.2, 9.4, -2.7, -1.9], [7.4, 12.4, -1.9, 3.8]];
   // Reed mats where the players stand, [x0, x1, z0, z1]: the skee lanes, the hoops, the shy, the claws, the pinball
   // tables, the snack bar's counter and the pool tables.
   const MATS = [[9.25, 12.55, -3.4, -2.05], [12.35, 13.75, 1.95, 5.65], [-13.5, -12.05, -8.4, -5.2], [-4.3, 4.3, -22.75, -21.45], [4.9, 7.8, -22.25, -21.05], [-16.6, -13.2, 1.9, 3.05], [-9, -6.6, -13.85, -12.75], [6.6, 9, -13.85, -12.75]];
@@ -260,48 +260,6 @@
     ["B", -16.2, "fern moss"], ["B", -10.3, "fern shroom"], ["B", -9.1, "crystal"], ["B", 9.2, "shroom moss"], ["B", 10.3, "fern"], ["B", 16.2, "shroom fern"],
     ["F", 8.2, "fern moss"], ["F", 10.3, "shroom fern"], ["F", 12.2, "crystal"]
   ];
-  // Crazy paving: each real seed's flagstone is its cell among all the seeds (the unseen ones only cut), `GROUT`
-  // short of halfway to each neighbour and cut to an octagon `reach` round the seed, so the stones at a walk's edge
-  // round off and the walk frays into the earth. Each stone comes back as its outline, its middle and its inner radius.
-  const GROUT = 0.035;
-  const clipped = (poly, nx, nz, c) => {
-    const out = [];
-    for (let i = 0; i < poly.length; i++) {
-      const p = poly[i], q = poly[(i + 1) % poly.length], dp = nx * p[0] + nz * p[1] - c, dq = nx * q[0] + nz * q[1] - c;
-      if (dp <= 0) out.push(p);
-      if ((dp <= 0) !== (dq <= 0)) { const t = dp / (dp - dq); out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]); }
-    }
-    return out;
-  };
-  const paving = (seeds, reach) => {
-    const stones = [], corner = reach / Math.cos(Math.PI / 8);
-    for (const [x, z, real] of seeds) {
-      if (!real) continue;
-      let poly = Array.from({ length: 8 }, (_, k) => [x + Math.cos((k + 0.5) / 8 * Math.PI * 2) * corner, z + Math.sin((k + 0.5) / 8 * Math.PI * 2) * corner]);
-      for (const [qx, qz] of seeds) {
-        const dx = qx - x, dz = qz - z, d = Math.hypot(dx, dz);
-        if (d > 1e-6 && d < reach * 2.2) poly = clipped(poly, dx / d, dz / d, ((qx + x) * dx + (qz + z) * dz) / (2 * d) - GROUT / 2);
-      }
-      if (poly.length < 3) continue;
-      const cx = poly.reduce((t, p) => t + p[0], 0) / poly.length, cz = poly.reduce((t, p) => t + p[1], 0) / poly.length;
-      let r = Infinity;
-      for (let i = 0; i < poly.length; i++) {
-        const [px, pz] = poly[i], [qx, qz] = poly[(i + 1) % poly.length], l = Math.hypot(qx - px, qz - pz);
-        if (l > 1e-6) r = Math.min(r, Math.abs((qx - px) * (cz - pz) - (qz - pz) * (cx - px)) / l);
-      }
-      stones.push({ poly, x: cx, z: cz, r });
-    }
-    return stones;
-  };
-  // A flagstone on `poly` ([x, z] corners): a flat top `top` high inset from its edge, and a bevel falling to `foot`
-  // all round it in a darker shade, glowing `e`.
-  const flagstone = (geo, poly, tone, top, foot = 0.004, e = 0.03) => {
-    const cx = poly.reduce((t, p) => t + p[0], 0) / poly.length, cz = poly.reduce((t, p) => t + p[1], 0) / poly.length, rgb = hexToRgb(tone), edge = rgb.map((v) => Math.round(v * 0.78));
-    const lo = poly.map(([x, z]) => pushVert(geo, x, foot, z));
-    const hi = poly.map(([x, z]) => { const dx = x - cx, dz = z - cz, k = Math.max(0.5, 1 - 0.07 / (Math.hypot(dx, dz) || 1)); return pushVert(geo, cx + dx * k, top, cz + dz * k); });
-    face(geo, facing(geo, hi.slice(), UP), rgb, { emissive: e });
-    for (let i = 0; i < poly.length; i++) { const j = (i + 1) % poly.length; face(geo, facing(geo, [lo[i], lo[j], hi[j], hi[i]], UP), edge, { emissive: e * 0.67 }); }
-  };
   // Lays blocks over a `cols` by `rows` grid of metre cells, row by row: at each cell not yet covered (and `free`),
   // one of `sizes` [across, up] picked at random, shrunk until it fits, handed to `put(i, j, w, h)`.
   const layBlocks = (cols, rows, sizes, rand, free, put) => {
@@ -409,7 +367,7 @@
   const CREEPERS = [[-1, 2.3, 0.2], [1, -8.5, 0.2], [1, -1.1, 0.2], [-1, -22.4, MEZZ.y], [1, -22.4, MEZZ.y]];
   const PEEKS = [[-1, -19.6], [1, -19.6], [1, 0.45]];
   const hall = BL.models.cachedSteps(function* (slice = null) {
-    const rand = mulberry32(3303), timber = [], OUT = HALL.front + 4;
+    const rand = mulberry32(3303), timber = [], OUT = HALL.front + HALL.exit;
     const W = HALL.halfW * 2, D = HALL.front - HALL.back, WAIN = 1.3;
     // The packed earth, on out through the tunnel. Its painted skins are drawn on the xy plane (y there is -z in the
     // hall) and `laid` flat `y` up: darker earth in big soft patches, each tone its own height, more sand and grit
@@ -484,19 +442,21 @@
     // each cell a fifth of a metre across, each pebble a rounded stone of seven to nine sides set a little off its
     // cell, turned its own way, a darker rim round its pale top, in bone and pale ochre; a few dark pebbles pressed
     // into the earth round them; and a kerb of eighteen bevelled stones round it all.
-    const MZ = MEDALLION.z, IN = MEDALLION.r - 0.28, CELL = 0.19, trand = mulberry32(3330), earth = geometry();
-    const letter = (col, row) => col >= 0 && col < 15 && row >= 0 && row < 5 && col % 4 < 3 && BL.hubModels.SIGN_GLYPHS["OOGA"[col >> 2]][row][col % 4] === "1";
+    const letters = Array.from({ length: 5 }, (_, row) => [..."OOGA"].map(ch => BL.hubModels.SIGN_GLYPHS[ch][row]).join("0"));
+    const cols = letters[0].length, mid = (cols - 1) / 2;
+    const MZ = MEDALLION.z, IN = MEDALLION.r - 0.28, CELL = 0.19 * 15 / cols, trand = mulberry32(3330), earth = geometry();
+    const letter = (col, row) => col >= 0 && col < cols && row >= 0 && row < 5 && letters[row][col] === "1";
     const pebble = (x, z, r, tone, e) => {
       const n = 7 + Math.floor(trand() * 3), turn = trand() * 3, squash = 0.78 + trand() * 0.18;
       daubDot(earth, x, -z, r, r * squash, tint(tone, 0.68), e * 0.5, turn, 0.0012, n);
       daubDot(earth, x - r * 0.06, -z + r * 0.06, r * 0.8, r * squash * 0.78, tone, e, turn, 0.0024, n);
     };
     daubDot(earth, 0, -MZ, IN + 0.03, IN + 0.03, EARTH[3], 0.03, 0, 0, 36);
-    for (let row = 0; row < 5; row++) { for (let col = 0; col < 15; col++) { if (letter(col, row)) {
-      pebble((col - 7) * CELL + (trand() - 0.5) * 0.04, MZ + (row - 2) * CELL + (trand() - 0.5) * 0.04, 0.088 + trand() * 0.018, trand() < 0.6 ? BONE : "#e8c890", 0.2);
+    for (let row = 0; row < 5; row++) { for (let col = 0; col < cols; col++) { if (letter(col, row)) {
+      pebble((col - mid) * CELL + (trand() - 0.5) * 0.04, MZ + (row - 2) * CELL + (trand() - 0.5) * 0.04, (0.088 + trand() * 0.018) * 15 / cols, trand() < 0.6 ? BONE : "#e8c890", 0.2);
     } } }
     for (let k = 0, n = 0; k < 120 && n < 26; k++) { yield* pause(slice);
-      const a = trand() * Math.PI * 2, d = Math.sqrt(trand()) * (IN - 0.12), x = Math.cos(a) * d, z = Math.sin(a) * d, col = Math.round(x / CELL + 7), row = Math.round(z / CELL + 2);
+      const a = trand() * Math.PI * 2, d = Math.sqrt(trand()) * (IN - 0.12), x = Math.cos(a) * d, z = Math.sin(a) * d, col = Math.round(x / CELL + mid), row = Math.round(z / CELL + 2);
       if ([-1, 0, 1].some((dc) => [-1, 0, 1].some((dr) => letter(col + dc, row + dr)))) continue;
       pebble(x, MZ + z, 0.035 + trand() * 0.025, FLAGS[3 - (n % 2) * 2], 0.03);
       n++;
@@ -561,7 +521,9 @@
       layBlocks(cols, HALL.h, WALL_BLOCKS, rand, (i, j) => !painted(i, j) && !door(i, j), (i, j, w, h) => {
         const out = -rand() * 0.22, bulge = Math.min(w, h) > 1 ? 0.14 : 0.1, c = 0.18, turn = (rand() - 0.5) * 0.08, cs = Math.cos(turn), sn = Math.sin(turn), ta = (rand() - 0.5) * 0.08, tb = (rand() - 0.5) * 0.08;
         const ends = side ? 0 : (i ? 0 : -0.35) + (i + w < cols ? 0 : 0.35);
-        stone(crag, onWall(wall, s0 + i + w / 2 + ends / 2, j + h / 2, out), r.map((v, k) => v * cs + UP[k] * sn + n[k] * ta), UP.map((v, k) => v * cs - r[k] * sn + n[k] * tb), n, w + Math.abs(ends) + LAP, h + LAP, 0.9, c, bulge, STONE[Math.floor(rand() * 3)]);
+        // A block across Block Frenzy's mouth is baked aside (`blockHall` lays the rock round the mouth), drawing the same numbers.
+        const into = wall === "B" && s0 + i < BLOCK_HALL.x1 + 0.3 && s0 + i + w > BLOCK_HALL.x0 - 0.3 && j < BLOCK_HALL.y + BLOCK_HALL.h && j + h > BLOCK_HALL.y;
+        stone(into ? geometry() : crag, onWall(wall, s0 + i + w / 2 + ends / 2, j + h / 2, out), r.map((v, k) => v * cs + UP[k] * sn + n[k] * ta), UP.map((v, k) => v * cs - r[k] * sn + n[k] * tb), n, w + Math.abs(ends) + LAP, h + LAP, 0.9, c, bulge, STONE[Math.floor(rand() * 3)]);
         for (let b = 0; b < h; b++) for (let a = 0; a < w; a++) {
           const du = Math.abs(a + 0.5 - w / 2) / (w / 2 - c), dv = Math.abs(b + 0.5 - h / 2) / (h / 2 - c);
           relief.set(cellOf(wall, s0 + i + a, j + b), out + 0.04 + bulge * Math.max(0, 1 - Math.max(du, dv)));
@@ -606,11 +568,11 @@
     const block = (x, y, z, w, d) => flat.push(box({ w, h: 1, d, color: STONE[Math.floor(rand() * 3)], offset: { x, y: y + 0.5, z } }));
     // The way out: a short rock tunnel past the doorway, two timber sets across it (bark log posts under a log lintel
     // bound to them with rope), the flagstones on under them, and the jungle outside at its far end.
-    for (let z = HALL.front + 0.5; z < OUT; z++) {
+    for (let z = HALL.front + 0.5; z < HALL.front + 1; z++) {
       for (let y = 0; y < HALL.doorH + 1; y++) { for (const s of [-1, 1]) { block(s * (HALL.door + 0.5), y, z, 1, 1); } }
       block(0, HALL.doorH, z, HALL.door * 2, 1);
     }
-    for (const z of [HALL.front + 0.8, HALL.front + 2.6]) {
+    for (const z of [HALL.front + 0.8]) {
       for (const s of [-1, 1]) {
         timber.push(J.log(s * (HALL.door - 0.19), -0.02, z, s * (HALL.door - 0.17), HALL.doorH - 0.1, z, 0.16, "#5a3c22"));
         timber.push(J.lashing(s * (HALL.door - 0.18), HALL.doorH - 0.4, z, 0, 1, 0, 0.16), J.lashing(s * (HALL.door - 0.18), HALL.doorH - 0.145, z, 1, 0, 0, 0.17));
@@ -621,7 +583,7 @@
     // glow over the horizon in bands, a far line of treetops, a palm leaning in from one side with its fronds hanging
     // and big leaves at the foot of the view, all dark against the light. Drawn on the xy plane, turned to face the
     // hall at the tunnel's end.
-    const view = geometry(), vw = HALL.door, vh = HALL.doorH, SKY = ["#e6cf98", "#f7e0aa", "#f0d6a0", "#e2cc9c", "#d0c49c", "#bab89a"];
+    const view = geometry(), vw = 2.5, vh = 3, SKY = ["#e6cf98", "#f7e0aa", "#f0d6a0", "#e2cc9c", "#d0c49c", "#bab89a"];
     SKY.forEach((c, k) => daubPoly(view, [[-vw, vh * k / 6], [vw, vh * k / 6], [vw, vh * (k + 1) / 6], [-vw, vh * (k + 1) / 6]], c, 0.8 - k * 0.05));
     daubPoly(view, [[-vw, 0], [vw, 0], [vw, 0.95], [-vw, 0.95]], "#4e6238", 0.3, 0.01);
     for (let k = 0; k < 9; k++) { daubDot(view, -vw + k * vw / 4 + ((k * 7) % 3 - 1) * 0.12, 0.95 + (k % 3) * 0.08, 0.34 + (k * 5 % 4) * 0.06, 0.26 + (k * 3 % 4) * 0.05, k % 2 ? "#4e6238" : "#456034", 0.3, 0, 0.01, 12); }
@@ -1075,52 +1037,7 @@
     };
     return { frame: merge(...frame), left: leaf(-1), right: leaf(1) };
   });
-  // A stone gargoyle for the arena's wall top, after the cathedrals' (one over the hallway's mouth and over every
-  // `GARGOYLE_EVERY`th bay): crouched on a ledge jutting from the rock, its great bat wings half spread up off its back, leaning out over the arena and down into it, ears pricked, jaw open on its
-  // fangs, its eyes glowing the hunt's green. Built facing +z, the ledge's back on the wall's face at the origin and
-  // its foot on y 0; every perch shares the one geometry.
-  const GARGOYLE_STONE = ["#45423e", "#3a3835", "#504c47"], GARGOYLE_EVERY = 2;
-  const gargoyle = cached(() => {
-    const J = BL.hubModels, [S0, S1, S2] = GARGOYLE_STONE, round = [], flat = [];
-    const lump = (x, y, z, rx, ry, rz, color) => {
-      const g = ball(1, color, 8), v = g.verts;
-      for (let i = 0; i < v.length; i += 3) { v[i] = x + v[i] * rx; v[i + 1] = y + v[i + 1] * ry; v[i + 2] = z + v[i + 2] * rz; }
-      return g;
-    };
-    const fang = (x, y, z, down) => moved(turnedX(lathe({ profile: [[0.018, 0], [0, 0.06]], segments: 5, color: "#b8b2a6" }), down ? Math.PI : 0), x, y, z);
-    // The beast, built crouched on y 0 and leant out over its paws.
-    const body = [], sheets = [];
-    for (const f of [-1, 1]) {
-      body.push(lump(f * 0.2, 0.24, -0.18, 0.2, 0.22, 0.26, S0), lump(f * 0.25, 0.06, -0.02, 0.1, 0.06, 0.14, S1));
-      body.push(J.log(f * 0.17, 0.5, 0.26, f * 0.18, 0.08, 0.4, 0.07, S0), lump(f * 0.18, 0.06, 0.45, 0.09, 0.06, 0.11, S1));
-      for (const d of [-0.04, 0, 0.04]) body.push(moved(turnedX(lathe({ profile: [[0.016, 0], [0, 0.06]], segments: 5, color: S2 }), Math.PI / 2 + 0.5), f * 0.18 + d, 0.05, 0.54));
-      const ear = turnedX(turnedZ(prism(ccw([[-0.06, 0], [0.06, 0], [f * 0.03, 0.22]]), 0.04, S1), -f * 0.45), -0.35);
-      sheets.push(moved(ear, f * 0.13, 0.85, 0.42));
-      // A wing folded up off the shoulder in four membranes between its fingers, its leading bone along the top.
-      const R = [0, 0], T = [[0.1, 1.1], [-0.7, 1.3], [-1.24, 0.84], [-1.2, 0.24], [-0.84, -0.08]];
-      const wing = (g) => moved(turnedZ(g, f * 0.22), f * 0.24, 0.62, -0.05);
-      for (let k = 0; k < T.length - 1; k++) sheets.push(wing(turnedY(prism(ccw([R, T[k], T[k + 1]]), 0.03, k % 2 ? S1 : S0), -Math.PI / 2)));
-      for (const [a, b] of [[R, T[0]], [T[0], T[1]]]) body.push(wing(J.log(0, a[1], a[0], 0, b[1], b[0], 0.04, S1)));
-      const eye = lump(f * 0.075, 0.765, 0.635, 0.036, 0.03, 0.022, HAUNT_GLOW);
-      for (const fc of eye.faces) fc.emissive = 1;
-      body.push(eye);
-    }
-    body.push(lump(0, 0.46, 0.02, 0.26, 0.3, 0.34, S0), lump(0, 0.58, 0.24, 0.23, 0.22, 0.2, S2));
-    for (let k = 0; k < 4; k++) body.push(moved(lathe({ profile: [[0.04, 0], [0, 0.09]], segments: 5, color: S1 }), 0, 0.72 - k * 0.04, 0.12 - k * 0.14));
-    body.push(J.log(0, 0.22, -0.4, 0, 0.12, -0.62, 0.05, S0), J.log(0, 0.12, -0.62, 0.12, 0.04, -0.7, 0.04, S0));
-    body.push(lump(0, 0.74, 0.46, 0.19, 0.17, 0.2, S2), lump(0, 0.815, 0.58, 0.17, 0.05, 0.07, S1), lump(0, 0.69, 0.64, 0.12, 0.09, 0.13, S0));
-    body.push(lump(0, 0.61, 0.67, 0.09, 0.05, 0.1, "#1e1b19"), lump(0, 0.55, 0.62, 0.11, 0.045, 0.13, S0));
-    for (const f of [-1, 1]) {
-      body.push(lump(f * 0.04, 0.71, 0.765, 0.02, 0.015, 0.012, "#1e1b19"));
-      body.push(fang(f * 0.05, 0.64, 0.73, true), fang(f * 0.06, 0.565, 0.71, false));
-    }
-    const perch = (g) => moved(turnedX(g, 0.3), 0, 0.3, -0.12);
-    round.push(...body.map(perch));
-    flat.push(...sheets.map(perch));
-    // The ledge it crouches on, out of the wall's top, and the bracket under it.
-    flat.push(bevelBox({ w: 0.9, h: 0.3, d: 1.2, color: S1, bevel: 0.05, offset: { y: 0.15, z: -0.3 } }), bevelBox({ w: 0.66, h: 0.26, d: 0.5, color: S1, bevel: 0.04, offset: { y: -0.12, z: 0.02 } }));
-    return shaded(round, flat);
-  });
+  const { gargoyle, GARGOYLE_EVERY } = BL.hauntModels;
   // Where a gargoyle's eyes look out, in its own frame (the fronts of its glowing eyes, leant with its body as `perch`
   // leans it), and the green laser the scene shines from each down onto the herald as it launches: a glowing rod a
   // metre along +z from the origin, stretched and aimed by its node.
@@ -1129,7 +1046,7 @@
     return [f * 0.075, y * c - z * sn + 0.3, y * sn + z * c - 0.12];
   });
   const gargoyleLaser = cached(() => unshadowed(box({ w: 0.035, h: 0.035, d: 1, color: HAUNT_GLOW, emissive: 1, offset: { z: 0.5 } })));
-  // A white letter on a gargoyle's chest, in the signs' 3x5 alphabet, each block set on the curve of its breast and
+  // A white letter on a gargoyle's chest, in the signs' five-row alphabet, each block set on the curve of its breast and
   // belly as they lean with it; the gargoyles spell `GARGOYLE_WORDS` round the wall from the one over the mouth. The M
   // is the carved signs' five-wide one, centred as the others are, since a three-wide M reads as an H (#420).
   const GARGOYLE_WORDS = "FREE SAMOURAI", GARGOYLE_CELL = 0.045;
@@ -1152,23 +1069,7 @@
   // hub's four repository carvings with their name boards (`totemModels`, stood by the scene), each `keep` round for
   // walkers, the revive elixir hanging in front of it past its board (`ELIXIR_Y` up, `ELIXIR_OUT` out).
   const ARENA_TOTEMS = { r: 13, n: 4, keep: 1.25 }, ELIXIR_Y = 1.35, ELIXIR_OUT = 1.9;
-  // The iron fence that rises across the hallway's mouth into the arena while a hunt runs (`IRON_FENCE`, wide enough to
-  // bury its ends in the rock either side, tall to the mouth's roof): wrought-iron bars with spear tips between two
-  // square posts, two rails across them, built across x facing +z with its foot on y 0.
-  const IRON_FENCE = { w: 4.6, h: 3.9, pitch: 0.2 };
-  const ironFence = cached(() => {
-    const { w, h, pitch } = IRON_FENCE, IRON = "#2a2c30", round = [], flat = [];
-    for (let x = -w / 2 + 0.3; x <= w / 2 - 0.29; x += pitch) {
-      round.push(moved(lathe({ profile: [[0.022, 0], [0.022, h - 0.22]], segments: 6, color: IRON }), x, 0, 0));
-      round.push(moved(lathe({ profile: [[0, h - 0.24], [0.05, h - 0.2], [0, h]], segments: 4, color: "#3c3f45" }), x, 0, 0));
-    }
-    for (const y of [0.35, h - 0.55]) flat.push(bevelBox({ w: w - 0.2, h: 0.07, d: 0.06, color: IRON, bevel: 0.015, offset: { y } }));
-    for (const f of [-1, 1]) {
-      flat.push(bevelBox({ w: 0.16, h: h + 0.1, d: 0.16, color: IRON, bevel: 0.02, offset: { x: f * (w / 2 - 0.12), y: (h + 0.1) / 2 } }));
-      round.push(moved(lathe({ profile: [[0.1, 0], [0.12, 0.05], [0, 0.18]], segments: 4, color: "#3c3f45" }), f * (w / 2 - 0.12), h + 0.1, 0));
-    }
-    return shaded(round, flat);
-  });
+  const { ironFence, IRON_FENCE } = BL.hauntModels;
   // A carved pumpkin `r` round, its face toward +z: the shell in ribs of two oranges glowing a little from within,
   // its stem, and the carving's eyes, nose and grin wrapped onto the shell's front, glowing.
   const PUMPKIN_PROFILE = [[0, 0], [0.55, 0.04], [0.92, 0.28], [1, 0.6], [0.9, 0.95], [0.5, 1.12], [0, 1.1]];
@@ -1232,6 +1133,164 @@
     }
     return web;
   };
+  // Block Frenzy's entry hall (`BLOCK_HALL`): the rock laid back round the mouth, a timber set like the haunted
+  // hallway's, a short carved passage with torches (`lanterns`), the four maps framed and the game's weapons racked on
+  // its walls, then the open-air cliff ledge with a railing and gate, and blue sky and clouds to look out on, the zipline
+  // running away into them. `rock` and `ledge` are the body of it; `props` and `sky` carry `sightHidden` in the scene.
+  const blockMaps = [
+    ["#2a2a45", "#d9953a", (g, e) => { daubPoly(g, [[-0.5, -0.2], [-0.2, -0.2], [-0.2, 0.2], [-0.5, 0.2]], "#7a5634", e, 0.004); daubPoly(g, [[0.2, -0.2], [0.5, -0.2], [0.5, 0.2], [0.2, 0.2]], "#7a5634", e, 0.004); daubDot(g, 0, -0.06, 0.09, 0.09, "#f7931a", 0.5, 0, 0.006, 8); }],
+    ["#3a5a78", "#a8703e", (g, e) => { for (const x of [-0.4, 0, 0.4]) { daubPoly(g, [[x - 0.14, -0.2], [x + 0.14, -0.2], [x + 0.14, 0.02], [x - 0.14, 0.02]], "#c8a678", e, 0.004); daubPoly(g, [[x - 0.2, 0.02], [x + 0.2, 0.02], [x, 0.22]], "#b8402e", e, 0.005); } }],
+    ["#1d3a2a", "#3a8f2a", (g, e) => { for (const [x, y, r] of [[-0.42, 0.06, 0.2], [0.05, 0.14, 0.26], [0.46, 0.02, 0.18]]) { daubDot(g, x, y, r, r, "#2e6b20", e, 0, 0.004, 10); daubPoly(g, [[x - 0.03, -0.2], [x + 0.03, -0.2], [x + 0.03, y - r * 0.6], [x - 0.03, y - r * 0.6]], "#6b4a2b", e, 0.005); } }],
+    ["#1b1230", "#4a3a5a", (g, e) => { daubDot(g, 0.42, 0.26, 0.11, 0.11, "#e8dcc0", 0.6, 0, 0.004, 10); daubPoly(g, [[-0.5, -0.2], [-0.22, -0.2], [-0.22, 0.12], [-0.36, 0.26], [-0.5, 0.12]], "#2a2230", e, 0.004); for (const x of [0.02, 0.28]) daubDot(g, x, -0.08, 0.07, 0.09, "#f2efe8", 0.6, 0, 0.006, 8); }]
+  ];
+  const blockHall = cached(() => {
+    const { x: X, x0: X0, x1: X1, y: Y, h: H, z0: Z0, ledge: LZ } = BLOCK_HALL, Z1 = HALL.back, TOP = Y + H, J = BL.hubModels;
+    const rand = mulberry32(5521), crag = geometry(), round = [], flat = [], props = [];
+    const rough = () => STONE[Math.floor(rand() * 3)];
+    const blocked = (s, y) => PAINTINGS.some(([w, a0, a1, y0, y1]) => w === "B" && s > a0 && s < a1 && y > y0 && y < y1);
+    // Round the mouth, where the wall's own blocks were baked aside: below the deck too, so the wall under it stays whole.
+    for (let j = 2; j < 9; j++) for (let i = 6; i < 14; i++) {
+      if (blocked(i + 0.5, j + 0.5) || i + 1 > X0 && i < X1 && j + 1 > Y && j < TOP) continue;
+      stone(crag, [i + 0.5, j + 0.5, Z1 + 0.02 - rand() * 0.12], [1, 0, 0], UP, [0, 0, 1], 1 + LAP, 1 + LAP, 0.9, 0.18, 0.1, rough());
+    }
+    // The passage: packed earth and paving level with the deck, rock walls and roof in the hall's blocks.
+    flat.push(box({ w: X1 - X0 + 0.5, h: 0.5, d: Z1 - LZ + 0.2, color: EARTH[3], emissive: 0.03, offset: { x: X, y: Y - 0.25, z: (Z1 + LZ) / 2 } }));
+    const seeds = [];
+    for (let z = LZ - 0.3; z < Z1 + 0.5; z += 0.75) for (let x = X0 - 0.3; x < X1 + 0.5; x += 0.85) {
+      const sx = x + (rand() - 0.5) * 0.3, sz = z + (rand() - 0.5) * 0.3;
+      seeds.push([sx, sz, sx > X0 + 0.2 && sx < X1 - 0.2 && sz > LZ + 0.2 && sz < Z1 - 0.2]);
+    }
+    const stones = geometry();
+    for (const { poly } of paving(seeds, 0.5)) flagstone(stones, poly, FLAGS[Math.floor(rand() * FLAGS.length)], FLAG_Y);
+    flat.push(moved(stones, 0, Y, 0));
+    const L = Z1 - Z0;
+    for (const side of [-1, 1]) {
+      const wall = side < 0 ? X0 : X1, n = [-side, 0, 0];
+      layBlocks(L, H, WALL_BLOCKS, rand, () => true, (i, j, w, h) => {
+        stone(crag, [wall + n[0] * -rand() * 0.2, Y + j + h / 2, Z0 + i + w / 2], [0, 0, 1], UP, n, w + LAP, h + LAP, 0.9, 0.18, Math.min(w, h) > 1 ? 0.14 : 0.1, rough());
+      });
+    }
+    layBlocks(L, X1 - X0, CEILING_BLOCKS, rand, () => true, (i, j, w, h) => {
+      stone(crag, [X0 + j + h / 2, TOP - rand() * 0.06, Z0 + i + w / 2], [0, 0, 1], [1, 0, 0], [0, -1, 0], w + LAP, h + LAP, 0.5, 0.22, 0.14, CEILING[Math.floor(rand() * 3)]);
+    });
+    // The cliff the passage comes out of: rock in big blocks round its far mouth and on down under the ledge.
+    const CW = 15, CL = X - CW / 2;
+    layBlocks(CW, 24, CEILING_BLOCKS, rand, (i, j) => !(CL + i + 1 > X0 && CL + i < X1 && j - 12 + 1 > 0 && j - 12 < H + 0.5), (i, j, w, h) => {
+      stone(crag, [CL + i + w / 2, Y + j - 12 + h / 2, Z0 - rand() * 0.3], [1, 0, 0], UP, [0, 0, -1], w + 0.5, h + 0.5, 0.9, 0.3, 0.3, rough());
+    });
+    // The ledge's underside, a wedge of rock back to the cliff.
+    round.push(moved(lathe({ profile: [[0, -6], [2.2, -3.2], [X1 - X0, -0.5], [X1 - X0, 0], [0, 0.01]], segments: 9, color: "#4b3f36" }), X, Y - 0.04, (Z0 + LZ) / 2));
+    // The timber set at each end of the passage, as the haunted hallway's mouth.
+    for (const z of [Z1 - 0.3, Z0 + 0.3]) {
+      for (const x of [X0 + 0.2, X1 - 0.2]) round.push(J.log(x, Y - 0.02, z, x, TOP - 0.1, z, 0.16, "#5a3c22"), J.lashing(x, TOP - 0.45, z, 0, 1, 0, 0.16));
+      round.push(J.log(X0 - 0.15, TOP - 0.16, z, X1 + 0.15, TOP - 0.18, z, 0.17, "#5c3f25"));
+    }
+    // The four maps framed along the walls, each drawn facing +z round its middle and stood out of its wall.
+    const FW = 1.7, FH = 1.14;
+    blockMaps.forEach(([sky, land, draw], k) => {
+      const [z, side] = BLOCK_HALL.pictures[k], wall = side < 0 ? X0 + 0.14 : X1 - 0.14, turn = side < 0 ? Math.PI / 2 : -Math.PI / 2, art = geometry(), e = 0.25;
+      daubPoly(art, [[-FW / 2 + 0.06, -FH / 2 + 0.06], [FW / 2 - 0.06, -FH / 2 + 0.06], [FW / 2 - 0.06, FH / 2 - 0.06], [-FW / 2 + 0.06, FH / 2 - 0.06]], sky, 0.15);
+      daubPoly(art, [[-0.72, -0.26], [0.72, -0.26], [0.5, -0.46], [-0.5, -0.46]], land, e, 0.002);
+      draw(art, e);
+      const at = (g) => moved(turnedY(g, turn), wall, Y + 1.8, z);
+      props.push(at(moved(art, 0, 0, 0.05)));
+      for (const yy of [-FH / 2, FH / 2]) round.push(at(J.log(-FW / 2 - 0.06, yy, 0, FW / 2 + 0.06, yy, 0, 0.045, "#5c3f25")));
+      for (const xx of [-FW / 2, FW / 2]) round.push(at(J.log(xx, -FH / 2 - 0.06, 0, xx, FH / 2 + 0.06, 0, 0.045, "#5c3f25")));
+    });
+    // The racks: the game's own weapons, the geometry its Oogas hold, laid along the wall on pegs over a small board
+    // naming each. Baked once into the hall's props.
+    const BM = BL.blockModels, { boundsOf } = BL.scene, RACK_W = 2.6, ROW = [0.75, 1.5, 2.25];
+    const sized = (g, k) => { const c = merge(g); for (let v = 0; v < c.verts.length; v++) c.verts[v] *= k; return c; };
+    const centredX = (g) => moved(g, -boundsOf(g).center[0], 0, 0);
+    const alongRack = (i, turn = Math.PI / 2) => centredX(turnedY(merge(BM.gun(i * 2)), turn));
+    const weapon = (id, label) => id === "hook" ? [centredX(sized(BM.hookHead(), 1.4))]
+      : label === "GOLD AKS" ? [moved(alongRack(id), -0.58, 0, 0), moved(alongRack(id, -Math.PI / 2), 0.58, 0, 0)] : [alongRack(id)];
+    for (const [z, side, rows] of BLOCK_HALL.racks) {
+      const wall = side < 0 ? X0 + 0.1 : X1 - 0.1, turn = side < 0 ? Math.PI / 2 : -Math.PI / 2, at = (g) => moved(turnedY(g, turn), wall, Y, z), inRack = [box({ w: RACK_W, h: 2.3, d: 0.05, color: TIMBER_DK, offset: { y: 1.45 } })];
+      rows.forEach(([id, label], r) => {
+        const y = ROW[r], tag = brushWord(geometry(), label, 0, y - 0.3, 0.09, 0.016, EARTH_CHALK, 0.35, 0.06);
+        for (const px of [-0.42, 0.42]) inRack.push(box({ w: 0.06, h: 0.06, d: 0.2, color: "#b8a04a", offset: { x: px, y: y - 0.12, z: 0.1 } }));
+        inRack.push(box({ w: Math.max(0.5, brushWidth(label, 0.09) + 0.14), h: 0.15, d: 0.04, color: TIMBER_LT, offset: { y: y - 0.3, z: 0.04 } }), tag);
+        for (const g of weapon(id, label)) inRack.push(moved(g, 0, y, 0.16));
+      });
+      props.push(at(merge(...inRack)));
+    }
+    // The ledge's railing: short bamboo runs on posts down its sides and across its lip, the gate standing open in the
+    // middle of the lip for the rope to pass.
+    const rail = (ax, az, bx, bz) => {
+      for (const y of [Y + 0.55, Y + 1]) round.push(J.bamboo(ax, y, az, bx, y, bz, 0.04));
+      for (const [px, pz] of [[ax, az], [bx, bz]]) round.push(J.log(px, Y, pz, px, Y + 1.12, pz, 0.07, "#5a3c22"), J.lashing(px, Y + 1, pz, 0, 1, 0, 0.07));
+    };
+    rail(X0 + 0.12, Z0 - 0.1, X0 + 0.12, LZ); rail(X1 - 0.12, Z0 - 0.1, X1 - 0.12, LZ);
+    rail(X0 + 0.12, LZ, X - 0.6, LZ); rail(X + 0.6, LZ, X1 - 0.12, LZ);
+    for (const [x, z, dx, dz] of [[X - 0.6, LZ, 0, 0.75], [X + 0.6, LZ, 0, 0.75]]) for (const y of [Y + 0.4, Y + 0.95]) round.push(J.bamboo(x, y, z, x + dx, y, z + dz, 0.035));
+    const rock = merge(crag);
+    // Blue sky all round: emissive cards well past everything, paling toward the horizon, and the hub's voxel clouds,
+    // a bank of them swallowing the rope's far end and more drifted about the sky.
+    const FAR = 150, CZ = -40, bands = [["#bfe0f7", -60, -5], ["#8fc8f2", -5, 20], ["#5aa6ea", 20, 50], ["#3b86dc", 50, 75]], sky = [];
+    for (const [c, y0, y1] of bands) {
+      const h = y1 - y0, m = (y0 + y1) / 2;
+      sky.push(box({ w: 2 * FAR, h, d: 0.5, color: c, emissive: 0.85, offset: { x: X, y: m, z: CZ - FAR } }), box({ w: 2 * FAR, h, d: 0.5, color: c, emissive: 0.85, offset: { x: X, y: m, z: CZ + FAR } }));
+      for (const s of [-1, 1]) sky.push(box({ w: 0.5, h, d: 2 * FAR, color: c, emissive: 0.85, offset: { x: X + s * FAR, y: m, z: CZ } }));
+    }
+    sky.push(box({ w: 2 * FAR, h: 0.5, d: 2 * FAR, color: "#3b86dc", emissive: 0.85, offset: { x: X, y: 75, z: CZ } }), box({ w: 2 * FAR, h: 0.5, d: 2 * FAR, color: "#bfe0f7", emissive: 0.85, offset: { x: X, y: -60, z: CZ } }));
+    const puff = (k, x, y, z, size) => {
+      const g = merge(BL.hubModels.cloud(k % 3));
+      for (let v = 0; v < g.verts.length; v++) g.verts[v] *= size;
+      for (const f of g.faces) f.emissive = 0.5;
+      return moved(g, x, y, z);
+    };
+    const cloudRand = mulberry32(5533), { cloudY, stop } = BLOCK_HALL;
+    for (let k = 0; k < 14; k++) sky.push(puff(k, X + (cloudRand() - 0.5) * 70, cloudY - 4 + cloudRand() * 6, stop.z + 12 - cloudRand() * 26, 2 + cloudRand() * 1.2));
+    for (let k = 0; k < 16; k++) sky.push(puff(k, X + (cloudRand() - 0.5) * 240, -30 + cloudRand() * 80, -60 - cloudRand() * 80, 1.2 + cloudRand() * 2));
+    return { rock, ledge: shaded(round, flat), props: merge(...props), sky: merge(...sky) };
+  });
+  // The watch door's sign, its own board in the carved signs' style: two lines so the letters can be large, the shared
+  // alphabet but for its own five-wide W (the shared one reads as an H and stays as it is), every line measured so it
+  // sits inside the board with a margin. 2.3 m wide, centred on its origin, facing +z.
+  const WATCH_W = ["10001", "10001", "10101", "11011", "10001"];
+  const watchSignBoard = cached(() => {
+    const G = BL.hubModels.SIGN_GLYPHS, glyphOf = (ch) => ch === "W" ? WATCH_W : ch === "M" ? BL.hubModels.CARVED_M : G[ch];
+    const measure = (s) => { let n = -1; for (const ch of s) n += ch === " " ? 2 : glyphOf(ch)[0].length + 1; return n; };
+    const LINES = ["Watch", "Block Frenzy"], W = 2.3, MARGIN = 0.16, BADGE = 6, cell = (W - MARGIN * 2) / Math.max(measure(LINES[0]) + BADGE + 2, measure(LINES[1])), ROW = 8 * cell, H = ROW * 2 + cell * 2;
+    const planks = ["#7a4f2a", "#86592f", "#6f4726"], plankH = H / 3, parts = [];
+    planks.forEach((c, k) => parts.push(bevelBox({ w: W + (k === 1 ? 0.08 : 0), h: plankH + 0.01, d: 0.12, color: c, bevel: 0.03, offset: { y: H / 2 - plankH * (k + 0.5) } })));
+    parts.push(box({ w: W - MARGIN, h: H - cell, d: 0.02, color: "#3f2513", offset: { z: 0.07 } }));
+    const ink = (x, y, w) => parts.push(box({ w, h: cell, d: 0.05, color: "#f5e6c0", emissive: 1, offset: { x, y, z: 0.1 } }));
+    LINES.forEach((line, l) => {
+      const n = measure(line) + (l === 0 ? BADGE + 2 : 0), base = H / 2 - cell * 1.5 - ROW * l;
+      let cursor = -n * cell / 2;
+      // The orange cube badge leads the first line, as on the hall's own sign.
+      if (l === 0) { parts.push(box({ w: BADGE * cell, h: BADGE * cell, d: 0.05, color: "#f7931a", emissive: 1, offset: { x: cursor + BADGE * cell / 2, y: base - 2.5 * cell + cell / 2, z: 0.1 } })); cursor += (BADGE + 2) * cell; }
+      for (const ch of line) {
+        if (ch === " ") { cursor += cell * 2; continue; }
+        const glyph = glyphOf(ch);
+        for (let row = 0; row < glyph.length; row++) for (let col = 0; col < glyph[row].length; col++) {
+          if (glyph[row][col] !== "1") continue;
+          let run = 1;
+          while (glyph[row][col + run] === "1") run++;
+          ink(cursor + (col + run / 2) * cell, base - row * cell, run * cell);
+          col += run - 1;
+        }
+        cursor += cell * (glyph[0].length + 1);
+      }
+    });
+    return merge(...parts);
+  });
+  // The doorway to watch Block Frenzy (`BL.arcadeBlockWatch`): a timber set proud of the hall's east wall, like the hall's
+  // own, with a vine along its lintel. The rock stays whole behind it; the scene hangs the portal and the sign in it.
+  const blockWatchDoor = cached(() => {
+    const { DOOR: D } = BL.arcadeBlockWatch, J = BL.hubModels, X = BLOCK_HALL.x1 - 0.3, Y = D.y, TOP = Y + D.h, round = [];
+    for (const z of [D.z0 - 0.22, D.z1 + 0.22]) round.push(J.log(X, Y - 0.02, z, X, TOP + 0.05, z, 0.16, "#5a3c22"), J.lashing(X, TOP - 0.45, z, 0, 1, 0, 0.16));
+    round.push(J.log(X, TOP + 0.04, D.z0 - 0.42, X, TOP + 0.02, D.z1 + 0.42, 0.17, "#5c3f25"));
+    // The hanging sign's ropes, and the blade sign's bark arm out from the post over the hall.
+    for (const z of [D.z - 0.85, D.z + 0.85]) round.push(J.log(BLOCK_HALL.x1 - 0.42, Y + BL.arcadeBlockWatch.SIGN_Y + 0.2, z, BLOCK_HALL.x1 - 0.42, TOP, z, 0.018, "#c9a36a"));
+    const armY = Y + BL.arcadeBlockWatch.BLADE_Y + 0.42, armZ = D.z1 + 0.22;
+    round.push(J.log(X, armY, armZ, BLOCK_HALL.x1 - 1.85, armY, armZ, 0.07, "#5a3c22"), J.lashing(X, armY, armZ, 1, 0, 0, 0.08));
+    return J.withJungle(shaded(round, []), (g) => {
+      J.garland(g, J.sagPoints(X - 0.14, TOP + 0.14, D.z0 - 0.3, X - 0.14, TOP + 0.14, D.z1 + 0.3, 0.16), { r: 0.04, every: 0.45, size: 0.26, droop: 0.55, out: [-1, 0, 0], rand: mulberry32(7411) });
+    });
+  });
   const haunt = BL.models.cachedSteps(function* (slice = null) {
     const { z0, z1, y: Y, h: H, end, arena: A } = HAUNT, X0 = HALL.halfW, L = end - X0, TOP = Y + H, MID = (z0 + z1) / 2, J = BL.hubModels, TAU = Math.PI * 2;
     const rand = mulberry32(6601), crag = geometry(), flat = [], round = [], parts = [], glow = [];
@@ -1398,6 +1457,33 @@
   const GOURD = [[0, 0], [0.09, 0.008], [0.16, 0.045], [0.195, 0.1], [0.2, 0.16], [0.185, 0.22], [0.15, 0.275], [0.1, 0.315], [0.075, 0.35], [0.085, 0.43], [0.075, 0.5], [0.042, 0.55], [0, 0.565]];
   const GOURD_S = 1.3;
   const GOURD_BAND = 3;
+  // The rock of the island's Arcade cave (#554), as the hall's copy of it past its doors: its walls with their alcoves,
+  // roof and mouth, in the mouth's frame (+z out of the cave, the doors at -5.6), glowing the cave's own dark colours
+  // since the hall's fires don't reach it. Its floor is `caveFloor(1)` and its cabinets are `arcadeEntrance.yard`'s.
+  const caveRoom = cached(() => {
+    const ROCK = "#080707", ROOF = "#0c0a0b", DOORS = -5.6, MOUTH = 0.5, HW = 3.25, DEEP = 0.6, H = 4, HIGH = 2.75, WIDE = 1.5, ALONG = BL.arcadeCabinets.NICHE.along;
+    const lit = (w, h, d, x, y, z, color = ROCK) => box({ w, h, d, color, emissive: 1, offset: { x, y, z } }), parts = [];
+    parts.push(lit(HW * 2 + DEEP * 2 + 0.4, 0.2, MOUTH - DOORS, 0, H + 0.1, (MOUTH + DOORS) / 2, ROOF));
+    const THICK = DEEP + 0.4;
+    for (const s of [-1, 1]) {
+      // The wall's runs between the alcoves, thick enough to be the alcoves' sides, then each alcove's back and lintel.
+      const span = (a0, a1) => { if (a1 - a0 > 0.01) parts.push(lit(THICK, H, a1 - a0, s * (HW + THICK / 2), H / 2, -(a0 + a1) / 2)); };
+      let from = -MOUTH;
+      for (const a of ALONG) {
+        span(from, a - WIDE / 2);
+        parts.push(lit(0.2, HIGH, WIDE, s * (HW + DEEP + 0.1), HIGH / 2, -a), lit(THICK, H - HIGH, WIDE, s * (HW + THICK / 2), (H + HIGH) / 2, -a));
+        from = a + WIDE / 2;
+      }
+      span(from, -DOORS);
+      parts.push(lit(HW + THICK - 2.5, H, 0.3, s * (2.5 + (HW + THICK - 2.5) / 2), H / 2, MOUTH + 0.15));
+    }
+    parts.push(lit(5, H - 3, 0.3, 0, (H + 3) / 2, MOUTH + 0.15));
+    // Grass from the floor's end to the mouth, for a hall with no photograph of the mainland to hang at the floor's end.
+    parts.push(lit(HW * 2, 0.02, MOUTH, 0, -0.004, MOUTH / 2, "#2f4a18"));
+    // Its overhead string lights.
+    for (const x of [-2.35, 2.35]) for (let z = -1.5; z >= -5.2; z -= 0.6) parts.push(box({ w: 0.11, h: 0.14, d: 0.11, color: "#ff2a1e", emissive: 1, offset: { x, y: 3.56, z } }));
+    return merge(...parts);
+  });
   const lanterns = BL.models.cachedSteps(function* (slice = null) {
     const J = BL.hubModels, round = [], flat = [], glow = [], flames = [], lights = [], kinds = [], footprints = [], ties = [], leaf = mulberry32(1707);
     // Its light `lift` over the flame, and `out` in front of it along +z where a fire against the back wall spills.
@@ -1434,7 +1520,8 @@
       }
       const [hx, , hz] = at(0.42, y1);
       fire(hx, cup(hx, y1, hz, 0.1), hz, 1, 0, 0.3);
-    };
+    };    for (const [x, z, n] of BLOCK_HALL.torches) wallTorch(x, z, n, 0, BLOCK_HALL.y + 1.15, BLOCK_HALL.y + 2.35);
+
     for (const [x, side] of HAUNT.torches) { yield* pause(slice); wallTorch(x, side < 0 ? HAUNT.z0 : HAUNT.z1, 0, -side, HAUNT.y + 1.45, HAUNT.y + 2.45); }
     const A = HAUNT.arena;
     for (let k = 0; k < A.torches; k++) { yield* pause(slice);
@@ -2032,6 +2119,32 @@
   // A bone lying along x, `len` long: a shaft between two double knobs.
   const boneBar = (len, r) => merge(turnedZ(turn([[0, -len / 2], [r, -len / 2], [r, len / 2], [0, len / 2]], 8, BONE), Math.PI / 2),
     ...[-1, 1].flatMap((sx) => [-1, 1].map((sy) => moved(ball(r * 1.6, BONE, 6), sx * len / 2, sy * r, 0))));
+  // A single open service bay. Chunky coils, circuit blocks and cloth-covered wires suit the timber cabinet.
+  const rallyRepairBay = cached(() => {
+    const J = BL.hubModels, parts = [
+      box({ w: 0.98, h: 0.72, d: 0.05, color: "#201a15", offset: { y: 0.56, z: -0.33 } }),
+      bevelBox({ w: 0.7, h: 0.54, d: 0.04, color: "#335746", bevel: 0.015, offset: { y: 0.58, z: -0.27 } }),
+      box({ w: 0.99, h: 0.05, d: 0.72, color: TIMBER_DK, offset: { y: 0.14, z: 0 } }),
+      bevelBox({ w: 0.1, h: 0.08, d: 0.1, color: "#a38b60", bevel: 0.01, offset: { x: 0.38, y: 0.91, z: 0.35 } })
+    ];
+    for (const x of [-0.22, 0, 0.22]) {
+      parts.push(bevelBox({ w: 0.12, h: 0.13, d: 0.09, color: "#292c2b", bevel: 0.01, offset: { x, y: 0.65, z: -0.2 } }));
+      parts.push(along(turn([[0.045, 0], [0.045, 0.16], [0, 0.16]], 8, "#b88b55"), x, 0.4, -0.21, 0, 0, 1));
+      for (const y of [0.81, 0.34]) parts.push(along(turn([[0.018, 0], [0.018, 0.02], [0, 0.02]], 6, "#c4bca7"), x, y, -0.24, 0, 0, 1));
+    }
+    return J.withJungle(shaded([], parts), g => {
+      for (const [x, color] of [[-0.36, "#bd6543"], [0.35, "#d0ab59"]])
+        J.liana(g, [[x, 0.86, -0.18], [x * 0.7, 0.75, 0.08], [x, 0.4, 0.18], [x * 0.5, 0.27, -0.15]], 0.015, 0.015, color);
+    });
+  });
+  // A long silver shaft reaches the upper service screw; the ochre fluted handle runs along +z into the palm.
+  const repairDriver = cached(() => merge(
+    box({ w: 0.025, h: 0.009, d: 0.06, color: "#b7bec1", offset: { z: -0.15 } }),
+    along(turn([[0.008, 0], [0.008, 0.41], [0, 0.41]], 6, "#a5afb3"), 0, 0, -0.14, 0, 0, 1),
+    along(turn([[0.025, 0], [0.04, 0.025], [0.04, 0.17], [0.027, 0.2], [0, 0.2]], 8, "#cf903c"), 0, 0, 0.25, 0, 0, 1),
+    moved(turnedX(torus(0.041, 0.005, "#493325", 0, 8, 4), Math.PI / 2), 0, 0, 0.3),
+    moved(turnedX(torus(0.041, 0.005, "#493325", 0, 8, 4), Math.PI / 2), 0, 0, 0.39)
+  ));
   const BEST_Y = 23;
   const attractStart = variants((i) => {
     const game = GAMES[i], palette = PALETTES[game.id];
@@ -2040,7 +2153,8 @@
       centred(g, game.title, 1, 1);
       titleBones(g, BONE_INK[game.id]);
       rect(g, 33, 21, 5, 5, 4); rect(g, 34, 20, 3, 7, 4); at(g, 35, 22, 7);
-      if (lit) { centred(g, "PRESS", 10, 3); centred(g, "START", 18, 3); }
+      if (game.unavailable) { centred(g, "OUT OF", 10, 3); centred(g, "ORDER", 18, 3); }
+      else if (lit) { centred(g, "PRESS", 10, 3); centred(g, "START", 18, 3); }
       return bake(g, palette, PIXEL, 0.45);
     });
   });
@@ -2066,7 +2180,7 @@
   // ---- the retro games' loops -----------------------------------------------------------------------------
   // The mezzanine's cabinets loop their retro games as the stage's loop theirs: the same grid, frame count and PRESS
   // START blink, the best under the loop. Their names are too long for the 5x7 font, so the title is lettered in the
-  // carved signs' 3x5 alphabet. Every palette shares its first five inks (the glass, the cabinet's trim, bone, and the
+  // carved signs' five-row alphabet. Every palette shares its first five inks (the glass, the cabinet's trim, bone, and the
   // banana coin and its mark); each game's own follow.
   const RETRO_INKS = {
     invaders: ["#b98cff", "#c8ff5a", "#c68642", "#3a2414", "#8a5a2c", "#8e8e96", "#ff8a2a"],
@@ -2078,15 +2192,18 @@
     dash: ["#6fae3a", "#3a6e24", "#2f8a3a", "#8a5a2c", "#1b1410", "#c68642", "#3a2414", "#b98cff"],
     stacker: ["#8e8e96", "#5a5a62", "#d9953a", "#6fae3a", "#c8583a", "#4a7ab0", "#2fb8a0", "#fff3a0"]
   };
-  const retroPalette = (r) => ["#07080d", CABINETS[4 + r].trim, BONE, BANANA, "#8a5210", ...RETRO_INKS[RETRO[r].id]];
+  const retroPalette = (r) => ["#07080d", CABINETS.find((c) => c.retro === r).trim, BONE, BANANA, "#8a5210", ...RETRO_INKS[RETRO[r].id]];
   const smallCentred = (g, s, y, c) => {
     const G = BL.hubModels.SIGN_GLYPHS;
-    let x = Math.floor((g.w - (s.length * 4 - 1)) / 2);
+    let width = -1;
+    for (const ch of s) width += G[ch] ? G[ch][0].length + 1 : 4;
+    let x = Math.floor((g.w - width) / 2);
     for (const ch of s) {
       const rows = G[ch];
       if (rows) for (let row = 0; row < rows.length; row++) for (let k = 0; k < rows[row].length; k++) if (rows[row][k] === "1") at(g, x + k, y + row, c);
-      x += 4;
+      x += rows ? rows[0].length + 1 : 4;
     }
+    return width;
   };
   // A triangle wave over `n` frames, 0 at f = 0 and 1 half way.
   const tri = (f, n = FRAMES) => { const k = (f % n) / n; return k < 0.5 ? k * 2 : 2 - k * 2; };
@@ -2254,14 +2371,14 @@
       }
     }
   };
-  // A retro game's loop, by its index in RETRO: its title between two bones, then the anim box.
+  // A retro game's loop, by its index in RETRO: its title, flanked by bones when there is room, then the anim box.
   const retroFrames = variants((r) => {
     const game = RETRO[r], palette = retroPalette(r), frames = [];
     for (let f = 0; f < FRAMES; f++) {
       const g = grid(GRID_W, GRID_H);
-      smallCentred(g, game.title, 2, 1);
+      const width = smallCentred(g, game.title, 2, 1);
       RETRO_DRAW[game.id](g, f);
-      titleBones(g, 2);
+      if (width <= GRID_W - 10) titleBones(g, 2);
       frames.push(bake(g, palette, PIXEL, 0.45));
     }
     return frames;
@@ -2271,8 +2388,8 @@
     const game = RETRO[r], palette = retroPalette(r);
     return [true, false].map((lit) => {
       const g = grid(GRID_W, GRID_H);
-      smallCentred(g, game.title, 2, 1);
-      titleBones(g, 2);
+      const width = smallCentred(g, game.title, 2, 1);
+      if (width <= GRID_W - 10) titleBones(g, 2);
       rect(g, 33, 21, 5, 5, 3); rect(g, 34, 20, 3, 7, 3); at(g, 35, 22, 4);
       if (lit) { centred(g, "PRESS", 10, 2); centred(g, "START", 18, 2); }
       return bake(g, palette, PIXEL, 0.45);
@@ -3082,6 +3199,13 @@
         daubDot(g, -0.48, -0.02, 0.12, 0.12, EARTH_CHALK, e, 0, 0, 14);
         daubDot(g, -0.43, 0.01, 0.1, 0.1, "#6e4c2e", 0, 0, 0.002, 14);
         for (const [x, y] of [[0.5, 0.05], [0.62, -0.25], [-0.6, -0.4], [0.4, -0.45], [-0.3, 0.12]]) daubDot(g, x, y, 0.022, 0.022, EARTH_CHALK, e, 0.3, 0, 5);
+      },
+      block: () => {
+        daubPoly(g, [[-0.3, -0.55], [0.22, -0.55], [0.22, -0.05], [-0.3, -0.05]], EARTH_OCHRE, e, z);
+        daubPoly(g, [[-0.3, -0.05], [0.22, -0.05], [0.4, 0.08], [-0.12, 0.08]], "#d9953a", e, z);
+        daubPoly(g, [[0.22, -0.55], [0.4, -0.42], [0.4, 0.08], [0.22, -0.05]], "#a8703e", e, z);
+        daubStroke(g, [[-0.12, -0.48], [-0.12, -0.12]], 0.03, EARTH_CHALK, e, z * 2);
+        for (const [x, y] of [[-0.55, -0.3], [0.6, -0.2], [-0.5, -0.5], [0.55, -0.48]]) daubDot(g, x, y, 0.06, 0.05, EARTH_RED, e, 0, z, 8);
       },
       mine: () => {
         daubPoly(g, [[-0.66, -0.55], [0.66, -0.55], [0.52, -0.38], [0.2, -0.3], [-0.24, -0.33], [-0.56, -0.42]], EARTH_BLACK, 0, 0);
@@ -4199,11 +4323,11 @@
       sprig(gr, W / 2 + 0.02, -H / 6, 0.03, 0.4, -1, 0.3, 2, 0.22, leaf);
     });
   });
-  // The back room's door, closed for good: rough logs stood side by side and bound with two ropes, in a frame of
+  // The back room's door, Ooga Raid's way in: rough logs stood side by side and bound with two ropes, in a frame of
   // stone slabs, a bone ring for a handle, a peephole barred with bones, crossed bones pegged on under a timber plank
-  // brushed in chalk with where the poker is not; a coconut-shell lantern sitting on the lintel, its carved holes glowing
-  // so the sign reads in the dark under the deck; and a liana draped along the lintel and down the frame's outer
-  // side, leaves bunched at the lintel's ends.
+  // brushed in chalk with the game's name and its house rule; a coconut-shell lantern sitting on the lintel, its carved
+  // holes glowing so the sign reads in the dark under the deck; and a liana draped along the lintel and down the frame's
+  // outer side, leaves bunched at the lintel's ends.
   const backDoor = cached(() => {
     const { withJungle, liana, sagPoints, sprig, log } = BL.hubModels, round = [], flat = [], w = 1.3, h = 2.2, leaf = mulberry32(23);
     for (const sx of [-1, 1]) flat.push(bevelBox({ w: 0.2, h: h + 0.1, d: 0.26, color: "#6b625a", bevel: 0.05, offset: { x: sx * (w / 2 + 0.1), y: (h + 0.1) / 2, z: 0.02 } }));
@@ -4215,8 +4339,8 @@
     // Pegged across the door and its frame, so the frame's slabs never cover its ends.
     flat.push(bevelBox({ w: 1.66, h: 0.38, d: 0.05, color: TIMBER, bevel: 0.02, offset: { y: 1.55, z: 0.18 } }));
     for (const sx of [-1, 1]) round.push(moved(ball(0.022, TIMBER_DK, 6), sx * 0.76, 1.55, 0.21));
-    const words = brushWord(geometry(), "NO POKER HERE!", 0, 1.625, 0.12, 0.02, EARTH_CHALK, 0.35, 0.207);
-    flat.push(brushWord(words, "(MAYBE SOMEWHERE ELSE?)", 0, 1.465, 0.066, 0.012, EARTH_CHALK, 0.3, 0.207));
+    const words = brushWord(geometry(), "OOGA RAID", 0, 1.615, 0.17, 0.028, EARTH_CHALK, 0.35, 0.207);
+    flat.push(brushWord(words, "NO PAPER MONEY!", 0, 1.435, 0.066, 0.012, EARTH_CHALK, 0.3, 0.207));
     for (const sx of [-1, 1]) round.push(moved(turnedZ(boneBar(0.5, 0.025), sx * 0.6), 0, 0.8, 0.16));
     // The lantern: a coconut on the lintel, holes carved round its front with the fire glowing through them.
     const lamp = { y: h + 0.31, z: 0.08 };
@@ -4442,16 +4566,19 @@
 
   // ---- the staff's uniforms ---------------------------------------------------------------------------------
   // The game-room gorillas are the arcade's staff and dress as one crew: hide dyed staff red, trimmed with banana-gold
-  // braid and bone buttons, the arcade's gold token for a badge, and each role's own piece. Hats sit on the Agent's
-  // head (its frame: the skull block spans x -0.3..0.3, y 0..0.6 and z -0.17..0.34, the crest rising to 0.86 down the
-  // middle and the brow jutting to z 0.43 just under y 0.52): 0 the gamemaster's tall ringmaster's hat, red with a
-  // gold band and token, a charcoal brim and a plume; 1 the staff's red cap, its visor edged in gold, the token on its
-  // front (the token attendant, the prize clerk and the deck's attendant); 2 the mechanic's, the same cap with its
-  // goggles pushed up on it; 3 the snack runner's paper soda-jerk cap with a red band. Vests fit the Agent's chest
-  // frame (the torso spans x -5U..5U, y 0..12U, z -3.5U..3.5U, U = 0.086; knuckle-walking, its back faces up, so the
-  // token on the back and the braid carry the look from above): 0 the gamemaster's tailcoat, 1 the token attendant's
-  // vest and change apron, 2 the mechanic's vest and tool belt, 3 the snack runner's vest under a long white apron,
-  // 4 the staff vest itself (`uniformParts`); `staffProp` is what each one holds.
+  // braid, charcoal facings and bone buttons in the manner of an old livery, the arcade's gold token for a badge, and
+  // each role's own piece. Hats sit on the Agent's head (its frame: the skull block spans x -0.3..0.3, y 0..0.6 and
+  // z -0.17..0.34, the crest rising to 0.86 down the middle and the brow jutting to z 0.43 just under y 0.52): 0 the
+  // gamemaster's tall ringmaster's hat, red with a gold band and token, a charcoal brim and a plume; 1 the staff's red
+  // cap on a charcoal band between two gold rings, a gold chin cord buttoned at its sides, its rounded visor rimmed in
+  // gold over a charcoal underside, the token on its front (the token attendant, the prize clerk and the deck's
+  // attendant); 2 the mechanic's, the same cap with a shorter visor and its goggles pushed up on it; 3 the snack
+  // runner's paper soda-jerk cap with a red band. Vests fit the Agent's chest frame (the torso spans x -5U..5U,
+  // y 0..12U, z -3.5U..3.5U, U = 0.086, the shoulder mounds x 3U..7U either side, y 8U..13U, z -2.5U..2.5U;
+  // knuckle-walking, its back faces up, so the token on the back and the braid carry the look from above): 0 the
+  // gamemaster's tailcoat, 1 the token attendant's vest and change apron, 2 the mechanic's vest and tool belt, 3 the
+  // snack runner's vest under a long white apron, 4 the staff vest itself (`uniformParts`); `staffProp` is what each
+  // one holds.
   const AU = 0.086;
   const WEAR_HIDE = "#7a4a26";
   const WEAR_DARK = "#4a2e18";
@@ -4459,6 +4586,20 @@
   // The staff's feathers (and the prize crown's), [light, dark] rgb: red, bone-white, ochre and the charcoal a white
   // one is tipped in, a redder red and a paler white than the machines' `FEATHERS`.
   const FEATHER_TONES = [["#d8563a", "#8a2a1c"], ["#f2e8d0", "#b8a888"], ["#e0a040", "#9a6220"], ["#3a3432", "#1e1a18"]].map((p) => p.map(hexToRgb));
+  // A cap's visor seen from above, `reach` out from its back edge at the origin and 0.6 across, `k` times that: a
+  // squared-off oval (a superellipse of power 2.5), so it reads as a soft bill rather than a slab. Convex, [x, ahead].
+  const visorOutline = (reach, k) => ccw(Array.from({ length: 15 }, (_, n) => {
+    const t = n / 14 * Math.PI, c = Math.cos(t);
+    return [Math.sign(c) * Math.abs(c) ** 0.8 * 0.3 * k, Math.sin(t) ** 0.8 * reach * k];
+  }));
+  // The visor, thin: red over a gold rim a little wider and a charcoal underside, its back edge sunk in the crown's
+  // band (every corner inside the crown) and drooping `droop` over the brow. In the head's frame.
+  const visor = (reach, droop) => {
+    const lay = (k, d, y, color) => moved(turnedX(prism(visorOutline(reach, k), d, color), Math.PI / 2), 0, y, 0);
+    return moved(turnedX(merge(lay(1.06, 0.02, 0, STAFF_GOLD), lay(1, 0.026, 0.009, STAFF_RED), lay(0.93, 0.012, -0.011, STAFF_INK)), droop), 0, 0.585, 0.23);
+  };
+  // The chin cord across the cap's front just over the visor, [x, z] round the band, and its two side buttons.
+  const CHIN_CORD = [[-0.34, 0.23], [-0.2, 0.385], [0, 0.44], [0.2, 0.385], [0.34, 0.23]];
   const staffHat = variants((i) => {
     if (i === 0) {
       // The crown rises from a charcoal brim with its edge turned up, a gold band round its foot with the token on
@@ -4480,11 +4621,15 @@
         box({ w: 0.012, h: 0.02, d: 0.6, color: "#e4dccb", offset: { y: 0.915, z: 0.06 } })
       ]);
     }
-    // The cap: a red crown over the crest with a gold band and button, the visor drooping a little over the brow.
+    // The cap: a red crown over the crest on a charcoal band between two gold rings, a gold button on top, the chin
+    // cord and the rounded visor; the mechanic's visor is shorter, so the goggles read over it.
     const z = 0.04, round = [
-      turn([[0.37, 0.55], [0.37, 0.66], [0.335, 0.78], [0.23, 0.875], [0.11, 0.91], [0, 0.915]], 14, STAFF_RED), turn([[0.376, 0.56], [0.376, 0.645]], 14, STAFF_GOLD),
+      turn([[0.37, 0.55], [0.37, 0.66], [0.335, 0.78], [0.23, 0.875], [0.11, 0.91], [0, 0.915]], 14, STAFF_RED), turn([[0.376, 0.56], [0.376, 0.645]], 14, STAFF_INK),
+      ...[0.565, 0.625].map((y) => turn([[0.381, y], [0.381, y + 0.016]], 14, STAFF_GOLD)),
       moved(ball(0.035, STAFF_GOLD, 6), 0, 0.915, 0)
-    ].map((p) => moved(p, 0, 0, z)), flat = [moved(turnedX(merge(bevelBox({ w: 0.58, h: 0.035, d: 0.32, color: STAFF_RED, bevel: 0.012 }), box({ w: 0.6, h: 0.03, d: 0.03, color: STAFF_GOLD, offset: { z: 0.16 } })), 0.12), 0, 0.585, 0.56)];
+    ].map((p) => moved(p, 0, 0, z)), flat = [visor(i === 2 ? 0.36 : 0.44, 0.12)];
+    for (let n = 1; n < CHIN_CORD.length; n++) flat.push(beam(CHIN_CORD[n - 1][0], 0.62, CHIN_CORD[n - 1][1], CHIN_CORD[n][0], 0.62, CHIN_CORD[n][1], 0.012, STAFF_GOLD));
+    for (const s of [-1, 1]) round.push(moved(ball(0.018, STAFF_GOLD, 6), s * 0.34, 0.62, 0.22));
     if (i === 1) round.push(...staffToken(0.075).map((p) => moved(p, 0, 0.73, z + 0.345)));
     else {
       // The mechanic's goggles, pushed up onto the crown on a charcoal strap: brass rims round dark glass, looking up.
@@ -4493,7 +4638,14 @@
       for (const s of [-1, 1]) for (const p of [torus(0.07, 0.02, brass, 0, 12, 5), turn([[0, 0.004], [0.062, 0.004], [0.055, 0.014], [0, 0.016]], 10, "#3d6266", 0.3)]) round.push(moved(turnedX(p, 1.02), s * 0.11, 0.745, z + 0.36));
       flat.push(beam(-0.045, 0.745, z + 0.375, 0.045, 0.745, z + 0.375, 0.02, brass));
     }
-    return shaded(round, flat);
+    // Pull the excess rear dome forward around the shallower skull. Taper the take-in to zero at its square
+    // corners so they and the crest stay covered; keep the front, visor, width and height as authored.
+    const cap = shaded(round, flat);
+    for (let n = 0; n < cap.verts.length; n += 3) {
+      const x = cap.verts[n], z = cap.verts[n + 2];
+      if (z < 0) cap.verts[n + 2] = z * (1 - 0.3 * Math.max(0, 1 - x * x / (0.24 * 0.24)));
+    }
+    return cap;
   });
   // A tooth or fang `len` long hanging down from its top at the origin, a charm for the prize crown. A round part.
   const charmTooth = (len, r) => turn([[0, 0], [r, 0], [r * 0.85, -len * 0.4], [0, -len]], 6, BONE);
@@ -4513,35 +4665,59 @@
   // A panel of dyed hide and a strip of braid (or any flat box) at (x, y, z), in the chest's frame.
   const dyed = (w, h, d, x, y, z, color = STAFF_RED) => bevelBox({ w, h, d, color, bevel: 0.2 * AU, offset: { x, y, z } });
   const braid = (w, h, d, x, y, z, color = STAFF_GOLD) => box({ w, h, d, color, offset: { x, y, z } });
-  // The staff's vest over the Agent's chest: a back panel, two front panels either side of a canvas shirt front, a
-  // panel under each arm and a pad over each shoulder, all red hide, with gold braid along the hems, up the front's
-  // edges and round the shoulders, three bone buttons, the token on the back (the side a knuckle-walker shows most)
-  // and, with `badge`, a name badge on the chest. Returns [round, flat] for `shaded`.
-  const uniformParts = (badge) => {
-    const y0 = 2.6 * AU, y1 = 11.8 * AU, mid = (y0 + y1) / 2, h = y1 - y0, flat = [];
+  // A line of braid `w` thick between two points of the chest's frame, all given in U.
+  const piping = (ax, ay, az, bx, by, bz, w = 0.45, color = STAFF_GOLD) => beam(ax * AU, ay * AU, az * AU, bx * AU, by * AU, bz * AU, w * AU, color);
+  // The shoulder yoke, one a side: hide cut to the shoulder's section in (z, y) and stood across x from beside the
+  // neck to just outside the mound, closing the gap between the vest's top and the shoulder: over the mound's front,
+  // top, back and outer face, its foot below the mound's underside. Its front and back sit a hair inside the panels'
+  // outer faces, so where a panel overlaps it the panel's own edge is the seam, piped in gold.
+  const YOKE = ccw([[2.9, 7.8], [4.0, 10.6], [4.0, 11.9], [3.0, 13.4], [1.2, 13.75], [-2.0, 13.75], [-3.6, 13.3], [-4.0, 11.9], [-4.0, 10.6], [-2.9, 7.8]].map(([z, y]) => [z * AU, y * AU]));
+  const yoke = (s) => sideShape(YOKE, s * 5.2 * AU, 4.4 * AU, STAFF_RED);
+  // A front panel, side `s`: tailored, its hem cut to a point at the front edge, its neckline a V from `neck` up to
+  // the yoke's inner edge and its top sloping down to the side seam. Outline in U, [x, y].
+  const frontPanel = (s, neck) => moved(prism(ccw([[1.2, 1.9], [5.3, 2.7], [5.3, 11.2], [3.0, 11.9], [1.2, neck]].map(([x, y]) => [s * x * AU, y * AU])), 0.6 * AU, STAFF_RED), 0, 0, 3.8 * AU);
+  // The staff's vest over the Agent's chest, as livery: a back panel, two tailored front panels either side of a
+  // canvas shirt front under charcoal collar points, a panel under each arm, a yoke over each shoulder and a charcoal
+  // stand collar behind, all red hide; gold braid along the hems (a bone line over it), the front edges, the
+  // neckline, the yoke seams and across the back; with `coat` false two rows of bone buttons and a charcoal shoulder
+  // board edged in gold on each yoke; the token on the back (the side a knuckle-walker shows most) and, with
+  // `badge`, a name badge on the chest. The tailcoat (`coat`) closes higher for its frogging and wears epaulettes.
+  // Returns [round, flat] for `shaded`.
+  const uniformParts = (badge, coat = false) => {
+    const y0 = 2.6 * AU, y1 = 11.8 * AU, mid = (y0 + y1) / 2, h = y1 - y0, neck = coat ? 11.2 : 9.6, flat = [];
     const round = staffToken(2.3 * AU).map((p) => moved(turnedY(p, Math.PI), 0, 7.6 * AU, -4.1 * AU));
-    flat.push(dyed(10.6 * AU, h, 0.6 * AU, 0, mid, -3.8 * AU), dyed(2.4 * AU, h - AU, 0.4 * AU, 0, mid + 0.5 * AU, 3.62 * AU, CANVAS));
-    for (const y of [y0 + 0.3 * AU, y1 - 0.3 * AU]) flat.push(braid(10.8 * AU, 0.6 * AU, 0.7 * AU, 0, y, -3.85 * AU));
+    flat.push(dyed(10.6 * AU, h, 0.6 * AU, 0, mid, -3.8 * AU), dyed(7 * AU, h - AU, 0.4 * AU, 0, mid + 0.5 * AU, 3.62 * AU, CANVAS), dyed(6.2 * AU, 1.6 * AU, 1.9 * AU, 0, 12 * AU, -3 * AU, STAFF_INK));
+    flat.push(braid(10.8 * AU, 0.6 * AU, 0.7 * AU, 0, y0 + 0.3 * AU, -3.85 * AU), braid(10.8 * AU, 0.2 * AU, 0.5 * AU, 0, y0 + 1 * AU, -3.95 * AU, BONE));
+    flat.push(braid(14.6 * AU, 0.5 * AU, 0.7 * AU, 0, 11.5 * AU, -3.85 * AU), braid(6.4 * AU, 0.3 * AU, 2 * AU, 0, 12.75 * AU, -3 * AU));
     for (const s of [-1, 1]) {
-      flat.push(dyed(4.1 * AU, h, 0.6 * AU, s * 3.25 * AU, mid, 3.8 * AU), dyed(0.6 * AU, 7 * AU, 7.6 * AU, s * 5.3 * AU, 6.5 * AU, 0), dyed(4 * AU, 0.9 * AU, 6.4 * AU, s * 5.6 * AU, 13.45 * AU, -0.3 * AU));
-      flat.push(braid(0.55 * AU, h, 0.7 * AU, s * 1.45 * AU, mid, 3.85 * AU), braid(4.1 * AU, 0.6 * AU, 0.7 * AU, s * 3.25 * AU, y0 + 0.3 * AU, 3.85 * AU), braid(0.5 * AU, AU, 6.6 * AU, s * 7.55 * AU, 13.4 * AU, -0.3 * AU));
+      flat.push(frontPanel(s, neck), yoke(s), dyed(0.6 * AU, 7 * AU, 7.6 * AU, s * 5.3 * AU, 6.5 * AU, 0));
+      flat.push(braid(0.5 * AU, (neck - 2.1) * AU, 0.5 * AU, s * 1.4 * AU, (neck + 2.1) / 2 * AU, 4.15 * AU), piping(s * 1.4, neck - 0.1, 4.15, s * 3.05, 11.75, 4.15));
+      flat.push(piping(s * 1.3, 2.15, 4.15, s * 5.3, 2.95, 4.15, 0.5), piping(s * 1.3, 2.75, 4.15, s * 5.3, 3.55, 4.15, 0.2, BONE));
+      // The yoke seams: along the front panel's top and down its outer edge, round the armhole.
+      flat.push(piping(s * 5.25, 11.2, 4.12, s * 3.05, 11.85, 4.12, 0.35), piping(s * 5.32, 7.9, 4.12, s * 5.32, 11.2, 4.12, 0.35));
+      // The collar's charcoal points over the shirt, and a gold welt pocket at the hip.
+      flat.push(moved(prism(ccw([[s * 0.9 * AU, 11.9 * AU], [s * 2.9 * AU, 11.9 * AU], [s * 1.35 * AU, 10.3 * AU]]), 0.3 * AU, STAFF_INK), 0, 0, 4.3 * AU), braid(1.7 * AU, 0.28 * AU, 0.3 * AU, s * 3.4 * AU, 4.4 * AU, 4.15 * AU));
+      if (!coat) {
+        flat.push(braid(4 * AU, 0.4 * AU, 2.3 * AU, s * 5.3 * AU, 13.75 * AU, 0.1 * AU), dyed(3.8 * AU, 0.45 * AU, 2 * AU, s * 5.3 * AU, 13.9 * AU, 0.1 * AU, STAFF_INK));
+        round.push(moved(ball(0.3 * AU, BONE, 6), s * 3.85 * AU, 14.2 * AU, 0.1 * AU));
+        for (const y of [4.4, 6.2, 8]) round.push(moved(ball(0.3 * AU, BONE, 6), s * 2.1 * AU, y * AU, 4.2 * AU));
+      }
     }
-    for (const y of [5.2, 7.2, 9.2]) round.push(moved(ball(0.32 * AU, BONE, 6), 2.05 * AU, y * AU, 4.2 * AU));
     if (badge) flat.push(braid(2.1 * AU, 1.1 * AU, 0.3 * AU, -3.2 * AU, 9.4 * AU, 4.2 * AU, CANVAS), braid(1.6 * AU, 0.24 * AU, 0.1 * AU, -3.2 * AU, 9.6 * AU, 4.38 * AU, STAFF_RED), braid(1.1 * AU, 0.18 * AU, 0.1 * AU, -3.4 * AU, 9.15 * AU, 4.38 * AU, STAFF_INK));
     return [round, flat];
   };
   const staffVest = variants((i) => {
-    const [round, flat] = uniformParts(i === 1 || i === 2 || i === 4);
+    const [round, flat] = uniformParts(i === 1 || i === 2 || i === 4, i === 0);
     if (i === 0) {
       // The gamemaster's tailcoat: gold frogging across the front with bone toggles, gold epaulettes fringed down the
-      // arms, a canvas jabot at the throat, and two tails edged in gold hanging from the waist behind.
+      // arms over the yokes, a canvas jabot at the throat, and two tails edged in gold hanging from the waist behind.
       for (const y of [5.3, 7, 8.7, 10.4]) for (const s of [-1, 1]) {
         flat.push(braid(3.3 * AU, 0.42 * AU, 0.8 * AU, s * 3.15 * AU, y * AU, 3.9 * AU));
         round.push(moved(ball(0.36 * AU, BONE, 6), s * 1.75 * AU, y * AU, 4.3 * AU));
       }
       for (const s of [-1, 1]) {
-        flat.push(dyed(4.3 * AU, 0.7 * AU, 6.6 * AU, s * 5.6 * AU, 14 * AU, -0.3 * AU, STAFF_GOLD));
-        for (let k = 0; k < 5; k++) flat.push(moved(turnedY(prism(ccw([[-0.55 * AU, 0.2 * AU], [0.55 * AU, 0.2 * AU], [0, -(k % 2 ? 1.9 : 1.4) * AU]]), 0.4 * AU, STAFF_GOLD), Math.PI / 2), s * 7.75 * AU, 13.7 * AU, (-2.9 + k * 1.3) * AU));
+        flat.push(dyed(4.3 * AU, 0.7 * AU, 5.2 * AU, s * 5.6 * AU, 13.85 * AU, -0.3 * AU, STAFF_GOLD));
+        for (let k = 0; k < 5; k++) flat.push(moved(turnedY(prism(ccw([[-0.55 * AU, 0.2 * AU], [0.55 * AU, 0.2 * AU], [0, -(k % 2 ? 1.9 : 1.4) * AU]]), 0.4 * AU, STAFF_GOLD), Math.PI / 2), s * 7.75 * AU, 13.6 * AU, (-2.9 + k * 1.3) * AU));
         const outline = (pts) => ccw(pts.map(([x, y]) => [s * x * AU, y * AU]));
         flat.push(moved(prism(outline([[0.2, 3.5], [5.25, 3.5], [4.6, -3.95], [2.35, -5.45]]), 0.4 * AU, STAFF_GOLD), 0, 0, -4.75 * AU), moved(prism(outline([[0.5, 3.2], [4.9, 3.2], [4.3, -3.6], [2.4, -5]]), 0.5 * AU, STAFF_RED), 0, 0, -5.05 * AU));
       }
@@ -4553,8 +4729,8 @@
         flat.push(dyed(2.3 * AU, 2 * AU, AU, x * AU, 0.3 * AU, 4.95 * AU));
         for (const dx of [-0.45, 0.4]) round.push(moved(turnedX(turn([[0, 0], [0.55 * AU, 0], [0.55 * AU, 0.2 * AU], [0, 0.2 * AU]], 8, STAFF_GOLD), Math.PI / 2), (x + dx) * AU, 1.45 * AU, 4.75 * AU));
       }
-      for (const s of [-1, 1]) flat.push(beam(s * 2.6 * AU, 11.9 * AU, 3.6 * AU, 1.5 * AU, 8.6 * AU, 4.35 * AU, 0.22 * AU, STAFF_GOLD));
-      round.push(moved(turnedZ(turn([[0, -0.8 * AU], [0.42 * AU, -0.8 * AU], [0.42 * AU, 0.8 * AU], [0, 0.8 * AU]], 8, BONE), Math.PI / 2), 1.9 * AU, 8.1 * AU, 4.5 * AU));
+      for (const s of [-1, 1]) flat.push(beam(s * 2.6 * AU, 11.9 * AU, 4.2 * AU, 1.5 * AU, 8.6 * AU, 4.45 * AU, 0.22 * AU, STAFF_GOLD));
+      round.push(moved(turnedZ(turn([[0, -0.8 * AU], [0.42 * AU, -0.8 * AU], [0.42 * AU, 0.8 * AU], [0, 0.8 * AU]], 8, BONE), Math.PI / 2), 1.2 * AU, 8.9 * AU, 4.6 * AU));
     } else if (i === 2) {
       // The mechanic's tool belt: leather round the waist with a gold buckle, a stone hammer hung head up in a loop, a
       // pouch with a bone driver standing in it, and a red-striped rag.
@@ -4565,15 +4741,15 @@
       for (const y of [0.1, 1.2]) flat.push(braid(1.75 * AU, 0.3 * AU, 0.3 * AU, -4.4 * AU, y * AU, 4.6 * AU, STAFF_RED));
       round.push(moved(turnedZ(boneBar(2.2 * AU, 0.2 * AU), Math.PI / 2), -1.7 * AU, 3.2 * AU, 4.85 * AU));
     } else if (i === 3) {
-      // The snack runner's long white apron, skirt and bib, banded red at the hem and the waist, on straps over the
-      // shoulders; a gold bow at the collar and the name badge on the bib.
+      // The snack runner's long white apron, skirt and bib, banded red at the hem and the waist, on straps up over the
+      // yokes' fronts onto the shoulders; a gold bow at the collar and the name badge on the bib.
       flat.push(dyed(8 * AU, 9.4 * AU, 0.35 * AU, 0, -0.3 * AU, 4.35 * AU, APRON), dyed(5.2 * AU, 6.4 * AU, 0.35 * AU, 0, 7.8 * AU, 4.3 * AU, APRON));
       flat.push(braid(8.2 * AU, 0.7 * AU, 0.45 * AU, 0, -4.2 * AU, 4.4 * AU, STAFF_RED), braid(8.2 * AU, 0.35 * AU, 0.45 * AU, 0, -3.35 * AU, 4.4 * AU), braid(8.2 * AU, 0.6 * AU, 0.45 * AU, 0, 4.4 * AU, 4.45 * AU, STAFF_RED));
       for (const s of [-1, 1]) {
-        flat.push(beam(s * 2.4 * AU, 10.9 * AU, 4.3 * AU, s * 3 * AU, 12.2 * AU, 1.5 * AU, 0.35 * AU, APRON));
-        flat.push(moved(prism(ccw([[0, 0], [s * 1.3 * AU, 0.6 * AU], [s * 1.3 * AU, -0.6 * AU]]), 0.4 * AU, STAFF_GOLD), 0, 11.9 * AU, 4.2 * AU));
+        flat.push(piping(s * 2.4, 10.9, 4.35, s * 3.6, 12.3, 4.15, 0.35, APRON), piping(s * 3.6, 12.3, 4.15, s * 3.8, 13.6, 3.2, 0.35, APRON), piping(s * 3.8, 13.6, 3.2, s * 3.6, 13.95, 1.4, 0.35, APRON));
+        flat.push(moved(prism(ccw([[0, 0], [s * 1.3 * AU, 0.6 * AU], [s * 1.3 * AU, -0.6 * AU]]), 0.4 * AU, STAFF_GOLD), 0, 11.9 * AU, 4.45 * AU));
       }
-      round.push(moved(ball(0.35 * AU, STAFF_GOLD, 6), 0, 11.9 * AU, 4.35 * AU));
+      round.push(moved(ball(0.35 * AU, STAFF_GOLD, 6), 0, 11.9 * AU, 4.6 * AU));
       flat.push(braid(2.1 * AU, 1.1 * AU, 0.3 * AU, -1.2 * AU, 9.2 * AU, 4.55 * AU), braid(1.6 * AU, 0.24 * AU, 0.1 * AU, -1.2 * AU, 9.4 * AU, 4.72 * AU, STAFF_RED));
     }
     // 4: the staff vest alone, for the prize clerk and the deck's attendant.
@@ -4629,6 +4805,6 @@
   };
   Object.assign(BL.arcadeModels, {
     buildSteps,
-    haunt, steelDoor, gargoyle, gargoyleLetter, GARGOYLE_EYES, gargoyleLaser, ARENA_TOTEMS, ironFence, IRON_FENCE, spotCan, spotRods, wheelAt, wheelStop, lanterns, ceiling, stage, mezzanine, wheel, clawMachine, claw, pinball, pinAt, airHockey, hockeyPieces, changer, ropes, retroFrames, retroStart, retroLine, ride, rideBeat, poolRing, dartSight, boardPost, pinFlipper, pinLight, pinTooth, pinRamp, clawMark, poolTable, poolBall, poolCue, poolDot, dartBoard, dart, dartOche, clawBooth, clawPrize, ticketStrip, fameBoard, fameFrame, prizeShelf, pennants, discoBall, speakers, tableProps, trashBin, ticketBucket, directory, wornPatch, backDoor, chainLink, prize, prizeCounter, staffHat, staffVest, staffProp, bulbFrame, zoneSign, posterFrame, posterArt, table, planterPot, hall, signFrame, attractStart, bestLine, digit, board, skeeLane, skeeDot, hoopMachine, hoop, coconutShy, coconut, shyVine, coconutBall, balls, meter, arrow, snackBar
+    caveRoom, blockHall, blockWatchDoor, watchSignBoard, haunt, steelDoor, gargoyle, gargoyleLetter, GARGOYLE_EYES, gargoyleLaser, ARENA_TOTEMS, ironFence, IRON_FENCE, spotCan, spotRods, wheelAt, wheelStop, lanterns, ceiling, stage, mezzanine, wheel, clawMachine, claw, pinball, pinAt, airHockey, hockeyPieces, changer, ropes, retroFrames, retroStart, retroLine, ride, rideBeat, poolRing, dartSight, boardPost, pinFlipper, pinLight, pinTooth, pinRamp, clawMark, poolTable, poolBall, poolCue, poolDot, dartBoard, dart, dartOche, clawBooth, clawPrize, ticketStrip, fameBoard, fameFrame, prizeShelf, pennants, discoBall, speakers, tableProps, trashBin, ticketBucket, directory, wornPatch, backDoor, chainLink, prize, prizeCounter, staffHat, staffVest, staffProp, bulbFrame, zoneSign, posterFrame, posterArt, table, planterPot, hall, signFrame, rallyRepairBay, repairDriver, attractStart, bestLine, digit, board, skeeLane, skeeDot, hoopMachine, hoop, coconutShy, coconut, shyVine, coconutBall, balls, meter, arrow, snackBar
   });
 })();

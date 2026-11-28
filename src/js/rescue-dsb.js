@@ -17,7 +17,13 @@
 (() => {
   "use strict";
   const BL=window.BL,D=BL.rescueDogs;
-  const KEY="oogaboogaland.rescue.v1",LOGINS=16,LOGIN=/^[a-z0-9-]{1,39}$/,REACH=200,SAVE_EVERY=15;
+  const KEY="oogaboogaland.rescue.v1",LOGINS=16,LOGIN=/^(?:[a-z0-9-]{1,39}|github:[1-9][0-9]*)$/,REACH=200,SAVE_EVERY=15;
+  // Keep the saved dog in place; only its verified numeric owner may use a reserved legacy key.
+  const accountKey=me=>{
+    if(typeof me?.login!=="string")return null;
+    const owner=BL.accountIdentities.accountForId(me.id),reserved=BL.accountIdentities.accountForHandle(me.login);
+    return owner?owner.legacyLogin:reserved?(Number.isSafeInteger(me.id)&&me.id>0?`github:${me.id}`:null):me.login.toLowerCase();
+  };
   const SIGN_IN="Sign in to adopt a puppy.";
   const DEBUG_LOGIN="@debug"; // Cannot collide with a GitHub login or take one of its saved slots.
   const params=new URLSearchParams(location.search),DEBUG=params.has("debug");
@@ -46,9 +52,9 @@
   };
   // DSB Land's stray homes are the same on every visit: laid out on the first and kept for the page's life.
   let homes=null;
-  // `groundAt`, `walkable` and `flyable` are the scene's own queries, `reviewed` whether a restored login view already
-  // stands where a review link would put it.
-  const attach=({root,crew,input,hud,fx,pilot,interiors,vacancies,land,groundAt,walkable,flyable,camera,renderer,world,reviewed})=>{
+  // `groundAt`, `walkable` and `flyable` are the scene's own queries.
+  const attach=({root,crew,input,hud,fx,pilot,interiors,vacancies,land,groundAt,walkable,flyable,camera,renderer,world})=>{
+    let reviewed=false;
     const store=load(),DOG={bodyRadius:.3},LEVEL=BL.dsbCoast.LEVEL;
     const dry=(x,z)=>!!interiors.active||land.groundAt(x,z)>LEVEL+.05;
     const clear=(ax,az,bx,bz,y)=>dry(bx,bz)&&walkable(ax,az,bx,bz,y,.6,DOG);
@@ -59,7 +65,7 @@
     homes||=D.homesAcross({lanes:land.lanes,groundAt:(x,z)=>groundAt(x,z),clearAt:(x,y,z)=>land.groundAt(x,z)>LEVEL+.4&&clear(x-.5,z,x+.5,z,y)&&clear(x,z-.5,x,z+.5,y),count:D.STRAY_CAP,lane:96,radius:120,seed:5281,near:[rescueDoor.x,rescueDoor.z]});
     const room=()=>interiors.active?.room.id==="puppy-rescue"?interiors.active.room:null;
     // Debug alone lends a signed-out visitor the driven Ooga; signed-in ownership still takes precedence.
-    const login=()=>{const me=BL.net.state.me;return typeof me?.login==="string"?me.login.toLowerCase():DEBUG&&!me?DEBUG_LOGIN:null;};
+    const login=()=>{const me=BL.net.state.me;return me?accountKey(me):DEBUG?DEBUG_LOGIN:null;};
     const ownOoga=()=>{const own=BL.net.ownCharacter(),cave=own?crew.cavemen.get(own.handle):DEBUG&&!BL.net.state.me?crew.player:null;return cave&&!BL.net.mayDrive(cave.traits.name)?cave:null;};
     let changes=0,saveTimer=0,shownFor=undefined,lastLine=null,pick=null,inRoom=null;
     const persist=()=>{dogs.writeStore();save(store);changes=dogs.changes;saveTimer=0;};
@@ -138,5 +144,5 @@
       // An adoption as the dialog's Adopt makes it, under the same rules.
       adopt:(breed=0,name="Rex")=>adopted({breed,name,stray:-1})}};
   };
-  BL.rescueDsb={attach,load,save,KEY,LOGINS,SIGN_IN};
+  BL.rescueDsb={attach,load,save,accountKey,KEY,LOGINS,SIGN_IN};
 })();

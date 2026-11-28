@@ -75,8 +75,8 @@ normalizes a bare directory differently), with `scene=dsb&debug=1&nosim=1&chain=
 
 Append `day=80&time=1200&weather=clear`, `time=1730`, `time=2200`, or
 `weather=storm` using the existing daylight/weather debug controls. Normal play
-still begins at Portara. Review views are free camera presets; Walk resumes
-Yellow's actual position. Quality remains governed by the existing renderer.
+still begins at Portara. Review views are temporary looks; any movement
+ends one and returns to Yellow's own camera at its actual position. Quality remains governed by the existing renderer.
 
 ## Verification and limitations
 

@@ -3,7 +3,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const KEY = "oogaboogaland.sheet.v1", NAMES = ["bananas", "roster", "players", "loot", "chat"], DOCKS = ["left", "right", "bottom"], TAB_EDGE = 41;
+  const KEY = "oogaboogaland.sheet.v1", NAMES = ["bananas", "roster", "players", "chat", "cloud"], DOCKS = ["left", "right", "bottom"], TAB_EDGE = 41;
   // A touch drawer's sticks need this much of the screen left over it.
   const STICK_ROOM = 320;
   // A phone's tabs start 16px in and stop short of the 44px chevron tab at the far right.
@@ -13,36 +13,74 @@
     return !!owner && !panel.hidden && !owner.hidden && owner.dataset.open === "true" && !!owner.getClientRects().length;
   };
   const tabFor = (panel) => panel.closest(".sheet")?.querySelector(`[data-tab="${panel.dataset.panel}"]`);
-  // Unread counts on the players and chat tabs (#430) belong to the page, not to one scene's sheet: players.js and
-  // chat.js keep them, and whichever sheet is up paints them beside the locker's count.
-  const badges = { players: 0, chat: 0 };
+  // Unread counts on the players and chat tabs (#430), and on Ooga Chat's for a hosted chat's requests to speak
+  // (cloud-panel.js), belong to the page, not to one scene's sheet: those files keep them, and whichever sheet is up
+  // paints them.
+  const badges = { players: 0, chat: 0, cloud: 0 };
+  // What the counts are of, oldest first, for the bell's list: a line for each sign-in and sign-out (`note`, its `kind`
+  // "in" or "out" choosing the line's mark), and for The Commons a line a run of messages, "3 new messages": lines
+  // heard one after another with no other notice between them share one. At most NOTICES_KEPT lines; older ones are
+  // only counted (`earlier`). A tab's lines go with its count.
+  const NOTICES_KEPT = 8;
+  const notices = [], earlier = { players: 0, chat: 0, cloud: 0 };
   let paintBadges = null;
+  // Runs of messages left side by side, once the line between them has gone, are one run.
+  const mend = () => {
+    for (let i = notices.length - 1; i > 0; i--) if (notices[i].kind === "chat" && notices[i - 1].kind === "chat") {
+      notices[i - 1].count += notices[i].count;
+      notices.splice(i, 1);
+    }
+  };
+  const forget = (name) => {
+    for (let i = notices.length - 1; i >= 0; i--) if (notices[i].name === name) notices.splice(i, 1);
+    earlier[name] = 0;
+    mend();
+  };
+  const trim = () => { if (notices.length > NOTICES_KEPT) earlier[notices.shift().name]++; };
   const setBadge = (name, count) => {
-    if (badges[name] === count) return;
+    const more = count - badges[name];
+    if (!more) return;
     badges[name] = count;
+    if (!count) forget(name);
+    else if (name === "chat" && more > 0) {
+      const last = notices[notices.length - 1];
+      if (last && last.name === "chat") last.count += more;
+      else { notices.push({ name, key: null, kind: "chat", text: "", count: more }); trim(); }
+    }
     if (paintBadges) paintBadges();
   };
-  // Calls `fn` when the visitor shows they are looking at `panel`: a click or a keyboard press on its tab in any
-  // window, the tab taking focus while the panel shows, or a press, a scroll or focus inside the shown panel. A panel
-  // put back on screen by a scene change, a fold or a layout restore is not looked at.
-  const watchViews = (panel, fn) => {
-    const name = panel.dataset.panel, onTab = (e) => e.target.closest?.(`.sheet [data-tab="${name}"]`);
-    document.addEventListener("click", (e) => { if (onTab(e) || e.target.closest?.(".sheet-expand") && visible(panel)) fn(); });
-    document.addEventListener("focusin", (e) => { if (onTab(e) && visible(panel)) fn(); });
-    for (const type of ["pointerdown", "focusin", "wheel", "touchstart"])
-      panel.addEventListener(type, () => { if (visible(panel)) fn(); }, { passive: true });
+  // One event on a tab, counted and listed. `key` names a line that `unnote` may take back, count and all.
+  const note = (name, text, key = null, kind = "") => {
+    notices.push({ name, key, kind, text, count: 1 });
+    badges[name]++;
+    trim();
+    if (paintBadges) paintBadges();
   };
-  // Whether the visitor is in `panel` now, so a new arrival there needs no count: the page has focus and so does the panel.
-  const attending = (panel) => visible(panel) && document.hasFocus() && panel.contains(document.activeElement);
+  const unnote = (name, key) => {
+    let i = notices.length - 1;
+    while (i >= 0 && (notices[i].name !== name || notices[i].key !== key)) i--;
+    if (i >= 0) { notices.splice(i, 1); mend(); }
+    else if (earlier[name]) earlier[name]--;
+    else return;
+    badges[name]--;
+    if (paintBadges) paintBadges();
+  };
+  // Only an explicit tab opening acknowledges that tab. Layout and notification inspection leave counts alone.
+  const watchViews = (panel, fn) => panel.addEventListener("sheetview", fn);
+  const attending = (panel) => visible(panel) && document.hasFocus() && panel.contains(document.activeElement)
+    && !document.activeElement.closest(".sheet-notifications");
   const readRect = (rect) => rect && [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)
     && Math.abs(rect.x) <= 100000 && Math.abs(rect.y) <= 100000 && rect.width > 0 && rect.width <= 10000
     && rect.height > 0 && rect.height <= 10000 ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
   // Scene HUDs come and go, but the latest choice belongs to this page even when
   // storage is blocked. Only explicit panel changes update it; game hiding does not.
   let shared = null;
-  const create = ({ lootEnabled, signal }) => {
+  // A first visit is a readable storage holding no saved layout, judged once a page. The director asks `welcome`
+  // a beat after the world shows; any panel choice before then, here or by a shortcut, wins instead.
+  let firstVisit = null, live = null;
+  const create = ({ signal }) => {
     const root = document.getElementById("sheet"), parent = root.parentElement;
-    const content = root.querySelector(".sheet-content"), nav = root.querySelector(".sheet-panels"), footer = root.querySelector(".sheet-foot");
+    const content = root.querySelector(".sheet-content"), nav = root.querySelector(".sheet-panels");
     const panels = [...content.children], templates = [...nav.children].map((tab) => tab.cloneNode(true));
     const windows = [], listeners = [], bottom = window.matchMedia("(width < 1140px)"), coarse = window.matchMedia("(pointer: coarse)");
     const phone = window.matchMedia("(pointer: coarse) and (max-width: 720px), (pointer: coarse) and (max-height: 500px)");
@@ -51,15 +89,29 @@
     const drawerHeight = (b) => Math.ceil(b.height * drawerShare);
     // Where a phone's up tab lifts the drawer: the default, or in landscape, where that shows hardly anything, most of the screen.
     const fullHeight = (b) => b.width > b.height ? Math.ceil(b.height * 0.6) : drawerHeight(b);
-    let serial = 0, gesture = null, mergeTarget = null, suppressClick = false, hidden = false, folded = false, disposed = false, lootCount = 0, saveTimer = 0;
+    // A phone on its side leaves too short a drawer to stack the Bananas panel's title, a row of its slab and its 44px
+    // Feed the Oogas, so while that panel shows there its drawer stands at least BANANA_DRAWER tall (style.css gives
+    // the untouched drawer the same), its saved size untouched for the other tabs.
+    const BANANA_DRAWER = 200, shortLandscape = window.matchMedia("(pointer: coarse) and (orientation: landscape) and (max-height: 500px)");
+    const bananaTall = (w) => w.node === root && w.tab === "bananas" && shortLandscape.matches;
+    let serial = 0, gesture = null, mergeTarget = null, suppressClick = false, hidden = false, folded = false, disposed = false, saveTimer = 0;
     if (!shared) {
-      try { shared = JSON.parse(localStorage.getItem(KEY)); } catch { /* Storage may be unavailable. */ }
+      try {
+        const raw = localStorage.getItem(KEY);
+        if (firstVisit === null) firstVisit = raw === null;
+        shared = JSON.parse(raw);
+      } catch {
+        // Storage may be unavailable, which is no first visit: a choice to close could not be remembered.
+        if (firstVisit === null) firstVisit = false;
+      }
     }
     const saved = shared;
     folded = saved?.folded === true;
-    // The live players tab is for signed-in visitors only (players.js).
-    const available = (name) => NAMES.includes(name) && (name !== "loot" || lootEnabled) && (name !== "chat" || BL.net.state.backend)
-      && (name !== "players" || !!BL.net.state.me);
+    // Online Oogas and The Commons (`chat`) are for signed-in visitors only; Ooga Chat (`cloud`, the last tab) only
+    // where the room speaks its audience protocol (cloud-panel.js), so an older backend keeps the panels it had.
+    const available = (name) => NAMES.includes(name) && (name === "cloud" ? !!BL.cloudPanel && BL.cloudPanel.available()
+      : name !== "players" && name !== "chat" || !!BL.net.state.me);
+    const belled = () => !!BL.net.state.me;
     const isOpen = (w) => !folded && w.open && available(w.tab);
     // On a phone every tab folds into the main drawer; separate panels stay saved, hidden, for a larger screen.
     const ownerOf = (name) => windows.find((w) => (w.node === root || !phone.matches) && w.tab === name && (w.open || w.rect || w.kept));
@@ -68,9 +120,10 @@
       target.addEventListener(type, fn, { ...options, signal });
       listeners.push(() => target.removeEventListener(type, fn, options));
     };
+    let playing = null;
     const save = () => {
       window.clearTimeout(saveTimer); saveTimer = 0;
-      if (disposed) return;
+      if (disposed || playing) return;
       shared = { open: main.open, tab: main.tab, folded, drawer: 2,
         height: savedHeight, rect: main.rect, dock: main.dock, windows: windows.filter((w) => w !== main).map((w) => ({ open: w.open, tab: w.tab, rect: w.rect, dock: w.dock })) };
       try { localStorage.setItem(KEY, JSON.stringify(shared)); } catch { /* Storage may be unavailable. */ }
@@ -95,7 +148,8 @@
         for (const name of ["left", "top", "width", "height"]) w.node.style.removeProperty(name);
         w.node.dataset.sized = "false";
         w.node.dataset.dock = bottom.matches ? "bottom" : "right";
-        if (w.node === root) { root.dataset.sticks = "true"; parent.style.removeProperty("--drawer-height"); }
+        // The sticks need room over the drawer, which the Bananas panel's taller one leaves them too little of.
+        if (w.node === root) { root.dataset.sticks = String(!(bottom.matches && bananaTall(w))); parent.style.removeProperty("--drawer-height"); }
         if (phone.matches) w.node.style.setProperty("--sheet-tab-step", `${Math.min(72, (viewport().width - PHONE_TAB_INSET) / Math.max(1, w.tabCount || NAMES.length))}px`);
         else w.node.style.removeProperty("--sheet-tab-step");
         return;
@@ -107,7 +161,7 @@
       // Fitting a keyboard-reduced viewport must not overwrite the saved size.
       // Minimum sizes belong to explicit resizing, not closing a short default drawer.
       r.width = phone.matches ? width : Math.min(width, Math.max(1, preferred.width));
-      r.height = Math.min(height, Math.max(1, preferred.height));
+      r.height = Math.min(height, Math.max(1, preferred.height, atBottom && bananaTall(w) ? BANANA_DRAWER : 0));
       r.x = dock === "left" || phone.matches ? b.x : dock === "right" ? b.x + b.width - r.width : Math.max(b.x, Math.min(b.x + b.width - r.width, preferred.x));
       r.y = atBottom ? b.y + b.height - r.height : Math.max(b.y, Math.min(b.y + b.height - r.height, preferred.y));
       w.node.dataset.sized = "true"; w.node.dataset.dock = dock;
@@ -121,15 +175,10 @@
         else parent.style.removeProperty("--drawer-height");
       }
     };
-    const placeFooter = () => {
-      const owner = isOpen(main) ? main : [...windows].reverse().find(isOpen) || main;
-      if (footer.parentElement !== owner.body) owner.body.append(footer);
-    };
     const front = (w) => {
       const i = windows.indexOf(w);
       windows.splice(i, 1); windows.push(w);
-      for (let j = 0; j < windows.length; j++) windows[j].node.style.zIndex = String(13 + j);
-      placeFooter();
+      for (let j = 0; j < windows.length; j++) windows[j].node.style.zIndex = String((playing ? 90 : 13) + j);
     };
     const observe = new MutationObserver(notify);
     const makeWindow = (node, tab, rect, dock) => {
@@ -173,14 +222,87 @@
       // Keep those saved panels so a temporary absence never deletes a layout.
       if (rect && NAMES.includes(entry.tab) && !ownerOf(entry.tab)) addWindow(entry.tab, rect, entry.dock, entry.open !== false);
     }
-    // Each counted tab's badge, in every window; a tab's name reads its count too, as the badge itself is not read.
+    const notificationTemplate = document.getElementById("sheet-notifications");
+    const badgeText = (count) => count > 99 ? "99+" : String(count);
+    const showBadge = (badge, count) => {
+      const text = badgeText(count);
+      if (badge.hidden !== !count) badge.hidden = !count;
+      if (badge.textContent !== text) badge.textContent = text;
+    };
+    const notificationViews = panels.map((panel) => {
+      const view = notificationTemplate.content.firstElementChild.cloneNode(true);
+      const button = view.querySelector("button"), detail = view.querySelector(".sheet-unread"), badge = view.querySelector(".tab-count");
+      detail.id = panel.id + "-unread";
+      button.setAttribute("aria-describedby", detail.id);
+      panel.querySelector(".panel-title").append(view);
+      let hovered = false, focused = false, pinned = false;
+      // A row a line, made as the list first reaches it and kept: at most NOTICES_KEPT and the count of earlier ones.
+      // Each carries its mark, drawn by its kind (style.css): a green dot for a sign-in, a red one for a sign-out, The
+      // Commons' own icon for messages.
+      const rows = [];
+      const addRow = () => {
+        const node = document.createElement("li"), mark = document.createElement("span"), text = document.createElement("span");
+        mark.className = "sheet-unread-mark"; mark.setAttribute("aria-hidden", "true");
+        mark.append(BL.nativeIcons.svg("chat"));
+        node.append(mark, text); detail.append(node);
+        return { node, text };
+      };
+      const list = (lines, kinds) => {
+        for (let i = 0; i < lines.length; i++) {
+          const row = rows[i] || (rows[i] = addRow());
+          if (row.text.textContent !== lines[i]) row.text.textContent = lines[i];
+          if (row.node.dataset.kind !== kinds[i]) row.node.dataset.kind = kinds[i];
+          if (row.node.hidden) row.node.hidden = false;
+        }
+        for (let i = lines.length; i < rows.length; i++) if (!rows[i].node.hidden) rows[i].node.hidden = true;
+      };
+      const paint = () => {
+        const shown = hovered || focused || pinned;
+        if (detail.hidden === shown) {
+          button.setAttribute("aria-expanded", String(shown));
+          detail.hidden = !shown;
+        }
+        showBadge(badge, shown ? 0 : badges.players + badges.chat + badges.cloud);
+      };
+      const reset = () => { hovered = focused = pinned = false; paint(); };
+      on(button, "pointerenter", (e) => { if (e.pointerType !== "touch") { hovered = true; paint(); } });
+      on(button, "pointerleave", () => { hovered = false; paint(); });
+      on(button, "focus", () => { focused = button.matches(":focus-visible"); paint(); });
+      on(button, "blur", reset);
+      on(button, "click", () => {
+        if (hovered || focused) return;
+        pinned = !pinned;
+        paint();
+      });
+      on(button, "keydown", (e) => {
+        if (e.key !== "Escape" || detail.hidden) return;
+        e.preventDefault(); e.stopPropagation();
+        reset();
+      });
+      return { panel, view, list, paint, reset };
+    });
+    on(document, "pointerdown", (e) => {
+      for (const item of notificationViews) if (!item.view.contains(e.target)) item.reset();
+    }, { capture: true });
+    const lines = [], kinds = [];
     const showCounts = () => {
+      // The bell lists the events, newest first.
+      lines.length = kinds.length = 0;
+      for (let i = notices.length - 1; i >= 0; i--) {
+        const notice = notices[i];
+        lines.push(notice.kind === "chat" ? `${badgeText(notice.count)} new ${notice.count === 1 ? "message" : "messages"}` : notice.text);
+        kinds.push(notice.kind);
+      }
+      const older = earlier.players + earlier.chat + earlier.cloud;
+      if (older) { lines.push(`${badgeText(older)} earlier`); kinds.push("earlier"); }
+      if (!lines.length) { lines.push("No new notifications"); kinds.push("none"); }
+      for (const item of notificationViews) { item.list(lines, kinds); item.paint(); }
       for (const w of windows) for (const badge of w.nav.querySelectorAll(".tab-count")) {
-        const tab = badge.closest("[data-tab]"), name = tab.dataset.tab, count = name === "loot" ? lootCount : badges[name] || 0;
-        const text = count > 99 ? "99+" : String(count), label = tab.dataset.label || (tab.dataset.label = tab.getAttribute("aria-label"));
-        if (badge.hidden !== !count) badge.hidden = !count;
-        if (badge.textContent !== text) badge.textContent = text;
-        if (name !== "loot") tab.setAttribute("aria-label", count ? `${label}, ${text} new` : label);
+        const tab = badge.closest("[data-tab]"), name = tab.dataset.tab;
+        const count = isOpen(w) ? 0 : badges[name] || 0;
+        showBadge(badge, count);
+        const label = tab.dataset.label || (tab.dataset.label = tab.getAttribute("aria-label"));
+        tab.setAttribute("aria-label", count ? `${label}, ${badgeText(count)} new` : label);
       }
     };
     const expand = root.querySelector(".sheet-expand");
@@ -221,10 +343,17 @@
         w.body.inert = !open || w.node.hidden;
         w.body.setAttribute("aria-hidden", String(w.body.inert));
       }
-      placeFooter(); showCounts(); showExpand();
+      // The bell counts Online Oogas and The Commons, so it shows on every panel for signed-in contributors alone.
+      const bell = belled();
+      for (const item of notificationViews) {
+        if (item.view.hidden === bell) item.view.hidden = !bell;
+        if (!bell || !visible(item.panel)) item.reset();
+      }
+      showCounts(); showExpand();
       notify();
     };
     const close = (w) => {
+      firstVisit = false;
       if (w.node.contains(document.activeElement)) document.activeElement.blur();
       // A phone's untouched drawer stays untouched, so the sticks keep riding above it.
       if (!coarse.matches || w.node.dataset.dock !== "bottom") measure(w);
@@ -240,11 +369,13 @@
       observe.disconnect();
       for (const current of windows) observe.observe(current.node, { attributes: true, attributeFilter: ["data-open", "hidden"] });
     };
-    const select = (w, name) => {
+    const select = (w, name, viewed = false) => {
       if (!available(name)) return;
+      firstVisit = false;
       w = ownerOf(name) || w; folded = false;
       w.tab = name; w.open = true; w.node.dataset.open = "true";
       refresh(); front(w); save();
+      if (viewed) panels.find((panel) => panel.dataset.panel === name)?.dispatchEvent(new Event("sheetview"));
     };
     const measure = (w) => {
       if (w.rect) return;
@@ -293,7 +424,7 @@
     on(parent, "pointerdown", (e) => {
       const w = findWindow(e.target);
       if (!w || hidden || e.button !== 0 || !e.isPrimary || gesture) return;
-      front(w); suppressClick = false;
+      front(w); suppressClick = false; firstVisit = false;
       const handle = e.target.closest("[data-tab], .sheet-drag, .sheet-corner, .sheet-edge, .sheet-panels");
       if (!handle) return;
       e.preventDefault(); e.stopPropagation();
@@ -371,7 +502,7 @@
       if (suppressClick && e.detail !== 0) { suppressClick = false; e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (e.target.closest(".sheet-expand")) {
         expand.blur();
-        if (!isOpen(main)) select(main, available(main.tab) ? main.tab : "roster");
+        if (!isOpen(main)) select(main, available(main.tab) ? main.tab : "roster", true);
         else if (expand.dataset.dir === "up") raise();
         else close(main);
         return;
@@ -379,7 +510,7 @@
       const tab = e.target.closest("[data-tab]");
       if (tab) {
         if (tab.dataset.tab === w.tab && w.node.dataset.open === "true") close(w);
-        else select(w, tab.dataset.tab);
+        else select(w, tab.dataset.tab, true);
       }
     });
     on(parent, "keydown", (e) => {
@@ -391,9 +522,9 @@
         e.preventDefault(); e.stopPropagation();
         const tabs = w.tabs.filter((t) => !t.hidden), i = tabs.indexOf(tab);
         const next = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1) + tabs.length) % tabs.length;
-        select(w, tabs[next].dataset.tab); tabs[next].focus({ preventScroll: true });
+        select(w, tabs[next].dataset.tab, true); tabs[next].focus({ preventScroll: true });
       } else if (handle && arrows.includes(e.key)) {
-        e.preventDefault(); e.stopPropagation(); measure(w);
+        e.preventDefault(); e.stopPropagation(); measure(w); firstVisit = false;
         const step = e.shiftKey ? 32 : 10, dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
         const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
         if (handle.dataset.corner || handle.dataset.edge) resize(w, w.bounds, handle.dataset.corner || handle.dataset.edge, dx, dy);
@@ -404,7 +535,7 @@
     on(parent, "dblclick", (e) => {
       const w = findWindow(e.target);
       if (!w || !e.target.closest(".sheet-drag")) return;
-      finish();
+      finish(); firstVisit = false;
       if (w === main) {
         w.rect = null; w.dock = null; savedHeight = null;
         root.style.removeProperty("--sheet-height");
@@ -415,41 +546,78 @@
     on(window, "resize", layout); on(bottom, "change", layout); on(phone, "change", layout);
     if (window.visualViewport) { on(window.visualViewport, "resize", layout); on(window.visualViewport, "scroll", layout); }
     on(window, "pagehide", () => { finish(); save(); });
-    let backend = BL.net.state.backend, signedIn = !!BL.net.state.me;
+    let signedIn = !!BL.net.state.me, cloud = available("cloud");
     const unsubscribe = BL.net.subscribe(() => {
-      if (backend === BL.net.state.backend && signedIn === !!BL.net.state.me) return;
-      backend = BL.net.state.backend;
-      signedIn = !!BL.net.state.me;
+      if (signedIn === !!BL.net.state.me && cloud === available("cloud")) return;
+      signedIn = !!BL.net.state.me; cloud = available("cloud");
       finish();
       refresh(); save();
     });
     refresh();
     for (let i = 0; i < windows.length; i++) windows[i].node.style.zIndex = String(13 + i);
-    return {
-      setLootCount(count) { lootCount = count; showCounts(); },
+    // Games start folded without overwriting the visitor's ordinary panel choices.
+    const setPlaying = (on) => {
+      if (!!playing === !!on) return;
+      finish();
+      if (on) {
+        playing = { folded, windows: windows.map(w => ({ node: w.node, open: w.open, tab: w.tab })) };
+        for (const w of windows) w.open = false;
+        folded = true;
+        if (document.activeElement?.closest(".sheet")) document.activeElement.blur();
+      } else {
+        folded = playing.folded;
+        for (const w of windows) {
+          const saved = playing.windows.find(p => p.node === w.node);
+          w.open = saved?.open || false;
+          if (saved) w.tab = saved.tab;
+        }
+        playing = null;
+      }
+      for (let i = 0; i < windows.length; i++) windows[i].node.style.zIndex = String((playing ? 90 : 13) + i);
+      refresh();
+    };
+    const api = {
+      // The first visit's Bananas, only while panels are neither hidden nor folded for a game.
+      welcome() {
+        if (!firstVisit || disposed || hidden || playing || folded) return false;
+        select(main, "bananas");
+        return true;
+      },
+      setPlaying,
       selectTab(name) { select(ownerOf(name) || main, name); },
-      fold() { finish(); folded = true; if (document.activeElement?.closest(".sheet")) document.activeElement.blur(); refresh(); save(); },
+      fold() { finish(); firstVisit = false; folded = true; if (document.activeElement?.closest(".sheet")) document.activeElement.blur(); refresh(); save(); },
       escape() {
         const w = [...windows].reverse().find((w) => !w.node.hidden && w.node.dataset.open === "true" && w.node.getClientRects().length);
         if (!w) return false;
         finish(); close(w); return true;
       },
-      setHidden(on) { finish(); hidden = !!on; if (hidden && document.activeElement?.closest(".sheet")) document.activeElement.blur(); refresh(); },
+      setHidden(on) { if (hidden === !!on) return; finish(); hidden = !!on; if (hidden && document.activeElement?.closest(".sheet")) document.activeElement.blur(); refresh(); },
       dispose() {
-        finish(); save(); disposed = true; observe.disconnect(); unsubscribe();
+        setPlaying(false); finish(); save(); disposed = true; observe.disconnect(); unsubscribe();
         if (paintBadges === showCounts) paintBadges = null;
         for (const off of listeners) off();
         listeners.length = 0;
-        for (const panel of panels) { content.append(panel); panel.hidden = panel.dataset.panel !== main.tab; }
-        main.body.append(footer);
+        for (const { view } of notificationViews) view.remove();
+        for (const panel of panels) { content.append(panel); panel.hidden = !available(panel.dataset.panel) || panel.dataset.panel !== main.tab; }
         main.body.inert = false; main.body.removeAttribute("aria-hidden");
         for (const w of windows) if (w !== main) w.node.remove();
         root.querySelector(".sheet-drag").remove();
         for (const handle of root.querySelectorAll(".sheet-corner, .sheet-edge")) handle.remove();
         root.hidden = false;
+        if (live === api) live = null;
         notify();
       }
     };
+    live = api;
+    return api;
   };
-  BL.sheet = { create, visible, tabFor, setBadge, watchViews, attending };
+  // Asked once by the director: a missed moment (no sheet up, a game, a choice already made) is not tried again.
+  const welcome = () => {
+    const opened = !!live && live.welcome();
+    firstVisit = false;
+    return opened;
+  };
+  // Opens a tab on the live sheet (cloud-panel.js asks a chat's host there before the banner's Sign out).
+  const selectTab = (name) => { if (live) live.selectTab(name); };
+  BL.sheet = { create, visible, tabFor, setBadge, note, unnote, watchViews, attending, welcome, selectTab };
 })();

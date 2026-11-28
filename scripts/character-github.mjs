@@ -17,9 +17,11 @@ export const createGitHub = (repo, token, fetcher = fetch) => {
   const api = (path, method, body, missing) => request(`repos/${repo}/${path}`, method, body, missing);
   const list = async (path, limit = 10) => {
     const rows = [];
-    for (let page = 1; page <= limit; page++) {
+    for (let page = 1; page <= limit + 1; page++) {
       const batch = await api(`${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${page}`);
       if (!Array.isArray(batch)) throw new Error("Expected GitHub list");
+      // A full last page may be the end of the list: only rows past the limit refuse.
+      if (page > limit && batch.length) break;
       rows.push(...batch);
       if (batch.length < 100) return rows;
     }
@@ -51,11 +53,13 @@ export const createGitHub = (repo, token, fetcher = fetch) => {
     const result = await request("graphql", "POST", {
       query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
       variables: { input: { branch: { repositoryNameWithOwner: repo, branchName: branch }, expectedHeadOid: expected,
-        message: { headline: message }, fileChanges: {
+        message: { headline: message.split("\n")[0], ...(message.includes("\n") ? { body: message.slice(message.indexOf("\n") + 1).trim() } : {}) }, fileChanges: {
           additions: additions.map(({ path, source }) => ({ path, contents: Buffer.from(source).toString("base64") })),
           deletions: deletions.map((path) => ({ path })) } } }
     });
     return result.data.createCommitOnBranch.commit.oid;
   };
-  return { repo, api, list, tree, file, commit };
+  const account = (idOrLogin) => request(Number.isSafeInteger(idOrLogin)
+    ? `user/${idOrLogin}` : `users/${encodeURIComponent(idOrLogin)}`);
+  return { repo, api, list, tree, file, commit, account };
 };

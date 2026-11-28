@@ -34,6 +34,7 @@
   const create = (spots) => {
     let ctx = null, master = null, buffer = null, ready = false, muted = false, disposed = false;
     muted = BL.sound.muted;
+    const soundChannel = BL.sound.channel("factory");
     const tones = [], noises = [], bed = {};
     let toneNext = 0, noiseNext = 0, since = 0, clock = 0, anvilIn = 0, speed = 0;
     // Where the visitor hears from, the way the view faces on the ground, and where the last cue was placed.
@@ -83,7 +84,7 @@
 
     const init = () => {
       ctx = new AudioContext();
-      master = gain(muted ? 0 : MASTER, ctx.destination);
+      master = gain(muted ? 0 : MASTER, soundChannel.node(ctx));
       buffer = ctx.createBuffer(1, ctx.sampleRate * NOISE_SECONDS, ctx.sampleRate);
       const data = buffer.getChannelData(0);
       for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
@@ -620,7 +621,7 @@
     const offSound = BL.sound.subscribe(setMuted);
 
     const dispose = () => {
-      offSound();
+      offSound(); soundChannel.release();
       disposed = true;
       window.removeEventListener("pointerdown", activate, true);
       window.removeEventListener("keydown", activate, true);

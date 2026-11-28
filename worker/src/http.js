@@ -2,7 +2,8 @@
 
 import { cookieNames, parseCookies } from "./cookies.js";
 import { getSession } from "./db.js";
-import { contributorFor } from "./contributor-access.js";
+import { contributorDecision, contributorForEnv } from "./contributor-access.js";
+import { oogatron } from "./contributor-policy.js";
 
 const BASE_HEADERS = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
 
@@ -11,6 +12,23 @@ export const json = (data, status = 200, headers = {}) =>
 
 export const text = (body, status, headers = {}) =>
   new Response(body, { status, headers: { ...BASE_HEADERS, "content-type": "text/plain; charset=utf-8", ...headers } });
+
+/** A request's body as text, read no further than `max` bytes; null past that, where `request.text()` would buffer it all. */
+export const readBody = async (request, max) => {
+  if (Number(request.headers.get("content-length") || 0) > max) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader(), bytes = new Uint8Array(max);
+  let used = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (used + value.byteLength > max) { await reader.cancel(); return null; }
+      bytes.set(value, used); used += value.byteLength;
+    }
+    return new TextDecoder().decode(bytes.subarray(0, used));
+  } finally { reader.releaseLock(); }
+};
 
 export const redirect = (location, cookies = []) => {
   const headers = new Headers(BASE_HEADERS);
@@ -45,24 +63,48 @@ export const allowed = async (limiter, key) => !limiter || (await limiter.limit(
 export const sessionToken = (request, env) =>
   parseCookies(request.headers.get("cookie")).get(cookieNames(env.SITE_ORIGIN).session) || null;
 
-const findSession = async (request, env, removal) => {
+const findSession = async (request, env, removal, strict = false) => {
   const token = sessionToken(request, env);
   if (!token) return null;
   try {
     const found = await getSession(env.DB, token);
     if (!found) return null;
     if (removal) return { ...found, token };
-    const character = await contributorFor(found.player.login);
+    const { character, fresh } = await contributorDecision(contributorForEnv(env), found.player.login, found.player.id, oogatron(env));
+    if (!character && !fresh) throw Object.assign(new Error("Character catalog is unavailable"), { code: "character_unavailable" });
     return character ? { ...found, token, character } : null;
   } catch (err) {
-    console.error("session lookup failed", err);
+    if (err.code !== "character_unavailable") console.error("session lookup failed", err);
+    // `/api/me` says it could not tell rather than "signed out", which a page believes for its whole life.
+    if (strict) throw err;
     return null;
   }
 };
 
 /** `{ player, session, token, character }` for a current character owner, or null. */
-export const getSessionFromRequest = (request, env) => findSession(request, env, false);
+export const getSessionFromRequest = (request, env, strict = false) => findSession(request, env, false, strict);
 
 // Losing character eligibility must not prevent clearing one's sessions or deleting one's account.
 // This authenticates ownership only; use exclusively for those removal operations.
-export const getSessionForRemoval = (request, env) => findSession(request, env, true);
+export const getSessionForRemoval = (request, env, strict = false) => findSession(request, env, true, strict);
+
+// A temporary catalog outage must not tell a reconnecting client that its account was signed out.
+export const serviceSession = async (request, env) => {
+  try { return await getSessionFromRequest(request, env, true); }
+  catch (error) {
+    return error.code === "character_unavailable"
+      ? text("Characters temporarily unavailable", 503, { "retry-after": "15" }) : null;
+  }
+};
+
+// The request passed on to a socket's object, with the player as the session says and nothing a client sent of its own.
+export const asPlayer = (request, found, extra = null) => {
+  const headers = new Headers(request.headers);
+  for (const name of [...headers.keys()]) if (name.startsWith("x-player-") || name === "x-game-name") headers.delete(name);
+  headers.set("x-player-id", String(found.player.id));
+  headers.set("x-player-login", found.player.login);
+  headers.set("x-player-display", found.player.display || found.player.login);
+  headers.set("x-player-contributor", "1");
+  if (extra) for (const [name, value] of Object.entries(extra)) headers.set(name, value);
+  return new Request(request, { headers });
+};

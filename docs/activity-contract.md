@@ -17,9 +17,9 @@ spots, then, once the forest is full, onto the chamber floor under the lake,
 taken in one fixed order (the Nth overflow sleeper takes the Nth spot) and
 searched once a page only as far as sleepers need them. The search uses the
 rainforest's original scenery transforms, so passing players and shaking trees
-cannot change the cached order. Each visit keeps its own bed reservations. A signed-in visitor
-arrives awake beside the pile regardless of activity, without changing their
-contribution timestamps.
+cannot change the cached order. Each visit keeps its own bed reservations. A visitor
+arrives awake where they last stood in this browser, or round the pile on a first
+visit, regardless of activity and without changing their contribution timestamps.
 
 Roster activity labels use yellow **clankin**, orange **chillin**, and gray **sleepin**.
 A separate dot before the name is green when `cave.humanControlled` is true and gray
@@ -64,10 +64,32 @@ contributed within the past hour, so the adapter ignores rows without a valid
 activity timestamp. Profile names, email addresses, and avatars are not imported.
 
 The activity adapter is event-type agnostic, so every event type shares the same
-one-hour clanking and 24-hour chilling windows through `last_seen_at`.
-Oogatron currently stores `mergedAt` in a pull request event's payload but timestamps
-that event with the pull request's creation time; an older pull request merged today
-therefore still needs an Oogatron-side event/timestamp update to count as activity today.
+one-hour clanking and 24-hour chilling windows through `last_seen_at`. A merge is
+its own event, timed when the pull request was merged and credited to whoever
+merged it, so merging an old pull request today is activity today.
+
+## Activity and contribution counts
+
+Activity and the counts are two different things. Activity is everything
+Oogatron sees, and it alone sets an Ooga's state and the cave it works at: a push
+to a pull request's branch, a comment or a merge wakes an Ooga at once.
+
+The counts (the Contributions number on a roster strip, its kinds, its repository
+chips, the "most contributions" sort and the jumbotron's leaderboards) follow
+GitHub's contribution graph, within the OogaBoogaX repositories alone:
+
+- **Commits** count once they are on the repository's default branch. A commit
+  only on a pull request's branch is activity until it lands; a squash merge's
+  one commit counts for the pull request's author, and a merge commit for its
+  author. A rebased or amended patch counts once.
+- **Pull requests**, **reviews** and **issues** opened count as they happen.
+- **Comments** and **merges** are activity, not contributions: the strip shows
+  them on a line of their own, outside the total, and the snapshot carries a
+  `merges` count and leaderboard of their own.
+
+Oogatron keeps both from one store: every distinct event is activity
+(`counted`), and its `tally` is what the counts read. See Oogatron's README,
+How activity is counted.
 
 Repository names normalize to lowercase through `activity-repos.js`. Any
 `OogaBoogaX/<repo>` is accepted, with `w-s-bitcoin/entropylab` as the historical
@@ -111,7 +133,7 @@ Malformed, future, repeated, and older timestamps do not replace newer activity.
 allocation-free work-route query; pass the canonical lowercase repository key.
 `stateFor(contributor)` and `ageLabel(contributor)` use the newest timestamp across
 projects. The roster orders characters from newest to oldest activity and displays
-minute-level ages for the first hour. `subscribe(callback)` reports accepted activity
+minute-level ages for the first hour. Online presence never changes that order. `subscribe(callback)` reports accepted activity
 batches and returns an unsubscribe function. These updates supplement the existing
 minute status refresh, which advances every visible age and lets working status expire
 without receiving a new event.

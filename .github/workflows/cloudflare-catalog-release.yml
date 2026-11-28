@@ -1,0 +1,324 @@
+name: Deploy Cloudflare with a character catalog
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      target_sha:
+        type: string
+        required: true
+      resume:
+        type: boolean
+        default: false
+      replace_held_target:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# The caller holds cloudflare-staging/production for this entire transaction.
+# A second concurrency group here would deadlock a reusable workflow against its caller.
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: character-catalog-${{ inputs.environment }}
+    steps:
+      - name: Validate approved immutable preflight inputs
+        run: node -e 'if (!["staging","production"].includes(process.env.CATALOG_ENVIRONMENT)) throw new Error("Invalid environment"); for (const key of ["TOOLING_SHA","TARGET_SHA"]) if (!/^[a-f0-9]{40}$/.test(process.env[key] || "")) throw new Error("Approved immutable SHA required"); if (process.env.REPLACE_HELD_TARGET && (!/^[a-f0-9]{40}$/.test(process.env.REPLACE_HELD_TARGET) || process.env.RESUME === "true")) throw new Error("Replacement requires the exact failed SHA and cannot also resume")'
+        env:
+          CATALOG_ENVIRONMENT: ${{ inputs.environment }}
+          TOOLING_SHA: ${{ vars.CHARACTER_CATALOG_TOOLING_SHA }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          REPLACE_HELD_TARGET: ${{ inputs.replace_held_target }}
+          RESUME: ${{ inputs.resume }}
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ vars.CHARACTER_CATALOG_TOOLING_SHA }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target_sha }}
+          path: release
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      # No Cloudflare or publication credentials: compare every already published immutable version before fencing.
+      - name: Preserve published hat versions before starting the release handoff
+        run: node tooling/scripts/equipment-retention.mjs preflight "$CATALOG_ENVIRONMENT" release
+        env:
+          CATALOG_ENVIRONMENT: ${{ inputs.environment }}
+  prepare:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: character-catalog-${{ inputs.environment }}
+    outputs:
+      tooling: ${{ vars.CHARACTER_CATALOG_TOOLING_SHA }}
+      baseline: ${{ steps.plan.outputs.baseline }}
+      engine: ${{ steps.plan.outputs.engine }}
+      reuse: ${{ steps.plan.outputs.reuse }}
+      artifact: ${{ steps.artifact.outputs.artifact-id }}
+    steps:
+      - name: Validate approved immutable deployment inputs
+        run: node -e 'if (!["staging","production"].includes(process.env.CATALOG_ENVIRONMENT)) throw new Error("Invalid environment"); for (const key of ["TOOLING_SHA","TARGET_SHA"]) if (!/^[a-f0-9]{40}$/.test(process.env[key] || "")) throw new Error("Approved immutable SHA required")'
+        env:
+          CATALOG_ENVIRONMENT: ${{ inputs.environment }}
+          TOOLING_SHA: ${{ vars.CHARACTER_CATALOG_TOOLING_SHA }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ vars.CHARACTER_CATALOG_TOOLING_SHA }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Preserve live characters and fence the old publication context
+        id: plan
+        run: |
+          args=(prepare --environment "$CATALOG_ENVIRONMENT" --target "$TARGET_SHA" --resume "$RESUME" --output plan)
+          if [ -n "$REPLACE_HELD_TARGET" ]; then args+=(--replace-held-target "$REPLACE_HELD_TARGET"); fi
+          node tooling/scripts/character-catalog-deploy.mjs "${args[@]}"
+        env:
+          CATALOG_ENVIRONMENT: ${{ inputs.environment }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          RESUME: ${{ inputs.resume }}
+          REPLACE_HELD_TARGET: ${{ inputs.replace_held_target }}
+          GH_TOKEN: ${{ github.token }}
+          CHARACTER_CATALOG_ENGINE: ${{ vars.CHARACTER_CATALOG_ENGINE }}
+          CHARACTER_CATALOG_R2_ACCOUNT_ID: ${{ vars.CHARACTER_CATALOG_R2_ACCOUNT_ID }}
+          CHARACTER_CATALOG_R2_BUCKET: ${{ vars.CHARACTER_CATALOG_R2_BUCKET }}
+          CHARACTER_CATALOG_R2_ACCESS_KEY_ID: ${{ secrets.CHARACTER_CATALOG_R2_WRITE_ACCESS_KEY_ID }}
+          CHARACTER_CATALOG_R2_SECRET_ACCESS_KEY: ${{ secrets.CHARACTER_CATALOG_R2_WRITE_SECRET_ACCESS_KEY }}
+      - name: Save the fenced plan for deployment and recovery
+        id: artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: catalog-deploy-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: plan/
+          if-no-files-found: error
+          retention-days: 7
+
+  render:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      artifact: ${{ steps.artifact.outputs.artifact-id }}
+    steps:
+      - name: Validate immutable renderer inputs
+        run: node -e 'for (const key of ["TOOLING_SHA","BASELINE_SHA"]) if (!/^[a-f0-9]{40}$/.test(process.env[key] || "")) throw new Error("Invalid immutable renderer revision")'
+        env:
+          TOOLING_SHA: ${{ needs.prepare.outputs.tooling }}
+          BASELINE_SHA: ${{ needs.prepare.outputs.baseline }}
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.tooling }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        if: needs.prepare.outputs.reuse != 'true'
+        with:
+          ref: ${{ needs.prepare.outputs.baseline }}
+          path: release
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.artifact }}
+          path: plan
+          merge-multiple: true
+      # No environment, storage credentials or deployment credentials reach this job.
+      - name: Reuse verified immutable portraits on redeployment or recovery
+        if: needs.prepare.outputs.reuse == 'true'
+        run: node -e 'const fs=require("node:fs"); fs.mkdirSync("rendered"); for (const name of ["portraits.json","portraits.png"]) fs.copyFileSync("plan/"+name,"rendered/"+name,fs.constants.COPYFILE_EXCL)'
+      - name: Render approved baseline portraits
+        if: needs.prepare.outputs.reuse != 'true'
+        run: node tooling/scripts/character-catalog-render.mjs --baseline-dir release --catalog plan/catalog.json --output rendered
+        env:
+          CHROME: /usr/bin/google-chrome
+      - uses: actions/upload-artifact@v6
+        id: artifact
+        with:
+          name: catalog-deploy-portraits-${{ github.run_id }}-${{ github.run_attempt }}
+          path: rendered/
+          if-no-files-found: error
+          retention-days: 7
+
+  stage:
+    needs: [prepare, render]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: character-catalog-${{ inputs.environment }}
+    steps:
+      - name: Recheck approved immutable tooling
+        run: node -e 'if (!/^[a-f0-9]{40}$/.test(process.env.TOOLING_SHA || "") || process.env.TOOLING_SHA !== process.env.PLANNED_SHA) throw new Error("Approved tooling changed; prepare again")'
+        env:
+          TOOLING_SHA: ${{ vars.CHARACTER_CATALOG_TOOLING_SHA }}
+          PLANNED_SHA: ${{ needs.prepare.outputs.tooling }}
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.tooling }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.artifact }}
+          path: plan
+          merge-multiple: true
+      - uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ needs.render.outputs.artifact }}
+          path: rendered
+          merge-multiple: true
+      - name: Reverify the approved target and publish its catalog before code deployment
+        run: node tooling/scripts/character-catalog-deploy.mjs stage --environment "$CATALOG_ENVIRONMENT" --plan plan/plan.json --portraits rendered
+        env:
+          CATALOG_ENVIRONMENT: ${{ inputs.environment }}
+          GH_TOKEN: ${{ github.token }}
+          CHARACTER_CATALOG_R2_ACCOUNT_ID: ${{ vars.CHARACTER_CATALOG_R2_ACCOUNT_ID }}
+          CHARACTER_CATALOG_R2_BUCKET: ${{ vars.CHARACTER_CATALOG_R2_BUCKET }}
+          CHARACTER_CATALOG_R2_ACCESS_KEY_ID: ${{ secrets.CHARACTER_CATALOG_R2_WRITE_ACCESS_KEY_ID }}
+          CHARACTER_CATALOG_R2_SECRET_ACCESS_KEY: ${{ secrets.CHARACTER_CATALOG_R2_WRITE_SECRET_ACCESS_KEY }}
+
+  deploy:
+    needs: [prepare, stage]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: character-catalog-${{ inputs.environment }}
+    steps:
+      - name: Recheck approved immutable deployment revisions
+        run: node -e 'if (!/^[a-f0-9]{40}$/.test(process.env.TOOLING_SHA || "") || process.env.TOOLING_SHA !== process.env.PLANNED_SHA || !/^[a-f0-9]{40}$/.test(process.env.BASELINE_SHA || "")) throw new Error("Approved deployment revisions changed")'
+        env:
+          TOOLING_SHA: ${{ vars.CHARACTER_CATALOG_TOOLING_SHA }}
+          PLANNED_SHA: ${{ needs.prepare.outputs.tooling }}
+          BASELINE_SHA: ${{ needs.prepare.outputs.baseline }}
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.tooling }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.baseline }}
+          path: release
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.artifact }}
+          path: plan
+          merge-multiple: true
+      - name: Configure the explicit catalog namespace in a temporary release config
+        run: node tooling/scripts/character-catalog-deploy.mjs config --environment "$CATALOG_ENVIRONMENT" --plan plan/plan.json --release-dir release
+        env:
+          CATALOG_ENVIRONMENT: ${{ inputs.environment }}
+          CHARACTER_CATALOG_R2_ACCOUNT_ID: ${{ vars.CHARACTER_CATALOG_R2_ACCOUNT_ID }}
+          CHARACTER_CATALOG_R2_BUCKET: ${{ vars.CHARACTER_CATALOG_R2_BUCKET }}
+      - name: Refresh Oogatron activity snapshot
+        working-directory: release
+        run: node scripts/jumbotron-data.mjs "$OOGATRON_STATS_URL"
+        env:
+          OOGATRON_STATS_URL: https://oogatron.wickedsmartbitcoin.workers.dev/v2/stats
+      - name: Build and stage the approved site with its catalog compatibility metadata
+        working-directory: release
+        run: npm run build:site
+        env:
+          CHARACTER_CATALOG_BASELINE: ${{ needs.prepare.outputs.baseline }}
+          CHARACTER_CATALOG_ENGINE: ${{ needs.prepare.outputs.engine }}
+          CHARACTER_CATALOG_ENVIRONMENT: ${{ inputs.environment }}
+      - name: Install Worker dependencies
+        working-directory: release
+        run: npm ci --prefix worker --omit=dev
+      - name: Worker checks
+        working-directory: release
+        run: node --test "worker/test/*.test.mjs"
+      - name: Apply D1 migrations
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CHARACTER_CATALOG_R2_ACCOUNT_ID }}
+          workingDirectory: release
+          wranglerVersion: '4.153.0'
+          command: d1 migrations apply DB --remote --config .catalog-wrangler.json
+      - name: Check whether the approved target enables account equipment
+        id: equipment
+        run: node -e 'const fs=require("node:fs"),c=JSON.parse(fs.readFileSync("release/.catalog-wrangler.json","utf8")),v=c.vars?.EQUIPMENT_ENABLED;if(v!==undefined&&v!=="0"&&v!=="1")throw new Error("Invalid equipment flag");if(v==="1"&&!fs.existsSync("release/scripts/equipment-retention.mjs"))throw new Error("Enabled target has no equipment retention guard");fs.appendFileSync(process.env.GITHUB_OUTPUT,`enabled=${v==="1"}\n`)'
+      - name: Read distinct saved hat versions without account identities
+        id: equipment_versions
+        if: steps.equipment.outputs.enabled == 'true'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CHARACTER_CATALOG_R2_ACCOUNT_ID }}
+          workingDirectory: release
+          wranglerVersion: '4.153.0'
+          command: >-
+            d1 execute DB --remote --config .catalog-wrangler.json --json --command "SELECT DISTINCT item, version FROM player_equipment WHERE item IS NOT NULL AND item <> 'none' ORDER BY item, version LIMIT 257"
+      - name: Refuse a target that loses a saved immutable hat version
+        if: steps.equipment.outputs.enabled == 'true'
+        run: node tooling/scripts/equipment-retention.mjs release
+        env:
+          EQUIPMENT_RETENTION_RESULT: ${{ steps.equipment_versions.outputs.command-output }}
+      - name: Deploy the approved Worker with the prepared catalog
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CHARACTER_CATALOG_R2_ACCOUNT_ID }}
+          workingDirectory: release
+          wranglerVersion: '4.153.0'
+          command: deploy --config .catalog-wrangler.json
+
+  verify:
+    needs: [prepare, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: character-catalog-${{ inputs.environment }}
+    steps:
+      - name: Recheck approved immutable verification tooling
+        run: node -e 'if (!/^[a-f0-9]{40}$/.test(process.env.TOOLING_SHA || "") || process.env.TOOLING_SHA !== process.env.PLANNED_SHA) throw new Error("Approved tooling changed; resume the held release")'
+        env:
+          TOOLING_SHA: ${{ vars.CHARACTER_CATALOG_TOOLING_SHA }}
+          PLANNED_SHA: ${{ needs.prepare.outputs.tooling }}
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.tooling }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.artifact }}
+          path: plan
+          merge-multiple: true
+      - name: Confirm the live runtime before releasing the publication barrier
+        run: node tooling/scripts/character-catalog-deploy.mjs finish --environment "$CATALOG_ENVIRONMENT" --plan plan/plan.json
+        env:
+          CATALOG_ENVIRONMENT: ${{ inputs.environment }}
+          CHARACTER_CATALOG_R2_ACCOUNT_ID: ${{ vars.CHARACTER_CATALOG_R2_ACCOUNT_ID }}
+          CHARACTER_CATALOG_R2_BUCKET: ${{ vars.CHARACTER_CATALOG_R2_BUCKET }}
+          CHARACTER_CATALOG_R2_ACCESS_KEY_ID: ${{ secrets.CHARACTER_CATALOG_R2_WRITE_ACCESS_KEY_ID }}
+          CHARACTER_CATALOG_R2_SECRET_ACCESS_KEY: ${{ secrets.CHARACTER_CATALOG_R2_WRITE_SECRET_ACCESS_KEY }}

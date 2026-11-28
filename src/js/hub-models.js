@@ -2,9 +2,8 @@
 // sign, trees, bushes, grass, rocks, barrels, torches, fire pit, clouds, dock and the critter
 // bodies.
 //
-// `SIGN_GLYPHS` is the blocky 3x5 alphabet every carved sign in the world is cut from, the Mempool cave's
-// headlines included. It must stay complete: a missing key is silently skipped and the reading loses a
-// letter. `SIGN_ICONS` are the cave emblems dressing.js banners carry; `SIGN_BADGES` the larger outlined ones
+// `SIGN_GLYPHS` is sign-glyphs.js's alphabet, re-exported here for the world's carved signs.
+// `SIGN_ICONS` are the cave emblems dressing.js banners carry; `SIGN_BADGES` the larger outlined ones
 // either side of a cave sign's name. `postSign` stands a scaled cave sign on two pegs for the Drop and Orbit
 // launch sites and the Mempool island. The jungle kit (`withJungle` and its vines, leaves, bamboo, lashings,
 // logs and thatch) dresses machines and stalls in the geometry they already draw with.
@@ -54,80 +53,9 @@
   const CLIFF = ["#7d6f61", "#5e5449", "#877869"];
   const WOOD = "#8a6236", WOOD_DK = "#5c4425", PLANK = "#a9773f";
   const CAVE_SIGN_WIDTH = 3.78, CAVE_SIGN_HEIGHT = 1.06;
-  const SIGN_GLYPHS = {
-    E: ["111", "100", "110", "100", "111"],
-    n: ["000", "110", "101", "101", "101"],
-    t: ["010", "111", "010", "010", "011"],
-    r: ["000", "110", "101", "100", "100"],
-    O: ["111", "101", "101", "101", "111"],
-    o: ["000", "111", "101", "101", "111"],
-    p: ["000", "110", "101", "110", "100", "100"],
-    y: ["000", "101", "101", "011", "001", "110"],
-    g: ["000", "111", "101", "111", "001", "110"],
-    q: ["000", "111", "101", "111", "001", "001"],
-    j: ["001", "000", "001", "001", "101", "010"],
-    B: ["110", "101", "110", "101", "110"],
-    L: ["100", "100", "100", "100", "111"],
-    a: ["000", "010", "101", "111", "101"],
-    b: ["100", "100", "110", "101", "110"],
-    d: ["001", "001", "011", "101", "011"],
-    c: ["000", "011", "100", "100", "011"],
-    e: ["000", "010", "111", "100", "011"],
-    f: ["011", "010", "111", "010", "010"],
-    h: ["100", "100", "110", "101", "101"],
-    i: ["010", "000", "010", "010", "010"],
-    k: ["100", "101", "110", "101", "101"],
-    l: ["110", "010", "010", "010", "011"],
-    m: ["000", "111", "111", "101", "101"],
-    s: ["000", "011", "110", "001", "110"],
-    u: ["000", "101", "101", "101", "011"],
-    v: ["000", "101", "101", "101", "010"],
-    w: ["000", "101", "101", "111", "101"],
-    x: ["000", "101", "010", "010", "101"],
-    z: ["000", "111", "001", "010", "111"],
-    A: ["010", "101", "111", "101", "101"],
-    C: ["011", "100", "100", "100", "011"],
-    D: ["110", "101", "101", "101", "110"],
-    F: ["111", "100", "110", "100", "100"],
-    H: ["101", "101", "111", "101", "101"],
-    M: ["101", "111", "111", "101", "101"],
-    P: ["110", "101", "110", "100", "100"],
-    R: ["110", "101", "110", "101", "101"],
-    S: ["011", "100", "010", "001", "110"],
-    T: ["111", "010", "010", "010", "010"],
-    W: ["101", "101", "101", "111", "101"],
-    X: ["101", "101", "010", "101", "101"],
-    G: ["011", "100", "101", "101", "011"],
-    I: ["111", "010", "010", "010", "111"],
-    J: ["001", "001", "001", "101", "010"],
-    K: ["101", "101", "110", "101", "101"],
-    N: ["101", "111", "101", "101", "101"],
-    Q: ["111", "101", "101", "111", "011"],
-    U: ["101", "101", "101", "101", "111"],
-    V: ["101", "101", "101", "101", "010"],
-    Y: ["101", "101", "010", "010", "010"],
-    Z: ["111", "001", "010", "100", "111"],
-    "/": ["001", "001", "010", "100", "100"],
-    0: ["111", "101", "101", "101", "111"],
-    1: ["010", "110", "010", "010", "111"],
-    2: ["111", "001", "111", "100", "111"],
-    3: ["111", "001", "111", "001", "111"],
-    4: ["101", "101", "111", "001", "001"],
-    5: ["111", "100", "111", "001", "111"],
-    6: ["111", "100", "111", "101", "111"],
-    7: ["111", "001", "001", "001", "001"],
-    8: ["111", "101", "111", "101", "111"],
-    9: ["111", "101", "111", "001", "111"],
-    ":": ["000", "010", "000", "010", "000"],
-    "!": ["010", "010", "010", "000", "010"],
-    "?": ["111", "001", "011", "000", "010"],
-    "+": ["000", "010", "111", "010", "000"],
-    "-": ["000", "000", "111", "000", "000"],
-    ".": ["000", "000", "000", "000", "010"],
-    "'": ["010", "010", "000", "000", "000"]
-  };
-  // The carved headline has room for both diagonals; a three-cell M reads too much like H at bridge distance.
-  const CARVED_M = ["10001", "11011", "10101", "10001", "10001"];
+  const { SIGN_GLYPHS } = BL.signGlyphs;
+  // Keep the existing carved-M export on the shared shape.
+  const CARVED_M = SIGN_GLYPHS.M;
   const SIGN_CELL = 0.075, SIGN_PAD = 0.855, SIGN_FRONT = 0.23;
   const SIGN_CACHE = BL.models.scopedMap();
   // The emblem each cave flies, 5 by 7: on its sign either side of the name and on its banners.
@@ -154,8 +82,19 @@
     cloud: { ink: { "#": "#f2efe8", "+": "#ffffff", "S": "#a9d7ef" }, rows: [".......", "..++...", ".++++..", "++##+++", "+######", ".SSSSS.", "......."] },
     // Ghost Hunter: the hunt's white ghost, its eyes and mouth dark.
     ghost: { ink: { "#": "#f2efe8", "+": "#ffffff", "*": "#1b1b1e" }, rows: ["..+++..", ".+####.", "+#*#*##", "+######", "+##*###", "+######", "#.#.#.#"] },
+    // Block Frenzy: an orange cube in three faces.
+    cube: { ink: { "#": "#f7931a", "+": "#ffc46b", "*": "#b8650a" }, rows: ["..+++..", ".+++++.", "#+++**#", "###*#*#", "##*###*", "##*#*#*", ".#####."] },
     // B.C.A.: a walnut abacus whose beads are bananas and ivory, on brass rods.
-    abacus: { ink: { "W": "#8a5a32", "-": "#d9b45a", "Y": "#f5d142", "I": "#f2efe8" }, rows: ["WWWWWWW", "WYY--IW", "W-IY-YW", "WI--YYW", "WYI--IW", "WWWWWWW", "W.....W"] }
+    abacus: { ink: { "W": "#8a5a32", "-": "#d9b45a", "Y": "#f5d142", "I": "#f2efe8" }, rows: ["WWWWWWW", "WYY--IW", "W-IY-YW", "WI--YYW", "WYI--IW", "WWWWWWW", "W.....W"] },
+    // Repo Island's sections (repo-island-data.js): a node's rack, an explorer's eye, a library's chain, a tool's gear,
+    // a wallet's key, a signing device's shield and a scroll of learning.
+    server: { ink: { "#": "#5e5449", "*": "#2a211c", "+": "#d0c8b8", "G": "#46ff72" }, rows: ["#######", "#*+**G#", "#######", "#*+**G#", "#######", "#*+**G#", "#######"] },
+    eye: { ink: { "#": "#2f6f9a", "+": "#f2efe8", "*": "#1b1b1e", "O": "#5aa6d0" }, rows: [".......", "..###..", ".#+++#.", "#+O*O+#", ".#+++#.", "..###..", "......."] },
+    chain: { ink: { "#": "#c9ced6", "+": "#eef1f5" }, rows: ["+#.....", "#.#....", ".##.##.", "...#.#.", "...##.#", "....#.#", ".....#+"] },
+    gear: { ink: { "#": "#c9ced6", "+": "#8f949b", "*": "#3b3d42" }, rows: ["..#.#..", ".#####.", "###+###", ".#+*+#.", "###+###", ".#####.", "..#.#.."] },
+    key: { ink: { "Y": "#e8b83a", "+": "#fff1a0" }, rows: ["..+YY..", ".Y...Y.", ".Y...Y.", "..YYY..", "...Y...", "...YY..", "...YYY."] },
+    shield: { ink: { "#": "#3c5a8a", "+": "#c8ccd0", "O": "#f7931a" }, rows: ["#######", "#+++++#", "#++O++#", "#+OOO+#", ".#+O+#.", "..#+#..", "...#..."] },
+    scroll: { ink: { "#": "#a8703e", "+": "#f2efe8", "-": "#6b5a48" }, rows: [".#####.", "#+++++#", ".#---#.", ".#+++#.", ".#---#.", "#+++++#", ".#####."] }
   };
   const BADGE_OUTLINE = "#2a1a0c", BADGE_CELLS = 9;
   const BADGE_CELL = SIGN_CELL * 5 / 7, BADGE_GAP = SIGN_CELL * 2;
@@ -189,8 +128,8 @@
   // cached version leaves small gaps between square letter cells for close views. `lit` makes the name and the
   // badge glow outright, as the island's cave mouths hang them. The front face sits at SIGN_FRONT and nothing reaches behind
   // z = -0.07, so it hangs where the old board did.
-  const caveSign = (text = "EntropyLab", iconName = null, pixels = false, lit = false) => {
-    const key = `${text}|${iconName || ""}|${pixels ? "pixels" : "solid"}${lit ? "|lit" : ""}`;
+  const caveSign = (text = "EntropyLab", iconName = null, pixels = false, lit = false, endPad = 0) => {
+    const key = `${text}|${iconName || ""}|${pixels ? "pixels" : "solid"}${lit ? "|lit" : ""}${endPad ? `|pad:${endPad}` : ""}`;
     const hit = SIGN_CACHE.get(key);
     if (hit) return hit;
     let cells = -1;
@@ -202,7 +141,7 @@
     }
     const textW = cells * SIGN_CELL;
     const iconW = iconName ? BADGE_CELL * BADGE_CELLS : 0;
-    const width = Math.max(CAVE_SIGN_WIDTH, textW + SIGN_PAD + (iconName ? iconW + BADGE_GAP : 0));
+    const width = Math.max(CAVE_SIGN_WIDTH, textW + SIGN_PAD + (iconName ? iconW + BADGE_GAP : 0)) + endPad * 2;
     // The badge leads the name; the pair is centred together, so the name moves right by half the badge and its gap.
     const shift = iconName ? (iconW + BADGE_GAP) * 0.5 : 0;
     const half = CAVE_SIGN_HEIGHT * 0.5, plankH = (CAVE_SIGN_HEIGHT - 0.04) / 3, depth = 0.3, mid = SIGN_FRONT - depth / 2;
@@ -213,8 +152,8 @@
       geos.push(bevelBox({ w: width + grow, h: plankH, d: depth, color: SIGN_PLANKS[k], bevel: 0.05, offset: { x: shift, y: half - plankH * (k + 0.5) - 0.02 * k, z: mid } }));
     });
     // One continuous dark panel backs the badge and name, with a glyph cell added above and below for descenders.
-    geos.push(bevelBox({ w: textW + (iconName ? iconW + BADGE_GAP : 0) + 0.14, h: 0.52 + 2 * SIGN_CELL, d: 0.035,
-      color: "#3f2513", bevel: 0.012, offset: { x: 0, y: 0, z: SIGN_FRONT + 0.0125 } }));
+    geos.push(bevelBox({ w: textW + (iconName ? iconW + BADGE_GAP : 0) + 0.14 + endPad, h: 0.52 + 2 * SIGN_CELL, d: 0.035,
+      color: "#3f2513", bevel: 0.012, offset: { x: endPad / 2, y: 0, z: SIGN_FRONT + 0.0125 } }));
     // Letters as solid horizontal runs of whole cells, touching row to row, so a glyph is one clean shape.
     const run = (x0, y, n) => geos.push(box({ w: SIGN_CELL * n, h: SIGN_CELL, d: 0.07, color: SIGN_INK, emissive: ink, offset: { x: x0 + SIGN_CELL * (n - 1) * 0.5, y, z: SIGN_FRONT + 0.03 } }));
     let cursor = shift - textW * 0.5;
@@ -395,10 +334,10 @@
     for (const [text, y] of [["OFF", 0.37], ["ON", -0.37]]) {
       const width = (text.length * 4 - 1) * cell;
       for (let i = 0; i < text.length; i++) {
-        const glyph = SIGN_GLYPHS[text[i]];
-        for (let row = 0; row < 5; row++) for (let col = 0; col < 3; col++) if (glyph[row][col] === "1") {
-          parts.push(box({ w: cell * 0.85, h: cell * 0.85, d: 0.006, color: "#e8efdf", emissive: 0.8,
-            offset: { x: -width / 2 + (i * 4 + col + 0.5) * cell, y: y + (2 - row) * cell, z: 0.255 } }));
+        const glyph = SIGN_GLYPHS[text[i]], sx = 3 / glyph[0].length;
+        for (let row = 0; row < 5; row++) for (let col = 0; col < glyph[row].length; col++) if (glyph[row][col] === "1") {
+          parts.push(box({ w: cell * sx * 0.85, h: cell * 0.85, d: 0.006, color: "#e8efdf", emissive: 0.8,
+            offset: { x: -width / 2 + (i * 4 + (col + 0.5) * sx) * cell, y: y + (2 - row) * cell, z: 0.255 } }));
         }
       }
     }
@@ -486,13 +425,13 @@
     for (const ch of name) {
       const glyph = SIGN_GLYPHS[ch];
       if (glyph) for (let row = 0; row < glyph.length; row++) {
-        const line = glyph[row];
+        const line = glyph[row], sx = 3 / line.length;
         for (let col = 0; col < line.length; col++) {
           if (line[col] !== "1") continue;
           let run = 1;
           while (line[col + run] === "1") run++;
-          parts.push(box({ w: cell * run * 0.92, h: cell * 0.92, d: 0.02, color: SIGN_INK, emissive: 1,
-            offset: { x: cursor + (col + run * 0.5) * cell, y: 3.02 + (2 - row) * cell, z: 0.18 } }));
+          parts.push(box({ w: cell * sx * run * 0.92, h: cell * 0.92, d: 0.02, color: SIGN_INK, emissive: 1,
+            offset: { x: cursor + (col + run * 0.5) * cell * sx, y: 3.02 + (2 - row) * cell, z: 0.18 } }));
           col += run - 1;
         }
       }
@@ -605,12 +544,13 @@
   const labScreenText = (geometry, text, x, y, z, cell, color) => {
     for (let i = 0; i < text.length; i++) {
       const ch = text[i], glyph = LAB_CODE_SIGNS[ch] || SIGN_GLYPHS[ch.toUpperCase()];
-      if (glyph) for (let row = 0; row < 5; row++) for (let col = 0; col < 3;) {
+      if (glyph) for (let row = 0; row < 5; row++) for (let col = 0; col < glyph[row].length;) {
         if (glyph[row][col] !== "1") { col++; continue; }
         const start = col;
-        while (col < 3 && glyph[row][col] === "1") col++;
-        labScreenRect(geometry, x + i * cell * 4 + start * cell, y - (row + 1) * cell,
-          (col - start) * cell * 0.88, cell * 0.88, z, color);
+        while (col < glyph[row].length && glyph[row][col] === "1") col++;
+        const sx = 3 / glyph[row].length;
+        labScreenRect(geometry, x + i * cell * 4 + start * cell * sx, y - (row + 1) * cell,
+          (col - start) * cell * sx * 0.88, cell * 0.88, z, color);
       }
     }
   };
@@ -1660,12 +1600,40 @@
     [[-2, 3.4, 3], [2.5, 4.4, 2.6], [6, 3, 2.2]],
     [[-4, 3.6, 3.2], [0, 5, 3.6], [4, 4.4, 3], [7.5, 3, 2.4]]
   ];
-  const cloud = variants((i) => {
+  // A cloud the Ooga Chat speakers sit on (#659) has a bench: across its middle, from just outside where the outer two
+  // sit (scene-hub.js's seats, BENCH_SPREAD of a third either side of the middle) BENCH_PAST further, BENCH_DEPTH
+  // either side of its long axis. The middle platform has exactly the purple square's footprint (SEAT_GLOW.outer)
+  // and rises BENCH_RISE above the outer seats. Fill the cloud under that square, then cap it with a box so its
+  // edges follow the glow rather than rounding out to the voxel grid. The other puffs stay below the platform.
+  const BENCH_SPREAD = 0.7, BENCH_PAST = 0.6, BENCH_DEPTH = 0.5, BENCH_RISE = 0.25;
+  const buildCloud = (i, bench) => {
     const rand = mulberry32(307 + i);
     const v = vox();
+    let platform = null;
     const puffs = CLOUD_PUFFS[i];
     const mid = (puffs[0][0] + puffs[puffs.length - 1][0]) / 2;
     for (const [cx, rx, rz] of puffs) blob(v, { cx: cx - mid + 0.5, cy: 1, cz: 0.5, rx, ry: 1.6, rz, chip: 0.3, rand, color: (x, y) => y > 0 ? 0 : 1 });
+    if (bench) {
+      // Cell x spans [x, x + 1) cells; the mesh's origin puts a cell's middle at x * VOX metres.
+      let x0 = Infinity, x1 = -Infinity, top = -Infinity;
+      const columns = new Map();
+      for (const [k] of v.map) {
+        voxCoords(k, CELL);
+        x0 = Math.min(x0, CELL[0]); x1 = Math.max(x1, CELL[0]); top = Math.max(top, CELL[1]);
+        const key = CELL[0] * 4096 + CELL[2], low = columns.get(key);
+        if (low === undefined || CELL[1] < low.min) columns.set(key, { x: CELL[0], z: CELL[2], min: CELL[1] });
+      }
+      const middle = (x0 + x1 + 1) / 2 - 0.5, half = ((x1 - x0 + 1) / 3 * BENCH_SPREAD) + BENCH_PAST / VOX, depth = BENCH_DEPTH / VOX;
+      const support = SEAT_GLOW.outer / VOX + 0.5;
+      for (const { x, z, min } of columns.values()) {
+        v.del(x, top, z);
+        const under = Math.abs(x - middle) < support && Math.abs(z) < support;
+        if (!under && (Math.abs(x - middle) > half || Math.abs(z) > depth)) continue;
+        for (let y = min; y < top; y++) v.set(x, y, z, y > 0 ? 0 : 1);
+      }
+      platform = box({ w: SEAT_GLOW.outer * 2, h: BENCH_RISE, d: SEAT_GLOW.outer * 2, color: "#f7f9fb",
+        offset: { x: middle * VOX, y: (top - 1) * VOX + BENCH_RISE / 2 } });
+    }
     // A flat base under the puffs, the way a cumulus sits on the air, grown straight down from the
     // cells already there: every cell added sits under another, so the cloud gains body without a
     // single new top face. The base rounds up toward
@@ -1686,11 +1654,14 @@
       const bottom = CLOUD_BASE + Math.round(CLOUD_ROUND * (1 - Math.sqrt(Math.max(0, inner))));
       for (let y = min - 1; y >= bottom; y--) v.set(x, y, z, 1);
     }
-    const geo = voxGeo(v, { unit: VOX, palette: ["#f7f9fb", "#dfe6ee"], origin: { x: -VOX / 2, y: -VOX, z: -VOX / 2 } });
+    let geo = voxGeo(v, { unit: VOX, palette: ["#f7f9fb", "#dfe6ee"], origin: { x: -VOX / 2, y: -VOX, z: -VOX / 2 } });
+    if (platform) geo = merge(geo, platform);
     geo.castShadow = false;
     geo.cutawayPreserve = true;
     return geo;
-  });
+  };
+  const cloud = variants((i) => buildCloud(i, false));
+  const benchCloud = variants((i) => buildCloud(i, true));
   const ladder = cached(() => merge(
     box({ w: 0.1, h: 4, d: 0.1, color: WOOD, offset: { x: -0.4, y: 2 } }),
     box({ w: 0.1, h: 4, d: 0.1, color: WOOD, offset: { x: 0.4, y: 2 } }),
@@ -1718,5 +1689,61 @@
       ...[-0.8, 0.8].map(brace)
     );
   });
-  BL.hubModels = { SIGN_GLYPHS, CARVED_M, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, libraryNook, libraryLamp, LIBRARY_SHELF_Y, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, clumped, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, firepit, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  // An Ooga Chat speaker's purple glow on their cloud (#659): the cloud's own faces round a seat, cut to the patch under
+  // the seated body and lifted a hair off the cloud, glowing #b18aff. On top, a dimmer square under a brighter one (on
+  // every step of the top near the seat's height); down the sides near the seat, bands that fade as they go down. Never
+  // a ring. One mesh a cloud mesh and seat, cached; the scene hangs it on the cloud's node, so it rides with the cloud.
+  const SEAT_GLOW = { inner: 0.5, outer: 0.95, near: 0.6, drop: 1, band: 0.25, lift: 0.02, rgb: [177, 138, 255], dim: [150, 110, 240],
+    bands: [0.85, 0.55, 0.3, 0.15] };
+  const seatGlows = new Map();
+  const cloudSeatGlow = (cloudGeo, sx, sy, sz) => {
+    const key = `${sx.toFixed(3)},${sy.toFixed(3)},${sz.toFixed(3)}`;
+    let byGeo = seatGlows.get(cloudGeo);
+    if (!byGeo) seatGlows.set(cloudGeo, byGeo = new Map());
+    if (byGeo.has(key)) return byGeo.get(key);
+    const v = cloudGeo.verts, out = { verts: [], faces: [], lines: [], castShadow: false };
+    const G = SEAT_GLOW, lo = [0, 0, 0], hi = [0, 0, 0];
+    // A quad on the plane `axis` = `plane`, over [u0, u1] x [w0, w1] of the other two axes, facing `sign`.
+    const quad = (axis, sign, plane, u0, u1, w0, w1, color, emissive) => {
+      const u = axis === 0 ? 1 : 0, w = axis === 2 ? 1 : 2, at = out.verts.length / 3;
+      const put = (a, b) => { const p = [0, 0, 0]; p[axis] = plane + sign * G.lift; p[u] = a; p[w] = b; out.verts.push(p[0], p[1], p[2]); };
+      // Wound so its normal points `sign` along `axis` (u x w is +axis for the axis orders used here).
+      const flip = (axis === 1 ? -1 : 1) * sign < 0;
+      if (!flip) { put(u0, w0); put(u1, w0); put(u1, w1); put(u0, w1); } else { put(u0, w0); put(u0, w1); put(u1, w1); put(u1, w0); }
+      out.faces.push({ i: [at, at + 1, at + 2, at + 3], color, emissive });
+    };
+    for (const f of cloudGeo.faces) {
+      lo[0] = lo[1] = lo[2] = Infinity; hi[0] = hi[1] = hi[2] = -Infinity;
+      for (const i of f.i) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], v[i * 3 + a]); hi[a] = Math.max(hi[a], v[i * 3 + a]); }
+      const axis = hi[0] - lo[0] < 1e-6 ? 0 : hi[1] - lo[1] < 1e-6 ? 1 : hi[2] - lo[2] < 1e-6 ? 2 : -1;
+      if (axis < 0) continue;
+      const a0 = v[f.i[0] * 3], a1 = v[f.i[1] * 3], a2 = v[f.i[2] * 3];
+      const p0 = [a0, v[f.i[0] * 3 + 1], v[f.i[0] * 3 + 2]], p1 = [a1, v[f.i[1] * 3 + 1], v[f.i[1] * 3 + 2]], p2 = [a2, v[f.i[2] * 3 + 1], v[f.i[2] * 3 + 2]];
+      const e1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]], e2 = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+      const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]], sign = n[axis] > 0 ? 1 : -1;
+      if (axis === 1) {
+        if (sign < 0 || lo[1] < sy - G.drop || lo[1] > sy + 0.01) continue;
+        for (const [r, color, emissive, raise] of [[G.outer, G.dim, 0.55, 0], [G.inner, G.rgb, 1, 0.015]]) {
+          const x0 = Math.max(lo[0], sx - r), x1 = Math.min(hi[0], sx + r), z0 = Math.max(lo[2], sz - r), z1 = Math.min(hi[2], sz + r);
+          if (x0 < x1 && z0 < z1) quad(1, 1, lo[1] + raise, x0, x1, z0, z1, color, emissive);
+        }
+        continue;
+      }
+      // A side: near the seat, and from the seat's height down DROP, in bands that fade.
+      const h = axis === 0 ? 2 : 0, plane = lo[axis], reach = G.outer + G.near;
+      if (axis === 0 ? Math.abs(plane - sx) > reach : Math.abs(plane - sz) > reach) continue;
+      const c = axis === 0 ? sz : sx, h0 = Math.max(lo[h], c - G.outer), h1 = Math.min(hi[h], c + G.outer);
+      if (h0 >= h1) continue;
+      for (let b = 0; b < G.bands.length; b++) {
+        const top = Math.min(hi[1], sy - b * G.band), bottom = Math.max(lo[1], sy - (b + 1) * G.band);
+        if (bottom >= top) continue;
+        const k = G.bands[b], color = [Math.round(255 + (G.rgb[0] - 255) * k), Math.round(255 + (G.rgb[1] - 255) * k), Math.round(255 + (G.rgb[2] - 255) * k)];
+        if (axis === 0) quad(0, sign, plane, bottom, top, h0, h1, color, k);
+        else quad(2, sign, plane, h0, h1, bottom, top, color, k);
+      }
+    }
+    byGeo.set(key, out);
+    return out;
+  };
+  BL.hubModels = { cloudSeatGlow, benchCloud, SIGN_GLYPHS, CARVED_M, SIGN_ICONS, SIGN_PLANKS, SIGN_INK, SIGN_CELL, SIGN_PAD, SIGN_FRONT, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, libraryNook, libraryLamp, LIBRARY_SHELF_Y, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, clumped, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, firepit, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();

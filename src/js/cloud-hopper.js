@@ -72,21 +72,30 @@
   const create = (ctx) => {
     const { root, dock, crew, pilot, hud, camera, game } = ctx;
     const ux = Math.cos(dock.rotation.y), uz = -Math.sin(dock.rotation.y);
-    const home = { x: dock.position.x + ux * (DOCK_LENGTH + RADIUS - 0.25), y: dock.position.y, z: dock.position.z + uz * (DOCK_LENGTH + RADIUS - 0.25) };
+    const home = ctx.launchPoint || { x: dock.position.x + ux * (DOCK_LENGTH + RADIUS - 0.25), y: dock.position.y, z: dock.position.z + uz * (DOCK_LENGTH + RADIUS - 0.25) };
     const length = Math.hypot(home.x, home.z), nx = home.x / length, nz = home.z / length;
     const start = { x: 0, y: 0, z: 0 };
     let level = LEVELS[0], player = "", farBefore = 0, watched = "", boardStatus = "loading";
     const heading = Math.atan2(-nx, -nz), platform = createNode({ sightHidden: true });
     const cloud = BL.cloudHopperModels.cloud(RADIUS, RADIUS, DEPTH);
-    const cabinet = BL.cloudHopperModels.cabinet();
+    const cabinet = ctx.arcade ? createNode({ visible: false }) : BL.cloudHopperModels.cabinet();
     cabinet.position.x = nx * 1.5; cabinet.position.z = nz * 1.5; cabinet.rotation.y = heading;
     addChild(platform, cloud, cabinet); addChild(root, platform);
     Object.assign(platform.position, home);
+    platform.visible = !ctx.arcade;
     const routeRoot = createNode({ visible: false, sightHidden: true });
     addChild(root, routeRoot);
     const from = { x: 0, y: 0, z: 0 }, carry = { x: 0, y: 0, z: 0 };
     const liftGoal = { x: 0, y: 0, z: 0 }, ghostStart = { x: 0, y: 0, z: 0 };
     const targetScreen = { x: 0, y: 0, depth: 0 };
+    let rideView = "shoulder", keepCarry = false, intoCombat = false;
+    // The run's own start in combat, which the hub's `combatOnly` lets through while the ride holds the controls; a hook
+    // picked up (`force`) brings combat too, since the mouse throws it only there.
+    const startCombat = (force = false) => {
+      if (!force && keepCarry || actor.weapon.aiming) return;
+      intoCombat = true;
+      try { pilot.modeAction("mode-toggle"); } finally { intoCombat = false; }
+    };
     let phase = "idle", actor = null, saved = null, course = null, age = 0, startedAt = 0, seconds = 0, displayTime = 0;
     let session = null, latest = null, run = 0, courseSeed = 0, courseDrift = 0;
     let unrecoverableAt = -1;
@@ -102,10 +111,10 @@
     const aimRay = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 }, aimHit = { x: 0, y: 0, z: 0, t: 0, cloud: null };
     // Rendering and player physics pause in a hidden tab. Keep the race's
     // wall clock on that same timeline while the soundtrack plays on.
-    let hiddenAt = document.hidden ? performance.now() : -1, hiddenTime = 0;
+    let helpHeld = false, hiddenAt = document.hidden ? performance.now() : -1, hiddenTime = 0;
     const raceNow = () => (hiddenAt < 0 ? performance.now() : hiddenAt) - hiddenTime;
     const onVisibility = () => {
-      if (document.hidden) {
+      if (document.hidden || helpHeld) {
         if (hiddenAt < 0) hiddenAt = performance.now();
       } else if (hiddenAt >= 0) {
         hiddenTime += performance.now() - hiddenAt;
@@ -186,14 +195,28 @@
     const held = () => phase === "intro" || phase === "lifting" || phase === "briefing" || phase === "won" || phase === "dq";
     const overlay = BL.cloudHopperHud.create({ onStart: () => beginRun(), onReplay: () => beginRun(), onExit: () => exit(),
       onGuideDone: () => finishGuide(), onSelect: (id) => selectLevel(id), onNext: () => nextLevel(), onHook: (down) => hookAction(down),
-      onGhost: () => replays?.toggle(),
+      onGhost: (key) => toggleGhost(key),
       letterSign: hud.letterSign });
     const ghost = BL.cloudHopperGhost.create({ root, renderer: ctx.renderer });
     let ghostRecording = null;
     const replays = BL.cloudHopperReplays?.create({ onBoard: board => overlay.setHighscores(board),
       onState: state => overlay.setReplayState?.(state),
       onHide: () => { ghostRecording = null; ghost.hide(); },
-      onPlay: recording => { ghostRecording = recording; stageGhost(); } });
+      // A recording loaded early waits for the start cloud; the results card shows none.
+      onPlay: recording => { ghostRecording = recording; if (phase === "ready" || phase === "running") stageGhost(); } });
+    // The ghost is chosen before a run (G or its button), never during one, and the choice carries to the next run.
+    // From a key (`say`), a toast says what it did, since the cards cover the ghost's button.
+    const toggleGhost = (say = false) => {
+      if (!replays || !active()) return false;
+      if (phase === "running") { if (say) hud.toast("Turn the ghost on or off before the run starts"); return true; }
+      const was = replays.wanted;
+      replays.toggle();
+      // Unchanged means no ghost to race: a level with no time yet, or a record whose run left no replay.
+      const record = Object.keys(BL.highscores?.get(level.board)?.highscores || {}).length > 0;
+      if (say) hud.toast(replays.wanted !== was ? replays.wanted ? "Record ghost on" : "Record ghost off"
+        : record ? "This record has no saved replay to race" : "No record ghost for this level yet");
+      return true;
+    };
     const audio = BL.cloudHopperAudio.create();
     const scenery = BL.cloudHopperSky.create({ root, renderer: ctx.renderer, seaY: ctx.seaY, onStrike: (distance) => audio.thunder(distance) });
     // Thunderhead's tornadoes, one a spot and any of them up at once, each writing its own whirl; `tornado` is the one
@@ -313,6 +336,11 @@
     const holdView = () => { pilot.cameraHandoff.capture(settlePose); };
     const settleView = () => { pilot.cameraHandoff.begin(settlePose, false, SETTLE_SECONDS); };
     const turnLiftView = (mix) => {
+      if (ctx.arcade && phase === "lifting") {
+        // Show the rider and cloud even when play uses first person. The retained play view returns at the top.
+        pilot.framePoint(liftGoal, 0.4, 1, START_VIEW);
+        return;
+      }
       const blend = mix === 1 ? 1 : (mix - liftViewMix) / Math.max(1e-9, 1 - liftViewMix);
       const closeView = pilot.view === "first-person" || pilot.view === "shoulder";
       // Keep the selected view across rides and replays. Only orbit needs
@@ -324,7 +352,7 @@
     const setPhase = (next) => {
       phase = next; age = 0;
       hud.setPanelsHidden(next === "lifting" || next === "briefing" || next === "ready" || next === "running");
-      cabinet.visible = next === "idle" || next === "intro";
+      cabinet.visible = !ctx.arcade && (next === "idle" || next === "intro");
       pilot.setActive(!held());
       overlay.show(next, seconds, session && played().scores, latest);
       audio.stage(next === "won" && latest?.run === played().scores[0]?.run ? "best" : next);
@@ -353,6 +381,14 @@
       if (pilot.view === "first-person" || pilot.view === "shoulder") turnLiftView(1);
       settleView();
       stageGhost();
+    };
+    const prepareEquipment = cave => {
+      if (!saved) saved = { jetOwned: cave.jetpackOwned, jetWorn: !!cave.jet, fuel: cave.jetFuel, recovering: cave.jetRecovering,
+        primary: cave.weapon.primaryOwned, secondary: cave.weapon.secondaryOwned, slot: cave.weapon.equipped ? 2 : cave.weapon.primaryEquipped ? 1 : 0,
+        aiming: cave.weapon.aiming };
+      cave.weapon.primaryOwned = cave.weapon.secondaryOwned = false; crew.selectWeapon(0, cave);
+      crew.setJetpackOwnership(cave, false); cave.jetFuel = 0; cave.jetRecovering = false;
+      crew.clearProjectiles();
     };
     const restoreEquipment = () => {
       if (!saved || !actor) return;
@@ -399,7 +435,8 @@
       ghost.clear();
       replays?.select(level.board, level.courseVersion);
       unwatchScores = BL.highscores?.watch(level.board, board => replays ? replays.update(board) : overlay.setHighscores(board),
-        status => { boardStatus = status; overlay.setHighscoreStatus(status); }) || null;
+        status => { boardStatus = status; overlay.setHighscoreStatus(status); },
+        submissions => overlay.setSubmissions(submissions)) || null;
       if (!BL.highscores) overlay.setHighscoreStatus("unavailable");
     };
     // The next level rides up from beside the island to its own start, as a first run does.
@@ -407,20 +444,22 @@
       if (phase !== "won" || level.id >= opened()) return;
       level = LEVELS[level.id]; beginRun(true);
     };
-    const launch = () => {
+    const launch = (fromArcade = false) => {
       if (active()) return false;
       const cave = pilot.player;
       if (!cave || cave !== crew.player) { hud.toast("Choose an Ooga and walk onto the Cloud Hopper cloud"); return false; }
-      if (!near(cave.root.position.x, cave.root.position.y - cave.baseY + 1.1, cave.root.position.z)) return false;
+      if (ctx.arcade ? !fromArcade : !near(cave.root.position.x, cave.root.position.y - cave.baseY + 1.1, cave.root.position.z)) return false;
       const refusal = ctx.refusal();
       if (refusal) { hud.toast(refusal); return false; }
-      actor = cave; overlay.setRunner(cave);
+      actor = cave; prepareEquipment(cave); platform.visible = true;
+      if (ctx.arcade) { Object.assign(platform.position, home); moveRider(); }
+      overlay.setRunner(cave);
       const login = BL.net.state.me?.login || "";
-      runnerName = login || cave.traits.name; player = login.toLowerCase();
-      session = sessions.get(login);
+      runnerName = login || cave.traits.name; player = game.cloudHopperPlayer(BL.net.state.me);
+      session = sessions.get(player);
       if (!session) {
         session = { levels: LEVELS.map(() => ({ runs: 0, scores: [], lastSeed: null })), lastLevel: 0 };
-        sessions.set(login, session);
+        sessions.set(player, session);
         if (sessions.size > SESSION_PLAYERS) sessions.delete(sessions.keys().next().value);
       }
       level = LEVELS[pickLevel() - 1]; showLevels(); audio.song(level.id - 1);
@@ -430,22 +469,18 @@
       return true;
     };
     const beginRun = (ride = false) => {
-      const replay = phase === "won" || phase === "dq", climb = !replay || ride;
+      const replay = phase === "won" || phase === "dq", climb = ctx.arcade || !replay || ride;
       if (phase !== "intro" && !replay || level.id > opened()) return false;
       const cave = actor;
+      rideView = pilot.view; keepCarry = replay && !cave.weapon.aiming;
       if (!cave || pilot.player !== cave || crew.player !== cave) { cancel(); return false; }
       const refusal = ctx.refusal();
       if (refusal) { hud.toast(refusal); return false; }
-      if (!saved) saved = { jetOwned: cave.jetpackOwned, jetWorn: !!cave.jet, fuel: cave.jetFuel, recovering: cave.jetRecovering,
-        primary: cave.weapon.primaryOwned, secondary: cave.weapon.secondaryOwned, slot: cave.weapon.equipped ? 2 : cave.weapon.primaryEquipped ? 1 : 0,
-        aiming: cave.weapon.aiming };
-      crew.selectWeapon(0, cave); cave.weapon.primaryOwned = cave.weapon.secondaryOwned = false;
-      crew.setJetpackOwnership(cave, false); cave.jetFuel = 0; cave.jetRecovering = false;
-      crew.clearProjectiles();
+      prepareEquipment(cave);
       endFall(); endSweep();
       clearRoute(true);
       audio.unlock();
-      if (ride) Object.assign(platform.position, home);
+      if (climb) Object.assign(platform.position, home);
       Object.assign(from, platform.position);
       liftViewMix = 0;
       const record = played();
@@ -499,24 +534,24 @@
       }
       routeRoot.visible = true;
       if (!climb) Object.assign(platform.position, start);
-      // A replay starts at the top at once, after a card for any power-up of the level not met yet; a ride shows
-      // those cards at the top.
-      const items = climb ? null : newItems();
-      if (items?.length) overlay.setGuide(false, items);
-      setPhase(climb ? "lifting" : items.length ? "briefing" : "ready");
-      // No carry here: the run is played in combat, at the shoulder or in first person. The hub's `combatOnly` holds
-      // it there from now on, and lets the pilot enter it while the ride holds the controls.
-      if (!cave.weapon.aiming) pilot.modeAction("mode-toggle");
+      // Every arcade attempt rides from beside the island; guidance waits until the cloud reaches the top.
+      const items = climb ? null : newItems(), guide = !climb && !hasSeenGuide(), briefing = guide || !!items?.length;
+      if (briefing) overlay.setGuide(guide, items);
+      setPhase(climb ? "lifting" : briefing ? "briefing" : "ready");
+      // A first run starts in combat, at the shoulder or in first person; X switches to carry and back from there,
+      // and a run played again keeps the mode the last one ended in.
+      startCombat();
       if (!replay) ctx.mode(true);
       moveRider();
+      if (climb && ctx.arcade) turnLiftView(0);
       if (!climb) {
-        if (!items.length) stageGhost();
+        if (!briefing) stageGhost();
         pilot.controls.reset(); turnLiftView(1);
-        if (items.length) pilot.freeCursor();
+        if (briefing) pilot.freeCursor();
       }
       return true;
     };
-    const near = (x, y, z) => !active() && Math.abs(y - 1.1 - platform.position.y) < 0.45
+    const near = (x, y, z) => !ctx.arcade && !active() && Math.abs(y - 1.1 - platform.position.y) < 0.45
       && Math.hypot(x - platform.position.x, z - platform.position.z) < RADIUS - 0.4;
     // `how` a run is lost: "water" (into the sea, or out of reach of every cloud) or "tornado" (swept up its core).
     const finish = (won, how = "water") => {
@@ -588,7 +623,7 @@
       const park = playing();
       endFall(); endSweep();
       pilot.releaseFrame(true);
-      cabinet.visible = true;
+      cabinet.visible = !ctx.arcade;
       if (park) ctx.mode(false);
       clearRoute(keepMusic); phase = "idle";
       hud.setPanelsHidden(false);
@@ -597,19 +632,23 @@
         Object.assign(platform.position, home);
         if (pilot.player === actor && crew.player === actor) moveRider();
       }
-      restoreEquipment(); actor = null; session = latest = null; runnerName = "";
+      restoreEquipment();
+      if (ctx.arcade) { platform.visible = false; ctx.park(); }
+      actor = null; session = latest = null; runnerName = "";
       overlay.hide(); pilot.setActive(true); pilot.controls.reset();
     };
     const exit = () => {
       if (!active()) return false;
-      cancel(true);
-      audio.stage("dock"); audio.level(dockMusicLevel(), 0.8); dockMusicOn = true;
+      if (ctx.arcade && ctx.cabinet?.()) { ctx.onExit(); return true; }
+      cancel(!ctx.arcade);
+      if (ctx.arcade) ctx.onExit();
+      else { audio.stage("dock"); audio.level(dockMusicLevel(), 0.8); dockMusicOn = true; }
       return true;
     };
     const preUpdate = (dt) => {
       displayTime += dt;
       if (cabinet.visible) BL.cloudHopperModels.updateCabinet(cabinet, displayTime);
-      if (!active()) { updateDockMusic(); return; }
+      if (!active()) { if (!ctx.arcade) updateDockMusic(); return; }
       if (pilot.player !== actor || crew.player !== actor) { cancel(); return; }
       audio.tick();
       if (falling) {
@@ -723,6 +762,12 @@
         const view = Math.min(1, age / LIFT_VIEW_SECONDS);
         if (t === 1) {
           holdView();
+          if (ctx.arcade) {
+            pilot.releaseFrame(true);
+            pilot.enterClose();
+            if (rideView !== "first-person") pilot.exitClose();
+            startCombat();
+          }
           pilot.controls.reset();
           const items = newItems();
           if (hasSeenGuide() && !items.length) { setPhase("ready"); stageGhost(); }
@@ -734,7 +779,7 @@
     };
     const platformSupport = (x, z, y, rise, radius) => {
       const p = platform.position, r = RADIUS + radius;
-      return (x - p.x) ** 2 + (z - p.z) ** 2 <= r * r && p.y <= y + rise + 1e-5 ? p.y : -Infinity;
+      return platform.visible && (x - p.x) ** 2 + (z - p.z) ** 2 <= r * r && p.y <= y + rise + 1e-5 ? p.y : -Infinity;
     };
     const supportAt = (x, z, y, rise, radius = 0.3) => Math.max(platformSupport(x, z, y, rise, radius),
       course && !held() ? course.supportAt(x, z, y, rise, radius) : -Infinity);
@@ -795,7 +840,7 @@
           // Another X-ray goggles refresh it to full; a feather or a hook is taken only with none held.
           if (pickup.kind === "xray") { xrayUntil = seconds + XRAY_SECONDS; xrayWarned = false; wearGoggles(true); }
           else if (pickup.kind === "updraft") feather = true;
-          else { hookHeld = true; hookAt = HAND; hookDown = false; }
+          else { hookHeld = true; hookAt = HAND; hookDown = false; startCombat(true); }
           audio.power(pickup.kind); hud.toast(PICKUP_TOAST[pickup.kind]);
         }
         for (let i = 0; i < pickupNodes.length; i++) if (!course.pickups[i].active) pickupNodes[i].visible = false;
@@ -873,12 +918,7 @@
     };
     const letGo = () => { hookAt = REEL; hookCloud = null; audio.hookRelease(); };
     // Moves the hook's head `step` metres toward a point; true once it is there.
-    const hookToward = (x, y, z, step) => {
-      const dx = x - hookTip.x, dy = y - hookTip.y, dz = z - hookTip.z, d = Math.hypot(dx, dy, dz);
-      if (d <= step) { hookTip.x = x; hookTip.y = y; hookTip.z = z; return true; }
-      hookTip.x += dx / d * step; hookTip.y += dy / d * step; hookTip.z += dz / d * step;
-      return false;
-    };
+    const hookToward = (x, y, z, step) => BL.grapple.toward(hookTip, x, y, z, step);
     // Before the crew moves: the hook flies, bites, pulls the Ooga toward its bite while the button is held, and
     // reels back once it lets go, the Ooga keeping its speed and the crew's air drag easing it.
     const updateHook = (dt) => {
@@ -909,7 +949,7 @@
       const dx = hookTip.x - p.x, dy = hookCloud.top + 0.8 - feet, dz = hookTip.z - p.z, d = Math.hypot(dx, dy, dz);
       hookPull += dt;
       if (d < HOOK_ARRIVE || hookPull > HOOK_PULL_SECONDS) { letGo(); return; }
-      const speed = Math.min(HOOK_PULL, d * 5) / d;
+      const speed = BL.grapple.pullSpeed(d, HOOK_PULL);
       if (actor.hop < 0.001) { crew.elevate(0); p.y += LAUNCH_CLEARANCE; actor.hop += LAUNCH_CLEARANCE; }
       actor.leap.vx = dx * speed; actor.leap.vz = dz * speed;
       actor.hopV = actor.hop <= LAUNCH_CLEARANCE ? Math.max(dy * speed, 4) : dy * speed;
@@ -1213,8 +1253,27 @@
       }
       return count;
     };
-    return { platform, cabinet, action, launch, near, exit, cancel, preUpdate, postUpdate, onJump, updraft, hookAction, fallView, supportAt, dispose, liveGeometry, pickupLightsWanted, pickupLights, drawOverlay,
-      get active() { return active(); }, get playing() { return playing(); }, get held() { return held(); },
+    const controlsHelpHold = on => {
+      helpHeld = on; onVisibility();
+      if (hookDown) hookAction(false);
+    };
+    const controlsHelp = touch => {
+      if (held()) return { title: "Cloud Hopper · " + (phase === "lifting" ? "Riding the lift" : "Waiting"), rows: [BL.controlsHelp.row(touch ? [] : BL.controls.shortcutKeys("escape"), "Exit Cloud Hopper", touch ? "Exit button" : "")] };
+      const H = BL.controlsHelp, rows = [touch ? H.row([], "Move", "Left stick") : H.movement("Move")];
+      if (!touch) rows.push(H.row(["shiftleft"], "Run"));
+      rows.push(H.row(touch ? [] : [" "], "Jump / use a sky feather", touch ? "Jump button" : ""));
+      if ((pilot.player?.jetpackOwned || pilot.player?.jet)) rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("jetpack"), "Wear / remove collected jetpack; hold jump to climb", touch ? "Jetpack button" : ""));
+      // Carry leaves the mouse's buttons alone, so there the hook goes from its button, or X brings back the crosshair.
+      if (hookHeld) rows.push(H.row([], "Aim at a cloud and hold to reel in; release to fly on",
+        touch ? "Hook button" : actor?.weapon.aiming ? "Left mouse" : "Hook button, or X to aim with the mouse"));
+      if (!touch && !held()) rows.push(H.row(BL.controls.shortcutKeys("resetView"), "Reset camera"));
+      if (!touch) rows.push(H.row(BL.controls.shortcutKeys("view"), "Switch carry and combat"));
+      if (!touch && phase !== "running") rows.push(H.row(BL.controls.shortcutKeys("ghost"), "Record ghost on or off"));
+      rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("escape"), "Exit Cloud Hopper", touch ? "Exit button" : ""));
+      return { title: "Cloud Hopper", rows };
+    };
+    return { controlsHelp, controlsHelpHold, platform, cabinet, action, launch, near, exit, cancel, preUpdate, postUpdate, onJump, updraft, hookAction, toggleGhost, fallView, supportAt, dispose, liveGeometry, pickupLightsWanted, pickupLights, drawOverlay,
+      get active() { return active(); }, get playing() { return playing(); }, get held() { return held(); }, get intoCombat() { return intoCombat; },
       get actor() { return actor; }, get phase() { return phase; }, get time() { return seconds; },
       get course() { return course; }, get start() { return start; }, get level() { return level; },
       // The level's fixed sky, which the hub samples instead of its clock while a run plays, and its lightning now.

@@ -46,12 +46,21 @@
     key: "dsb", bands: [[0, 0.3, "#403054", 0.55], [0.3, 0.36, "#49ddd9", 0.8], [0.36, 0.62, "#2a1648", 0.7], [0.62, 1, "#12082a", 0.8]],
     dots: ["#49ddd9", "#ffdf38"], dotY: [0.66, 0.3]
   };
+  // Valhodl's, until its baked picture (`art`, bifrost-valhodl-art.js) has decoded: its night over the castle's stone
+  // and the moat, its windows lit.
+  const KEEP_STAND = {
+    key: "keep", bands: [[0, 0.2, "#22331f", 0.4], [0.2, 0.27, "#1f5a6e", 0.7], [0.27, 0.6, "#4a3f37", 0.45], [0.6, 1, "#0d1230", 0.8]],
+    dots: ["#ffbe5c", "#ffe9a8"], dotY: [0.33, 0.24]
+  };
   // The windows, left to right as the tunnel looks in, at their bearings round the wall. Only an open world carries a
   // label, a `tint` (the colour its frame's rim and light glow in, the colour of that world) and a `stand`-in; a world
-  // whose looks change gives all of them through `look`. `instant` crosses without the fade, as that world's own way
-  // back does.
+  // whose looks come from a file loaded after this one gives all of them through `look`. `instant` crosses without the fade, as that world's own way
+  // back does. A `lazy` world is never fetched or photographed by the chamber: nothing of it loads until someone walks
+  // through its window, which shows its stand-in, or the picture `art` names (`BL.bifrostArt`), baked from the land
+  // beforehand. A world left by another of its scenes too names it in `via`, so the
+  // traveller comes back out of its window all the same.
   const WINDOWS = [
-    { id: "west", kind: "mirror" },
+    { id: "keep", kind: "travel", scene: "keep", via: ["keephalls"], name: "Valhodl", label: "VALHODL", tint: "#a56bff", stand: KEEP_STAND, lazy: true, art: "valhodl" },
     { id: "dsb", kind: "travel", scene: "dsb", name: "DSB Land", label: "DSB", tint: "#3f8cff", stand: DSB_STAND },
     { id: "poker", kind: "travel", scene: "poker", name: "The Ember Den", label: "EMBER DEN", instant: true, look: () => pokerLook() },
     { id: "east", kind: "mirror" }
@@ -612,18 +621,17 @@
     const rgb = hue < 1 ? [c, x, 0] : hue < 2 ? [x, c, 0] : hue < 3 ? [0, c, x] : hue < 4 ? [0, x, c] : hue < 5 ? [x, 0, c] : [c, 0, x];
     return "#" + rgb.map((v) => Math.round((v + m) * 255).toString(16).padStart(2, "0")).join("");
   };
-  // The poker room dresses itself in the cave theme its visitor last chose there, and so does its window: the theme's
+  // The poker room's window wears the room's preset (poker-themes.js, loaded after this file, so read when asked): its
   // felt, lifted to glow, is the window's colour, and the room's floor, felt, walls, ceiling and lamps are its stand-in.
-  // The picture is the room in that theme, so it is keyed by the theme too.
   const pokerLook = () => {
-    const theme = BL.pokerThemes.get(BL.pokerThemes.load()), ui = theme.ui, key = `poker:${theme.id}`;
+    const theme = BL.pokerThemes.club, ui = theme.ui, key = "poker";
     return {
-      key, theme, tint: glowing(ui.feltLight),
+      key, tint: glowing(ui.feltLight),
       stand: { key, bands: [[0, 0.2, theme.runner, 0.35], [0.2, 0.3, ui.feltLight, 0.6], [0.3, 0.78, theme.stone[1], 0.3], [0.78, 1, ui.deep, 0.5]], dots: [ui.bright, ui.accent], dotY: [0.42, 0.3] }
     };
   };
   // An open world's looks now: the key its picture goes by, its tint and its stand-in.
-  const lookOf = (row) => row.look ? row.look() : { key: row.id, tint: row.tint, stand: row.stand };
+  const lookOf = (row) => row.look ? row.look() : { key: row.id, tint: row.tint, stand: row.stand, art: row.art || null };
   // A window's mirror, `MIRROR_Z` past the wall's face inside its arch: one quad facing +z at z 0, a reflector keyed on
   // its own geometry, so each window has a glass of its own (by slot). `backing` closes the arch behind the glass,
   // which shows nothing until its first capture and on Canvas 2D only its sheen. Every window shares the backing.

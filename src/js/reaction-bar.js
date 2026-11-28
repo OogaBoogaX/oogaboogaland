@@ -1,0 +1,467 @@
+// The emoji bar, the island's and Ooga Chat's alike (#655, #656), on X Spaces' pattern: a dark card of ten emoji (one row
+// where the panel is wide enough, else one row that scrolls, by drag or under an edge chevron at each end: style.css `.reactions`) and, past a divider, the raised hand
+// pinned beside them. Nothing here reads anything at load but window.BL (the policy and emoji-data.js), so Ooga Chat
+// shares it; `create(net)` makes one set of bars over one connection, the island's net.js (reactions.js) or a page's
+// own of the same shape: `state` ({ me, reactions, room,
+// hand, handTone, handEmoji, customHand }, read live), `sendReaction(emoji)`, `setHand(on, tone, emoji)` and
+// `subscribe(fn)`. A tap sends that emoji for a moment; the right slot stays up until tapped again (`setHand`),
+// defaulting to the raised hand. A long press on any slot (or a right click, the context-menu key or Shift+F10) opens
+// the picker, floating in the middle of the screen: every emoji in emoji-data.js under its group, a search by name, a
+// skin tone (applied to every bar emoji and the hand that takes one), a heart colour (any heart in a slot shows and goes
+// out in it; red until changed) and Reset. Choosing one puts it in that slot, swapping with the slot that already held
+// it so the ten stay distinct; choosing a heart sets the heart colour too, and the slot keeps "a heart". The right slot
+// is independent of the ten; only it can stay up. Its choice lives in `ooga-reactions-persistent`, defaulting to the
+// hand on older rooms. The ten, tone and heart are this browser's (localStorage `ooga-reactions`, `ooga-reactions-tone`,
+// `ooga-reactions-heart`), read at `create` and checked against the shared policy. The bars show only where the
+// connection takes reactions (`state.reactions`), signed in, and work only while its room is live. The picker's grid is
+// built on its first opening and kept for the page life. No frame work and no timers but a long press's.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const P = BL.reactionPolicy;
+  const SLOTS_KEY = "ooga-reactions", TONE_KEY = "ooga-reactions-tone", HEART_KEY = "ooga-reactions-heart", PIN_KEY = "ooga-reactions-persistent";
+  // The plain hearts, red first: a slot holding any of them holds "a heart" (stored as the red one) in the chosen colour.
+  const HEARTS = ["❤️", "🩷", "🧡", "💛", "💚", "💙", "🩵", "💜", "🤎", "🖤", "🩶", "🤍"], HEART = HEARTS[0];
+  const HEART_NAMES = ["Red", "Pink", "Orange", "Yellow", "Green", "Blue", "Light blue", "Purple", "Brown", "Black", "Grey", "White"];
+  const asSlot = (emoji) => HEARTS.includes(emoji) ? HEART : emoji;
+  const HOLD_MS = 450, MOVE_PX = 10, PERSISTENT = P.DEFAULTS.length;
+  const GROUP_ICONS = { "Smileys & Emotion": "😀", "People & Body": "👋", "Animals & Nature": "🐻", "Food & Drink": "🍔", "Travel & Places": "✈️",
+    "Activities": "⚽", "Objects": "💡", "Symbols": "💯", "Flags": "🏁" };
+  const TONE_NAMES = ["No skin tone", "Light skin tone", "Medium-light skin tone", "Medium skin tone", "Medium-dark skin tone", "Dark skin tone"];
+  const names = new Map();
+  for (const group of BL.emojiData.groups) for (const [emoji, name] of group.emoji) names.set(emoji, name);
+
+  const read = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
+  const write = (key, value) => { try { localStorage.setItem(key, value); } catch { /* private window: kept for the page */ } };
+  // One emoji bar set over one connection (`net`: the island's net.js, or a page's own with the same shape).
+  const create = (net) => {
+    let slots = P.DEFAULTS.slice(), tone = 0, heart = 0, persistent = P.HAND;
+    {
+      let saved = null;
+      try { saved = JSON.parse(read(SLOTS_KEY)); } catch { saved = null; }
+      if (Array.isArray(saved) && saved.length === slots.length && saved.every((e) => P.valid(e))) {
+        saved = saved.map(asSlot);
+        if (new Set(saved).size === saved.length) slots = saved;
+      }
+      const pin = read(PIN_KEY);
+      if (names.has(pin)) persistent = asSlot(pin);
+      const t = Number(read(TONE_KEY)), h = Number(read(HEART_KEY));
+      if (P.tone(t)) tone = t;
+      if (Number.isInteger(h) && h >= 0 && h < HEARTS.length) heart = h;
+    }
+    const save = () => {
+      write(SLOTS_KEY, JSON.stringify(slots));
+      write(TONE_KEY, String(tone));
+      write(HEART_KEY, String(heart));
+      write(PIN_KEY, persistent);
+    };
+    const shown = (emoji) => emoji === HEART ? HEARTS[heart] : P.toned(emoji, tone);
+    const label = (emoji) => names.get(shown(emoji)) || names.get(emoji) || emoji;
+    const selected = (slot) => slot === PERSISTENT ? persistent : slots[slot];
+    const persistentEmoji = () => net.state.customHand ? shown(persistent) : P.HANDS[tone];
+    // The empty wire emoji retains the original hand and skin-tone semantics for older pages.
+    const setPersistent = (on) => net.setHand(on, tone, persistent === P.HAND ? "" : persistentEmoji());
+    const syncPersistent = () => { if (net.state.hand) setPersistent(true); };
+
+    // One bar: the grid of ten, the divider and the hand.
+    const bars = [];
+    // Every bar's row stands at the same scroll (`offset`): one that scrolls moves the others, and one shown later (a
+    // tab opened) takes it up as it gets its size. A follower is moved with its snapping held off, since snapping
+    // would round each step of the leader's glide; it snaps again once the visitor reaches for it, from a snap point,
+    // since the leader came to rest on one.
+    let offset = 0;
+    const follow = (g) => {
+      if (Math.abs(g.scrollLeft - offset) < 1) return;
+      g.style.scrollSnapType = "none";
+      g.scrollLeft = offset;
+    };
+    const lead = (g) => { if (g.style.scrollSnapType) g.style.scrollSnapType = ""; };
+    const makeBar = (host, handAllowed = null) => {
+      const card = document.createElement("div"), grid = document.createElement("div"), divider = document.createElement("span"), hand = document.createElement("button");
+      card.className = "reaction-bar"; card.setAttribute("role", "group"); card.setAttribute("aria-label", "Reactions");
+      grid.className = "reaction-grid";
+      const buttons = slots.map((_, i) => {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "reaction"; b.dataset.slot = String(i);
+        grid.append(b);
+        return b;
+      });
+      divider.className = "reaction-divider"; divider.setAttribute("aria-hidden", "true");
+      hand.dataset.slot = String(PERSISTENT);
+      hand.type = "button"; hand.className = "reaction reaction-hand"; hand.setAttribute("aria-pressed", "false");
+      // Where the bar is too narrow for the ten in a row (style.css: one row that scrolls), the row fades into the
+      // card's edge under a chevron at each end that has more beyond it: a press pages that way, a wheel scrolls it
+      // sideways, and a mouse drags it as a finger does (the click that ends a drag is swallowed by the long press's
+      // move rule below).
+      const scroller = document.createElement("div"), more = document.createElement("button"), back = document.createElement("button");
+      scroller.className = "reaction-scroll";
+      more.type = "button"; more.className = "reaction-more"; more.hidden = true;
+      more.setAttribute("aria-label", "More reactions");
+      more.title = "More reactions";
+      more.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
+      back.type = "button"; back.className = "reaction-more reaction-back"; back.hidden = true;
+      back.setAttribute("aria-label", "Earlier reactions");
+      back.title = "Earlier reactions";
+      back.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
+      scroller.append(grid, back, more);
+      const overflow = () => grid.scrollWidth - grid.clientWidth;
+      const syncMore = () => {
+        const end = overflow() - grid.scrollLeft < 4, start = grid.scrollLeft < 4;
+        if (more.hidden !== end) more.hidden = end;
+        if (back.hidden !== start) back.hidden = start;
+      };
+      grid.addEventListener("scroll", () => {
+        syncMore();
+        // A follower's own scroll (or one clamped short by a narrower row) is never passed back.
+        if (grid.style.scrollSnapType === "none" || Math.abs(grid.scrollLeft - offset) < 1 || !grid.clientWidth) return;
+        offset = grid.scrollLeft;
+        for (const other of bars) if (other.grid !== grid) follow(other.grid);
+      }, { passive: true });
+      if (typeof ResizeObserver === "function") new ResizeObserver(() => { follow(grid); syncMore(); }).observe(grid);
+      for (const type of ["pointerdown", "focusin"]) scroller.addEventListener(type, () => lead(grid));
+      const page = (dir) => grid.scrollBy({ left: dir * grid.clientWidth * 0.8, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      more.addEventListener("click", () => page(1));
+      back.addEventListener("click", () => page(-1));
+      grid.addEventListener("wheel", (e) => {
+        lead(grid);
+        if (overflow() < 4 || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+        e.preventDefault();
+        grid.scrollLeft += e.deltaY;
+      }, { passive: false });
+      // A mouse or pen drag (touch scrolls natively): past MOVE_PX the row follows the pointer with snapping held off,
+      // and on letting go it settles on the nearest cell, or on either end within half a cell of it. A press let go
+      // off the row before it dragged (never captured, so its pointerup went elsewhere) is dropped on its next move
+      // here, with the button no longer held.
+      let dragPointer = null, dragX = 0, dragLeft = 0, dragging = false;
+      grid.addEventListener("pointerdown", (e) => {
+        if (e.pointerType === "touch" || e.button !== 0 || e.isPrimary === false || overflow() < 4) return;
+        dragPointer = e.pointerId; dragX = e.clientX; dragLeft = grid.scrollLeft; dragging = false;
+      });
+      grid.addEventListener("pointermove", (e) => {
+        if (e.pointerId !== dragPointer) return;
+        if (!(e.buttons & 1)) { if (!dragging) dragPointer = null; return; }
+        const dx = e.clientX - dragX;
+        if (!dragging) {
+          if (Math.abs(dx) <= MOVE_PX) return;
+          dragging = true;
+          grid.dataset.dragging = "true";
+          grid.setPointerCapture(e.pointerId);
+        }
+        grid.scrollLeft = dragLeft - dx;
+      });
+      const endDrag = (e) => {
+        if (e.pointerId !== dragPointer) return;
+        dragPointer = null;
+        if (!dragging) return;
+        dragging = false;
+        const step = buttons[0].offsetWidth + (parseFloat(getComputedStyle(grid).columnGap) || 0);
+        const left = grid.scrollLeft;
+        delete grid.dataset.dragging;
+        grid.scrollLeft = left;
+        const max = overflow(), target = max - left < step / 2 ? max : left < step / 2 ? 0 : Math.round(left / step) * step;
+        if (step > 0) grid.scrollTo({ left: target, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      };
+      grid.addEventListener("pointerup", endDrag);
+      grid.addEventListener("pointercancel", endDrag);
+      card.append(scroller, divider, hand);
+      host.append(card);
+      const bar = { host, card, grid, buttons, hand, handAllowed };
+      bars.push(bar);
+      return bar;
+    };
+    const paint = () => {
+      for (const bar of bars) {
+        bar.buttons.forEach((b, i) => {
+          const e = slots[i], text = shown(e);
+          if (b.textContent !== text) b.textContent = text;
+          b.setAttribute("aria-label", label(e));
+          b.title = `${label(e)} · long-press to change`;
+        });
+        const up = net.state.hand, text = up ? net.state.handEmoji || P.HANDS[net.state.handTone] : persistentEmoji();
+        if (bar.hand.textContent !== text) bar.hand.textContent = text;
+        bar.hand.setAttribute("aria-pressed", String(up));
+        const words = P.HANDS.includes(text) ? up ? "Lower your hand" : "Raise your hand" : `${up ? "Unpin" : "Pin"} ${text}`;
+        bar.hand.setAttribute("aria-label", words);
+        bar.hand.title = `${words}: stays over your Ooga until toggled off${net.state.customHand ? " · long-press to change" : ""}`;
+        bar.hand.setAttribute("aria-haspopup", net.state.customHand ? "dialog" : "false");
+      }
+    };
+
+    // Available only signed in, in a live room that takes reactions.
+    let available = false;
+    const account = () => {
+      const s = net.state, on = !!s.me && s.reactions && s.room === "live", hide = !s.me || !s.reactions;
+      for (const bar of bars) {
+        if (bar.host.hidden !== hide) bar.host.hidden = hide;
+        for (const b of bar.buttons) b.disabled = !on;
+        // A bar may hold the hand to a rule of its own (Ooga Chat's panel: an active speaker only); it stays in view.
+        bar.hand.disabled = !on || !!bar.handAllowed && !bar.handAllowed();
+      }
+      if (available !== on) { available = on; if (!on) { cancelHold(); close(); } }
+      paint();
+    };
+
+    const react = (i) => net.sendReaction(shown(slots[i]));
+
+    // A long press: a held pointer that stays put opens the picker and swallows the click that follows.
+    let holdTimer = 0, holdSlot = -1, holdBar = null, holdX = 0, holdY = 0, holdPointer = null, swallow = false;
+    const cancelHold = () => { window.clearTimeout(holdTimer); holdTimer = 0; holdSlot = -1; holdPointer = null; };
+    const wire = (bar) => {
+      bar.card.addEventListener("pointerdown", (e) => {
+        const b = e.target.closest(".reaction[data-slot]");
+        if (e.isPrimary === false || holdPointer !== null) { cancelHold(); swallow = true; return; }
+        swallow = false;
+        if (!b || b.disabled || e.button !== 0) return;
+        if (b === bar.hand && !net.state.customHand) return;
+        holdPointer = e.pointerId;
+        holdSlot = Number(b.dataset.slot); holdBar = bar; holdX = e.clientX; holdY = e.clientY;
+        window.clearTimeout(holdTimer);
+        holdTimer = window.setTimeout(() => {
+          holdTimer = 0;
+          swallow = true;
+          if (holdSlot >= 0) open(holdBar, holdSlot);
+        }, HOLD_MS);
+      });
+      bar.card.addEventListener("pointermove", (e) => {
+        if (holdPointer === e.pointerId && Math.hypot(e.clientX - holdX, e.clientY - holdY) > MOVE_PX) { cancelHold(); swallow = true; }
+      });
+      for (const type of ["pointerup", "pointercancel", "pointerleave"]) bar.card.addEventListener(type, (e) => {
+        if (holdPointer !== e.pointerId) return;
+        if (type !== "pointerup") swallow = true;
+        cancelHold();
+      });
+      bar.card.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        const b = e.target.closest(".reaction[data-slot]");
+        cancelHold();
+        // A touch's long press opened it already; a right click opens it now.
+        if (b && !b.disabled && !(picker && !picker.root.hidden && pickSlot === Number(b.dataset.slot))) open(bar, Number(b.dataset.slot));
+      });
+      bar.card.addEventListener("click", (e) => {
+        const b = e.target.closest(".reaction");
+        if (!b || b.disabled) return;
+        if (swallow) { swallow = false; return; }
+        if (b === bar.hand) setPersistent(!net.state.hand);
+        else react(Number(b.dataset.slot));
+      });
+      bar.card.addEventListener("keydown", (e) => {
+        const b = e.target.closest(".reaction[data-slot]");
+        if (!b || !(e.key === "ContextMenu" || e.key === "F10" && e.shiftKey)) return;
+        e.preventDefault();
+        open(bar, Number(b.dataset.slot));
+      });
+    };
+
+    // The picker, one for both bars, floating in the middle of the screen over everything, outside the panels.
+    let picker = null, pickSlot = -1, pickBar = null;
+    const build = () => {
+      const root = document.createElement("div"), head = document.createElement("div"), title = document.createElement("span"), current = document.createElement("span");
+      const closeButton = document.createElement("button"), tools = document.createElement("div"), search = document.createElement("input"), tones = document.createElement("div");
+      const nav = document.createElement("div"), grid = document.createElement("div"), foot = document.createElement("div"), reset = document.createElement("button");
+      const hearts = document.createElement("div");
+      root.className = "reaction-picker"; root.setAttribute("role", "dialog"); root.setAttribute("aria-label", "Choose a reaction"); root.hidden = true;
+      document.body.append(root);
+      head.className = "reaction-picker-head";
+      title.className = "reaction-picker-title"; current.className = "reaction-picker-current";
+      title.append("Replace ", current);
+      closeButton.type = "button"; closeButton.className = "reaction-picker-close"; closeButton.setAttribute("aria-label", "Close"); closeButton.textContent = "×";
+      head.append(title, closeButton);
+      tools.className = "reaction-picker-tools";
+      search.type = "search"; search.className = "reaction-picker-search"; search.placeholder = "Search emoji"; search.setAttribute("aria-label", "Search emoji");
+      search.autocomplete = "off"; search.spellcheck = false;
+      tones.className = "reaction-tones"; tones.setAttribute("role", "radiogroup"); tones.setAttribute("aria-label", "Skin tone");
+      const toneButtons = TONE_NAMES.map((name, t) => {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "reaction-tone"; b.dataset.tone = String(t); b.setAttribute("role", "radio"); b.setAttribute("aria-label", name); b.title = name;
+        tones.append(b);
+        return b;
+      });
+      tools.append(search, tones);
+      hearts.className = "reaction-hearts"; hearts.setAttribute("role", "radiogroup"); hearts.setAttribute("aria-label", "Heart colour");
+      const heartButtons = HEARTS.map((h, i) => {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "reaction-heart"; b.dataset.heart = String(i); b.setAttribute("role", "radio");
+        b.setAttribute("aria-label", `${HEART_NAMES[i]} heart`); b.title = `${HEART_NAMES[i]} heart`; b.textContent = h;
+        hearts.append(b);
+        return b;
+      });
+      nav.className = "reaction-picker-nav"; nav.setAttribute("role", "group"); nav.setAttribute("aria-label", "Emoji groups");
+      grid.className = "reaction-picker-grid";
+      const all = [], toneable = [], sections = [];
+      BL.emojiData.groups.forEach((group, g) => {
+        const jump = document.createElement("button"), heading = document.createElement("h4"), set = document.createElement("div");
+        jump.type = "button"; jump.className = "reaction-picker-jump"; jump.dataset.group = String(g); jump.textContent = GROUP_ICONS[group.name] || group.emoji[0][0];
+        jump.setAttribute("aria-label", group.name); jump.title = group.name;
+        nav.append(jump);
+        heading.className = "reaction-picker-group"; heading.textContent = group.name;
+        set.className = "reaction-picker-set";
+        const items = [];
+        for (const [emoji, name, light] of group.emoji) {
+          const b = document.createElement("button");
+          b.type = "button"; b.className = "reaction-choice"; b.dataset.e = emoji; b.title = name; b.setAttribute("aria-label", name);
+          b.textContent = emoji;
+          set.append(b);
+          const item = { b, emoji, name: name.toLowerCase() };
+          all.push(item); items.push(item);
+          if (light) toneable.push(item);
+        }
+        grid.append(heading, set);
+        sections.push({ heading, set, items });
+      });
+      foot.className = "reaction-picker-foot";
+      reset.type = "button"; reset.className = "link reaction-picker-reset"; reset.textContent = "Reset to defaults";
+      foot.append(reset);
+      root.append(head, tools, hearts, nav, grid, foot);
+      const p = { root, current, search, toneButtons, grid, all, toneable, sections };
+      const paintTones = () => {
+        for (const item of toneable) { const text = P.toned(item.emoji, tone); if (item.b.textContent !== text) item.b.textContent = text; }
+        toneButtons.forEach((b, t) => b.setAttribute("aria-checked", String(t === tone)));
+        heartButtons.forEach((b, i) => b.setAttribute("aria-checked", String(i === heart)));
+      };
+      p.paintTones = paintTones;
+      paintTones();
+      closeButton.addEventListener("click", () => close(true));
+      tones.addEventListener("click", (e) => {
+        const b = e.target.closest(".reaction-tone");
+        if (!b) return;
+        tone = Number(b.dataset.tone);
+        save();
+        paintTones();
+        p.current.textContent = shown(selected(pickSlot));
+        // A raised hand takes the new tone at once.
+        syncPersistent();
+        paint();
+      });
+      hearts.addEventListener("click", (e) => {
+        const b = e.target.closest(".reaction-heart");
+        if (!b) return;
+        heart = Number(b.dataset.heart);
+        save();
+        paintTones();
+        p.current.textContent = shown(selected(pickSlot));
+        syncPersistent();
+        paint();
+      });
+      nav.addEventListener("click", (e) => {
+        const b = e.target.closest(".reaction-picker-jump");
+        if (!b) return;
+        const section = sections[Number(b.dataset.group)];
+        if (!section.heading.hidden) grid.scrollTop = section.heading.offsetTop - grid.offsetTop;
+      });
+      search.addEventListener("input", () => {
+        const q = search.value.trim().toLowerCase();
+        for (const section of sections) {
+          let any = false;
+          for (const item of section.items) { const hide = !!q && !item.name.includes(q); if (item.b.hidden !== hide) item.b.hidden = hide; any = any || !hide; }
+          section.heading.hidden = section.set.hidden = !any;
+        }
+        grid.scrollTop = 0;
+      });
+      grid.addEventListener("click", (e) => {
+        const b = e.target.closest(".reaction-choice");
+        if (!b) return;
+        choose(b.dataset.e);
+      });
+      reset.addEventListener("click", () => {
+        slots = P.DEFAULTS.slice();
+        tone = 0;
+        heart = 0;
+        persistent = P.HAND;
+        save();
+        paintTones();
+        syncPersistent();
+        paint();
+        close(true);
+      });
+      root.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        e.preventDefault();
+        e.stopPropagation();
+        close(true);
+      });
+      return p;
+    };
+    const choose = (picked) => {
+      if (pickSlot < 0) return;
+      if (HEARTS.includes(picked)) heart = HEARTS.indexOf(picked);
+      const emoji = asSlot(picked);
+      if (pickSlot === PERSISTENT) persistent = emoji;
+      else {
+        const was = slots[pickSlot], other = slots.indexOf(emoji);
+        if (other >= 0) slots[other] = was;
+        slots[pickSlot] = emoji;
+      }
+      syncPersistent();
+      save();
+      paint();
+      close(true);
+    };
+    // Closes on a press outside it, as every popup does.
+    const outside = (e) => {
+      if (picker && !picker.root.contains(e.target)) close(false);
+    };
+    const open = (bar, slot) => {
+      if (!available || slot === PERSISTENT && !net.state.customHand) return;
+      if (!picker) picker = build();
+      pickSlot = slot; pickBar = bar;
+      picker.current.textContent = shown(selected(slot));
+      picker.current.title = label(selected(slot));
+      picker.search.value = "";
+      picker.search.dispatchEvent(new Event("input"));
+      picker.root.hidden = false;
+      for (const bar of bars) bar.card.dataset.picking = String(bar === pickBar);
+      for (const b of [...bar.buttons, bar.hand]) b.dataset.picking = String(Number(b.dataset.slot) === slot);
+      document.addEventListener("pointerdown", outside, true);
+      // A fine pointer types the search at once; a phone's keyboard would cover the grid, so it waits for a tap.
+      if (window.matchMedia("(pointer: fine)").matches) picker.search.focus({ preventScroll: true });
+      else picker.root.querySelector(".reaction-picker-close").focus({ preventScroll: true });
+    };
+    const close = (refocus) => {
+      swallow = false;
+      if (!picker || picker.root.hidden) return;
+      picker.root.hidden = true;
+      document.removeEventListener("pointerdown", outside, true);
+      for (const bar of bars) { delete bar.card.dataset.picking; for (const b of [...bar.buttons, bar.hand]) delete b.dataset.picking; }
+      if (refocus && pickBar) (pickSlot === PERSISTENT ? pickBar.hand : pickBar.buttons[pickSlot]).focus({ preventScroll: true });
+      pickSlot = -1; pickBar = null;
+    };
+
+    window.addEventListener("blur", cancelHold);
+    document.addEventListener("visibilitychange", () => { if (document.hidden) { cancelHold(); close(); } });
+    net.subscribe(account);
+    account();
+
+    // The hand's key (H, director.js): false where there is no room to raise it in, so the key stays with the scene.
+    const toggleHand = () => available && (setPersistent(!net.state.hand), true);
+
+    // A bar in a panel, on the same state; `handAllowed` gates its hand (Ooga Chat's: an active speaker), asked again on
+    // `refresh`.
+    const mount = (host, { handAllowed = null } = {}) => { wire(makeBar(host, handAllowed)); account(); };
+
+    return {
+      close,
+      mount,
+      refresh: account,
+      toggleHand,
+      get slots() { return slots.slice(); },
+      get tone() { return tone; },
+      get heart() { return HEARTS[heart]; },
+      get persistent() { return persistent; },
+      stats: () => ({ bars: bars.length, available, open: !!picker && !picker.root.hidden, slot: pickSlot, picker: picker ? picker.all.length : 0 })
+    };
+  };
+  // A reaction popping up over whoever sent it, the same on Online Oogas' rows (players.js) and Ooga Chat's tiles
+  // (audience-tiles.js), as it does over their Ooga: it pops in, rises a little and fades over 2.6 s, and under Calm only
+  // fades. `pop(el)` plays it on `el` and returns the animation; the caller shows the emoji and hides it on finish.
+  const POP_TIMING = { duration: 2600, easing: "linear" }, CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const POP = [
+    { opacity: 1, transform: "translateY(0) scale(0.4)" },
+    { opacity: 1, transform: "translateY(-2px) scale(1.15)", offset: 0.07 },
+    { opacity: 1, transform: "translateY(-3px) scale(1)", offset: 0.12 },
+    { opacity: 1, transform: "translateY(-5px) scale(1)", offset: 0.73 },
+    { opacity: 0, transform: "translateY(-7px) scale(1)" },
+  ];
+  const POP_CALM = [{ opacity: 1 }, { opacity: 1, offset: 0.73 }, { opacity: 0 }];
+  const pop = (el) => el.animate(CALM.matches ? POP_CALM : POP, POP_TIMING);
+  BL.reactionBar = { create, pop };
+})();

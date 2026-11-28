@@ -1,0 +1,424 @@
+/* Ooga Chat's own layout. The look (tokens, sign lettering, slabs, chips, the amber button) comes from ../native.css,
+   which the island shares, and every panel wears the island's own rules (src/style.css, taken by scripts/ooga-chat.mjs
+   ISLAND_RULES); this file only places them: native tabs on top of one plank frame, the island's drawer, sized for a
+   phone first and centred on wider screens. */
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-text-size-adjust: 100%;
+}
+
+.oc [hidden] { display: none !important; }
+
+.oc {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-width: 620px;
+  height: 100vh;
+  height: min(100dvh, 900px);
+  min-height: 520px;
+  margin: 0 auto;
+  padding: calc(16px + var(--safe-top)) calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));
+}
+
+.oc > * { flex: none; }
+
+.oc-tabs {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 6px;
+  padding: 0 6px;
+}
+
+.oc-tab {
+  width: 58px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.oc-tab-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 6px 13px 4px;
+  border: 3px solid var(--wood-edge);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: linear-gradient(180deg, var(--wood), var(--wood-dk));
+  box-shadow: 0 -2px 0 rgba(0, 0, 0, 0.2) inset;
+}
+
+.oc-tab svg { display: block; width: 100%; height: auto; filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5)); }
+.oc-tab:hover .oc-tab-face { background: linear-gradient(180deg, var(--plank), var(--wood)); }
+/* The chosen tab's face runs on over the frame's top border, so it reads as part of the frame. */
+.oc-tab[aria-selected="true"] .oc-tab-face {
+  height: calc(100% + 3px);
+  background: linear-gradient(180deg, #b8844a, var(--plank));
+  box-shadow: none;
+}
+.oc-tab:focus-visible { outline: none; }
+.oc-tab:focus-visible .oc-tab-face { outline: 2px solid var(--accent); outline-offset: -3px; }
+
+.oc > .oc-frame {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+}
+
+/* The page's name, for assistive technology: what shows is each panel's own carved title, as on the island. */
+.oc-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.oc-slab { padding: 20px 22px; }
+
+.oc-signin {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.oc-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  border-radius: 6px;
+}
+
+/* The sign-in's words, as the design has them: a quiet sans line over the buttons, in the note and under it. */
+.oc-lede,
+.oc-role,
+.oc-foot,
+.oc-note span {
+  margin: 0;
+  color: #bbb4a6;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.oc-foot { text-align: center; }
+
+.oc-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  color: var(--accent-text);
+}
+
+.oc-status-line .link,
+.oc-notice .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.oc-providers {
+  display: grid;
+  gap: 11px;
+  margin-top: 12px;
+}
+
+/* A sign-in button, the design's: the plank's wood, its edge and nail shadow, the label in the panels' own type. */
+.oc-provider {
+  min-height: 51px;
+  padding: 9px 12px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(var(--plank), var(--wood));
+  color: var(--paper);
+  font: inherit;
+  font-weight: 600;
+  box-shadow: 0 3px 0 var(--nail);
+  cursor: pointer;
+}
+
+.oc-provider:hover:not(:disabled) { filter: brightness(1.12); }
+.oc-provider:focus-visible { outline: 2px solid #ffd9a0; outline-offset: 2px; }
+.oc-provider:disabled { opacity: 0.4; cursor: default; }
+
+.oc-note {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 1px;
+  padding: 13px;
+  border: 1px solid #51483b;
+  border-radius: 5px;
+  background: #24211d;
+}
+
+.oc-note strong { color: #ffd9a0; font-size: 12px; }
+
+/* In the account row, the sign-in button spans the panel as it does on the sign-in screen. */
+.account > .oc-account-signin { flex: 1 1 100%; }
+/* In a hosted chat the account row is the chat's own footer (ooga-chat-panels.js `accountRow`), laid out as the Ooga Chat
+   tab's is (chat-hosts.css): on a narrow screen one row of buttons sharing its width. */
+@media (max-width: 479px) {
+  .oc-panel .account[data-chat="true"] > .account-actions { display: flex; flex: 1 1 100%; flex-wrap: nowrap; gap: 8px; }
+  .oc-panel .account[data-chat="true"] .foot-button { flex: 1 1 0; min-width: 0; padding: 0 6px; letter-spacing: 0.04em; }
+}
+/* Signed in, the visitor is online here, in Ooga Chat: their name's dot is its purple, whether or not The Commons is up. */
+.oc-panel .account .account-name::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #b18aff;
+  box-shadow: 0 0 5px rgba(177, 138, 255, 0.6);
+  vertical-align: 1px;
+}
+/* The Commons' online tag in the title's top right corner, as Online Oogas has it (the island's Commons keeps its
+   help button there, which pushes the tag over). */
+.panel.oc-commons[data-panel="chat"] > .panel-title h2 { margin-right: auto; }
+
+/* A notice that needs the visitor: an expired sign-in, a failed check, an unconfirmed sign-out, with its retry. */
+.oc-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(216, 137, 43, 0.42);
+  border-radius: 6px;
+  background: rgba(216, 137, 43, 0.08);
+  color: var(--paper);
+}
+
+/* Read by assistive technology only: why a disabled control is off. */
+.oc-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* One height for every tab, as the island's drawer has: the frame takes the page's height, each tab's panel the frame's,
+   and inside it the slab takes what the panel's fixed parts leave and scrolls its own overflow (native.css .panel). */
+.oc-views,
+.oc-view { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
+/* The Ooga Chat panel shows its space only while signed in, and only its footer while signing out. */
+.oc-chat[data-space="off"] > :is(.cloud-status, .cloud-roster, .oc-chat-foot),
+.oc-chat[data-space="foot"] > :is(.cloud-status, .cloud-roster) { display: none; }
+.oc-pending p { margin: 0; color: rgba(243, 239, 228, 0.7); }
+
+.oc-players { padding: 12px 14px; }
+.oc-roster-note { margin: 0; }
+
+/* The grid's names open the island's Volume row below it, wide enough to adjust on a phone. */
+.oc-volume-toggle {
+  display: flex;
+  justify-content: center;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.oc-volume-toggle:disabled { cursor: default; }
+.oc-volume-toggle:hover:not(:disabled) { color: var(--accent-text); }
+.oc-volume-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.oc-volume-head { display: flex; align-items: center; gap: 12px; }
+.oc-volume-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.oc-chat[data-space="off"] > .oc-volume,
+.oc-chat[data-space="foot"] > .oc-volume { display: none; }
+
+/* Feed the Oogas: the island's donation dialog (donation-popup.js), framed as the island frames its dialogs (style.css
+   `.modal`, `.modal-close`, `.donation-popup`). The kiosk draws the name and message on its own screen; their fields
+   only take the typing, so they stay in the page, focusable, a phone's keyboard able to open on them, but out of
+   sight; 16px keeps iOS from zooming in. */
+.donation-popup {
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  margin: auto;
+  padding: 16px 18px 18px;
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+  font: inherit;
+}
+.donation-popup::backdrop { background: rgba(0, 0, 0, 0.6); }
+.donation-popup .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.donation-popup h2 { margin: 0 0 12px; font-size: 14px; color: var(--paper); filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5)); }
+.donation-popup .modal-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -4px -4px 0 0;
+  padding: 0;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--paper);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.donation-popup .modal-close:hover,
+.donation-popup .modal-close:focus-visible { background: rgba(0, 0, 0, 0.38); }
+#donation-fields {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+#donation-fields input { font-size: 16px; }
+#donation-screen { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 6px; }
+#donation-screen:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.donation-popup .help {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  background: var(--tablet);
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font-size: 11px;
+  line-height: 1.5;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.oc-device { display: grid; gap: 6px; margin: 12px 4px 0; color: rgba(243, 239, 228, 0.78); font-size: 12px; }
+.oc-device-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; }
+/* Each line's ×, at its end. */
+.oc-device-close {
+  margin-left: auto; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: none;
+  color: rgba(243, 239, 228, 0.6); font: inherit; font-size: 18px; line-height: 1; cursor: pointer;
+}
+.oc-device-close:hover { background: rgba(243, 239, 228, 0.1); color: var(--paper); }
+.oc-device-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+@media (pointer: coarse) { .oc-device-close { width: 40px; height: 40px; } }
+
+.oc-error {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: #241810;
+  color: var(--paper);
+}
+
+.oc-fixture-note { margin: 12px 4px 0; color: var(--faint); font-size: 11px; }
+
+@media (max-width: 420px) {
+  .oc { padding: calc(8px + var(--safe-top)) calc(8px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(8px + var(--safe-left)); }
+  .oc-tabs { gap: 4px; padding: 0 4px; }
+  .oc-tab { width: 52px; height: 42px; }
+  .oc-tab-face { padding: 6px 11px 4px; }
+  .oc-slab { padding: 14px 16px; }
+}
+/* At every width the panels keep tight: their own padding at 6px over and under and 8px at the sides, their rows 6px apart, the emoji bar and the footer
+   at the panel's 8px, and in a chat the island view and the roster of faces out to the panel's sides, square, meeting
+   with no gap. */
+.oc .oc-panel { gap: 6px; padding: 6px 8px; }
+.oc .oc-panel > .panel-foot { gap: 6px 12px; }
+.oc .oc-panel.oc-panel > :is(.hc-room-strip, .cloud-roster) { margin-right: -8px; margin-left: -8px; border-right-width: 0; border-left-width: 0; border-radius: 0; }
+.oc .oc-panel > .hc-room-strip .iv-stage { border-right-width: 0; border-left-width: 0; border-radius: 0; }
+/* On a phone the app also runs edge to edge: no page margin or side borders. */
+@media (max-width: 480px) {
+  .oc { padding: calc(4px + var(--safe-top)) var(--safe-right) var(--safe-bottom) var(--safe-left); }
+  .oc > .oc-frame { border-right-width: 0; border-left-width: 0; border-radius: 0; box-shadow: none; }
+  .oc-fixture-note { margin: 8px 8px 0; }
+  .oc-device { margin: 6px 8px 0; }
+}
+/* With hosted chats on and no chat joined, the other tabs' emoji bars stand down: reactions belong to a chat
+   (ooga-chat-panels.js `outOfChat`). */
+.oc-panel[data-chat="none"] > .panel-foot > .reactions { display: none; }
+
+
+/* The island view full screen (island-view.js, chat-hosts.css `.iv-full-host`): the app's column at the right edge,
+   the view filling the rest; on a screen taller than it is wide, under the view. */
+html.iv-full .oc { position: fixed; z-index: 41; top: 0; right: 0; bottom: 0; width: var(--iv-side, min(420px, 42vw)); max-width: none; height: 100dvh; min-height: 0; margin: 0; }
+@media (max-aspect-ratio: 1 / 1) { html.iv-full .oc { top: var(--iv-split, 55dvh); left: 0; width: auto; height: calc(100dvh - var(--iv-split, 55dvh)); } }
+/* Full screen keeps the chat alone in that column, with no tabs over it. */
+html.iv-full .oc-tabs, html.iv-full .oc-fixture-note, html.iv-full .oc-device { display: none !important; }
+/* In a chat, full screen gives its title line a solid bar of its own across the view's top (Back, the chat's title over
+   its counts, a host's Requests and Share), safe from the status bar, the land's tag and the fold button left out; the
+   view starts under it and the chat's panel at its roster right under the view. A host's Requests panel drops from the
+   bar over the top of the view, never pushing the roster. */
+html.iv-full .oc-chat[data-space="on"] > .panel-title {
+  position: fixed; z-index: 44; top: 0; left: 0; right: 0; box-sizing: border-box; display: flex; align-items: center; gap: 6px;
+  height: calc(var(--iv-bar) + var(--safe-top)); max-width: none; margin: 0; padding: var(--safe-top) calc(8px + var(--safe-right)) 0 calc(4px + var(--safe-left));
+  border: 0; border-bottom: 1px solid rgba(243, 239, 228, 0.08); border-radius: 0; background: #0c0b0a; text-shadow: none;
+}
+html.iv-full .oc-chat[data-space="on"] > .panel-title > :is(.panel-chip:not(.hc-requests), .iv-fold) { display: none; }
+html.iv-full .oc-chat[data-space="on"] .hc-dock:not(:empty) {
+  position: fixed; z-index: 43; margin: 0; top: calc(var(--iv-bar) + var(--safe-top)); left: 0; right: 0; max-height: calc(var(--iv-split, 55dvh) - var(--iv-bar) - var(--safe-top));
+  padding: 0 var(--safe-right) 0 var(--safe-left); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+html.iv-full .oc-chat[data-space="on"] .hc-dock > .hc-pop.hc-docked { margin: 0; border-width: 0 0 3px; border-radius: 0; }
+@media (min-aspect-ratio: 1 / 1) {
+  html.iv-full .oc-chat[data-space="on"] > .panel-title, html.iv-full .oc-chat[data-space="on"] .hc-dock:not(:empty) { right: var(--iv-side, min(420px, 42vw)); }
+  html.iv-full .oc-chat[data-space="on"] .hc-dock:not(:empty) { max-height: calc(100dvh - var(--iv-bar) - var(--safe-top)); }
+}
+/* The view under the bar, beside or over the chat's column. */
+html.iv-full { --iv-bar: 52px; }
+html.iv-full:has(.oc-chat[data-space="on"]) .iv-full-host { top: calc(var(--iv-bar) + var(--safe-top)); }
+@media (max-aspect-ratio: 1 / 1) { html.iv-full:has(.oc-chat[data-space="on"]) .iv-full-host { height: calc(var(--iv-split, 55dvh) - var(--iv-bar) - var(--safe-top)); } }
+/* Full screen's own button inside the view's corner, the same square as Share in the bar over it, their right edges lined up. */
+html.iv-full .iv-full-button {
+  top: 8px; right: calc(8px + var(--safe-right)); width: 32px; height: 32px; border-radius: 6px;
+  background: rgba(36, 32, 28, 0.72); box-shadow: inset 0 0 0 1px rgba(243, 239, 228, 0.12); color: rgba(243, 239, 228, 0.9);
+}
+html.iv-full .iv-full-button svg { width: 17px; height: 17px; }
+/* The land's tag beside it, the same height. */
+html.iv-full .iv-land-tag { top: 8px; height: 32px; padding: 0 10px; border-radius: 6px; font-size: 11px; }
+html.iv-full .iv-full-button:not([hidden]) ~ .iv-land-tag { right: calc(8px + 32px + 6px + var(--safe-right)); }
+/* No margin between the view and the chat's panel, beside it or under it: the page's inset, the frame's edges, the
+   panel's top padding and the gaps its empty rows leave go, and the roster of faces runs the panel's whole width from
+   its top, square, so the two meet edge to edge and stand as tall as each other side by side. */
+html.iv-full .oc { padding: var(--safe-top) var(--safe-right) var(--safe-bottom) 0; }
+@media (max-aspect-ratio: 1 / 1) { html.iv-full .oc { padding: 0 var(--safe-right) var(--safe-bottom) var(--safe-left); } }
+html.iv-full .oc > .oc-frame { border-width: 0; border-radius: 0; box-shadow: none; }
+html.iv-full .oc .oc-panel[data-space="on"] { gap: 0; padding: 0 8px 6px; }
+html.iv-full .oc .oc-panel[data-space="on"] > .hc-notice-host { margin-top: 0; }
+html.iv-full .oc .oc-panel[data-space="on"] > .cloud-roster { margin: 0 -8px; border-width: 0 0 2px; border-radius: 0; }
+html.iv-full .oc .oc-panel[data-space="on"] > .cloud-roster ~ :not(.hc-start, .hc-preview, .hc-pop) { margin-top: 6px; }
+html.iv-full .oc .oc-panel[data-space="on"] > .cloud-roster + .hc-alone { margin: 0 -8px; }
+html.iv-full .iv-reset { top: 8px; }
+html.iv-full .iv-stage > .hc-chat-notice { top: 8px; }

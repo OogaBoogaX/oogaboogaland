@@ -7,7 +7,9 @@
   const BL = window.BL = window.BL || {};
   // Clanking (working) within one hour, chillin until a day has passed,
   // asleep through 30 days, then away. The 60s hub interval re-samples these thresholds.
-  const MINUTE = 60 * 1e3, HOUR = 60 * MINUTE, WORK_WINDOW = HOUR, CHILL_WINDOW = 24 * HOUR, AWAY_WINDOW = 30 * 24 * HOUR;
+  // The windows themselves are roster-panel.js's (`stateAt`, `ageAt`), shared with Ooga Chat's Contributing Oogas.
+  const MINUTE = 60 * 1e3, HOUR = 60 * MINUTE, WORK_WINDOW = HOUR, CHILL_WINDOW = 24 * HOUR;
+  const { stateAt, ageAt } = BL.rosterPanel;
   const ENTROPY = "oogaboogax/entropylab", MAX_REPOS = 64;
   const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
   // Historical EntropyLab activity; a backend can refresh it with applyActivity.
@@ -97,12 +99,6 @@
     const seen = contributor.activity.get(repo);
     return seen > 0 && seen <= at && at - seen < WORK_WINDOW;
   };
-  const stateAt = (stamp, at) => {
-    const age = at - stamp;
-    if (!Number.isFinite(age) || stamp <= 0 || age < 0) return "sleeping";
-    if (age < WORK_WINDOW) return "working";
-    return age < CHILL_WINDOW ? "chilling" : age <= AWAY_WINDOW ? "sleeping" : "away";
-  };
   const contributionAt = (contributor) => contributor.lastContributionAt > 0 ? contributor.lastContributionAt : contributor.lastCommitAt;
   const stateFor = (contributor, at = Date.now()) => {
     if (contributor.local) return "chilling";
@@ -112,14 +108,6 @@
     return contributor.maintainer && state !== "away" ? "working" : state;
   };
   const contributionStateFor = (contributor, at = Date.now()) => stateAt(contributionAt(contributor), at);
-  const ageAt = (stamp, at) => {
-    if (!Number.isFinite(stamp) || stamp <= 0) return "no activity";
-    const minutes = Math.max(0, Math.floor((at - stamp) / MINUTE));
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    return `${Math.floor(hours / 24)}d ago`;
-  };
   const ageLabel = (contributor, at = Date.now()) => contributor.maintainer ? "building" : ageAt(contributor.lastCommitAt, at);
   const contributionAgeLabel = (contributor, at = Date.now()) => ageAt(contributionAt(contributor), at);
   const recordContribution = (contributor, stamp) => {
@@ -155,6 +143,10 @@
   // contributed to. Without that field, org-wide last_seen_at lands on the
   // lab's key as before; either way stateFor (max across repos) gives the
   // same org-wide wake/sleep state.
+  const snapshotOwner = (login) => {
+    const character = BL.characters.ownedBy(login);
+    return character && byName.get(character.handle.toLowerCase());
+  };
   const applySnapshot = (snapshots, at = Date.now()) => {
     const rows = [];
     let sourceChanged = false;
@@ -176,7 +168,7 @@
       // per-repository rows are used separately to route working characters.
       if (Array.isArray(snapshot.contributors)) for (const contributor of snapshot.contributors) {
         if (!contributor || typeof contributor.login !== "string" || typeof contributor.last_seen_at !== "string" || !ISO_TIME.test(contributor.last_seen_at)) continue;
-        const stamp = Date.parse(contributor.last_seen_at), entry = byName.get(contributor.login.toLowerCase());
+        const stamp = Date.parse(contributor.last_seen_at), entry = snapshotOwner(contributor.login);
         if (entry && Number.isFinite(stamp) && stamp > 0 && stamp <= at && recordContribution(entry, stamp)) sourceChanged = true;
       }
       const perRepo = version === 3 && Array.isArray(snapshot.repos)
@@ -196,8 +188,8 @@
       for (const contributor of list) {
         if (!contributor || typeof contributor.login !== "string" || typeof contributor.last_seen_at !== "string" || !ISO_TIME.test(contributor.last_seen_at)) continue;
         const lastCommitAt = Date.parse(contributor.last_seen_at);
-        const entry = byName.get(contributor.login.toLowerCase());
-        if (entry && Number.isFinite(lastCommitAt) && lastCommitAt > 0 && lastCommitAt <= at) accepted.push({ entry, name: contributor.login, lastCommitAt, repo });
+        const entry = snapshotOwner(contributor.login);
+        if (entry && Number.isFinite(lastCommitAt) && lastCommitAt > 0 && lastCommitAt <= at) accepted.push({ entry, name: entry.name, lastCommitAt, repo });
       }
       // The first authoritative snapshot replaces the bundled historical fallback,
       // even when the fallback happened to be later. Subsequent snapshots still
@@ -233,38 +225,9 @@
     }
     for (const notify of listeners) notify();
   };
-  const { fnv1a, mulberry32 } = BL.math;
   const voiceFor = (name) => BL.characters.get(name)?.voice || null;
-  const SKINS = ["#c98a5b", "#a9744c", "#8a5a3a", "#d9a06b", "#b58057"];
-  const HAIRS = ["#2b1b10", "#4a2c14", "#151312", "#5c4425", "#7a2e12"];
-  const HAIRS_SLIM = ["#ece5d3", "#e0dac6", "#f2eee2", "#b9dcaa", "#a3d19a"];
-  const FURS = ["#d98a2e", "#cc7f28", "#c98936", "#e09a40", "#c27a24", "#d4913a"];
-  // A character's look overrides the hashed skin, hair and fur and carries its
-  // flags into the traits; its dress hooks go to models.buildCaveman.
-  const traitsFor = (name) => {
-    const character = BL.characters.get(name);
-    const look = character?.look || {};
-    const slim = look.build === "slim";
-    const rand = mulberry32(fnv1a(name));
-    const skin = SKINS[Math.floor(rand() * SKINS.length)];
-    const hashedHair = (slim ? HAIRS_SLIM : HAIRS)[Math.floor(rand() * HAIRS.length)];
-    const traits = {
-      ...look,
-      name,
-      display: character?.display || byName.get(name.toLowerCase())?.display || name,
-      slim,
-      skin: look.skin || skin,
-      hair: look.hair || hashedHair,
-      fur: look.fur || FURS[Math.floor(rand() * FURS.length)],
-      height: 0.92 + rand() * 0.24,
-      belly: (0.9 + rand() * 0.35) * (slim ? 0.8 : 1),
-      rand: mulberry32(fnv1a(name + "/body")),
-      dress: character?.dress
-    };
-    // An explicit stature replaces the hashed one after every draw, so the
-    // other hashed traits keep their sequence.
-    if (look.height) traits.height = look.height;
-    return traits;
-  };
+  // The look an Ooga is built from (characters.js `traitsFor`, which Ooga Chat's 3D view shares), named here as the
+  // roster names it.
+  const traitsFor = (name) => BL.characters.traitsFor(name, byName.get(name.toLowerCase())?.display);
   BL.contributors = { roster, activeRoster, solo, debugState, debugRoster, addTemporary, addLocal, stateFor, ageLabel, contributionStateFor, contributionAgeLabel, traitsFor, voiceFor, hasRecentActivity, applyActivity, applySnapshot, subscribe, seedDebugActivity };
 })();

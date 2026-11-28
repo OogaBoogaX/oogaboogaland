@@ -2,8 +2,9 @@
 
 Oogatron's raw org-wide `/v2/stats` snapshot is the single contributor source.
 OBL does not crawl repositories or infer GitHub logins from commit author names,
-display names, or email addresses. The raw snapshot includes `first_seen_at`,
-which the smaller baked jumbotron payload deliberately omits.
+display names, or email addresses. The raw snapshot and the baked jumbotron
+payload both carry `first_seen_at`; the roster's stats strips show it as each
+contributor's first contribution, but the bake is never an onboarding source.
 Automatic files and temporary sign-in characters require an integer
 `counts.commits >= 1`; issues, comments, reviews and PR activity alone do not qualify.
 This threshold does not remove or rewrite existing custom profiles.

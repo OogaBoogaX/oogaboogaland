@@ -68,7 +68,9 @@
   const LOW = 0.65, RISE = 0.5, UP = HM.LAYOUT.gangway.y - 0.5;
   // How long each thing takes, s, [least, most]; how likely each is when she picks the next, by its kind; how long the
   // visitor may stand in her way before she goes elsewhere.
-  const TIMES = { fix: [6, 10], inspect: [4.5, 7], admire: [5, 7], glare: [3, 5], pace: [7, 10], yell: [3.2, 4], smash: [60, 60], scare: [20, 20] }, BLOCKED = 1.4;
+  const TIMES = { fix: [6, 10], inspect: [4.5, 7], admire: [5, 7], glare: [3, 5], pace: [7, 10], yell: [3.2, 4], smash: [60, 60], scare: [20, 20], brawl: [600, 600] }, BLOCKED = 1.4;
+  // Squaring up to a worker pounding the Jet (`brawl`): how far from him she stands.
+  const BRAWL = { gap: 1.25 };
   const WEIGHT = { fix: 0.4, inspect: 0.22, admire: 0.14, pace: 0.12, glare: 0.12 };
   // Running at the visitor: from how far (across the runway she stops at its edge and yells over it), how often at
   // most, how likely when she picks, and how near she stops.
@@ -108,13 +110,16 @@
     spook: ["WHO THE #@$% IS STARTING MY ENGINES?!", "WHAT THE #@$% WAS THAT?!"],
     hide: ["...is it gone?"], charge: ["OH, YOU WANT SOME OF THIS?!"], charged: ["Yeah. That's what I thought."], booth: ["I DIDN'T TOUCH ANYTHING!"],
     brother: ["KORTIK! WAS THAT YOU?!"], prod: ["THIS THING IS POSSESSED!"], nope: ["...nope."], zapped: ["...ow."], groove: ["I DID NOT JUST DO THAT."], stay: ["HEY! STAY WHERE I PUT YOU!"],
-    tess: ["TESS! BUZZ OFF!", "NOT NOW, TESS!", "GET OUT OF MY FACE, YOU FLYING TOASTER!", "I CAN'T SEE THE #@$%ING JET!", "I'M FIXING IT! LEAVE ME BE!"]
+    tess: ["TESS! BUZZ OFF!", "NOT NOW, TESS!", "GET OUT OF MY FACE, YOU FLYING TOASTER!", "I CAN'T SEE THE #@$%ING JET!", "I'M FIXING IT! LEAVE ME BE!"],
+    brawl: ["HEY! GET AWAY FROM MY JET!", "OH, NO YOU #@$%ING DON'T!", "YOU TOUCH MY JET, YOU DEAL WITH ME!"],
+    faceoff: ["BRING IT, BANANA BREATH!", "YOU WANT A PIECE OF THIS?!"], started: ["HE STARTED IT!", "HE HIT MY JET FIRST!"]
   };
   // How she says each (a style of `hangarAudio.voice`); how often a line about the Jet or Lightning comes out a rare
   // one instead, and a yell a scream.
   const STYLE = { jet: "yell", lightning: "yell", hammer: "yell", rage: "scream", charge: "scream", caught: "yell", mutter: "mutter", hope: "soft", rare: "yell", panic: "scream", blame: "yell",
     poke: "yell", rampage: "scream", smash: "yell", shove: "yell", chase: "scream", meltdown: "scream", sulk: "yell", fixed: "mutter", hush: "scream", quarrel: "scream", tess: "yell", spook: "scream",
-    hide: "soft", charge: "scream", charged: "mutter", booth: "yell", brother: "scream", prod: "yell", nope: "soft", zapped: "mutter", groove: "yell", stay: "scream" };
+    hide: "soft", charge: "scream", charged: "mutter", booth: "yell", brother: "scream", prod: "yell", nope: "soft", zapped: "mutter", groove: "yell", stay: "scream",
+    brawl: "scream", faceoff: "yell", started: "yell" };
   const RARE = 0.08, SCREAM = 0.2;
   // The static fire: where she runs to, the nearer of them (beside the booth and by the far wall's crates, both where
   // the test's show view keeps her in frame lying down); how far off she may stay put and cower; how near the blast
@@ -171,7 +176,7 @@
   // `fx` for her lines and sparks, `audio` for her voice, her boots and her hammer's clang, `fire` the static fire test
   // she freaks out at, `jet` the Jet's node, which her rampage rocks, `toast` for what the visitor should know, `blocks`
   // the circles she walks round, and `avoid(x, z, feet, height, radius)`, where she must not step into now.
-  const create = ({ fx, audio, fire, jet, toast, blocks = null, avoid = null }) => {
+  const create = ({ fx, audio, fire, jet, toast, blocks = null, avoid = null, quieted = () => false }) => {
     const S = HM.LAYOUT.sis, k = SM.rig(), P = k.parts, H = k.heads, rand = BL.math.mulberry32(0x5153), B = HM.blast(), SPARK = B.spark, IRON = B.iron;
     // The Jet's paint flying off it: its white and its livery's blue.
     const CHIPS = [BL.models.particleGeometry("#eeeae2", 0.1, 0), BL.models.particleGeometry("#2a4fb8", 0.1, 0)];
@@ -347,7 +352,7 @@
       const style = STYLE[pool] === "yell" && rand() < SCREAM ? "scream" : STYLE[pool];
       say(one(LINES[rare ? "rare" : pool]), style, dur);
     };
-    const maybeSay = (pool, chance) => { if (quiet <= 0 && rand() < chance) sayFrom(pool); };
+    const maybeSay = (pool, chance) => { if (quiet <= 0 && !quieted() && rand() < chance) sayFrom(pool); };
     // The static fire's hold on her: whether she is in it, its line at the malfunction said, how far down she is (0
     // standing, 1 flat), which way the blast slides her, her soot and when she last smoked.
     const A = BL.hangarFire.AT;
@@ -400,9 +405,10 @@
       return visitorSpot;
     };
     const nextSpot = (driven) => {
+      if (brawlAt) return brawlSpot;
       if (rampage) return smashSpot(false);
       if (storming) return doorSpot || spots[0];
-      if (driven && clock - visitedAt > VISIT.every && rand() < VISIT.chance) {
+      if (driven && !quieted() && clock - visitedAt > VISIT.every && rand() < VISIT.chance) {
         const s = visit(driven);
         if (s) return s;
       }
@@ -432,6 +438,7 @@
     const arrive = () => {
       last = spot;
       doing = rampage && spot.kind === "fix" ? "smash" : spot.kind;
+      if (doing === "fix" && quieted()) doing = "inspect";
       if (doing === "fix" && !storming && (forceHush || clock >= hushNext && rand() < HUSH.chance)) { doing = "hush"; hushNext = clock + HUSH.every; forceHush = false; hushBlows = 0; hushed = 0; }
       t = 0;
       spot.dur = storming && doing === "glare" ? POKE.sulk : doing === "hush" ? 60 : pick(TIMES[doing][0], TIMES[doing][1]);
@@ -494,7 +501,7 @@
     // her tether she goes for the Jet; while she smashes it each poke counts toward stopping her, and a second at a
     // spot sends her running for another; storming off or sulking, she only tells them to go away.
     const poke = () => {
-      if (panicking || !seen) return false;
+      if (panicking || !seen || brawlAt) return false;
       const q = seen.root.position;
       pokeX = q.x; pokeZ = q.z; pokedAt = clock; coolAt = POKE.calm;
       BL.gamepad.rumble(0.2, 0.55, 110);
@@ -553,7 +560,7 @@
     const RIVALRY = BL.kortik.RIVALRY, D = HM.LAYOUT.door, DOOR_AT = { x: D.x, y: D.y + 0.5, z: D.z - 0.6 }, HEARD = RIVALRY.map(([his]) => "KORTIK: " + his);
     let quarrelIn = pick(QUARREL.first[0], QUARREL.first[1]), quarrel = 0, answerIn = 0;
     // Whether she is free to hear him, or to answer: none of her fits, tempers, trips at the visitor or the static fire.
-    const free = () => !panicking && !rampage && !storming && fitT <= 0 && doing !== "chase" && doing !== "hush" && spot !== visitorSpot && !scare && talk <= 0;
+    const free = () => !panicking && !rampage && !storming && !brawlAt && fitT <= 0 && doing !== "chase" && doing !== "hush" && spot !== visitorSpot && !scare && talk <= 0 && !quieted();
     const hearKortik = () => {
       quarrel = Math.floor(rand() * RIVALRY.length);
       fx.sayAt(DOOR_AT.x, D.y + 3.6, DOOR_AT.z, HEARD[quarrel], 3.2);
@@ -573,6 +580,9 @@
     // quiet moment. Not while the static fire has her.
     let spookAt = 0, spookSaid = false, spookPool = "spook", scare = null, lastScare = null, settled = false, settledAt = 0, peekAt = 0, peekT = 0, kortikIn = 0, engX = 0, engZ = 0, slowLook = null;
     const scareSpot = { name: "scare", x: 0, z: 0, kind: "scare", lx: 0, ly: 3, lz: 0, cell: -1, dur: 0, paceYaw: 0 };
+    // The worker she squares up to (`brawl`), read live, and the place beside him she stands at.
+    let brawlAt = null;
+    const brawlSpot = { name: "brawl", x: 0, z: 0, kind: "brawl", lx: 0, ly: 1.6, lz: 0, cell: -1, dur: 0, paceYaw: 0 };
     // The stacked crates on her ground, to hide behind; where she stands beside the booth's console, and what she slaps.
     const STACKS = HM.LAYOUT.crates.filter(([x, z, , n]) => n === 2 && x > X0 && x < X1 && z > Z0 && z < Z1);
     const BOOTH = [F.x - 1, F.z + 3.2, F.x - 1.2, F.z + 1];
@@ -730,6 +740,8 @@
       t += dt;
       quiet -= dt;
       talk = Math.max(0, talk - dt);
+      // Quieted (`quieted`), she puts the hammer down for a look instead.
+      if (doing === "fix" && quieted()) { doing = "inspect"; t = 0; spot.dur = pick(TIMES.inspect[0], TIMES.inspect[1]); }
       stand();
       let face = H.open, wantYaw = yaw, stepping = false, glareAt = null, swingNow = -1, swingLen = SWING, hop = 0;
       slowLook = null;
@@ -745,7 +757,8 @@
         if (tessLook > 0) tessLook -= dt;
         else if ((tessIn -= dt) <= 0) { tessIn = pick(DISTRACT.every[0], DISTRACT.every[1]); tessLook = DISTRACT.look; say(one(LINES.tess), STYLE.tess, 1.6); }
       } else tessLook = 0;
-      near = !!driven && !panicking && Math.hypot(driven.root.position.x - p.x, driven.root.position.z - p.z) < POKE.reach && Math.abs(feetAt(driven) - feet) < POKE.rise;
+      if (brawlAt) { brawlSpot.lx = brawlAt.x; brawlSpot.lz = brawlAt.z; }
+      near = !!driven && !panicking && !brawlAt && Math.hypot(driven.root.position.x - p.x, driven.root.position.z - p.z) < POKE.reach && Math.abs(feetAt(driven) - feet) < POKE.rise;
       // Kortik shouting through the door now and then while she is free to hear it, and her answer once his line is out.
       if (answerIn > 0) { if ((answerIn -= dt) <= 0 && !panicking && !rampage) answerKortik(); }
       // Her brother yelling back through the door that it wasn't him.
@@ -952,8 +965,8 @@
           // Running at them, red, her fist up and shaking.
           face = H.redOpen;
           want.armLx = -2.5 + Math.sin(clock * 16) * 0.3; want.armLz = 0.35; want.foreLx = -0.8;
-        } else if (rampage) {
-          // Running to the next spot to smash, red, the hammer up over her head.
+        } else if (rampage || spot === brawlSpot) {
+          // Running to the next spot to smash, or at a worker pounding the Jet, red, the hammer up over her head.
           face = H.redOpen;
           want.armRx = -2.6; want.armRz = -0.25; want.foreRx = -0.5; want.hamX = Math.PI - 0.5;
         } else if (storming) face = H.redOpen;
@@ -985,7 +998,14 @@
         if (doing === "yell" && driven) { visitorSpot.lx = driven.root.position.x; visitorSpot.lz = driven.root.position.z; visitorSpot.ly = feetAt(driven) + 1.6; }
         wantYaw = Math.atan2(spot.lx - p.x, spot.lz - p.z);
         const u = t / spot.dur, up = Math.atan2(spot.ly - feet - 1.75, Math.hypot(spot.lx - p.x, spot.lz - p.z));
-        if (doing === "smash" && tessLook > 0) {
+        if (doing === "brawl") {
+          // Squared up to him, red, the hammer up and her fist shaking, bouncing on her feet.
+          face = H.redOpen;
+          want.crouch = Math.max(0, Math.sin(clock * 9)) * 0.06; want.lean = 0.1;
+          want.armLx = -1.9 + Math.sin(clock * 14) * 0.35; want.armLz = 0.3; want.foreLx = -1.1; want.foreLz = 0;
+          want.armRx = -2.6; want.armRz = -0.25; want.foreRx = -0.5; want.hamX = Math.PI - 0.5;
+          want.headX = 0;
+        } else if (doing === "smash" && tessLook > 0) {
           // Turned on Tess buzzing round her head, red, the hammer up and her fist shaking at her.
           wantYaw = Math.atan2(tess.x - p.x, tess.z - p.z);
           swingT = 0;
@@ -1303,13 +1323,40 @@
     };
     goTo(nextSpot(null));
 
+    // A worker of the crew pounding the Jet (`hangar-meltdown.js`), where he stands (read live): she drops what she is
+    // doing and runs at him, red, the hammer up, screaming, to stand squared up to him at `stand` (`brawlSpot`, doing
+    // "brawl", `brawling` once she is there) until the scene lets her go (null), when she blames him, unless `quiet`,
+    // glares a moment where he stood and goes back to her routine. Not while the static fire has her, she smashes the
+    // Jet or storms off; whether she came (or, letting go, whether she was in it).
+    const brawl = (at, stand = null, quiet = false) => {
+      if (!at) {
+        if (!brawlAt) return false;
+        brawlAt = null;
+        pathN = 0;
+        doing = "glare"; spot = brawlSpot; t = 0; brawlSpot.dur = 3;
+        if (!quiet) sayFrom("started", 2.4);
+        return true;
+      }
+      if (panicking || rampage || storming || brawlAt) return false;
+      if (doing === "hush") endHush();
+      const dx = p.x - at.x, dz = p.z - at.z, d = Math.hypot(dx, dz) || 1;
+      const cell = stand ? nearestOpen(stand.x, stand.z, 0) : nearestOpen(at.x + dx / d * BRAWL.gap, at.z + dz / d * BRAWL.gap, 0);
+      if (cell < 0) return false;
+      fitT = 0; scare = null;
+      brawlAt = at;
+      brawlSpot.cell = cell; brawlSpot.x = cx(cell); brawlSpot.z = cz(cell); brawlSpot.lx = at.x; brawlSpot.lz = at.z;
+      goTo(brawlSpot);
+      if (doing === "walk") speed = RUN;
+      sayFrom("brawl", 1.8);
+      return true;
+    };
     // Tess come to distract her in a rampage, by where she is (read live), or gone (null).
     const distract = (at) => {
       if (at && !tess) { tessIn = pick(0.8, 1.6); tessLook = 0; }
       tess = at;
     };
     // How cross she is, 0 to 4 by her anger, 5 while she smashes: the terminals' mood page shows it.
-    return { node, props, body: P.torso, actor, update, liveGeometry, poke, spook, settle, zap, dark, groove, useNear, actLabel, overlay, distract, debug, get near() { return near; }, get rampaging() { return rampage; }, get mood() { return rampage ? 5 : Math.min(4, anger); } };
+    return { node, props, body: P.torso, actor, update, liveGeometry, poke, spook, settle, zap, dark, groove, useNear, actLabel, overlay, distract, brawl, sayFrom, debug, get near() { return near; }, get rampaging() { return rampage; }, get brawling() { return doing === "brawl"; }, get mood() { return rampage ? 5 : Math.min(4, anger); } };
   };
 
   BL.sis = { create };

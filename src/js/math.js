@@ -1,6 +1,7 @@
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
   const lerp = (a, b, t) => a + (b - a) * t;
   const damp = (current, target, rate, dt) => lerp(current, target, 1 - Math.exp(-rate * dt));
@@ -285,6 +286,17 @@
       out[3] = cx * cy * cz + sx * sy * sz;
       return out;
     },
+    // fromEuler with the angles read from e (x, y, z in a Float64Array), for a per-frame caller that is not inlined into:
+    // a fraction handed over a call is boxed into a new heap number, an array is not.
+    fromEulerIn: (out, e) => {
+      const x = e[0], y = e[1], z = e[2];
+      const cx = Math.cos(x / 2), sx = Math.sin(x / 2), cy = Math.cos(y / 2), sy = Math.sin(y / 2), cz = Math.cos(z / 2), sz = Math.sin(z / 2);
+      out[0] = sx * cy * cz + cx * sy * sz;
+      out[1] = cx * sy * cz - sx * cy * sz;
+      out[2] = cx * cy * sz - sx * sy * cz;
+      out[3] = cx * cy * cz + sx * sy * sz;
+      return out;
+    },
     // out = a (x) b: rotating a vector by out applies b first, then a.
     multiply: (out, a, b) => {
       const t = QUAT_TEMP;
@@ -316,6 +328,15 @@
     // Rotates a vector; out receives x, y, z, not a quaternion.
     rotateVec: (out, q, x, y, z) => {
       const qx = q[0], qy = q[1], qz = q[2], qw = q[3];
+      const ix = qw * x + qy * z - qz * y, iy = qw * y + qz * x - qx * z, iz = qw * z + qx * y - qy * x, iw = -qx * x - qy * y - qz * z;
+      out[0] = ix * qw + iw * -qx + iy * -qz - iz * -qy;
+      out[1] = iy * qw + iw * -qy + iz * -qx - ix * -qz;
+      out[2] = iz * qw + iw * -qz + ix * -qy - iy * -qx;
+      return out;
+    },
+    // rotateVec with the vector read from e (x, y, z in a Float64Array), as fromEulerIn.
+    rotateVecIn: (out, q, e) => {
+      const x = e[0], y = e[1], z = e[2], qx = q[0], qy = q[1], qz = q[2], qw = q[3];
       const ix = qw * x + qy * z - qz * y, iy = qw * y + qz * x - qx * z, iz = qw * z + qx * y - qy * x, iw = -qx * x - qy * y - qz * z;
       out[0] = ix * qw + iw * -qx + iy * -qz - iz * -qy;
       out[1] = iy * qw + iw * -qy + iz * -qx - ix * -qz;

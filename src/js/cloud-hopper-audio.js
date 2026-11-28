@@ -13,6 +13,10 @@
   const create = () => {
     let ctx = null, master = null, musicGain = null, jetGain = null, jetFilter = null, jetHiss = null, music = null;
     let armed = false, disposed = false, resuming = false, jetOn = false, muted = BL.sound.muted, nextJump = 0;
+    const soundChannel = BL.sound.channel("hopper"), musicChannel = BL.sound.channel("music");
+    // On the sound panel's list only while the game is up.
+    const listSounds = (on) => { soundChannel.show(on); musicChannel.show(on); };
+    listSounds(false);
     let musicStage = "", musicSong = 0, backgroundTimer = 0, rainGain = null, rainOn = false, nextTone = 0, nextAir = 0, nextThunder = 0;
     let roarGain = null, roarHowl = null, roarLevel = 0, gustGain = null, gustWhistle = null, gustLevel = 0;
     let musicLevel = 0, musicFrom = 0, musicAt = 0, musicUntil = 0, musicFade = 0.12;
@@ -97,7 +101,8 @@
       try { ctx = new AudioContext(); } catch { return; }
       master = ctx.createGain();
       master.gain.value = muted ? 0 : MASTER;
-      master.connect(ctx.destination);
+      master.connect(BL.sound.output(ctx));
+      const fx = soundChannel.node(ctx, master);
       const gain = (value, to) => {
         const node = ctx.createGain();
         node.gain.value = value; node.connect(to);
@@ -113,7 +118,7 @@
       const noise = ctx.createBufferSource();
       noise.buffer = buffer; noise.loop = true;
       for (let i = 0; i < 2; i++) {
-        const level = gain(0, master), tone = ctx.createOscillator();
+        const level = gain(0, fx), tone = ctx.createOscillator();
         tone.type = "triangle"; tone.frequency.value = 180;
         tone.connect(gain(0.65, level)); tone.start();
         const air = filter("bandpass", 1400, 0.7, gain(0.5, level));
@@ -122,41 +127,41 @@
       }
       for (let i = 0; i < CLOUD_VOICES; i++) {
         // A broad, steady wash avoids the old descending nasal hiss.
-        const level = gain(0, master), air = filter("lowpass", 1000, 0.45, level);
+        const level = gain(0, fx), air = filter("lowpass", 1000, 0.45, level);
         noise.connect(filter("highpass", 150, 0.5, air));
         clouds.push({ gain: level, until: 0, level: 0 });
       }
       for (let i = 0; i < WARN_VOICES; i++) {
         // A soft whistle rising over a breath of air: a cloud is about to fade.
-        const level = gain(0, master), tone = ctx.createOscillator();
+        const level = gain(0, fx), tone = ctx.createOscillator();
         tone.type = "sine"; tone.frequency.value = 620;
         tone.connect(gain(0.5, level)); tone.start();
         noise.connect(filter("bandpass", 2600, 1.2, gain(0.35, level)));
         warnings.push({ gain: level, tone, until: 0, level: 0 });
       }
       for (let i = 0; i < TONE_VOICES; i++) {
-        const level = gain(0, master), tone = ctx.createOscillator();
+        const level = gain(0, fx), tone = ctx.createOscillator();
         tone.type = "sine"; tone.frequency.value = 440;
         tone.connect(level); tone.start();
         tones.push({ gain: level, tone, until: 0 });
       }
       for (let i = 0; i < AIR_VOICES; i++) {
-        const level = gain(0, master), band = filter("bandpass", 800, 1.2, level);
+        const level = gain(0, fx), band = filter("bandpass", 800, 1.2, level);
         noise.connect(band);
         airs.push({ gain: level, band, until: 0 });
       }
       for (let i = 0; i < THUNDER_VOICES; i++) {
         // A crack in the upper band over a deep rumble, each its own level.
-        const crack = gain(0, master), rumble = gain(0, master);
+        const crack = gain(0, fx), rumble = gain(0, fx);
         noise.connect(filter("bandpass", 900, 0.6, crack));
         noise.connect(filter("lowpass", 140, 0.7, rumble));
         thunders.push({ crack, rumble });
       }
       // A storm's rain: a soft hiss under everything while it falls.
-      rainGain = gain(0, master);
+      rainGain = gain(0, fx);
       noise.connect(filter("highpass", 900, 0.5, filter("lowpass", 5200, 0.5, rainGain)));
       // A tornado: a low roar of wind with a howl over it that wavers and climbs as it nears.
-      roarGain = gain(0, master);
+      roarGain = gain(0, fx);
       noise.connect(filter("lowpass", 320, 0.7, roarGain));
       roarHowl = filter("bandpass", 600, 3, gain(0.4, roarGain));
       noise.connect(roarHowl);
@@ -164,14 +169,14 @@
       waver.type = "sine"; waver.frequency.value = 0.35;
       waver.connect(gain(140, roarHowl.frequency)); waver.start();
       // A gust: a broad rush of wind with a thin whistle over it that wavers and rises with its strength.
-      gustGain = gain(0, master);
+      gustGain = gain(0, fx);
       noise.connect(filter("bandpass", 700, 0.5, gustGain));
       gustWhistle = filter("bandpass", 1400, 6, gain(0.5, gustGain));
       noise.connect(gustWhistle);
       const flutter = ctx.createOscillator();
       flutter.type = "sine"; flutter.frequency.value = 0.6;
       flutter.connect(gain(260, gustWhistle.frequency)); flutter.start();
-      jetGain = gain(0, master);
+      jetGain = gain(0, fx);
       // A jetpack's thrust, all of it from the noise and no tones, so it never hums like a motor: a deep rushing roar,
       // breathing gently with a slow drift of the same noise so it is never quite static, and a thin hiss over it.
       const roar = gain(0.8, jetGain);
@@ -180,7 +185,7 @@
       noise.connect(filter("lowpass", 10, 0.5, gain(6, roar.gain)));
       jetHiss = filter("bandpass", JET_HISS[0], 0.8, gain(0.16, jetGain));
       noise.connect(jetHiss);
-      musicGain = gain(0, master);
+      musicGain = gain(0, musicChannel.node(ctx, master));
       musicFrom = 0; musicAt = ctx.currentTime; musicUntil = musicAt + musicFade;
       applyLevel();
       music = BL.cloudHopperMusic.create(ctx, musicGain, noise);
@@ -192,7 +197,7 @@
     // trusted input retries a browser-suspended context.
     const unlock = () => {
       if (disposed) return;
-      armed = true;
+      armed = true; listSounds(true);
       if (document.hidden || navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
       open();
       if (ctx && ctx.state !== "running" && ctx.state !== "closed" && !resuming) {
@@ -410,14 +415,14 @@
     window.addEventListener("pointerdown", gesture, true);
     window.addEventListener("keydown", gesture, true);
     const stop = () => {
-      armed = false; musicStage = ""; clearBackground(); quiet();
+      armed = false; listSounds(false); musicStage = ""; clearBackground(); quiet();
       musicFrom = musicLevel = 0; musicAt = musicUntil = ctx ? ctx.currentTime : 0;
       applyLevel();
       if (music) music.stop();
     };
     const dispose = () => {
       if (disposed) return;
-      disposed = true; stop(); offSound();
+      disposed = true; stop(); offSound(); soundChannel.release(); musicChannel.release();
       document.removeEventListener("visibilitychange", gate);
       window.removeEventListener("pointerdown", gesture, true);
       window.removeEventListener("keydown", gesture, true);

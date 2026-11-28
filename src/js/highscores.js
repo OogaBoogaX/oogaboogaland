@@ -6,7 +6,7 @@
   const BL = window.BL = window.BL || {};
   const rules = BL.highscoreRules, net = BL.net;
   const FRESH_MS = 30000, TIMEOUT_MS = 6000, MAX_WRITES = 4;
-  const entries = new Map(Object.keys(rules.games).map(id => [id, { data: null, at: 0, source: null, loading: null, refresh: false, status: "loading", listeners: new Set(), statusListeners: new Set() }]));
+  const entries = new Map(Object.keys(rules.games).map(id => [id, { data: null, at: 0, source: null, loading: null, refresh: false, status: "loading", listeners: new Set(), statusListeners: new Set(), submissions: [], submissionListeners: new Set() }]));
   const tickets = new WeakMap(), requests = new Set();
   const arcade = { loading: null, refresh: false, nextAt: 0, source: null };
   let liveOff = null, refreshTimer = 0, connection = null;
@@ -31,14 +31,16 @@
     }
     let runs;
     if (data.runs !== undefined) {
-      if (!/^cloud-hopper-l[1-4]$/.test(id) || !Array.isArray(data.runs) || data.runs.length > 10) return null;
+      if ((!/^cloud-hopper-l[1-4]$/.test(id) && !rules.cabinets.includes(id)) || !Array.isArray(data.runs) || data.runs.length > 10) return null;
       runs = [];
       for (const run of data.runs) {
         if (!isObject(run) || typeof run.username !== "string" || !validLogin(run.username)
           || !Number.isSafeInteger(run.score) || run.score <= 0 || run.score > game.max
+          || rules.cabinets.includes(id) && run.id === undefined
+          || run.id !== undefined && (typeof run.id !== "string" || !/^[a-f0-9]{64}$/.test(run.id) || runs.some(row => row.id === run.id))
           || !Number.isSafeInteger(run.achieved) || run.achieved < 0
-          || runs.length && (run.score < runs.at(-1).score || run.score === runs.at(-1).score && run.achieved < runs.at(-1).achieved)) return null;
-        runs.push({ username: run.username, score: run.score, achieved: run.achieved });
+          || runs.length && ((game.direction === "asc" ? run.score < runs.at(-1).score : run.score > runs.at(-1).score) || run.score === runs.at(-1).score && run.achieved < runs.at(-1).achieved)) return null;
+        runs.push({ username: run.username, score: run.score, achieved: run.achieved, ...(run.id ? { id: run.id } : {}) });
       }
     }
     const r = data.replay;
@@ -53,10 +55,17 @@
   // Optional status subscribers keep loading/failure copy separate from existing score callbacks.
   const statusOf = entry => !available() ? entry.data ? "stale" : net.state.resolved ? "unavailable" : "loading" : entry.status;
   const notifyStatus = entry => { for (const fn of entry.statusListeners) fn(statusOf(entry)); };
+  const notifySubmissions = entry => { for (const fn of entry.submissionListeners) fn(entry.submissions.slice()); };
   const publish = (id, data) => {
     const entry = entries.get(id);
     // A GET started before a submission must not erase that submission's newer reply.
     if (entry.data && data.revision < entry.data.revision) return;
+    // A live read can confirm a write before its POST response arrives. Match identities, never equal scores.
+    entry.submissions = entry.submissions.filter(run => {
+      if (!data.runs?.some(saved => saved.id && saved.id === run.id)) return true;
+      run.status = "saved"; return false;
+    });
+    notifySubmissions(entry);
     entry.at = Date.now();
     entry.status = "ready";
     if (entry.data && data.revision === entry.data.revision && data.replay?.hash === entry.data.replay?.hash) { notifyStatus(entry); return; }
@@ -133,8 +142,19 @@
     arcade.source = source;
     arcade.nextAt = Date.now() + FRESH_MS; // Back off on failure while keeping the last good boards.
     const signed = !!net.state.me;
+    for (const id of rules.arcade) {
+      const entry = entries.get(id);
+      entry.status = entry.data ? "refreshing" : "loading"; notifyStatus(entry);
+    }
     arcade.loading = request(signed ? "arcade-live" : "arcade").then(result => {
-      if (stopped || !result.data) return;
+      if (stopped) return;
+      if (!result.data) {
+        for (const id of rules.arcade) {
+          const entry = entries.get(id);
+          entry.status = entry.data ? "stale" : "unavailable"; notifyStatus(entry);
+        }
+        return;
+      }
       for (const board of result.data.boards) publish(board.game, board);
       // Use the remaining edge lifetime, not another whole browser TTL on top of it.
       arcade.nextAt = Date.now() + (signed ? FRESH_MS : result.data.refreshAfterMs);
@@ -166,7 +186,10 @@
     const nextConnection = net.state.room === "live" ? net.state.connectionToken || "live" : null;
     const accountChanged = nextId !== accountId || nextEpoch !== logoutEpoch || nextEnabled !== enabled || resolved !== net.state.resolved;
     const joined = nextConnection && nextConnection !== connection;
-    if (nextId !== accountId || nextEpoch !== logoutEpoch) generation++;
+    if (nextId !== accountId || nextEpoch !== logoutEpoch) {
+      generation++;
+      for (const entry of entries.values()) { entry.submissions.length = 0; notifySubmissions(entry); }
+    }
     accountId = nextId; logoutEpoch = nextEpoch; enabled = nextEnabled; connection = nextConnection; resolved = net.state.resolved;
     if (accountChanged || joined) for (const entry of entries.values()) if (entry.listeners.size) notifyStatus(entry);
     // Join first, then read: changes committed during the snapshot also arrive over the socket.
@@ -185,17 +208,19 @@
     document.addEventListener("visibilitychange", onVisibility);
     onAccount();
   };
-  const watch = (id, fn, onStatus) => {
+  const watch = (id, fn, onStatus, onSubmissions) => {
     const entry = entries.get(id);
     if (!entry || stopped) return () => {};
     start();
     entry.listeners.add(fn);
     if (onStatus) entry.statusListeners.add(onStatus);
+    if (onSubmissions) entry.submissionListeners.add(onSubmissions);
     fn(entry.data);
     onStatus?.(statusOf(entry));
+    onSubmissions?.(entry.submissions.slice());
     load(id);
     scheduleGuest();
-    return () => { entry.listeners.delete(fn); if (onStatus) entry.statusListeners.delete(onStatus); scheduleGuest(); };
+    return () => { entry.listeners.delete(fn); if (onStatus) entry.statusListeners.delete(onStatus); if (onSubmissions) entry.submissionListeners.delete(onSubmissions); scheduleGuest(); };
   };
   const get = id => entries.get(id)?.data || null;
   // Zero means the shared board is loaded but this machine has no record. Null means use a labelled local best.
@@ -211,7 +236,7 @@
     if (!available() || !net.state.resolved || !net.state.me) return null;
     const token = {};
     tickets.set(token, { game: id, playerId: net.state.me.id, generation, sent: new Set(),
-      runId: /^cloud-hopper-l[1-4]$/.test(id) ? crypto.randomUUID() : null,
+      runId: /^cloud-hopper-l[1-4]$/.test(id) || rules.cabinets.includes(id) ? crypto.randomUUID() : null,
       replay: BL.cloudHopperReplays?.startTicket(id) });
     return token;
   };
@@ -220,33 +245,59 @@
     const ticket = token && tickets.get(token);
     onAccount();
     if (!ticket || !current(ticket) || !rules.valid(ticket.game, machine, score) || ticket.sent.has(machine)) return false;
-    if (writes >= MAX_WRITES) { BL.hud.toast("Shared score could not be saved. Your local score is kept."); return false; }
     ticket.sent.add(machine);
+    const entry = entries.get(ticket.game), pending = ticket.runId
+      ? { id: null, username: net.state.me.login, score, status: "saving" } : null;
+    if (pending) {
+      // Keep all in-flight uploads (at most four) and only the latest failures.
+      if (entry.submissions.length >= 10) entry.submissions.splice(entry.submissions.findIndex(run => run.status !== "saving"), 1);
+      entry.submissions.push(pending); notifySubmissions(entry);
+    }
+    const failed = () => {
+      if (pending && current(ticket) && entry.submissions.includes(pending)) { pending.status = "failed"; notifySubmissions(entry); }
+    };
+    if (writes >= MAX_WRITES) { failed(); BL.hud.toast("Shared score could not be saved. Your local score is kept."); return false; }
     writes++;
     const body = { machine, score, version: rules.get(ticket.game).version, playerId: ticket.playerId };
+    let saved = false;
+    const confirm = data => {
+      if (!current(ticket)) return false;
+      if (pending) entry.submissions = entry.submissions.filter(run => run !== pending);
+      saved = true; publish(ticket.game, data); notifySubmissions(entry); return true;
+    };
     try {
       // The replay ticket is also this run's identity on the numeric fallback. A lost
       // upload response must never append the same finish twice.
       if (ticket.runId) body.runId = (await ticket.replay)?.token || ticket.runId;
       if (!current(ticket)) return false;
+      if (pending) {
+        const bytes = new TextEncoder().encode(JSON.stringify([ticket.game, ticket.playerId, body.runId]));
+        pending.id = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), n => n.toString(16).padStart(2, "0")).join("");
+        if (!current(ticket)) return false;
+      }
       const known = get(ticket.game), fastest = known && Math.min(...Object.values(known.highscores));
       if (recording && ticket.replay && BL.cloudHopperReplays && (!known || score <= fastest)) {
         const replay = { ...recording, version: 1, game: ticket.game, playerId: ticket.playerId };
         const uploaded = await BL.cloudHopperReplays.submit(ticket.game, ticket.replay, replay, () => current(ticket));
         const data = uploaded && accept(ticket.game, uploaded);
-        if (data && current(ticket)) { publish(ticket.game, data); return true; }
+        if (data && current(ticket)) return confirm(data);
         // Storage/format/capacity failure must not discard the accepted numeric score.
       }
       // A lost response retries the same run identity; machine records still only improve.
       for (let attempt = 0; attempt < 2 && current(ticket); attempt++) {
         const result = await request(ticket.game, body);
         if (stopped) return false;
-        if (result.data) { publish(ticket.game, result.data); return true; }
+        if (result.data) return confirm(result.data);
         if (!result.retry) break;
       }
+      if (pending?.status === "saved" && current(ticket)) return true;
       if (current(ticket)) BL.hud.toast("Shared score could not be saved. Your local score is kept.");
       return false;
-    } finally { writes--; }
+    } catch {
+      if (pending?.status === "saved" && current(ticket)) return true;
+      if (current(ticket)) BL.hud.toast("Shared score could not be saved. Your local score is kept.");
+      return false;
+    } finally { writes--; if (!saved) failed(); }
   };
   const dispose = () => {
     stopped = true;
@@ -257,7 +308,7 @@
     window.clearTimeout(refreshTimer); refreshTimer = 0;
     document.removeEventListener("visibilitychange", onVisibility);
     for (const controller of requests) controller.abort();
-    for (const entry of entries.values()) { entry.listeners.clear(); entry.statusListeners.clear(); entry.data = null; }
+    for (const entry of entries.values()) { entry.listeners.clear(); entry.statusListeners.clear(); entry.submissionListeners.clear(); entry.submissions.length = 0; entry.data = null; }
   };
   BL.highscores = { watch, get, best, begin, submit, dispose };
 })();

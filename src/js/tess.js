@@ -396,12 +396,20 @@
   const BEAMS = 4;
   // Her sparks and motes at once, at most: a working beam keeps about 13 in the air and a fast flight about 10.
   const FLECKS = 24;
+  // How long a flip over backwards lasts (`flip`), s; how high a whole one lifts her, m; and how quickly she leans into
+  // a tilt, a share a second.
+  const FLIP = 0.95, FLIP_HOP = 0.35, TILT_RATE = 4;
   // One Tess for a visit, under `parent`, picked as `kind`. The place she guides moves her through this rig: a flight
   // path she steers along (`clearPath`, `push`, `steer`, the last point following someone while `track`ed), her beam
   // (`mode` 1 working, 2 pointing, landing on `aim`, or split to each of up to BEAMS `aims` round the `aim` she
   // faces), whom she watches when she is not flying or beaming (`watching`
   // and `watch`), and her moods: `calm` while she talks, `steady` while she keeps by someone, so she does not turn to
-  // her flight. Outline registries walk past her, as she moves every frame.
+  // her flight. Outline registries walk past her, as she moves every frame. A place may unsettle her (`uneasy`, 0 to 1:
+  // her rings falter and stutter out of step, her eye narrows and dims and she trembles), spin her rings up (`whirl`:
+  // that many times more turns on top of her own, brighter the faster, throwing motes off once fast, which the place
+  // eases up and down), tilt her to one side (`tilt`, rad, which she leans into) and flip her over backwards in the air
+  // (`flip`, `flipping`; a share of a turn only tips her back that far and back again); none of it moves her body,
+  // which the place flies.
   // Hub scope survives scene changes, but Tess's meshes need survive only while a Tess owns them. The director leaves
   // one scene and enters the next in one task, so the caches go only once that task ends with no Tess: the Factory's
   // greeter entered as the hub's guide leaves reuses every tier rather than rebuilding them in the swap frame.
@@ -422,7 +430,7 @@
     // Her bubble stands over her eye, not the rings, whose top moves as they tumble.
     const figure = { root: body, parts: { head } }, rings = [], pivots = [], orientations = [], turnQ = quat.create();
     const tumbles = Float64Array.from(RINGS, (_, i) => i * 2.1);
-    let greetingT = 0, speakingT = 0, lookYaw = 0, lookPitch = 0, tempo = 1, flare = 0, trailT = 0, sparkT = 0, litGain = 1, shown = 0;
+    let greetingT = 0, speakingT = 0, lookYaw = 0, lookPitch = 0, tempo = 1, flare = 0, trailT = 0, sparkT = 0, litGain = 1, shown = 0, flipT = 0, flipShare = 1, whirlT = 0, tilted = 0;
     body.sightHidden = true;
     hover.scale.x = hover.scale.y = hover.scale.z = SCALE;
     addChild(body, hover); addChild(hover, head);
@@ -509,8 +517,10 @@
     };
     const rig = {
       root: body, figure, position, vel,
-      mode: 0, aim: { x: 0, y: 0, z: 0 }, aims: null, calm: false, steady: false, watching: false, watch: { x: 0, y: 0, z: 0 },
+      mode: 0, aim: { x: 0, y: 0, z: 0 }, aims: null, calm: false, steady: false, watching: false, watch: { x: 0, y: 0, z: 0 }, uneasy: 0, whirl: 0, tilt: 0,
       clearPath(speed, corner) { pathCount = pathAt = 0; pathSpeed = speed; pathCorner = corner; tracking = false; },
+      // Stops her where she is: what she was flying at goes, so she no longer faces or trails it.
+      stop() { vel.x = vel.y = vel.z = 0; },
       push(x, y, z) { const o = pathCount++ * 3; path[o] = x; path[o + 1] = y; path[o + 2] = z; },
       // The last point follows someone: she never settles on it, and `steer` never reports arriving.
       track() { tracking = true; },
@@ -545,6 +555,8 @@
       // A greeting's tilt of the eye, and the rings' flare when she notices someone.
       nod() { greetingT = 1.4; },
       flare() { flare = 1; },
+      flip(share = 1) { flipT = FLIP; flipShare = share; },
+      get flipping() { return flipT > 0; },
       // The beam she shows: the mode she asked for, once she faces where it lands.
       get shown() { return shown; },
       update(dt, elapsed) {
@@ -572,30 +584,44 @@
         } else if (mode) lookAt(aim.x, aim.y, aim.z);
         else if (rig.watching) lookAt(rig.watch.x, rig.watch.y, rig.watch.z);
         greetingT = Math.max(0, greetingT - dt); speakingT = Math.max(0, speakingT - dt);
+        // Unsettled, spun up and flipping: how much of each now.
+        flipT = Math.max(0, flipT - dt);
+        const uneasy = rig.uneasy, whirl = rig.whirl;
+        // A flip: once over backwards, eased in and out, lifting her as she goes over; a share of one only tips her back
+        // that far and back again, lifting her less. A tilt she leans into.
+        const flipped = flipT > 0 ? 1 - flipT / FLIP : 0, over = flipShare < 1 ? Math.sin(flipped * Math.PI) * flipShare : flipped * flipped * (3 - 2 * flipped);
+        tilted = damp(tilted, rig.tilt, TILT_RATE, dt);
         const turnBy = Math.atan2(Math.sin(lookYaw - body.rotation.y), Math.cos(lookYaw - body.rotation.y));
         body.rotation.y = (body.rotation.y + damp(0, turnBy, 8, dt)) % TAU;
         head.rotation.x = damp(head.rotation.x, lookPitch + Math.sin(greetingT * 9) * greetingT * 0.05, 8, dt);
         head.rotation.z = damp(head.rotation.z, Math.sin(greetingT * 7) * greetingT * 0.06
           - (cruising ? Math.max(-0.35, Math.min(0.35, turnBy * 0.3)) : 0), 6, dt);
-        hover.position.y = Math.sin(elapsed * 1.7) * 0.018 * SCALE;
+        hover.position.y = Math.sin(elapsed * 1.7) * 0.018 * SCALE + uneasy * Math.sin(elapsed * 47) * 0.004 * SCALE + Math.sin(flipped * Math.PI) * FLIP_HOP * Math.min(1, flipShare * 2);
+        // A tremble shakes her, a flip turns her over and a tilt leans her to one side.
+        hover.rotation.x = uneasy * Math.sin(elapsed * 37) * 0.025 - over * TAU;
+        hover.rotation.z = tilted + uneasy * Math.sin(elapsed * 41 + 1) * 0.035;
         // Each ring tumbles about its own diameter, at her pace: brisk in flight, busy at work, slow while she talks,
         // and a flare when she notices someone. Quaternions keep three-axis turns stable; the angles stay bounded.
+        // Unsettled, each ring moves in fits and starts, out of step with the others, and twitches.
         const pace = cruising ? 1.8 : rig.calm ? 0.5 : working ? 1.25 : 1;
         tempo = damp(tempo, pace, 2, dt); flare = Math.max(0, flare - dt * 0.9);
+        const flicker = 1 - uneasy * (0.35 + 0.25 * Math.sin(elapsed * 17) * Math.sin(elapsed * 6.3));
         for (let i = 0; i < rings.length; i++) {
-          const spec = RINGS[i];
-          tumbles[i] = (tumbles[i] + spec.tumble * (tempo + flare * 2.5) * dt) % TAU;
-          quat.fromAxisAngle(turnQ, spec.axis[0], spec.axis[1], spec.axis[2], tumbles[i]);
+          const spec = RINGS[i], fits = 1 - uneasy * (Math.sin(elapsed * (4.3 + i * 1.7) + i * 2.1) > 0 ? 0.9 : 0.15);
+          tumbles[i] = (tumbles[i] + spec.tumble * (tempo * fits + flare * 2.5 + whirl) * dt) % TAU;
+          quat.fromAxisAngle(turnQ, spec.axis[0], spec.axis[1], spec.axis[2], tumbles[i] + uneasy * Math.sin(elapsed * 29 + i * 2.3) * 0.1);
           quat.multiply(pivots[i].quaternion, orientations[i], turnQ);
           rings[i].rotation.z = (elapsed * spec.spin) % TAU;
-          rings[i].glow = 1 + flare * 1.6 + (working ? 0.3 + Math.sin(elapsed * 11 + i * 2) * 0.2 : 0);
+          rings[i].glow = (1 + flare * 1.6 + whirl * 0.07 + (working ? 0.3 + Math.sin(elapsed * 11 + i * 2) * 0.2 : 0)) * flicker;
         }
         optics.position.x = damp(optics.position.x, Math.sin(turnBy) * 0.004, 9, dt);
         optics.position.y = damp(optics.position.y, -Math.sin(head.rotation.x) * 0.004, 9, dt);
         blades.rotation.z = Math.sin(elapsed * 0.4) * 0.05;
-        iris.glow = 1 + Math.sin(speakingT * 18) * speakingT * 0.15;
-        const blink = Math.pow(Math.max(0, Math.cos(elapsed * TAU / 7.3)), 80);
-        pupil.scale.y = 1 - blink * 0.85;
+        // Her eye: dimmer and flickering while unsettled, its pupil narrowing, and blinking.
+        iris.glow = (1 + Math.sin(speakingT * 18) * speakingT * 0.15) * flicker;
+        const blink = Math.pow(Math.max(0, Math.cos(elapsed * TAU / 7.3)), 80), narrow = 1 - Math.min(0.85, uneasy * 0.45);
+        pupil.scale.x = narrow;
+        pupil.scale.y = (1 - blink * 0.85) * narrow;
 
         // The beam, once she faces where it lands: a working one is bright, throws sparks and carries her light onto
         // what she works; a pointing one is thin and soft. Her own show only: it never touches what it lands on.
@@ -623,6 +649,12 @@
         }
         for (let i = laid; i < BEAMS; i++) beams[i].visible = glints[i].visible = false;
         shown = mode;
+        // Her rings spun up fast throw motes off all round her, the more the faster.
+        if (whirl > 3 && (whirlT -= dt) <= 0) {
+          whirlT = 0.6 / whirl;
+          const u = Math.random() * 2 - 1, a = Math.random() * TAU, h = Math.sqrt(1 - u * u), dx = h * Math.cos(a), dz = h * Math.sin(a);
+          fleck(MOTE(), position.x + dx * RADIUS, position.y + hover.position.y + u * RADIUS, position.z + dz * RADIUS, dx * 1.6, u * 1.6, dz * 1.6, 0.5, 0, 0, -100);
+        }
         // A faint trail of motes behind her in flight.
         if (speed > 1.6 && (trailT -= dt) <= 0) {
           trailT = 0.045;

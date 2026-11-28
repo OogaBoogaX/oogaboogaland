@@ -3,6 +3,8 @@
   "use strict";
   const BL=window.BL, S=BL.scene, daylight=BL.daylight;
   const params=new URLSearchParams(location.search), DEBUG=params.has("debug"), LATITUDE=37;
+  let navigationViews = null;
+  let interiorView = null, interiorFocused = false;
   const OVERVIEW={yaw:-0.08,pitch:1.22,dist:207,target:{x:-2,y:10,z:-1}};
   const VIEW_NAMES={overview:"Overview",portara:"Portara","coastal-chora":"Chora","coastal-harbor":"Harbor","coastal-beach":"Beach","coastal-ruins":"Ruins","coastal-trail":"Sacred Way","water-falls":"Waterfalls","water-pool":"Pool","vac-windmills":"Windmills","vac-lower":"Lower town","vac-central":"Central town","vac-upper":"Upper town"};
   const JETPACK_HUD_STATE={owned:false,equipped:false,fuel:1,blocked:false};
@@ -58,8 +60,10 @@
   // DSB Land's code is deferred on a hosted page and arrives before the visit is built, while the screen holds dark.
   const scene={id:"dsb",renderOpts,prepare:()=>{const loading=BL.deferred.load("dsb");return loading?loading.then(()=>null):null;}};
   let atmosphere=null,town=null,entrance=null,olympus=null,vacancies=null,collision=null;
-  let root,camera,land,pilot,crew,avatar,hud,input,fx,gate,game,world,go,overlayCanvas,panel,context,leaving=false,overview=false;
-  let jetpackBeforeInterior=false,detachedExit=false;
+  let root,camera,land,pilot,crew,avatar,hud,input,fx,gate,game,world,go,overlayCanvas,panel,context,leaving=false,held=false;
+  // `held`: the entrance holds the avatar until it arrives. Otherwise the visitor always drives it; a view of a place is
+  // the pilot's look, which leaves it standing under the visitor's control.
+  let jetpackBeforeInterior=false;
   const VOICE_ZONES={"dsb-studio":"dsb-studio","maxis-club":"dsb-maxis","without-rulers":"dsb-without-rulers","proof-of-ink":"dsb-proof-of-ink","big-bitcoin":"dsb-big-bitcoin","meme-factory":"dsb-meme-factory","stackchain-magazine":"dsb-stackchain","svrn-society":"dsb-svrn","puppy-rescue":"dsb-puppy-rescue","free-wallets":"dsb-free-wallets"};
   let remotes=null,unsubscribeAccount=null,footsteps=null;
   const voiceZone=()=>VOICE_ZONES[interiors?.active?.room.id]||"dsb-outside";
@@ -81,12 +85,19 @@
     else return false;
     pilot.showAct();return true;
   };
+  // DSB Land's outdoor scope (outdoor-scope.js): no room active, no entry or exit fading, the arrival done, an Ooga driven.
+  const shareScope=()=>{
+    const travelling=entrance&&entrance.phase!=="done";
+    const reason=!travelling&&!crew.player?"no-body":BL.outdoorScope.dsbReason(!!travelling,!!interiors?.transitioning,!!interiors?.active);
+    BL.outdoorScope.report(reason==="outdoor"?"dsb":null,reason);
+  };
   const sharePresence=()=>{
+    shareScope();
     const travelling=entrance&&entrance.phase!=="done";
     const driven=!travelling&&crew.player;
     BL.net.setZone(travelling?"dsb-transit":voiceZone());
     BL.net.setBody(driven?driven.traits.name:null);
-    if(driven){const p=driven.root.position;BL.net.sendPose(p.x,p.y-driven.baseY,p.z,driven.root.rotation.y,null,BL.crew.jetFlags(driven),BL.crew.weaponFlags(driven));BL.net.setHealth(driven.health.value,driven.health.stunned);}
+    if(driven){const p=driven.root.position;BL.net.sendPose(p.x,p.y-driven.baseY,p.z,driven.root.rotation.y,null,BL.crew.jetFlags(driven),BL.crew.weaponFlags(driven),BL.crew.visualState(driven));BL.net.setHealth(driven.health.value,driven.health.stunned);}
   };
   const accountChanged=()=>{
     if(!avatar)return;
@@ -111,24 +122,24 @@
   };
   const before={x:0,y:0,z:0},after={x:0,y:0,z:0};
   const nearGate=()=>avatar&&Math.hypot(avatar.root.position.x+45,avatar.root.position.z+44)<10;
-  // In as it left the last scene (pilot.js `arrive`): view, combat, weapon, and the look, pitch and zoom the navigate keeps.
-  // Each building frames its own room at its door, as before.
-  const walk=()=>{overview=false;pilot.arrive(avatar);pilot.navigate({position:{x:avatar.root.position.x,y:avatar.root.position.y-avatar.baseY,z:avatar.root.position.z},yaw:Math.PI,pitch:.22,dist:7});pilot.setActive(true);};
+  // In as it left the last scene (pilot.js `arrive`): view, combat, and the look, pitch and zoom the navigate keeps. DSB
+  // Land has no weapons, so what it came in with waits parked until it leaves. Building doors keep the visitor's view too.
+  const walk=()=>{held=false;pilot.arrive(avatar);pilot.navigate({position:{x:avatar.root.position.x,y:avatar.root.position.y-avatar.baseY,z:avatar.root.position.z},yaw:Math.PI,pitch:.22,dist:7});crew.parkWeapons(avatar);pilot.refreshCombat();pilot.setActive(true);};
   const presetView=name=>{
-    if(leaving||gate?.isOpen||interiors?.transitioning)return;
-    if(interiors?.active){detachedExit=!pilot.player;interiors.request(interiors.active.room.exit);return;}
-    if(!VIEW_NAMES[name])return;
-    overview=true;pilot.freeCursor();pilot.goPreset(name);hud.setDetachedView(name);hud.el.modeDestination.title="DSB island · "+VIEW_NAMES[name]+" · cycle views";
+    if(leaving||gate?.isOpen||interiors?.transitioning)return false;
+    if(interiors?.active){if(name!=="outside")return false;interiors.request(interiors.active.room.exit);return true;}
+    if(!VIEW_NAMES[name])return false;
+    pilot.freeCursor();pilot.goPreset(name);hud.setDetachedView(name);hud.el.modeDestination.title="DSB island · "+VIEW_NAMES[name]+" · choose a viewpoint";return true;
   };
   const overviewView=()=>presetView("overview");
   const escapeView=()=>{
     if(interiors?.transitioning)return true;
-    if(pilot.escape()){overview=!pilot.player;return true;}
-    if(interiors?.active){detachedExit=interiors.request(interiors.active.room.exit);return true;}
-    if(!leaving){world.pilot=null;leaving=go("bifrost");}
+    if(pilot.escape())return true;
+    if(interiors?.active){interiors.request(interiors.active.room.exit);return true;}
+    if(!leaving){world.pilot=crew.player===avatar?avatar.traits.name:null;leaving=go("bifrost");}
     return true;
   };
-  const nearTv=()=>!overview&&!interiors?.active&&!interiors?.transitioning&&noderunner?.near(avatar.root.position);
+  const nearTv=()=>!held&&!interiors?.active&&!interiors?.transitioning&&noderunner?.near(avatar.root.position);
   const studioRoom=()=>interiors?.active?.room.id==="dsb-studio"?interiors.active.room:null;
   const maxisRoom=()=>interiors?.active?.room.id==="maxis-club"?interiors.active.room:null;
   const shopRoom=()=>interiors?.active?.room.id==="without-rulers"?interiors.active.room:null;
@@ -190,13 +201,13 @@
     if(interiors.target(avatar.root.position))return false;
     if(menuZone()){openVenue();return true;}return false;
   };
-  const act=()=>{if(menuOpen())return true;if(!interiors?.transitioning&&studioAct())return true;if(nearTv()){tv.open();return true;}if(!overview&&interiors?.request(avatar.root.position,avatar.root.rotation.y))return true;if(interiors?.active)return false;if(nearGate()&&!overview){gate.open();return true;}return false;};
+  const act=()=>{if(menuOpen())return true;if(!interiors?.transitioning&&studioAct())return true;if(nearTv()){tv.open();return true;}if(!held&&interiors?.request(avatar.root.position,avatar.root.rotation.y))return true;if(interiors?.active)return false;if(nearGate()&&!held){gate.open();return true;}return false;};
   const mute=()=>{const on=weather.toggleMuted();interiors?.audio.update(on);};
   const modeAction=name=>!leaving&&!gate?.isOpen&&!interiors?.transitioning&&pilot.modeAction(name);
-  const action=(name,value)=>{if(entrance?.action(name))return;if(menuOpen())return;if(modeAction(name)||(name.startsWith("weapon-primary")||seatRoom())&&pilot.weaponAction(name))return;if(name==="dsb-mute")mute();else if(name==="jetpack-toggle")toggleJetpack();else if(interiors?.transitioning)return;else if(name==="mode-preset")presetView(value);else if(name==="reset-view")pilot.resetCamera();else if(name==="dsb-context")act();else if(name==="act")pilot.action();else if(name==="leave")hud.toast("Return through the Portara at the summit.");};
+  const action=(name,value)=>{if(entrance?.action(name))return;if(menuOpen())return;if(modeAction(name))return;if(name==="dsb-mute")mute();else if(name==="jetpack-toggle")toggleJetpack();else if(interiors?.transitioning)return;else if(name==="mode-preset")return presetView(value);else if(name==="reset-view")pilot.resetCamera();else if(name==="dsb-context")act();else if(name==="act")pilot.action();else if(name==="leave")hud.toast("Return through the Portara at the summit.");};
   const shore={x:0,z:0,nx:0,nz:0};
   const deepWaterReturn=()=>{
-    if(overview||crew.player!==avatar)return false;
+    if(held||crew.player!==avatar)return false;
     const p=avatar.root.position,C=BL.dsbCoast;
     if(p.y-avatar.baseY>C.LEVEL+.05||C.LEVEL-land.heightAt(p.x,p.z)<=C.maxDepth(avatar))return false;
     C.nearest(land.coast,p.x,p.z,shore);
@@ -211,7 +222,7 @@
     waterInteraction.clear();pilot.navigate({position:safe,yaw:bearing,pitch:.22,dist:7});hud.toast("Back on shore");return true;
   };
   const enter=ctx=>{
-    ({game,world,go}=ctx);leaving=false;overview=false;jetpackBeforeInterior=false;detachedExit=false;
+    ({game,world,go}=ctx);leaving=false;held=false;jetpackBeforeInterior=false;
     root=S.createNode();exterior=S.createNode();S.addChild(root,exterior);land=BL.dsbGeography.build();S.addChild(exterior,land.root);
     const structures=[];
     water=BL.dsbWater.create(land);S.removeChild(land.root,land.sea);S.addChild(exterior,water.node);renderOpts.dsbWater=water;
@@ -230,23 +241,24 @@
     const asked=new URLSearchParams(location.search).get("character");
     const own=BL.net.ownCharacter(),carried=world.pilot||asked;
     const allowed=c=>!BL.net.mayDrive(c.name);
-    const name=own?.handle||BL.contributors.roster.find(c=>c.name===carried&&allowed(c))?.name||(!BL.net.state.backend?"YellowBrokeIt":BL.contributors.roster.find(allowed)?.name||"YellowBrokeIt");world.pilot=null;
-    hud=BL.hud.create({signal:ctx.signal,roster:BL.contributors.roster,catalog:BL.models.SWAG,tierColors:BL.models.TIER_COLORS,renderIcon:BL.hud.renderIcon,lootEnabled:false});
+    // The visitor's own Ooga, else the one they walked in with or asked for, else their assigned one (`preferredCharacter`).
+    // A page that prepared none (debug) keeps its old default.
+    const assigned=BL.net.preferredCharacter()?.handle;
+    const name=own?.handle||BL.contributors.roster.find(c=>c.name===carried&&allowed(c))?.name||assigned||(!BL.net.state.backend?"YellowBrokeIt":BL.contributors.roster.find(allowed)?.name||"YellowBrokeIt");world.pilot=null;
+    hud=BL.hud.create({signal:ctx.signal,roster:BL.contributors.roster});
     hud.setDestinations(Object.keys(VIEW_NAMES),VIEW_NAMES);
     hud.setAreaLabel("CHORA");
-    hud.el.modeDestination.title="DSB island · cycle views";
-    hud.el.modeDestinationLabel.textContent="DSB island. Cycle views";
+    hud.el.modeDestination.title="DSB island · choose a viewpoint";
+    hud.el.modeDestinationLabel.textContent="DSB island. Open Map to choose a viewpoint";
     const hooks={};input=BL.interact.create({canvas:ctx.canvas,renderer:ctx.renderer,camera,hooks});
     const STEP=BL.pilot.WALK.step;
-    const loginContexts=BL.dsbInteriors.definitions.filter(d=>land.buildings.some(b=>b.name===d.building)).map(d=>d.id);
-    let restoringLogin=false;
     const groundAt=(x,z,feet,_top,actor)=>{
       if(interiors?.active)return interiors.groundAt(x,z,feet,_top,actor);
       const ground=land.groundAt(x,z),at=Number.isFinite(feet)?feet:ground;
       // A falling body's edge can meet a roof or stair while its centre is still outside the top face.
       return collision?Math.max(ground,collision.solids.supportAt(x,z,at,STEP,actor?.bodyRadius||0)):ground;
     };
-    pilot=BL.pilot.create({carry:true,renderer:ctx.renderer,canvas:ctx.canvas,camera,hud,mayPossess,jetpackStatus,loginContexts,loginContext:()=>interiors?.active?.room.id||null,presets:{...BL.dsbEnrichment.REVIEWS,...BL.dsbVacancies.REVIEWS,...BL.rescueRoom.VIEWS,...BL.walletsRoom.VIEWS,portara:{yaw:0,pitch:.08,dist:17,target:{x:-45,y:land.heightAt(-45,-48)+BL.dsbAtmosphere.portaraAperture.height/2,z:-48}},"water-falls":{yaw:-.65,pitch:.48,dist:37,target:{x:-37,y:25,z:-16}},"water-pool":{yaw:-.9,pitch:.75,dist:22,target:{x:-45,y:14,z:0}},overview:OVERVIEW,chora:{yaw:.62,pitch:.12,dist:18,target:{x:31,y:7,z:33}}},landing:"overview",pitch:[.1,1.45],dist:[3,270],follow:{y:1,min:3,max:9,pitch:[.1,.8]},fly:{speed:8,perDist:.1,climb:5,yMax:180},clampCamera:p=>{if(interiors)interiors.clampCamera(p,avatar?.root.position);else p.y=Math.max(p.y,land.heightAt(p.x,p.z)+1);if(!interiors?.active&&land.heightAt(p.x,p.z)<BL.dsbCoast.LEVEL)p.y=Math.max(p.y,BL.dsbCoast.LEVEL+.12);},coarse:matchMedia("(pointer: coarse)").matches,onFreeAction:act,onPlayerAction:act,close:{eyeHeight:1.7,eyeRatio:.8,eyeForward:0,maxStep:.6,pitch:[-1.2,1.2],orbitDist:12,trailingDist:6,groundAt:(x,z)=>groundAt(x,z,avatar?avatar.root.position.y-avatar.baseY:undefined)}});
+    pilot=BL.pilot.create({carry:true,renderer:ctx.renderer,canvas:ctx.canvas,camera,hud,mayPossess,jetpackStatus,presets:(navigationViews={...BL.dsbEnrichment.REVIEWS,...BL.dsbVacancies.REVIEWS,...BL.rescueRoom.VIEWS,...BL.walletsRoom.VIEWS,portara:{yaw:0,pitch:.08,dist:17,target:{x:-45,y:land.heightAt(-45,-48)+BL.dsbAtmosphere.portaraAperture.height/2,z:-48}},"water-falls":{yaw:-.65,pitch:.48,dist:37,target:{x:-37,y:25,z:-16}},"water-pool":{yaw:-.9,pitch:.75,dist:22,target:{x:-45,y:14,z:0}},overview:OVERVIEW,chora:{yaw:.62,pitch:.12,dist:18,target:{x:31,y:7,z:33}}}),landing:"overview",pitch:[.1,1.45],dist:[3,270],follow:{y:1,min:3,max:9,pitch:[.1,.8]},clampCamera:p=>{if(interiors)interiors.clampCamera(p,avatar?.root.position);else p.y=Math.max(p.y,land.heightAt(p.x,p.z)+1);if(!interiors?.active&&land.heightAt(p.x,p.z)<BL.dsbCoast.LEVEL)p.y=Math.max(p.y,BL.dsbCoast.LEVEL+.12);},coarse:matchMedia("(pointer: coarse)").matches,onPlayerAction:act,close:{eyeHeight:1.7,eyeRatio:.8,eyeForward:0,maxStep:.6,pitch:[-1.2,1.2],orbitDist:12,trailingDist:6,groundAt:(x,z)=>groundAt(x,z,avatar?avatar.root.position.y-avatar.baseY:undefined)}});
     fx=BL.fx.create({root,renderer:ctx.renderer,camera,overlay:ctx.overlay,hud,tickerAt:{x:-45,y:42,z:-44}});
     const splatGeometry=BL.models.particleGeometry("#e34d32",.12,0);
     const walkable=(ax,az,bx,bz,y,h=1.5,a)=>{
@@ -281,7 +293,7 @@
     crew=shared.crew=BL.crew.create(shared);pilot.bind(shared);avatar=crew.cavemen.get(name);
     crew.setJetpackOwnership(avatar,true,BL.hubModels.jetpack(),BL.hubModels.jetFlame());
     crew.wearJetpack(avatar,BL.hubModels.jetpack(),BL.hubModels.jetFlame());
-    remotes=BL.remotePlayers.create({root,crew,fx,visible:rec=>rec.zone===voiceZone()&&(!entrance||entrance.phase==="done")});
+    remotes=BL.remotePlayers.create({root,crew,fx,unarmed:true,visible:rec=>rec.zone===voiceZone()&&(!entrance||entrance.phase==="done")});
     footsteps=BL.footsteps.create(); // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     document.addEventListener("focusin",sheetFocus,{signal:ctx.signal});
     Object.assign(avatar.root.position,{x:-45,y:land.heightAt(-45,-43)+avatar.baseY,z:-43});avatar.root.rotation.y=0;
@@ -350,14 +362,18 @@
     pilot.bind({...shared,crew:waterInteraction.steering(crew,()=>!interiors?.active&&!interiors?.transitioning)});
     interiors=BL.dsbInteriors.create({root,exterior,land,weather,
       relocate:(position,yaw,dist)=>{
-        if(restoringLogin){Object.assign(avatar.root.position,{x:position.x,y:position.y+avatar.baseY,z:position.z});avatar.root.rotation.y=yaw+Math.PI;return;}
-        overview=detachedExit;detachedExit=false;pilot.setActive(true);
-        if(overview){Object.assign(avatar.root.position,{x:position.x,y:position.y+avatar.baseY,z:position.z});avatar.root.rotation.y=yaw+Math.PI;}
-        else if(pilot.player!==avatar)pilot.possess(avatar);
-        pilot.navigate({position,target:{x:position.x,y:position.y+1.7,z:position.z},yaw,pitch:.22,dist});
+        pilot.setActive(true);
+        if(pilot.player!==avatar)pilot.possess(avatar);
+        pilot.navigate({position,target:{x:position.x,y:position.y+1.7,z:position.z},yaw:interiorView?.view==="first-person"?yaw+Math.PI+interiorView.relYaw:yaw,pitch:interiorView?interiorView.pitch:.22,dist:interiorView?interiorView.distance:dist});
+        if(interiorView)pilot.adopt(interiorView, false);
         pilot.setActive(!interiors?.transitioning);
       },
-      lock:on=>{pilot.setActive(!on);pilot.controls.reset();input.reset();hud.el.modeDestination.disabled=on;},
+      // An entry or exit leaves the outdoor scope from its request, before the fade or the room's swap.
+      lock:on=>{
+        if(on){interiorView=pilot.viewState();interiorFocused=pilot.captureControl({}).focused;shareScope();}
+        pilot.setActive(!on);pilot.controls.reset();input.reset();hud.el.modeDestination.disabled=on;
+        if(!on){if(interiorFocused)pilot.focusAim();pilot.controls.takeMovement();interiorView=null;interiorFocused=false;}
+      },
       onChange:(lighting,label)=>{
         if(exitPick){input.remove(exitPick);exitPick=null;}
         if(interiors.active?.room.exitDoor){exitPick=interiors.active.room.exitDoor;input.add(exitPick,{kind:"dsb-exit"});}
@@ -382,15 +398,16 @@
         walletSpace=interiors.active?1+BL.dsbInteriors.definitions.findIndex(d=>d.id===interiors.active.room.id):0;walletWalk.on=false;
         if(interiors.active)tv?.close();
         scene.renderOpts=lighting||renderOpts;hud.setAreaLabel(interiors.active?label:"CHORA");
+        hud.setDestinations(interiors.active?["outside"]:Object.keys(VIEW_NAMES),interiors.active?{outside:"Return outside to CHORA"}:VIEW_NAMES);
         hud.el.modeDestination.disabled=interiors.transitioning;
-        hud.el.modeDestination.title=interiors.active?"Return outside to CHORA":"DSB island · cycle views";
-        hud.el.modeDestinationLabel.textContent=interiors.active?"Return outside to CHORA":"DSB island. Cycle views";
+        hud.el.modeDestination.title=interiors.active?"Return outside to CHORA":"DSB island · choose a viewpoint";
+        hud.el.modeDestinationLabel.textContent=interiors.active?"Map. Return outside to CHORA":"DSB island. Open Map to choose a viewpoint";
         BL.net.setZone(voiceZone());
       }
     });
     memeMenu=BL.memeFactoryMenu.create({onOpen:on=>{pilot.setActive(!on&&!interiors.transitioning);pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);}});
     svrnMenu=BL.svrnMenu.create({onOpen:on=>{pilot.setActive(!on&&!interiors.transitioning);pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);}});
-    rescue=BL.rescueDsb.attach({root,crew,input,hud,fx,pilot,interiors,vacancies,land,groundAt,walkable,flyable,camera,renderer:ctx.renderer,world,reviewed:pilot.loginViewRestored});
+    rescue=BL.rescueDsb.attach({root,crew,input,hud,fx,pilot,interiors,vacancies,land,groundAt,walkable,flyable,camera,renderer:ctx.renderer,world});
     walletsMenu=BL.walletsMenu.create({onTake:takeWallet,onOpen:on=>{pilot.setActive(!on&&!interiors.transitioning);pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);}});
     wallets=BL.walletBombs.create({root,crew,fx,hud,groundAt:(x,z,feet)=>groundAt(x,z,feet,undefined,WALLET),bounds:()=>interiors.active?.room.bounds||null,addTarget:(node,owner,opts)=>input.add(node,owner,opts),removeTarget:node=>input.remove(node),pickGeometry:BL.walletsRoom.PICK,muted:()=>weather.shared.state.muted,
       // Signed in, the devices are shared with the players in the same zone (net.js sendWallet, subscribeWallets).
@@ -422,27 +439,27 @@
     bigReview=false;bigMenuReview=0;memeReview=false;contextReview=false;stackchainReview=false;svrnReview=false;walletsReview=false;
     scene.renderOpts=renderOpts;
     Object.assign(scene,{root,camera,input,setInterior:weather.setInterior,debug:{get audio(){return entrance?.audio;},weather:weather.shared,renderOpts,daylight:clock,camera,pilot,crew,controls:pilot.controls,hud,dsb:{get presence(){return {zone:BL.net.state.zone,body:crew.player?.traits.name||null,...remotes.stats()};},land,vacancies,water,waterInteraction,weather,nature,detail,enrichment,groundAt:(x,z,feet)=>groundAt(x,z,feet,undefined,avatar),get town(){return town;},get atmosphere(){return atmosphere;},get entrance(){return entrance;},get olympus(){return olympus;},noderunner,tv,studioSession,shopMenu,inkMenu,bigMenu,memeMenu,stackchainMenu,svrnMenu,get wallets(){return wallets?.debug;},walletsMenu,takeWallet,get walletLine(){return walletLine;},get walletWalk(){return walletWalk.on?[walletWalk.x,walletWalk.z,walletWalk.slot]:null;},get rescue(){return rescue?.debug;},menuZone,openVenue,interiors,exterior,setInterior:weather.setInterior,gate,avatar,get phase(){return interiors?.active?"interior":"land";},overview:OVERVIEW}}});
-    if(pilot.loginViewRestored){
-      restoringLogin=true;
-      if(pilot.loginContext)interiors.restore(pilot.loginContext);
-      restoringLogin=false;
-      pilot.possess(avatar);pilot.setActive(true);overview=!pilot.player;
-      studioReview=maxisReview=shopReview=inkReview=bigReview=memeReview=stackchainReview=svrnReview=walletsReview=contextReview=true;
-    }else walk();
+    walk();
+    // A reload of this tab stands where the Ooga stood, in the venue it stood in (visit-spot.js), while the floor is
+    // still there to walk on from; a venue whose floor is not is entered at its door. A venue's own address (routes.js,
+    // its id as the place) opens inside it, at the spot its door lets a visitor in.
+    const stood=ctx.from===null?BL.visitSpot.take("dsb",ctx.place||""):null;
+    if(stood&&(!stood.place||interiors.restore(stood.place))&&Math.abs(groundAt(stood.x,stood.z,stood.y,stood.y,avatar)-stood.y)<.05&&BL.visitSpot.holds(stood,walkable,avatar))
+      pilot.navigate({position:stood,yaw:stood.yaw-Math.PI,pitch:.22,dist:interiors.active?interiors.active.room.followDistance:7});
+    else if(ctx.place)interiors.restore(ctx.place);
     unsubscribeAccount=BL.net.subscribe(accountChanged);accountChanged();
-    if(pilot.loginViewRestored)return;
-    if(ctx.from==="bifrost"||DEBUG&&params.has("entrance"))entrance=BL.dsbEntrance.create({root,camera,avatar,pilot,fx,exterior,scene,renderOpts,land,gate,hold:on=>{overview=on;},muted:()=>weather.shared.state.muted,onArrive:walk,onLeave:()=>{if(leaving)return;world.pilot=avatar.traits.name;leaving=go("bifrost");}});
+    if(ctx.from==="bifrost"||DEBUG&&params.has("entrance"))entrance=BL.dsbEntrance.create({root,camera,avatar,pilot,fx,exterior,scene,renderOpts,land,gate,hold:on=>{held=on;},muted:()=>weather.shared.state.muted,onArrive:walk,onLeave:()=>{if(leaving)return;world.pilot=avatar.traits.name;leaving=go("bifrost");}});
     if(DEBUG&&params.get("view")==="clearing") {
       const p=land.marks.clearing;
       pilot.navigate({position:{x:p.x,y:p.y,z:p.z},yaw:-2.4,pitch:.22,dist:7});
     }
     if(DEBUG&&params.get("view")==="noderunner")pilot.navigate({position:noderunner.review,yaw:noderunner.building.yaw,pitch:-.18,dist:9});
-    if(DEBUG&&params.get("view")==="chora"){overview=true;pilot.goPreset("chora");}
+    if(DEBUG&&params.get("view")==="chora")pilot.goPreset("chora");
     if(DEBUG&&params.get("view")==="portara"){
-      overview=true;pilot.goPreset("portara");
+      pilot.goPreset("portara");
       if(params.get("portal")==="active")gate.activate();
     }
-    if(DEBUG&&(BL.dsbEnrichment.REVIEWS[params.get("view")]||BL.dsbVacancies.REVIEWS[params.get("view")]||BL.walletsRoom.VIEWS[params.get("view")]||BL.rescueRoom.VIEWS[params.get("view")])){overview=true;pilot.goPreset(params.get("view"));}
+    if(DEBUG&&(BL.dsbEnrichment.REVIEWS[params.get("view")]||BL.dsbVacancies.REVIEWS[params.get("view")]||BL.walletsRoom.VIEWS[params.get("view")]||BL.rescueRoom.VIEWS[params.get("view")]))pilot.goPreset(params.get("view"));
     if(DEBUG&&params.get("view")?.startsWith("water-")){
       const view=params.get("view"),depths={"water-dry":-.65,"water-ankle":avatar.bodyHeight*.12,"water-knee":avatar.bodyHeight*.3,"water-waist":avatar.bodyHeight*.5,"water-chest":avatar.bodyHeight*.7,"water-head":BL.dsbCoast.maxDepth(avatar)-.15,"water-swash":0};
       if(Object.hasOwn(depths,view)){
@@ -453,10 +470,8 @@
         const d=land.harborDecks.find(p=>p.id===view.slice(11));
         pilot.navigate({position:{x:d.x,y:land.groundAt(d.x,42),z:42},yaw:Math.PI,pitch:.16,dist:5});
       }
-      else if(view==="water-harbor"){overview=true;pilot.goPreset("coastal-harbor");}
-      else if(view==="water-falls"||view==="water-pool"){
-        overview=true;pilot.goPreset(view);
-      }
+      else if(view==="water-harbor")pilot.goPreset("coastal-harbor");
+      else if(view==="water-falls"||view==="water-pool")pilot.goPreset(view);
     }
     if(params.get("overview")==="1")overviewView();
     if(DEBUG&&(params.get("view")==="svrn-door"||params.get("interior")==="svrn-society"))interiors.review("svrn-society",params.get("interior")==="svrn-society");
@@ -473,7 +488,6 @@
   const update=(dt,time)=>{
     if(leaving)return;
     if(entrance?.update(dt,time)){sharePresence();remotes.update(dt);return;}sampleDaylight();renderOpts.time=time;if(!interiors.active){water.update(time);gate.update();}interiors.update(dt);collision.sync();
-    overview=!pilot.player;
     if(DEBUG&&!studioReview&&studioRoom()&&!interiors.transitioning){
       studioReview=true;const room=studioRoom(),view=params.get("view");
       if(view==="studio-seat")sit(room.seats[19]);
@@ -545,7 +559,7 @@
     studioSession.setMuted(weather.shared.state.muted);studioSession.update(dt);
     Object.assign(before,avatar.root.position);before.y+=avatar.bodyHeight/2-avatar.baseY;
     wallets.releasePose();
-    if(!gate.isOpen&&!menuOpen()&&!interiors.transitioning){pilot.readInput(dt);steerWallet(dt);if(!overview&&!interiors.transitioning)crew.update(dt,time);if(!interiors.active&&deepWaterReturn()){Object.assign(before,avatar.root.position);before.y+=avatar.bodyHeight/2-avatar.baseY;}pilot.update(dt);}
+    if(!gate.isOpen&&!menuOpen()&&!interiors.transitioning){pilot.readInput(dt);steerWallet(dt);if(crew.player===avatar&&!interiors.transitioning)crew.update(dt,time);if(!interiors.active&&deepWaterReturn()){Object.assign(before,avatar.root.position);before.y+=avatar.bodyHeight/2-avatar.baseY;}pilot.update(dt);}
     wallets.update(dt,time,walletSpace);showWalletLine();
     // A blast's flash leads the Chora's point lights for its moment (the lamp it displaces goes last); the store keeps
     // a slot for it after its own lamps.
@@ -557,8 +571,8 @@
     if(shopMenuReview>0){shopMenuReview=Math.max(0,shopMenuReview-dt);if(shopMenuReview===0&&shopRoom())shopMenu.open();}
     if(studioRoom()&&!interiors.transitioning)interiors.audio.setDucked(studioSession.playing);
     Object.assign(after,avatar.root.position);after.y+=avatar.bodyHeight/2-avatar.baseY;
-    if(!interiors.active&&!interiors.transitioning&&!overview&&gate.traverse(before,after,avatar.bodyRadius,1,avatar.bodyHeight))return;
-    detail.update(renderOpts.lampFactor);olympus.update(dt,renderOpts.lampFactor);weather.update(dt,renderOpts);waterInteraction.update(dt,time,overview?null:avatar,!interiors.active&&!interiors.transitioning);atmosphere.update(time,renderOpts,!interiors.active);noderunner.update(dt,avatar.root.position,weather.state,renderOpts.lampFactor);tv.update();if(!interiors.active){nature.update(dt,time);enrichment.update(time,renderOpts.lampFactor);}
+    if(!interiors.active&&!interiors.transitioning&&crew.player===avatar&&gate.traverse(before,after,avatar.bodyRadius,1,avatar.bodyHeight))return;
+    detail.update(renderOpts.lampFactor);olympus.update(dt,renderOpts.lampFactor);weather.update(dt,renderOpts);waterInteraction.update(dt,time,crew.player===avatar?avatar:null,!interiors.active&&!interiors.transitioning);atmosphere.update(time,renderOpts,!interiors.active);noderunner.update(dt,avatar.root.position,weather.state,renderOpts.lampFactor);tv.update();if(!interiors.active){nature.update(dt,time);enrichment.update(time,renderOpts.lampFactor);}
     const nearDoor=interiors.target(avatar.root.position),door=interiors.target(avatar.root.position,avatar.root.rotation.y);
     const nearbySeat=seatRoom()?seatNear():null,zone=menuZone();
     const studioLabel=avatar.camp.seat?"Stand up":nearbySeat?"Sit":nearBlacklight()?(walletsRoom().blacklightMode?"Turn blacklights off":"Turn blacklights on"):!nearDoor&&zone?zone.label:null;
@@ -567,10 +581,11 @@
     context.classList.toggle("ink-context-browse",!!inkRoom()&&!!zone&&!nearbySeat&&!door);
     if(inkLayoutPending&&inkRoom()){inkLayoutPending=false;layoutInkBrowse();}
     sharePresence();remotes.update(dt);footsteps.update(crew.player);
-    context.hidden=!!avatar.camp.seat||overview||interiors.transitioning||gate.isOpen||menuOpen()||(!studioLabel&&!nearTv()&&!door&&(interiors.active||!nearGate()));fx.update(dt);
+    if(crew.player===avatar&&!leaving&&!interiors.transitioning&&!gate.isOpen)BL.visitSpot.note("dsb",interiors.active?interiors.active.definition.id:"",avatar);
+    context.hidden=!!avatar.camp.seat||crew.player!==avatar||pilot.looking||interiors.transitioning||gate.isOpen||menuOpen()||(!studioLabel&&!nearTv()&&!door&&(interiors.active||!nearGate()));fx.update(dt);
   };
   const leave=()=>{
-    world.pilotDetached=!pilot.player;world.pilot=pilot.player?pilot.player.traits.name:null;
+    world.pilot=pilot.player?pilot.player.traits.name:null;
     unsubscribeAccount();unsubscribeAccount=null;BL.net.setBody(null);BL.net.setZone("scene-transition");
     document.removeEventListener("focusin",sheetFocus);remotes.dispose();remotes=null;footsteps.dispose();footsteps=null;
     inkLayoutObserver.disconnect();inkLayoutObserver=null;window.removeEventListener("resize",requestInkLayout);
@@ -587,12 +602,45 @@
     if(exitPick){input.remove(exitPick);exitPick=null;}
     input.remove(noderunner.screenFace);tv.dispose();tv=null;interiors.dispose();interiors=null;collision.dispose();collision=null;exterior=null;scene.renderOpts=renderOpts;
     noderunner.dispose();noderunner=null;
-    entrance?.dispose();entrance=null;waterInteraction.dispose();waterInteraction=null;vacancies.dispose();vacancies=null;olympus.dispose();olympus=null;town.dispose();town=null;atmosphere.dispose();atmosphere=null;enrichment.dispose();enrichment=null;detail.dispose();detail=null;nature.dispose();nature=null;weather.dispose();weather=null;gate.dispose();pilot.dispose();crew.dispose();fx.dispose();const targets=input.targetCount;input.dispose();hud.dispose();context.hidden=true;
+    entrance?.dispose();entrance=null;waterInteraction.dispose();waterInteraction=null;vacancies.dispose();vacancies=null;olympus.dispose();olympus=null;town.dispose();town=null;atmosphere.dispose();atmosphere=null;enrichment.dispose();enrichment=null;detail.dispose();detail=null;nature.dispose();nature=null;weather.dispose();weather=null;gate.dispose();crew.unparkWeapons(avatar);pilot.dispose();crew.dispose();fx.dispose();const targets=input.targetCount;input.dispose();hud.dispose();context.hidden=true;
     document.body.classList.remove("dsb-active","dsb-studio-active","maxis-club-active");while(root.children.length)S.removeChild(root,root.children[root.children.length-1]);
     lamps.length=0;renderOpts.lightCount=0;clock=null;water=renderOpts.dsbWater=null;
-    scene.setInterior=scene.debug=scene.input=null;land=avatar=crew=pilot=gate=fx=hud=input=game=null;return {targets};
+    navigationViews=interiorView=null;interiorFocused=false;scene.setInterior=scene.debug=scene.input=null;land=avatar=crew=pilot=gate=fx=hud=input=game=null;return {targets};
   };
   // ₿IFRÖST's deferred code (the poker room's, for its window) did not arrive: DSB Land stays, and its ways home work again.
-  Object.assign(scene,{enter,update,stay:()=>{leaving=false;},leave,onKey:e=>{if(studioSession?.isOpen){if(e.key==="Escape")studioSession.close();return true;}if(entrance?.onKey(e))return true;if(rescue?.onKey(e))return true;if(walletsMenu?.isOpen){if(e.key==="Escape")walletsMenu.close();return true;}if((e.key==="y"||e.key==="Y")&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&wallets.throwCarried()){e.preventDefault();return true;}if(svrnMenu?.isOpen){if(e.key==="Escape")svrnMenu.close();return true;}if(stackchainMenu?.isOpen){if(e.key==="Escape")stackchainMenu.close();return true;}if(memeMenu?.isOpen){if(e.key==="Escape")memeMenu.close();return true;}if(tv?.isOpen){if(e.key==="Escape")tv.close();return true;}if(bigMenu?.isOpen){if(e.key==="Escape")bigMenu.close();return true;}if(inkMenu?.isOpen){if(e.key==="Escape")inkMenu.close();return true;}if(shopMenu?.isOpen){if(e.key==="Escape")shopMenu.close();return true;}if(e.key==="0"&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&!leaving&&!gate.isOpen&&!interiors.transitioning)return pilot.resetCamera();if((e.key==="x"||e.key==="X")&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&modeAction("mode-toggle")){e.preventDefault();return true;}if(seatRoom()&&(e.key==="1"||e.key==="2"))return pilot.weaponMode(Number(e.key));if(seatRoom()&&e.key.toLowerCase()==="v")return pilot.weaponAction("weapon-fire");if(e.key.toLowerCase()==="t"&&seatRoom()){crew.throwTomato();return true;}if(tv?.isOpen){if(e.key==="Escape")tv.close();return true;}if(e.key.toLowerCase()==="m"){mute();return true;}if((e.key==="j"||e.key==="J")&&!e.repeat)return toggleJetpack();if(e.key==="Escape"&&!gate.isOpen)return escapeView();return false;},overlay:dt=>{const dpr=Math.min(devicePixelRatio||1,2),w=Math.round(overlayCanvas.clientWidth*dpr),h=Math.round(overlayCanvas.clientHeight*dpr);if(overlayCanvas.width!==w||overlayCanvas.height!==h){overlayCanvas.width=w;overlayCanvas.height=h;}overlayCanvas.getContext("2d").setTransform(dpr,0,0,dpr,0,0);fx.drawOverlay(dt,drawExtra);},stats:()=>({targets:input.targetCount,tweens:0,...remotes.stats(),...rescue.stats(),...wallets.stats()}),liveGeometry:set=>{remotes.liveGeometry(set);if(avatar)set.add(avatar.headOpen).add(avatar.headClosed);},onDonation:(donation,counted=null)=>{game.recordDonation(donation,counted&&counted.exact);world.level=Math.min(BL.pile.MAX_BANANAS,world.level+(counted?counted.exact:BL.game.bananasFor(donation.sats)));},onLootCleared:()=>{}});
+  Object.assign(scene,{enter,update,stay:()=>{leaving=false;},leave,onKey:e=>{if(studioSession?.isOpen){if(e.key==="Escape")studioSession.close();return true;}if(entrance?.onKey(e))return true;if(rescue?.onKey(e))return true;if(walletsMenu?.isOpen){if(e.key==="Escape")walletsMenu.close();return true;}if(BL.controls.matches(e,"throwWallet")&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&wallets.throwCarried()){e.preventDefault();return true;}if(svrnMenu?.isOpen){if(e.key==="Escape")svrnMenu.close();return true;}if(stackchainMenu?.isOpen){if(e.key==="Escape")stackchainMenu.close();return true;}if(memeMenu?.isOpen){if(e.key==="Escape")memeMenu.close();return true;}if(tv?.isOpen){if(e.key==="Escape")tv.close();return true;}if(bigMenu?.isOpen){if(e.key==="Escape")bigMenu.close();return true;}if(inkMenu?.isOpen){if(e.key==="Escape")inkMenu.close();return true;}if(shopMenu?.isOpen){if(e.key==="Escape")shopMenu.close();return true;}if(e.key==="0"&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&!leaving&&!gate.isOpen&&!interiors.transitioning)return pilot.resetCamera();if(BL.controls.matches(e, "view")&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&modeAction("mode-toggle")){e.preventDefault();return true;}if(BL.controls.matches(e,"tomato")&&seatRoom()){crew.throwTomato();return true;}if(tv?.isOpen){if(e.key==="Escape")tv.close();return true;}if(e.key.toLowerCase()==="m"){mute();return true;}if(BL.controls.matches(e, "jetpack")&&!e.repeat)return toggleJetpack();if(e.key==="Escape"&&!gate.isOpen)return escapeView();return false;},overlay:dt=>{const dpr=Math.min(devicePixelRatio||1,2),w=Math.round(overlayCanvas.clientWidth*dpr),h=Math.round(overlayCanvas.clientHeight*dpr);if(overlayCanvas.width!==w||overlayCanvas.height!==h){overlayCanvas.width=w;overlayCanvas.height=h;}overlayCanvas.getContext("2d").setTransform(dpr,0,0,dpr,0,0);fx.drawOverlay(dt,drawExtra);},stats:()=>({targets:input.targetCount,tweens:0,...remotes.stats(),...rescue.stats(),...wallets.stats()}),liveGeometry:set=>{remotes.liveGeometry(set);if(avatar)set.add(avatar.headOpen).add(avatar.headClosed);},onDonation:(donation,counted=null)=>{game.recordDonation(donation,counted&&counted.exact);world.level=Math.min(BL.pile.MAX_BANANAS,world.level+(counted?counted.exact:BL.game.bananasFor(donation.sats)));},onLootCleared:()=>{}});
+  scene.controlsHelp = touch => {
+    const H = BL.controlsHelp, help = pilot.controlsHelp(touch, ["jetpack"]);
+    if (seatRoom()) help.rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("tomato"), "Throw tomato", touch ? "Throw tomato button" : ""));
+    if (walletTools && !walletTools.hidden) help.rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("throwWallet"), "Throw carried wallet", touch ? "Throw button" : ""), H.row([], "Place carried wallet", touch ? "Tap ground" : "Click ground"));
+    help.title = "DSB Land · " + help.title; return help;
+  };
+  scene.navigationLooking = () => !!pilot?.looking;
+  scene.navigationReturn = () => pilot?.endLook();
+  scene.navigationStatus = () => scene.navigationReady ? "" : "Finish the current interaction first.";
+  scene.navigationMap = () => {
+    if (!land || !navigationViews || interiors?.active) return null;
+    const bounds = { minX: Infinity, minZ: Infinity, maxX: -Infinity, maxZ: -Infinity };
+    for (const [x, z] of land.coast) { bounds.minX = Math.min(bounds.minX, x); bounds.maxX = Math.max(bounds.maxX, x); bounds.minZ = Math.min(bounds.minZ, z); bounds.maxZ = Math.max(bounds.maxZ, z); }
+    const points = [];
+    for (const name of Object.keys(VIEW_NAMES)) {
+      const target = navigationViews[name]?.target;
+      if (target) points.push({ name, x: target.x, z: target.z });
+    }
+    const paths = [land.trail, land.waterfront, ...land.lanes];
+    return { title: "DSB Land", bounds, points, origin: { x: pilot.orbit.target.x, z: pilot.orbit.target.z },
+      surfaceAt: (x, z) => { if (!land) return NaN; const h = land.groundAt(x, z); return h >= BL.dsbCoast.LEVEL ? h : NaN; },
+      isPath: (x, z) => {
+        for (const path of paths) for (let i = 1; i < path.length; i++) {
+          const a = path[i - 1], b = path[i], dx = b[0] - a[0], dz = b[1] - a[1], length = dx * dx + dz * dz;
+          const t = length ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / length)) : 0;
+          if ((x - a[0] - dx * t) ** 2 + (z - a[1] - dz * t) ** 2 < 1.5) return true;
+        }
+        return false;
+      }
+    };
+  };
+  scene.controlsHelpHold = on => { if (on) { walletWalk.on = false; crew.steer(0, 0, 0, 0, 0); } pilot.controls.reset(); pilot.setMenuOpen(on, false); };
+  Object.defineProperty(scene,"navigationReady",{get:()=>!leaving&&!gate?.isOpen&&!interiors?.transitioning&&!menuOpen()&&(!entrance||entrance.phase==="done")});
   BL.scenes.dsb=scene;
 })();

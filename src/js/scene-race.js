@@ -64,9 +64,9 @@
   // These are one visit's state: created in enter, dropped in leave.
   // Where the game exits to: back to Ooga Arcade when a cabinet started it, otherwise the island.
   let home = "hub";
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, hud, rhud, hooks, input, fx, controls, track, racers, items, audio, weather, agent;
+  let renderer, game, world, go, testBananas, root, camera, hud, rhud, hooks, input, fx, controls, track, racers, items, audio, weather, agent;
   let phase = "garage", countdown = 0, accumulator = 0, sceneTime = 0, finishedAt = 0;
-  let stateTimer = 0, hintTimer = 0, unsubscribeAccount = null;
+  let stateTimer = 0, unsubscribeAccount = null;
   let scoreTicket = null, unwatchScores = null;
   // revAt is the countdown time the throttle was first held through; -1 while it is off.
   let revAt = -1, crowdSwell = 0, driftTaught = 0;
@@ -211,7 +211,6 @@
   const startRace = () => {
     if (!racers.racers.length) return;
     scoreTicket = BL.highscores?.begin("race") || null;
-    window.clearTimeout(hintTimer);
     hud.hideHint();
     placeRacers();
     phase = "countdown";
@@ -465,6 +464,7 @@
         if (r === racers.player) {
           cam.shake = Math.max(cam.shake, 0.3 + tier * 0.15);
           audio.cues.boost();
+          BL.gamepad.rumble(0.15 + tier * 0.15, 0.45, 160);
           // The tiers are taught the first time each is released, once a visit.
           if (tier > driftTaught) {
             driftTaught = tier;
@@ -478,6 +478,7 @@
       if (r === racers.player) {
         if (hard) cam.shake = Math.max(cam.shake, 0.5);
         audio.cues.land();
+        if (hard) BL.gamepad.rumble(0.6, 0.4, 120);
       }
     };
     racers.events.onHop = (r) => {
@@ -488,11 +489,12 @@
       if (r === racers.player) {
         audio.cues.wall();
         cam.shake = Math.max(cam.shake, 0.3);
+        BL.gamepad.rumble(0.5, 0.3, 120);
       }
     };
     racers.events.onBump = (a, b) => {
       peelOut(a, 0.07, 0.25, 3);
-      if (a === racers.player || b === racers.player) audio.cues.bump();
+      if (a === racers.player || b === racers.player) { audio.cues.bump(); BL.gamepad.rumble(0.3, 0.3, 90); }
     };
     racers.events.onRespawn = (r, why) => {
       const geo = why === "lava" ? EMBER : why === "water" ? SPLASH : DUST;
@@ -501,6 +503,7 @@
       if (r === racers.player) {
         cam.warm = false;
         cam.shake = 0.6;
+        BL.gamepad.rumble(0.7, 0.5, 220);
         if (why === "water") audio.cues.splash();
         else audio.cues.respawn();
       }
@@ -555,7 +558,7 @@
     items.events.onHit = (r, by, kind) => {
       fx.burst(r.x, r.y + 0.8, r.z, 8, [SPARK, DUST], 2);
       fx.say(r.cave, kind === "peel" ? "Slippy!" : kind === "boulder" ? "OOF." : "Ow! Rock!", 1.4);
-      if (r === racers.player) cam.shake = Math.max(cam.shake, 0.7);
+      if (r === racers.player) { cam.shake = Math.max(cam.shake, 0.7); BL.gamepad.rumble(0.85, 0.6, 240); }
       if (by === racers.player && by) hud.toast(`${BL.characters.displayOf(r.name)} spun out`);
       if (r === racers.player || by === racers.player) audio.cues.hit();
       peelOut(r, 0.12, 0.4, 5);
@@ -625,20 +628,14 @@
     const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
     world.level = Math.min(pileMod.MAX_BANANAS, world.level + (counted ? counted.exact : bananas));
     const who = donation.handle ? `@${donation.handle}` : "anon";
-    const loot = lootEnabled ? game.lootFor(donation) : null;
-    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
+    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}`);
     fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${gameMod.formatLarge(shown)} BANANAS`, 4.5);
     const p = racers.player;
     if (p) fx.burst(p.x, p.y + 1.6, p.z, 20, CONFETTI, 2.2);
     // Set taken to 0.01, not 0: race-items' countdown branch must run once to make the banana visible again.
     for (const b of items.bananas) if (b.taken > 0) b.taken = 0.01;
-    if (loot) {
-      game.addItem({ item: loot.item, tier: loot.tier, donationId: donation.id });
-      renderLocker();
-    }
     hud.setStats(game.state);
   };
-  const renderLocker = () => hud.renderInventory(game.state.inventory, game.assignedTo, () => null);
 
   const tooltipFor = (hit) => {
     const o = hit.owner;
@@ -728,26 +725,22 @@
   };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
-  const onLootCleared = () => {
-    if (!lootEnabled) return;
-    renderLocker();
-    hud.toast("Loot locker cleared");
-  };
   // A demo tip is the simulation's alone: in real mode it would count a tip nobody paid.
   const demoTip = (sats) => {
     if (!donations.real) onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
   };
+  const controlCopy = touch => touch ? "Drag to look round the garage · left stick steers · hold Drift · tap Throw" : "Drag to look round the garage · W A S D or arrows drive · hold Space to drift, tap to hop · E throws · Q looks back · Escape pauses";
   const onKey = (e) => {
-    if (e.key === "Escape") {
+    if (BL.controls.matches(e, "escape")) {
       if (phase === "racing") pause(true);
       else if (phase === "paused") pause(false);
       else if (phase === "finished") toGarage();
       else go(home);
     }
-    if (e.key === "e" || e.key === "E" || e.key === "Shift") useItem();
-    if (e.key === "0") cam.offset = 0;
-    if (e.key === "Enter" && phase === "garage") startRace();
-    if (e.key === "Enter" && phase === "finished" && !rhud.el.next.hidden) nextRace();
+    if (BL.controls.matches(e, "item")) useItem();
+    if (BL.controls.matches(e, "resetView")) cam.offset = 0;
+    if (BL.controls.matches(e, "start") && phase === "garage") startRace();
+    if (BL.controls.matches(e, "start") && phase === "finished" && !rhud.el.next.hidden) nextRace();
     if (e.key === "b" || e.key === "B") {
       world.level = Math.min(pileMod.MAX_BANANAS, world.level + testBananas);
       hud.toast(`+${testBananas} test bananas`);
@@ -761,12 +754,12 @@
   };
 
   const enter = (ctx) => {
-    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
+    ({ renderer, game, world, go, testBananas } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
     hudMod.leaveTo("race", home);
     camera = createCamera({ fov: 50, near: 0.3, far: 280 });
     root = createNode();
-    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, camera, hud, overlay: ctx.overlay, tickerAt: TICKER_AT });
@@ -812,13 +805,6 @@
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
     window.addEventListener("keydown", onGesture, { signal: ctx.signal });
-    hud.onAssign((entryId, name) => {
-      if (game.assign(entryId, name)) renderLocker();
-    });
-    hud.onUnassign((name) => {
-      game.unassign(name);
-      renderLocker();
-    });
     Object.assign(hooks, {
       onHover: (hit, p) => {
         if (hit) hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.kind === "racer" ? hit.owner.racer.cave : null);
@@ -856,19 +842,15 @@
       else if (action === "leave") go(home);
       else if (action === "item") useItem();
       else if (action === "mute") toggleMute();
-      else if (action === "clear-loot") {
-        game.clearLoot();
-        onLootCleared();
-      } else if (action === "reset") {
+      else if (action === "reset") {
         game.resetAll();
         location.reload();
       }
     });
     for (const cave of contributors.activeRoster) hud.setRosterRow(cave.name, contributors.stateFor(cave), contributors.ageLabel(cave));
-    if (lootEnabled) renderLocker();
     hud.setStats(game.state);
     rhud.el.joyLook.hidden = true;
-    rhud.el.help.textContent = COARSE ? "Drag to look round the garage · left stick steers · hold Drift · tap Throw" : "Drag to look round the garage · W A S D or arrows drive · hold Space to drift, tap to hop · E throws · Q looks back · Escape pauses";
+    rhud.el.help.textContent = controlCopy(COARSE);
     phase = "garage";
     cam.garageYaw = cam.garageLift = 0;
     toGarage();
@@ -876,16 +858,12 @@
       for (const cave of contributors.activeRoster) hud.setRosterRow(cave.name, contributors.stateFor(cave), contributors.ageLabel(cave));
       fx.trimPool();
     }, 6e4);
-    hintTimer = window.setTimeout(() => {
-      const pick = ownRacer() ? "a ride and a track" : "an Ooga, a ride and a track";
-      hud.hint(COARSE ? `Tap ${pick}, then Race!` : `Pick ${pick}, then Race! (Enter)`);
-    }, 1200);
     window.addEventListener("blur", onBlur, { signal: ctx.signal });
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     Object.assign(raceScene, {
       root, camera, input,
       debug: {
-        hud, demoTip, trimPool: fx.trimPool, camera, controls, cavemen: null, crates: null, agent: agent.debug,
+        hud, demoTip, trimPool: fx.trimPool, camera, controls, cavemen: null, agent: agent.debug,
         get audio() {
           return audio;
         },
@@ -929,7 +907,6 @@
   const leave = () => {
     unwatchScores?.(); unwatchScores = null; scoreTicket = null;
     window.clearInterval(stateTimer);
-    window.clearTimeout(hintTimer);
     window.removeEventListener("blur", onBlur);
     unsubscribeAccount();
     unsubscribeAccount = null;
@@ -970,12 +947,25 @@
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...racers.stats(), ...items.stats(), sectors: track.sectors.length, phase };
   };
   const raceScene = BL.deferred.scene("race", {
-    id: "race", renderOpts: null, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
-    enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry,
+    id: "race", padContext: "race", renderOpts: null, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
+    enter, update, overlay, onDonation, onKey, leave, stats, liveGeometry,
     get inMotion() {
       return phase === "countdown" || phase === "racing" || fx.inMotion;
     }
   });
   BL.scenes = BL.scenes || {};
+  raceScene.controlsHelp = touch => {
+    const H = BL.controlsHelp, rows = [];
+    if (touch) rows.push(...H.fromCopy(controlCopy(true), true));
+    else {
+      rows.push(H.movement(COARSE ? "Steer / brake · automatic throttle in touch layout" : "W accelerates · S brakes · A/D steer"),
+        H.row(BL.controls.keysFor("up"), "Hold to drift · release to boost · tap to hop"),
+        H.row(BL.controls.shortcutKeys("item"), "Use held item"), H.row(BL.controls.keysFor("yawLeft"), "Look back"),
+        H.row(BL.controls.shortcutKeys("resetView"), "Reset camera"), H.row([], "Look around", "Drag"));
+    }
+    if (phase === "garage" || phase === "finished" && !rhud.el.next.hidden) rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("start"), phase === "garage" ? "Start race" : "Next race", touch ? "Race button" : ""));
+    rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("escape"), touch ? "Leave the race" : phase === "racing" || phase === "paused" ? "Pause / resume" : "Back", touch ? "Back button" : ""));
+    return { title: "Ooga Rally", rows };
+  };
   BL.scenes.race = raceScene;
 })();

@@ -1,11 +1,11 @@
-// Pulls bitcoin.org/bitcoin.pdf and bakes its pages into src/js/whitepaper-pages-data.js: pdftoppm (poppler), the page's
-// white margins cut back by 60% and the box padded to the whitepaper monolith's face with the page's own paper, so the
-// text fills the stone; greyscale, the pages stacked into one tall strip with the stone's dark gap between them, WebP at
-// quality 75 through cwebp, base64 into the module the page loads before scene-hub.js. One strip is one texture the
-// monolith's face is a window onto, so the reader slides the document up and down inside the stone. Committed, so the
-// page itself needs no PDF reader and no third-party script: bitcoin.org sends no CORS header, and rasterising a PDF in
-// the browser would take an external library. Run `node scripts/whitepaper-pages.mjs` (cwebp required); on any failure
-// it keeps the committed file.
+// Pulls bitcoin.org/bitcoin.pdf and bakes its pages into src/js/whitepaper-pages.js for the Genesis room (Room 8 of the
+// Timechain Sphere): pdftoppm (poppler), each page's white margins cut back by 60% so the text reads bigger, the box
+// padded with the page's own paper to one aspect, greyscale, the pages stacked into one tall strip with a dark gap
+// between them, WebP at quality 75 through cwebp, base64 into the module. One strip is one picture the large reader
+// scrolls, and the pop-up cuts its pages from it. Committed, so the page needs no PDF reader and no third-party script:
+// bitcoin.org sends no CORS header, and rasterising a PDF in the browser would take an external library. Adapted from
+// stacktoshi's whitepaper monolith (#354, removed in #539). Run `node scripts/whitepaper-pages.mjs` (cwebp required);
+// on any failure it keeps the committed file.
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,15 +13,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const out = join(root, "src", "js", "whitepaper-pages-data.js");
+const out = join(root, "src", "js", "whitepaper-pages.js");
 const source = "https://bitcoin.org/bitcoin.pdf";
 const width = 1280, quality = 75, measureDpi = 50;
 // What is left of each margin: 0.4 takes 60% of it off, which is what makes the text read bigger on the stone.
 const margin = 0.4;
-// The gap between the pages in the strip: the monolith's own dark, so a page boundary reads as the stone showing
-// between them while the document slides.
+// The gap between the pages in the strip: a dark band, so a page boundary reads while the document slides.
 const gapInk = 22;
-// The whitepaper monolith's face (scene-hub.js WP w and h), which the cropped page is padded to with its own paper.
+// The aspect the cropped page is padded to with its own paper (the monolith's face in #354, kept so the strip reads the
+// same; a page's own aspect is 0.707).
 const face = 1.62 / 2.145;
 
 // A PGM from pdftoppm -gray: P5, the comment-free header pdftoppm writes, then one byte a pixel.
@@ -120,17 +120,61 @@ try {
   execFileSync("cwebp", ["-quiet", "-q", String(quality), pgm, "-o", webp], { stdio: "ignore" });
   const data = readFileSync(webp);
 
-  const module = `// Bitcoin: A Peer-to-Peer Electronic Cash System — the ${count} pages bitcoin.org/bitcoin.pdf serves, rasterised
-// by scripts/whitepaper-pages.mjs (pdftoppm, the white margins cut back by 60% and the box padded to the monolith's face
-// with the page's own paper, greyscale, WebP q${quality}) and stacked into one strip, a gap of the stone's own dark
-// between the pages, so the reader slides the document up and down inside the monolith's face. Committed; regenerate
-// with \`node scripts/whitepaper-pages.mjs\`.
+  const module = `// Bitcoin: A Peer-to-Peer Electronic Cash System, the ${count} pages bitcoin.org/bitcoin.pdf serves, as one tall greyscale
+// strip: each page's white margins cut back by 60% so the text reads bigger, the pages stacked with a dark gap between
+// them, WebP q${quality}, base64, baked by scripts/whitepaper-pages.mjs (pdftoppm and cwebp). The strip and its script are
+// stacktoshi's, from the whitepaper monolith (PR #354, removed from the mainland in #539); the Genesis room's large
+// reader scrolls the same strip in a full-screen window, and its pop-up cuts its pages from it (\`load\`). bitcoin.org
+// publishes the paper under the MIT licence (its footer: "Released under the MIT license"); the text and figures are
+// reproduced unchanged. Regenerate with \`node scripts/whitepaper-pages.mjs\`.
+//
+// bitcoin.org's licence (github.com/bitcoin-dot-org/Bitcoin.org, LICENSE):
+//
+// Copyright (c) 2009-2026 Bitcoin.org
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+// documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+// permit persons to whom the Software is furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+// the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+// WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+// COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  BL.whitepaperPages = {
+  const D = BL.whitepaperPages = {
+    licence: "MIT (bitcoin.org)", source: "https://bitcoin.org/bitcoin.pdf",
     width: ${width}, height: ${height}, page: ${pageHeight}, gap: ${gap}, count: ${count},
-    strip: "data:image/webp;base64,${data.toString("base64")}"
+    strip: "data:image/webp;base64,${data.toString("base64")}",
+    pages: [], ready: null,
+    // The strip decoded once; each page cut from it as its own JPEG data URL (one a frame) for the pop-up's page mode.
+    load() {
+      if (D.ready) return D.ready;
+      D.ready = new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const c = document.createElement("canvas"); c.width = D.width; c.height = D.page;
+          const ctx = c.getContext("2d");
+          let i = 0;
+          const cut = () => {
+            // The decoded strip (some 80 MB of pixels) is let go with the canvas once the last page is cut.
+            if (i >= D.count) { c.width = c.height = 0; img.src = ""; resolve(D); return; }
+            ctx.drawImage(img, 0, i * (D.page + D.gap), D.width, D.page, 0, 0, D.width, D.page);
+            D.pages[i++] = c.toDataURL("image/jpeg", 0.88);
+            requestAnimationFrame(cut);
+          };
+          cut();
+        };
+        img.onerror = () => resolve(D);
+        img.src = D.strip;
+      });
+      return D.ready;
+    }
   };
 })();
 `;

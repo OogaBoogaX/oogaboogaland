@@ -22,7 +22,7 @@ const recording = (duration = 1, playerId = 1, username = "winner", game = GAME)
 };
 const database = () => {
   const sql = new DatabaseSync(":memory:"); sql.exec("PRAGMA foreign_keys=ON");
-  for (const name of ["0001_init", "0002_tess", "0003_highscores", "0004_highscore_notifications", "0005_cloud_hopper_levels", "0006_cloud_hopper_replays", "0007_cloud_hopper_runs"])
+  for (const name of ["0001_init", "0002_tess", "0003_highscores", "0004_highscore_notifications", "0005_cloud_hopper_levels", "0006_cloud_hopper_replays", "0007_cloud_hopper_runs", "0008_cabinet_runs", "0009_identity_collision_guard"])
     sql.exec(readFileSync(new URL(`../migrations/${name}.sql`, import.meta.url), "utf8"));
   const statement = (query, args = []) => {
     const execute = method => {
@@ -164,7 +164,7 @@ test("retirement grace and orphan maintenance keep current winners and reclaim b
   assert.equal(f.DB.sql.prepare("SELECT count(*) n FROM cloud_hopper_replay_objects").get().n, 1);
 });
 
-test("client keeps the active ghost fixed while numeric boards and post-finish results stay live, loads lazily and clears on level/exit", async () => {
+test("client keeps the active ghost fixed while numeric boards and post-finish results stay live, loads lazily, remembers the choice for later attempts and clears on level/exit", async () => {
   const r = recording(), bytes = codec.encode(r), hash = createHash("sha256").update(new Uint8Array(bytes)).digest("hex");
   const pointer = { hash, score: 1000, username: "winner", courseVersion: 1 }, board = { game: GAME, highscores: { winner: 1000 }, achieved: { winner: 1 }, replay: pointer };
   const fetches = [], states = [], plays = [], boards = []; let hiding = 0, fail = false;
@@ -188,15 +188,23 @@ test("client keeps the active ghost fixed while numeric boards and post-finish r
   const finished = { ...next, highscores: { other: 800, winner: 500 }, achieved: { other: 2, winner: 3 },
     replay: { ...pointer, score: 500, hash: "e".repeat(64) } };
   player.update(finished); assert.equal(boards.at(-1), finished); assert.equal(fetches.length, 1);
-  player.start(); assert.equal(states.at(-1), "off"); assert.equal(boards.at(-1), finished);
-  fail = true; await player.toggle(); assert.equal(states.at(-1), "error"); assert.equal(plays.length, 2);
+  // The choice carries to the next attempt, which loads the newest winner by itself; a failed load leaves it chosen.
+  const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+  fail = true; player.start(); assert.equal(player.wanted, true); assert.equal(states.at(-1), "loading"); assert.equal(boards.at(-1), finished);
+  await settle(); assert.equal(states.at(-1), "error"); assert.equal(fetches.length, 2); assert.equal(plays.length, 2);
+  player.end(); fail = false;
+  player.select(GAME, 1, board); assert.equal(states.at(-1), "off"); // Cards between attempts load nothing.
+  player.start(); await settle(); assert.equal(states.at(-1), "on"); assert.equal(plays.length, 3); assert.equal(fetches.length, 2);
+  // Turned off, it stays off for the attempts after.
+  await player.toggle(); assert.equal(player.wanted, false); player.end(); player.start();
+  assert.equal(states.at(-1), "off"); assert.equal(plays.length, 3); assert.equal(fetches.length, 2);
   player.select("cloud-hopper-l2", 1, { replay: null }); await player.toggle(); assert.equal(states.at(-1), "unavailable");
   assert.equal(fetches.length, 2); player.clear(); assert.ok(hiding >= 4); assert.equal(player.enabled, false);
 });
 
 test("the actual recorder snapshots appearance, stages on elevated clouds without doubling height, and preserves world-space playback", () => {
   const context = { window: { BL: { cloudHopperReplayCodec: codec } }, Float32Array };
-  for (const name of ["math", "scene", "models", "cloud-hopper-ghost"])
+  for (const name of ["math", "scene", "models", "ghost-style", "cloud-hopper-ghost"])
     runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`, import.meta.url), "utf8"), context);
   const BL = context.window.BL, S = BL.scene, root = S.createNode(), body = S.createNode(), head = S.createNode({ geometry: BL.models.box({ w: 1, h: 1, d: 1, color: "#ff0000" }) });
   S.addChild(body, head); S.addChild(root, body);
@@ -307,4 +315,23 @@ test("same-player replay finishes remain separate; upload retry and numeric fall
   assert.deepEqual(slower.runs.map(r => r.score), [1000, 2000, 3000]);
   assert.deepEqual(slower.replay, won.replay);
   assert.equal(f.objects.size, 2); // Only the two successive winning recordings went to R2.
+});
+
+
+test("island NPC ghosts render without loading the deferred Cloud Hopper game", () => {
+  const context = { window: { BL: {} }, Float32Array };
+  for (const name of ["math", "scene", "models", "ghost-style", "npc-ghosts"])
+    runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`, import.meta.url), "utf8"), context);
+  const BL = context.window.BL;
+  assert.equal(BL.cloudHopperGhost, undefined);
+  const geometry = BL.models.box({ w: 1, h: 1, d: 1, color: "#ff0000" });
+  const actor = { root: BL.scene.createNode({ geometry }) };
+  const ghosts = BL.npcGhosts.create({ renderer: { releaseGeometry() {} } });
+  assert.equal(ghosts.set(actor, true), true);
+  ghosts.paint(.016);
+  assert.notEqual(actor.root.geometry, geometry);
+  assert.equal(actor.root.geometry.glass, .3);
+  ghosts.restore();
+  assert.equal(actor.root.geometry, geometry);
+  ghosts.dispose();
 });

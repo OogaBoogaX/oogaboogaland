@@ -1,0 +1,227 @@
+name: Publish character catalog
+
+on:
+  workflow_run:
+    workflows: [Character bundles]
+    types: [completed]
+  schedule:
+    - cron: '9 * * * *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Catalog environment
+        type: choice
+        options: [staging, production]
+        default: staging
+        required: true
+      operation:
+        description: Publish the next merged daily bundle, bootstrap an approved baseline, or roll back a catalog
+        type: choice
+        options: [publish, bootstrap, rollback]
+        default: publish
+        required: true
+      rollback_revision:
+        description: Previously accepted SHA256 revision (rollback only)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# The entire plan/render/publish transaction shares the manual code deployment's
+# environment lock. Queue every request so catalog events cannot replace a manual deployment.
+# Runs whose plan is disabled use their own group and never enter a deployment queue.
+concurrency:
+  group: >-
+    ${{ github.repository == 'OogaBoogaX/oogaboogaland' &&
+        (vars.CHARACTER_CATALOG_PUBLISH_ENABLED == 'true' || github.event_name == 'workflow_dispatch') &&
+        (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/rock') &&
+        (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') &&
+        format('cloudflare-{0}', inputs.environment || 'production') ||
+        format('character-catalog-skipped-{0}', github.run_id) }}
+  cancel-in-progress: false
+  queue: max
+
+env:
+  CATALOG_ENVIRONMENT: ${{ inputs.environment || 'production' }}
+  CATALOG_OPERATION: ${{ inputs.operation || 'publish' }}
+  CATALOG_ROLLBACK_REVISION: ${{ inputs.rollback_revision }}
+
+jobs:
+  plan:
+    if: >-
+      github.repository == 'OogaBoogaX/oogaboogaland' &&
+      (vars.CHARACTER_CATALOG_PUBLISH_ENABLED == 'true' ||
+       github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/rock') &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: character-catalog-${{ inputs.environment || 'production' }}
+    outputs:
+      publish: ${{ steps.plan.outputs.publish }}
+      baseline: ${{ steps.plan.outputs.baseline }}
+      reuse: ${{ steps.plan.outputs.reuse }}
+      tooling: ${{ vars.CHARACTER_CATALOG_TOOLING_SHA }}
+      artifact: ${{ steps.artifact.outputs.artifact-id }}
+    steps:
+      - name: Validate the approved immutable tooling revision
+        run: node -e 'if (!/^[a-f0-9]{40}$/.test(process.env.TOOLING_SHA || "")) throw new Error("Set an approved immutable CHARACTER_CATALOG_TOOLING_SHA first")'
+        env:
+          TOOLING_SHA: ${{ vars.CHARACTER_CATALOG_TOOLING_SHA }}
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ vars.CHARACTER_CATALOG_TOOLING_SHA }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Repository-scoped read-only inspection token
+        if: vars.CHARACTER_APP_CLIENT_ID != ''
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.CHARACTER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CHARACTER_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: read
+      - name: Verify the next publication with read-only credentials
+        id: plan
+        run: |
+          args=(plan --environment "$CATALOG_ENVIRONMENT" --operation "$CATALOG_OPERATION" --output plan)
+          if [ "$CATALOG_OPERATION" = rollback ]; then args+=(--rollback "$CATALOG_ROLLBACK_REVISION"); fi
+          node tooling/scripts/character-catalog-release.mjs "${args[@]}"
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          CHARACTER_BOT_LOGIN: ${{ vars.CHARACTER_BOT_LOGIN || 'github-actions[bot]' }}
+          CHARACTER_CATALOG_BASELINE: ${{ vars.CHARACTER_CATALOG_BASELINE }}
+          CHARACTER_CATALOG_ENGINE: ${{ vars.CHARACTER_CATALOG_ENGINE }}
+          CHARACTER_CATALOG_R2_ACCOUNT_ID: ${{ vars.CHARACTER_CATALOG_R2_ACCOUNT_ID }}
+          CHARACTER_CATALOG_R2_BUCKET: ${{ vars.CHARACTER_CATALOG_R2_BUCKET }}
+          CHARACTER_CATALOG_R2_ACCESS_KEY_ID: ${{ secrets.CHARACTER_CATALOG_R2_READ_ACCESS_KEY_ID }}
+          CHARACTER_CATALOG_R2_SECRET_ACCESS_KEY: ${{ secrets.CHARACTER_CATALOG_R2_READ_SECRET_ACCESS_KEY }}
+      - name: Upload the canonical plan
+        if: steps.plan.outputs.publish == 'true'
+        id: artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: character-catalog-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: plan/
+          if-no-files-found: error
+          retention-days: 7
+
+  render:
+    needs: plan
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      artifact: ${{ steps.artifact.outputs.artifact-id }}
+    steps:
+      - name: Validate immutable renderer inputs
+        run: node -e 'for (const key of ["TOOLING_SHA", "BASELINE_SHA"]) if (!/^[a-f0-9]{40}$/.test(process.env[key] || "")) throw new Error("Invalid immutable renderer revision")'
+        env:
+          TOOLING_SHA: ${{ needs.plan.outputs.tooling }}
+          BASELINE_SHA: ${{ needs.plan.outputs.baseline }}
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.plan.outputs.tooling }}
+          path: tooling
+          persist-credentials: false
+      - name: Read the approved deployed renderer baseline
+        if: needs.plan.outputs.reuse != 'true'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.plan.outputs.baseline }}
+          path: baseline
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ needs.plan.outputs.artifact }}
+          path: plan
+          merge-multiple: true
+      # This job has no R2 environment or publication secrets. The pinned renderer
+      # serves only the approved baseline plus validated JSON and blocks external requests.
+      - name: Reuse the accepted revision's verified portrait bytes
+        if: needs.plan.outputs.reuse == 'true'
+        run: node -e 'const fs=require("node:fs"); fs.mkdirSync("portraits"); for (const name of ["portraits.json","portraits.png"]) fs.copyFileSync("plan/"+name,"portraits/"+name,fs.constants.COPYFILE_EXCL)'
+      - name: Render the versioned portrait atlas
+        if: needs.plan.outputs.reuse != 'true'
+        run: node tooling/scripts/character-catalog-render.mjs --baseline-dir baseline --catalog plan/catalog.json --output portraits
+        env:
+          CHROME: /usr/bin/google-chrome
+      - name: Upload portrait data
+        id: artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: character-catalog-portraits-${{ github.run_id }}-${{ github.run_attempt }}
+          path: portraits/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [plan, render]
+    if: >-
+      needs.plan.outputs.publish == 'true' &&
+      (vars.CHARACTER_CATALOG_PUBLISH_ENABLED == 'true' ||
+       github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: character-catalog-${{ inputs.environment || 'production' }}
+    steps:
+      - name: Recheck approved immutable publication tooling
+        run: node -e 'if (!/^[a-f0-9]{40}$/.test(process.env.TOOLING_SHA || "") || process.env.TOOLING_SHA !== process.env.PLANNED_SHA) throw new Error("Approved publication tooling changed; plan again")'
+        env:
+          TOOLING_SHA: ${{ vars.CHARACTER_CATALOG_TOOLING_SHA }}
+          PLANNED_SHA: ${{ needs.plan.outputs.tooling }}
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.plan.outputs.tooling }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ needs.plan.outputs.artifact }}
+          path: plan
+          merge-multiple: true
+      - uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ needs.render.outputs.artifact }}
+          path: portraits
+          merge-multiple: true
+      - name: Repository-scoped read-only inspection token
+        if: vars.CHARACTER_APP_CLIENT_ID != ''
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.CHARACTER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CHARACTER_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: read
+      - name: Reverify immutable source and conditionally activate catalog data
+        run: |
+          args=(publish --environment "$CATALOG_ENVIRONMENT" --operation "$CATALOG_OPERATION" --plan plan/plan.json --portraits portraits)
+          if [ "$CATALOG_OPERATION" = rollback ]; then args+=(--rollback "$CATALOG_ROLLBACK_REVISION"); fi
+          node tooling/scripts/character-catalog-release.mjs "${args[@]}"
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          CHARACTER_BOT_LOGIN: ${{ vars.CHARACTER_BOT_LOGIN || 'github-actions[bot]' }}
+          CHARACTER_CATALOG_BASELINE: ${{ vars.CHARACTER_CATALOG_BASELINE }}
+          CHARACTER_CATALOG_ENGINE: ${{ vars.CHARACTER_CATALOG_ENGINE }}
+          CHARACTER_CATALOG_R2_ACCOUNT_ID: ${{ vars.CHARACTER_CATALOG_R2_ACCOUNT_ID }}
+          CHARACTER_CATALOG_R2_BUCKET: ${{ vars.CHARACTER_CATALOG_R2_BUCKET }}
+          CHARACTER_CATALOG_R2_ACCESS_KEY_ID: ${{ secrets.CHARACTER_CATALOG_R2_WRITE_ACCESS_KEY_ID }}
+          CHARACTER_CATALOG_R2_SECRET_ACCESS_KEY: ${{ secrets.CHARACTER_CATALOG_R2_WRITE_SECRET_ACCESS_KEY }}

@@ -67,17 +67,18 @@
   const pointReach = (stretch, size) => CUBE.size * size / (2 * Math.sqrt(3)) * (2 / Math.sqrt(stretch) + stretch);
   const RIPPLES = { high: 20, medium: 16, low: 8, canvas2d: 6 };
   const WAKES = { high: 12, medium: 8, low: 4, canvas2d: 4 }, WAKE_ACTORS = 160;
-  const WAVE_CAP = 32, WAVE_WIDTH = 0.32, WAVE_HEIGHT = 0.18;
+  const WAVE_CAP = 32, WAVE_WIDTH = 0.32, WAVE_HEIGHT = 0.4;
   // Shared with the vertex shader: compact crest/trough packet and its analytic slopes, in world space.
   const sampleWaves = (out, x, z, waves, end = null) => {
     const surface = waves.surface, dx = x - surface[0], dz = z - surface[1], r = Math.hypot(dx, dz), time = surface[3];
     const edge = clamp((surface[2] - r) / 0.8, 0, 1), envelope = edge * edge * (3 - 2 * edge);
-    const a = x * 0.9 + z * 0.5 - time * 1.15, b = -x * 0.6 + z * 1.3 - time * 1.7;
-    const swell = 0.028 * Math.sin(a) + 0.014 * Math.sin(b);
+    // Two swells and a shorter chop across them.
+    const a = x * 0.9 + z * 0.5 - time * 1.15, b = -x * 0.6 + z * 1.3 - time * 1.7, chop = x * 1.7 - z * 1.1 - time * 2.6;
+    const swell = 0.16 * Math.sin(a) + 0.08 * Math.sin(b) + 0.03 * Math.sin(chop);
     const rim = -6 * edge * (1 - edge) / 0.8 / Math.max(r, 0.0001);
     let height = swell * envelope;
-    let sx = (0.0252 * Math.cos(a) - 0.0084 * Math.cos(b)) * envelope + swell * rim * dx;
-    let sz = (0.014 * Math.cos(a) + 0.0182 * Math.cos(b)) * envelope + swell * rim * dz;
+    let sx = (0.144 * Math.cos(a) - 0.048 * Math.cos(b) + 0.051 * Math.cos(chop)) * envelope + swell * rim * dx;
+    let sz = (0.08 * Math.cos(a) + 0.104 * Math.cos(b) - 0.033 * Math.cos(chop)) * envelope + swell * rim * dz;
     for (let i = 0; i < waves.count; i++) {
       const o = i * 4, dx = x - waves.data[o], dz = z - waves.data[o + 1], r = Math.hypot(dx, dz);
       const q = (r - waves.data[o + 2]) / WAVE_WIDTH;
@@ -475,9 +476,11 @@
       if (!ripple.life) rippleCount++;
       ripple.age = 0; ripple.life = wake ? 1.6 : 1.3;
       ripple.from = 0.04; ripple.to = reach - WAVE_WIDTH;
-      ripple.strength = strength; ripple.amplitude = wake ? 0.095 : 0.055;
+      ripple.strength = strength; ripple.amplitude = wake ? 0.18 : 0.09;
       ripple.x = x; ripple.z = z;
     };
+    // A body dropping into the water at (x, z), island-local: a wide ring of waves, `strength` 0 to 1.5.
+    const splash = (x, z, strength = 1) => disturb(x, z, 1.4 + strength * 0.6, clamp(strength, 0, 1.5));
     // Called only for a visible raindrop's actual landing, in island-local coordinates.
     const rain = (x, y, z, size, wet) => {
       if (Math.abs(levelAt(x, z) - y) > 0.06) return;
@@ -1016,7 +1019,7 @@
       get queued() { return queued; }, get dropped() { return dropped; }, get started() { return started; }, get preview() { return preview; }
     };
     return {
-      apply, block, update, levelAt, rain, wake, dispose, state, picks,
+      apply, block, update, levelAt, rain, wake, splash, dispose, state, picks,
       resume() {
         // The feed has updated the target while effects rested; return at that level without replaying the absence.
         level = target;

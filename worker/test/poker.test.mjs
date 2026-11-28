@@ -11,20 +11,25 @@ import { loadProtocol, source } from "../../server/poker/load.mjs";
 const site = "https://floor.example", env = { SITE_ORIGIN: site, POKER_SERVICE_URL: "https://relay.example", POKER_SERVICE_TOKEN: "ab".repeat(32) };
 const account = async () => ({ player: { id: 101, login: "player-one", display: "Player One" } });
 const request = (path, options = {}) => new Request(site + path, { ...options, headers: { origin: site, ...options.headers } });
+// As workerd does: its fetch has no "error" redirect mode and throws on it.
+const workerd = answer => async (url, options = {}) => {
+  if (options.redirect !== undefined && options.redirect !== "follow" && options.redirect !== "manual") throw new TypeError(`Invalid redirect value ${options.redirect}`);
+  return answer(url, options);
+};
 
 test("poker gateway derives identity and strips cookies and spoofed service headers", async () => {
   let call;
-  const gateway = createPokerGateway(account, async (url, options) => {
+  const gateway = createPokerGateway(account, workerd(async (url, options) => {
     call = { url: String(url), ...options };
     return new Response('{"accepted":true}', { headers: { "content-type": "application/json", "set-cookie": "secret=bad", "x-player-id": "forged" } });
-  });
+  }));
   const response = await gateway(request("/poker/api/command", { method: "POST", body: "{}", headers: {
     "content-type": "application/json", cookie: "session=private", authorization: "Bearer poker-session",
     "x-poker-service-token": "forged", "x-player-id": "999", "x-player-login": "fake", "x-poker-instance": "cd".repeat(32),
   } }), env);
   assert.equal(response.status, 200);
   assert.equal(call.url, "https://relay.example/poker/api/command");
-  assert.equal(call.redirect, "error");
+  assert.equal(call.redirect, "manual");
   assert.equal(call.headers.get("cookie"), null);
   assert.equal(call.headers.get("x-player-id"), "101");
   assert.equal(call.headers.get("x-player-login"), "player-one");
@@ -55,8 +60,9 @@ test("poker gateway fails closed on missing config, sign-out, wrong origin, unkn
 });
 
 test("poker gateway rejects upstream HTML and redirects instead of delivering executable error pages", async () => {
-  for (const response of [new Response("bad", { headers: { "content-type": "text/html" } }), new Response(null, { status: 302, headers: { location: site } })]) {
-    const gateway = createPokerGateway(account, async () => response);
+  for (const response of [new Response("bad", { headers: { "content-type": "text/html" } }), new Response(null, { status: 302, headers: { location: site } }),
+    new Response("{}", { status: 307, headers: { "content-type": "application/json", location: site } })]) {
+    const gateway = createPokerGateway(account, workerd(async () => response));
     assert.equal((await gateway(request("/poker/worker.js"), env)).status, 502);
   }
 });
@@ -219,9 +225,20 @@ test("private worker reload recovers a hand key and pending move, then erases th
     assert.equal(saved.hand, secret);
     assert.equal(saved.publicKey, key);
     assert.equal(s.tables[0].state().keys.length, 1);
+    second.postMessage({ type: "action", name: "depart", requestId: 2 });
+    await waitFor(() => saved.departing && messages.some(m => m.packet?.departing));
+    assert.ok(s.tables[0].summary().state.seats.some(p => p?.id === key));
+    await second.terminate(); messages.length = 0;
+    const third = spawn(false);
+    await waitFor(() => messages.some(m => m.packet?.departing));
     s.advance(90001); await s.sweep();
     await waitFor(() => saved.hand === null && saved.lastRecord?.events.at(-1).request.op === "cancel");
     assert.equal(saved.keyHand, "");
-    await second.terminate();
+    await waitFor(() => !saved.departing && !s.tables[0].summary().state.seats.some(p => p?.id === key));
+    third.postMessage({ type: "action", name: "watch", value: 1 });
+    await waitFor(() => messages.some(m => m.packet?.table === 1));
+    third.postMessage({ type: "action", name: "join" });
+    await waitFor(() => s.tables[1].summary().state.seats.some(p => p?.id === key));
+    await third.terminate();
   } finally { for (const worker of workers) await worker.terminate(); peer.dispose(); await s.close(); }
 });

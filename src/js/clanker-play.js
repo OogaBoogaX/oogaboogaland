@@ -6,8 +6,11 @@
   const THROW_CHARGE_TIME = 1, THROW_MIN_POWER = 1 / 3, THROW_RESULT_TIME = 0.35;
   const PITCH_LIMIT = Math.PI / 2 - 0.0001, ZOOM_PAUSE = 220;
   const create = ({ canvas, camera, renderer, pilot, hud, clankers, input = null, constrainCamera = null,
-    reticleTarget = null, sightClear = null, aimCeiling = null, groundAt = null, grabOoga = null, releaseOoga = null, mayPossess = null, combatOnly = null, birdsEyeMin = 5, maxDistance = 32 }) => {
+    reticleTarget = null, liveTarget = null, sightClear = null, aimCeiling = null, groundAt = null, grabOoga = null, releaseOoga = null, mayPossess = null, combatOnly = null, birdsEye = null, birdsEyeMin = 5, maxDistance = 32 }) => {
     const orbit = pilot.orbit, cameraHandoff = pilot.cameraHandoff, target = { x: 0, y: 0, z: 0 };
+    // Combat goes overhead only where the scene offers it (`birdsEye`), as an Ooga's does (pilot.js `noOverhead`);
+    // elsewhere it keeps to the shoulder and first person, and a double right-click there does nothing.
+    const overheadOk = () => BL.pilot.BIRDS_EYE_FIXTURE || !!birdsEye?.();
     const smashMin = clankers.smashPower(0, true), smashBase = clankers.smashPower(0, false);
     const smashMax = clankers.smashPower(1, false), smashRate = (smashMax - smashBase) / POUND_CHARGE_TIME;
     const command = { x: 0, z: 0, climbAxis: 0, climbSide: 0, heading: NaN, jumpHeld: false, jumpPressed: false, run: false };
@@ -18,7 +21,6 @@
     const acquiredEye = { x: 0, y: 0, z: 0 };
     const previousEye = { x: 0, y: 0, z: 0 };
     const shoulderPoint = { x: 0, y: 0, z: 0 };
-    const carryTarget = { kind: "facing", x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0 };
     const eye = new Float64Array(3), rayView = mat4.create(), cameraUp = { x: 0, y: 1, z: 0 };
     const ray = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
     const hit = { node: null, owner: null, x: 0, y: 0, z: 0, distance: 0, type: "object" };
@@ -33,25 +35,29 @@
     let actMode = -1;
     let handoffBefore = false, holdingFollow = false, pinnedFollow = false, viewChanged = false, moving = false;
     let acquisitionHold = false;
-    let shoulderPointActive = false, carryShoulderAim = false;
-    let shoulderSide = SHOULDER_SIDE, peek = 0, orbitPitch = 0.42, overheadHeight = 14, headHidden = null, savedHeadHidden = false;
+    let shoulderPointActive = false;
+    let shoulderSide = SHOULDER_SIDE, peek = 0, orbitPitch = 0.42, overheadHeight = 14, headHidden = null;
+    const headOwner = {};
     let overheadEntry = false;
     let targetWait = 0, rightAt = -Infinity, rightDownAt = -Infinity, rightTravel = 0;
-    let carryRight = false, rightPointer = -1, rightX = 0, rightY = 0, rightLastX = 0, rightLastY = 0;
-    let combatTooltipEntry = null, combatTooltipText = "";
+    let combatTooltipEntry = null, combatTooltipText = "", combatTooltipNoDot = false;
     let zoomAt = -Infinity, zoomDirection = 0, zoomStopped = false, zoomGesture = null;
-    const clearRight = () => { rightAt = rightDownAt = -Infinity; rightTravel = 0; carryRight = false; rightPointer = -1; };
+    const clearRight = () => { rightAt = rightDownAt = -Infinity; rightTravel = 0; };
     // Keep the selected mode as intent while asleep; it becomes usable on wake.
     const isCombat = () => !!player && combat && !clankers.sleeping(player);
     const restoreHead = () => {
-      if (headHidden) headHidden.cameraHidden = savedHeadHidden;
+      if (headHidden) BL.scene.hideFromCamera(headHidden, headOwner, false);
       headHidden = null;
     };
     const setCombatTooltip = (entry) => {
+      // A ghost gorilla (npc-ghosts.js) shows its online dot, as its roster row does; one turning ghost or solid under
+      // the crosshair changes the dot without the target changing.
+      const noDot = !!entry && !entry.ghostTrack;
       if (entry !== combatTooltipEntry) combatTooltipText = entry ? `🦍 ${entry.owner.traits.display}` : "";
-      else if (!entry || !hud.el.tooltip.hidden && hud.el.tooltipText.textContent === combatTooltipText) return;
+      else if (!entry || noDot === combatTooltipNoDot && !hud.el.tooltip.hidden && hud.el.tooltipText.textContent === combatTooltipText) return;
       combatTooltipEntry = entry;
-      if (entry) hud.tooltip.show(combatTooltipText, 0, 0, entry, true);
+      combatTooltipNoDot = noDot;
+      if (entry) hud.tooltip.show(combatTooltipText, 0, 0, entry, noDot);
       else hud.tooltip.hide();
     };
     const resetReticle = () => {
@@ -70,7 +76,7 @@
     const setView = (next, zoomDistance = null) => {
       if (next === view) return;
       clearRight();
-      shoulderPointActive = carryShoulderAim = false;
+      shoulderPointActive = false;
       if (view !== "birds-eye") orbitPitch = orbit.tPitch;
       view = next; viewChanged = true;
       overheadEntry = false;
@@ -111,16 +117,22 @@
       targetWait = 0.05;
       viewRay();
       let type = "none";
-      let tooltipEntry = null;
+      let tooltipEntry = null, limit = 60;
       if (input && input.weaponTargets.ray(hit, ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, 60, null, acceptTarget, true)) {
         const near = Math.max(0, hit.distance - 0.035);
+        limit = hit.distance;
         if (!sightClear || sightClear(ray.ox, ray.oy, ray.oz, ray.ox + ray.dx * near, ray.oy + ray.dy * near, ray.oz + ray.dz * near, hit.node, true)) {
           const kind = hit.owner.kind;
-          type = kind === "clanker" || kind === "agent" ? "friendly" : kind === "caveman" ? hit.type
+          // An NPC ghost track (npc-ghosts.js) is a roster NPC drawn while its player drives a separate body: never a target.
+          const ghost = (kind === "clanker" || kind === "caveman") && hit.owner.cave.ghostTrack;
+          type = ghost ? "none" : kind === "clanker" || kind === "agent" ? "friendly" : kind === "caveman" ? hit.type
             : kind === "crate" ? "object" : reticleTarget ? reticleTarget(hit) : "none";
           if (isCombat() && kind === "clanker") tooltipEntry = hit.owner.entry;
         }
       }
+      // A live remote player in front of what was found, or anywhere along the ray when nothing was (the scene's
+      // `liveTarget`, which never tests the visitor's own body), is a friend, and the name behind it goes.
+      if (liveTarget && liveTarget(ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, limit) < limit) { type = "friendly"; tooltipEntry = null; }
       setCombatTooltip(tooltipEntry);
       if (reticle.dataset.target !== type) reticle.dataset.target = type;
     };
@@ -179,7 +191,6 @@
     };
     const cancelInput = () => {
       clearRight();
-      carryShoulderAim = false;
       jumpKey = jumpTap = run = grabHeld = grabSpent = false;
       mouseButtons = 0;
       blockedButtons = 0;
@@ -252,7 +263,7 @@
       hud.setAct(mode === 6 ? "WAKE UP!" : mode === 5 ? "IN AIR" : mode === 4 ? "JUMP OFF" : mode === 3 ? "ROLLING!" : mode === 2 ? "DROP & ROLL" : mode === 1 ? "DOUBLE JUMP" : "JUMP");
     };
     const beginJump = () => {
-      shoulderPointActive = carryShoulderAim = false;
+      shoulderPointActive = false;
       if (clankers.wake()) { jumpTap = false; syncCursor(); }
       else if (player.fire.burning) {
         jumpTap = false;
@@ -271,7 +282,7 @@
       out.height = camera.position.y - player.root.position.y;
       out.eyeX = camera.position.x; out.eyeY = camera.position.y; out.eyeZ = camera.position.z;
       out.fov = camera.fov; out.side = Math.sign(shoulderSide); out.focused = focused;
-      return cameraHandoff.capture(out, headHidden, savedHeadHidden, player.root);
+      return cameraHandoff.capture(out, headHidden, player.root);
     };
     const release = () => {
       if (!player) return false;
@@ -280,7 +291,7 @@
       restoreHead(); resetReticle();
       clankers.release();
       player = null; combat = false; wasLocked = false;
-      shoulderPointActive = carryShoulderAim = false;
+      shoulderPointActive = false;
       holdingFollow = handoffBefore = pinnedFollow = viewChanged = moving = false;
       acquisitionHold = false;
       overheadEntry = false;
@@ -297,23 +308,30 @@
     };
     const possess = (entry, atBoot = false, transition = null) => {
       if (disposed || !entry || !entry.active || !entry.root.visible) return false;
-      if (entry === player) { requireCombat(); return true; }
+      // A separate body (clankers.js `separateBodies`) stands for its NPC: asking for that NPC keeps it.
+      if (entry === player || player && player.npc === entry) { requireCombat(); return true; }
       const refusal = mayPossess && mayPossess(entry);
       if (refusal) { hud.toast(refusal); return false; }
       const incoming = transition || captureControl(controlState);
       if (!player) savedNear = camera.near;
       if (player) { blurCombat(); restoreHead(); }
       if (!clankers.possess(entry)) return false;
+      entry = clankers.player;
       cameraHandoff.cancel();
       pilot.release(true);
       rebasePilot();
       player = entry;
-      shoulderPointActive = carryShoulderAim = false;
+      shoulderPointActive = false;
       smashMeter = smashBase;
       pilot.setExternalControl(true, isCombat);
       combat = incoming.active && incoming.combat; focused = wasLocked = false;
       view = incoming.active ? incoming.view : "orbit";
       if (combat && view === "orbit") view = BL.pilot.combatEntryView(camera.position, entry.root.position);
+      // Carry has no shoulder view: a carried one comes in as the orbit.
+      if (!combat && view === "shoulder") view = "orbit";
+      // Overhead where none is offered comes in at the shoulder, at X's entry pitch.
+      const level = view === "birds-eye" && !overheadOk();
+      if (level) view = "shoulder";
       overheadEntry = false;
       shoulderSide = incoming.side < 0 ? -SHOULDER_SIDE : SHOULDER_SIDE;
       shoulder = view === "shoulder" ? shoulderSide : 0; peek = 0; actMode = -1;
@@ -340,7 +358,7 @@
         orbit.dist = orbit.tDist = Math.hypot(dx, dy, dz);
       } else {
         orbit.yaw = orbit.tYaw = incoming.yaw;
-        orbit.pitch = orbit.tPitch = view === "birds-eye" ? PITCH_LIMIT : incoming.pitch;
+        orbit.pitch = orbit.tPitch = view === "birds-eye" ? PITCH_LIMIT : level ? 0.42 : incoming.pitch;
         overheadHeight = Math.max(0.1, incoming.height - 0.15);
         orbit.dist = orbit.tDist = view === "first-person" ? 0 : view === "shoulder" ? SHOULDER_DISTANCE
           : view === "birds-eye" ? overheadHeight : Math.max(0.01, incoming.distance);
@@ -379,7 +397,6 @@
           updateSmashGauge();
         }
       } else if (name === "gorilla-beat") clankers.chestBeat();
-      else if (name === "mode-release") release();
       else if (name === "mode-toggle") {
         const required = !!combatOnly?.();
         if (required && combat) return true;
@@ -390,14 +407,14 @@
           // selection is still turning toward it. The camera's current aim
           // and pending orbit pitch do not change the elevation threshold.
           updateTarget();
-          entryView = BL.pilot.combatEntryView(camera.position, target);
+          entryView = overheadOk() ? BL.pilot.combatEntryView(camera.position, target) : "shoulder";
           captureControl(controlState);
           cameraHandoff.cancel();
           holdCamera(false);
           if (entryView === "shoulder") orbit.tPitch = 0.42;
         }
         combat = !combat;
-        shoulderPointActive = carryShoulderAim = false;
+        shoulderPointActive = false;
         if (!combat) setCombatTooltip(null);
         targetWait = 0;
         cancelInput();
@@ -405,7 +422,7 @@
         else if (view === "birds-eye" && !combat) {
           orbitPitch = orbit.pitch;
           setView("orbit");
-        }
+        } else if (view === "shoulder" && !combat) setView("orbit", SHOULDER_DISTANCE);
         // Carry shares the Ooga's native cursor; only combat captures mouse look.
         if (combat) focusCombat();
         else blurCombat();
@@ -421,14 +438,15 @@
       else return false;
       return true;
     };
-    // Called after the scene and HUD have had a chance to close their UI.
+    // Called after the scene and HUD have had a chance to close their UI. It frees the cursor; it never lets go of the
+    // gorilla (T goes back to its Ooga).
     const escape = () => {
       if (!player) return false;
       if (focused || lockPending || document.pointerLockElement === canvas || performance.now() - unlockedAt < 100) {
         blurCombat();
         return true;
       }
-      return release();
+      return false;
     };
     const onKeyDown = (event) => {
       if (!player || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -449,7 +467,7 @@
         consume(event);
         if (!jumpKey && !event.repeat) { jumpKey = true; beginJump(); }
       } else if (key === "shift" && event.code !== "ShiftRight" && event.location !== 2) { run = true; consume(event); }
-      else if (key === "g") {
+      else if (BL.controls.matches(event, "grab")) {
         if (!clankers.combatEnabled) return;
         consume(event);
         if (clankers.sleeping(player)) return;
@@ -460,16 +478,16 @@
           if (smashPointer < 0) grabActive = !!(grabOoga && grabOoga(player));
         }
       }
-      else if (key === "1") {
+      else if (BL.controls.matches(event, "smash")) {
         consume(event);
         if (!event.repeat) action("gorilla-smash");
-      } else if (key === "x") {
+      } else if (BL.controls.matches(event, "view")) {
         consume(event);
         if (!event.repeat) action("mode-toggle");
-      } else if (key === "n") {
+      } else if (BL.controls.matches(event, "north")) {
         consume(event);
         if (view === "birds-eye") { orbit.tYaw = orbit.yaw + Math.atan2(-Math.sin(orbit.yaw), Math.cos(orbit.yaw)); viewChanged = true; }
-      } else if (key === "c") {
+      } else if (BL.controls.matches(event, "chest")) {
         consume(event);
         if (!event.repeat) action("gorilla-beat");
       } else if (key === "v" || key === "j" || key.length === 1 && key >= "3" && key <= "9") consume(event);
@@ -482,7 +500,7 @@
         jumpKey = false; event.preventDefault();
       }
       else if (event.key === "Shift" && event.code !== "ShiftRight" && event.location !== 2) { run = false; event.preventDefault(); }
-      else if (event.key.toLowerCase() === "g") {
+      else if (BL.controls.matches(event, "grab")) {
         consume(event);
         grabHeld = grabSpent = false;
         const throwing = throwPointer;
@@ -547,52 +565,16 @@
         orbit.tx = p.x; orbit.ty = height; orbit.tz = p.z; shoulder = side;
       }
     };
-    const shoulderAt = (clientX, clientY) => {
-      const rect = canvas.getBoundingClientRect(), size = renderer.size;
-      const p = player.root.position, height = shoulderHeight(), side = shoulderSide;
-      pilot.pickCarryTarget(carryTarget, (clientX - rect.left) * size.width / rect.width,
-        (clientY - rect.top) * size.height / rect.height, player, height, Math.abs(side) * 2);
-      setView("shoulder");
-      let yaw = player.heading - Math.PI, pitch = 0;
-      if (carryTarget.kind === "point") {
-        shoulderPoint.x = carryTarget.x; shoulderPoint.y = carryTarget.y; shoulderPoint.z = carryTarget.z;
-        shoulderPointActive = true;
-        const x = shoulderPoint.x - p.x, z = shoulderPoint.z - p.z, horizontal = Math.hypot(x, z);
-        yaw = Math.atan2(-x, -z) + Math.asin(side / horizontal);
-        pitch = Math.atan2(height - shoulderPoint.y, Math.sqrt(horizontal * horizontal - side * side));
-      } else if (carryTarget.kind === "direction") {
-        const horizontal = Math.hypot(carryTarget.dx, carryTarget.dz);
-        if (horizontal > 1e-6) yaw = Math.atan2(-carryTarget.dx, -carryTarget.dz);
-        pitch = Math.atan2(-carryTarget.dy, horizontal);
-      }
-      orbit.tYaw = orbit.yaw + Math.atan2(Math.sin(yaw - orbit.yaw), Math.cos(yaw - orbit.yaw));
-      orbitPitch = orbit.tPitch = clamp(pitch, -PITCH_LIMIT, PITCH_LIMIT);
-      carryShoulderAim = true;
-      peek = 0;
-      followOffset.x = followOffset.y = followOffset.z = 0;
-      pinnedFollow = false;
-      holdingFollow = handoffBefore || climbHandoff();
-      if (holdingFollow) {
-        orbit.tx = p.x; orbit.ty = height; orbit.tz = p.z; shoulder = side;
-      }
-    };
     const rightPress = (event) => {
       if (clankers.sleeping(player)) { clearRight(); return; }
+      // Carry has no shoulder view: the right button changes no view there.
+      if (!combat) { clearRight(); return; }
       const recapture = isCombat() && !focused;
       // Restoring combat focus consumes this press, including its release;
       // it cannot become the first half of a double-click.
       if (recapture) { clearRight(); blockedButtons |= mouseButtons; }
       if (mouseButtons & ~2) clearRight();
       const now = performance.now();
-      if (!combat && view === "orbit") {
-        // Wait for an exclusive click: adding the other mouse button belongs
-        // to walking, in either press order, and must leave the view alone.
-        if (mouseButtons !== 2) return;
-        carryRight = true; rightPointer = event.pointerId;
-        rightX = rightLastX = event.clientX; rightY = rightLastY = event.clientY;
-        rightDownAt = now; rightTravel = 0; rightAt = -Infinity;
-        return;
-      }
       if (view === "birds-eye" || view === "orbit") {
         const overhead = view === "birds-eye";
         setView("shoulder");
@@ -601,8 +583,8 @@
         clearRight();
       } else if (recapture) focusCombat();
       else if (!(mouseButtons & ~2)) {
-        if (now - rightAt <= 350) {
-          setView(combat ? "birds-eye" : "orbit");
+        if (now - rightAt <= 350 && overheadOk()) {
+          setView("birds-eye");
           clearRight();
         } else { rightDownAt = now; rightTravel = 0; }
       }
@@ -654,7 +636,7 @@
     };
     const moveView = (dx, dy) => {
       if (!player) return false;
-      if (dx || dy) shoulderPointActive = carryShoulderAim = false;
+      if (dx || dy) shoulderPointActive = false;
       if (view === "birds-eye") {
         if (dx) { orbit.tYaw -= dx * 0.004; viewChanged = true; }
         return true;
@@ -677,11 +659,13 @@
       if (fresh) zoomStopped = false;
       if (zoomStopped) return true;
       clearRight();
-      shoulderPointActive = carryShoulderAim = false;
+      shoulderPointActive = false;
       viewChanged = true;
       let next = view, nextDistance = null;
-      if (view === "first-person" && direction > 0) next = "shoulder";
+      if (view === "first-person" && direction > 0) next = combat ? "shoulder" : "orbit";
       else if (view === "shoulder") {
+        // Combat that may not go overhead stops at the shoulder.
+        if (direction > 0 && combat && !overheadOk()) { zoomStopped = true; return true; }
         next = direction < 0 ? "first-person" : combat ? "birds-eye" : "orbit";
         if (direction > 0) nextDistance = clamp(Math.max(SHOULDER_DISTANCE, orbit.tDist) * factor, SHOULDER_DISTANCE, maxDistance);
       }
@@ -690,23 +674,18 @@
         if (direction < 0 && overheadHeight <= SHOULDER_DISTANCE) next = "shoulder";
       } else if (view === "orbit") {
         orbit.tDist = clamp(orbit.tDist * factor, Math.min(orbit.tDist, SHOULDER_DISTANCE), Math.max(orbit.tDist, maxDistance));
-        if (direction < 0 && orbit.tDist <= SHOULDER_DISTANCE) next = "shoulder";
+        if (direction < 0 && orbit.tDist <= SHOULDER_DISTANCE) next = "first-person";
       }
       if (next !== view) {
-        // Shoulder is the mandatory stop in either direction. Once a fresh
-        // gesture leaves it, outward travel continues through distant views.
-        if (next === "shoulder") zoomStopped = true;
+        // Combat stops at the shoulder in either direction, carry at its near orbit out of first person. Once a fresh
+        // gesture leaves it, outward travel continues through distant views; carry's orbit goes on into the eyes.
+        if (next === "shoulder" || next === "orbit" && view === "first-person") zoomStopped = true;
         setView(next, nextDistance);
       }
       return true;
     };
     const onMove = (event) => {
       if (!player || event.pointerType === "touch") return;
-      if (carryRight && event.pointerId !== rightPointer) clearRight();
-      if (carryRight && event.pointerId === rightPointer) {
-        rightTravel += Math.hypot(event.clientX - rightLastX, event.clientY - rightLastY);
-        rightLastX = event.clientX; rightLastY = event.clientY;
-      }
       const pressed = event.buttons & ~mouseButtons & ~blockedButtons;
       const released = mouseButtons & ~event.buttons;
       mouseButtons = event.buttons;
@@ -732,17 +711,6 @@
     };
     const releaseRight = (event) => {
       const now = performance.now();
-      if (carryRight) {
-        const x = rightX, y = rightY, rect = canvas.getBoundingClientRect();
-        const clicked = event.target === canvas && event.pointerId === rightPointer && event.button === 2 && !event.buttons
-          && !combat && view === "orbit" && !clankers.sleeping(player) && now - rightDownAt <= 350
-          && x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
-          && event.clientX >= rect.left && event.clientX < rect.right && event.clientY >= rect.top && event.clientY < rect.bottom
-          && rightTravel + Math.hypot(event.clientX - rightLastX, event.clientY - rightLastY) <= 8;
-        clearRight(); consume(event);
-        if (clicked) shoulderAt(event.clientX, event.clientY);
-        return;
-      }
       rightAt = event.target === canvas && !clankers.sleeping(player) && now - rightDownAt <= 350 && rightTravel <= 8 ? now : -Infinity;
       rightDownAt = -Infinity;
     };
@@ -799,7 +767,7 @@
     on(window, "pointermove", onMove, true);
     on(window, "pointerup", onUp, true);
     on(window, "mousemove", (event) => {
-      if (player && !carryRight && Number.isFinite(rightDownAt)) rightTravel += Math.hypot(event.movementX || 0, event.movementY || 0);
+      if (player && Number.isFinite(rightDownAt)) rightTravel += Math.hypot(event.movementX || 0, event.movementY || 0);
       if (player && isCombat() && focused && (event.target === canvas || document.pointerLockElement === canvas)) {
         consume(event);
         moveView(event.movementX || 0, event.movementY || 0);
@@ -844,14 +812,15 @@
       updateSmashGauge();
       const axes = pilot.controls.read();
       const shoulderCombat = isCombat() && view === "shoulder";
-      if (shoulderCombat && axes.shiftTap) { shoulderSide = -shoulderSide; shoulderPointActive = carryShoulderAim = false; viewChanged = true; }
+      if (shoulderCombat && axes.shiftTap) { shoulderSide = -shoulderSide; shoulderPointActive = false; viewChanged = true; }
       const planted = shoulderCombat && axes.peek && !run;
       peek = damp(peek, planted ? axes.x * 0.34 : 0, 14, dt);
       const moveX = planted ? 0 : axes.x, moveY = planted ? 0 : axes.y;
-      const turn = isCombat() ? clamp(axes.yaw + axes.orbitYaw, -1, 1) : axes.yaw;
+      // A pad's look speed lets `axes.yaw` pass 1; Q and E take only the room left, as they did at 1.
+      const turnMax = Math.max(1, Math.abs(axes.yaw)), turn = isCombat() ? clamp(axes.yaw + axes.orbitYaw, -turnMax, turnMax) : axes.yaw;
       if (turn || axes.pitch || planted) viewChanged = true;
       moving = Math.hypot(moveX, moveY) > 0.05;
-      if (turn || axes.pitch || planted || moving) shoulderPointActive = carryShoulderAim = false;
+      if (turn || axes.pitch || planted || moving) shoulderPointActive = false;
       orbit.tYaw += turn * 1.7 * dt;
       if (view === "birds-eye") {
         const delta = Math.atan2(Math.sin(orbit.tYaw - orbit.yaw), Math.cos(orbit.tYaw - orbit.yaw));
@@ -864,7 +833,7 @@
       const sy = Math.sin(movementYaw), cy = Math.cos(movementYaw);
       command.x = moveX * cy - moveY * sy;
       command.z = -moveX * sy - moveY * cy;
-      command.heading = isCombat() || view === "first-person" ? movementYaw + Math.PI : carryShoulderAim ? orbit.tYaw + Math.PI
+      command.heading = isCombat() || view === "first-person" ? movementYaw + Math.PI
         : Math.hypot(command.x, command.z) > 0.01 ? Math.atan2(command.x, command.z) : NaN;
       command.climbAxis = axes.y;
       command.climbSide = -axes.x;
@@ -875,28 +844,30 @@
       clankers.control(command);
       jumpTap = false;
     };
-    const finishView = (dt) => {
-      cameraHandoff.apply(dt);
-      const first = view === "first-person";
-      if (first && orbit.dist < 0.65 && !headHidden) {
-        // The incoming head stays visible while a handoff approaches it.
-        const head = player.gorilla.parts.head, bounds = BL.scene.boundsOf(head.geometry);
+    // The gorilla's head is judged from its own view here and again from the camera as it is drawn (the pilot's
+    // `settle`, after anything else has moved the view): hidden while the eye or near plane touches it, or in its own first person while the eye is
+    // within its reach, and shown the moment neither holds, wherever the view went.
+    const settleHead = () => {
+      if (!player) { restoreHead(); return; }
+      const head = player.gorilla.parts.head;
+      if (headHidden && headHidden !== head) restoreHead();
+      let hide = pilot.judgeHead(player.root, head, !!headHidden);
+      if (!hide && view === "first-person" && orbit.dist < 0.65) {
+        const bounds = BL.scene.boundsOf(head.geometry);
         BL.scene.updateWorld(player.root, player.root.parent.world);
         const m = head.world;
         mat4.transformPoint(eye, m, bounds.center[0], bounds.center[1], bounds.center[2]);
         const scale = Math.max(Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10]));
-        if (!cameraHandoff.active || Math.hypot(camera.position.x - eye[0], camera.position.y - eye[1], camera.position.z - eye[2]) <= bounds.radius * scale + camera.near) {
-          cameraHandoff.takeHead(head);
-          headHidden = head; savedHeadHidden = headHidden.cameraHidden; headHidden.cameraHidden = true;
-        }
-      } else if (!first && headHidden) {
-        // Keep the head out of the near plane until the exit dolly clears it.
-        BL.scene.updateWorld(player.root, player.root.parent.world);
-        const bounds = BL.scene.boundsOf(headHidden.geometry), m = headHidden.world;
-        mat4.transformPoint(eye, m, bounds.center[0], bounds.center[1], bounds.center[2]);
-        const scale = Math.max(Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10]));
-        if (Math.hypot(camera.position.x - eye[0], camera.position.y - eye[1], camera.position.z - eye[2]) > bounds.radius * scale + camera.near) restoreHead();
+        hide = Math.hypot(camera.position.x - eye[0], camera.position.y - eye[1], camera.position.z - eye[2]) <= bounds.radius * scale + camera.near;
       }
+      if (!hide) restoreHead();
+      else if (!headHidden) { headHidden = head; BL.scene.hideFromCamera(head, headOwner, true); }
+    };
+    // It lives as long as the pilot whose camera it shares, and does nothing while no gorilla is driven.
+    pilot.onSettle(settleHead);
+    const finishView = (dt) => {
+      cameraHandoff.apply(dt);
+      settleHead();
       updateReticle(dt);
       hud.setGorilla(player, view, isCombat(), clankers.combatEnabled);
       showAct();
@@ -1039,7 +1010,7 @@
       if (!player || clankers.player !== player || !player.active || !player.root.visible) return false;
       cameraHandoff.cancel();
       clearRight();
-      shoulderPointActive = carryShoulderAim = false;
+      shoulderPointActive = false;
       const first = view === "first-person", overhead = view === "birds-eye";
       acquisitionHold = pinnedFollow = handoffBefore = overheadEntry = false;
       holdingFollow = climbHandoff();
@@ -1084,7 +1055,29 @@
       disposed = false;
       for (const [node, type, callback, options] of listeners) node.addEventListener(type, callback, options);
     };
-    return { possess, release, escape, respawn, travelRefusal, travel, freeCursor, resetCamera, captureControl, readInput, update, action, orbit: moveView, zoom, cancelInput, refreshCombat, resume, dispose,
+    const controlsHelp = touch => {
+      const H = BL.controlsHelp, rows = [touch ? H.row([], "Walk / climb", "Left stick") : H.movement("Walk / climb")];
+      rows.push(H.row(touch ? [] : [" "], clankers.sleeping(player) ? "Wake up" : "Jump / double jump", touch ? "Action button" : ""));
+      if (!touch) {
+        rows.push(H.row(["shiftleft"], "Run"), H.row(BL.controls.keysFor("yawLeft", "yawRight"), "Turn the view"));
+        if (!isCombat()) rows.push(H.row(BL.controls.keysFor("pitchDown", "pitchUp"), "Tilt the view"));
+        if (view === "birds-eye") rows.push(H.row(BL.controls.shortcutKeys("north"), "Face north"));
+        if (isCombat() && view === "shoulder") rows.push(H.row(["shiftright"], "Tap to swap shoulder · hold with A/D to peek"));
+        if (!combatOnly?.() && !clankers.sleeping(player)) rows.push(H.row(BL.controls.shortcutKeys("view"), "Toggle view control"));
+        rows.push(H.row(BL.controls.shortcutKeys("chest"), "Beat chest"), H.row(BL.controls.shortcutKeys("resetView"), "Reset camera"));
+      }
+      rows.push(H.row([], "Look around / change distance", touch ? "Drag / pinch" : "Drag / scroll"));
+      if (clankers.combatEnabled && !clankers.sleeping(player)) {
+        rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("smash"), "Smash · hold and release the button to charge", touch ? "Smash button" : isCombat() ? "Smash button / left mouse" : "Smash button"));
+        if (!touch) rows.push(H.row(BL.controls.shortcutKeys("grab"), "Hold to grab a nearby Ooga · release to drop"), H.row(BL.controls.shortcutKeys("grab"), "Keep G held, then charge and release the mouse to throw", "Left mouse"));
+      }
+      if (!touch) {
+        if (isCombat()) rows.push(H.row(["tab"], "Release mouse cursor"));
+        rows.push(H.row(BL.controls.shortcutKeys("escape"), "Release cursor"));
+      }
+      return { title: "Island · Controlling a gorilla", rows };
+    };
+    return { controlsHelp, possess, release, escape, respawn, travelRefusal, travel, freeCursor, resetCamera, captureControl, readInput, update, action, orbit: moveView, zoom, cancelInput, refreshCombat, resume, dispose,
       get active() { return !!player; }, get player() { return player; }, get view() { return view; },
       get birdsEye() { return !!player && view === "birds-eye"; }, get birdsEyeMix() { return player ? camera.orthoMix || 0 : 0; },
       get firstPerson() { return !!player && view === "first-person"; },

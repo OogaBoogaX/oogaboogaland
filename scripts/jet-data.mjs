@@ -1,9 +1,10 @@
 // Regenerates src/js/jet-data.js, the Lightning Jet Hangar boards' fallback snapshot: node scripts/jet-data.mjs.
-// It sends the six GitHub calls the page's jet-feed.js sends (with GITHUB_TOKEN when set, for the higher limit) and
-// runs them through the page's own `parse`; given a directory instead, it reads the saved responses there (repo.json,
-// pulls.json, commits.json and commits.link, week.json, releases.json, milestones.json). On any failure it warns and
-// keeps the committed file, so a deploy never fails because of it.
-import { readFileSync, writeFileSync } from "node:fs";
+// It sends the GitHub calls the page's jet-feed.js sends (with GITHUB_TOKEN when set, for the higher limit), a 404 on
+// Jet 2.0's branch only leaving the reading without it, and runs them through the page's own `parse`; given a
+// directory instead, it reads the saved responses there (repo.json, pulls.json, commits.json and commits.link,
+// week.json, releases.json, milestones.json, and, when there, v2.json, v2.link and v2-week.json). On any failure it
+// warns and keeps the committed file, so a deploy never fails because of it.
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
@@ -25,15 +26,22 @@ const fromGitHub = async () => {
   const body = async (path) => (await get(path)).json();
   const at = Date.now(), since = new Date(at - 7 * 86400000).toISOString();
   const first = await get("/commits?per_page=1");
-  return {
-    at,
-    bodies: {
-      repo: await body(""), pulls: await body("/pulls?state=open&per_page=100"),
-      commitsLink: first.headers.get("link") || "", commits: await first.json(),
-      week: await body(`/commits?since=${since}&per_page=100`), releases: await body("/releases?per_page=100"),
-      milestones: await body("/milestones?state=open&per_page=10")
-    }
+  const bodies = {
+    repo: await body(""), pulls: await body("/pulls?state=open&per_page=100"),
+    commitsLink: first.headers.get("link") || "", commits: await first.json(),
+    week: await body(`/commits?since=${since}&per_page=100`), releases: await body("/releases?per_page=100"),
+    milestones: await body("/milestones?state=open&per_page=10"), v2: null, v2Link: "", v2Week: null
   };
+  try {
+    const head = await get(`/commits?sha=${feed.V2}&per_page=1`);
+    bodies.v2Link = head.headers.get("link") || "";
+    bodies.v2 = await head.json();
+    bodies.v2Week = await body(`/commits?sha=${feed.V2}&since=${since}&per_page=100`);
+  } catch (e) {
+    if (!/HTTP 404/.test(e.message)) throw e;
+    bodies.v2 = bodies.v2Week = null;
+  }
+  return { at, bodies };
 };
 const fromDirectory = (dir) => {
   const json = (name) => JSON.parse(readFileSync(join(dir, name), "utf8"));
@@ -41,7 +49,8 @@ const fromDirectory = (dir) => {
     at: Date.now(),
     bodies: {
       repo: json("repo.json"), pulls: json("pulls.json"), commits: json("commits.json"), commitsLink: readFileSync(join(dir, "commits.link"), "utf8").trim(),
-      week: json("week.json"), releases: json("releases.json"), milestones: json("milestones.json")
+      week: json("week.json"), releases: json("releases.json"), milestones: json("milestones.json"),
+      ...(existsSync(join(dir, "v2.json")) ? { v2: json("v2.json"), v2Link: readFileSync(join(dir, "v2.link"), "utf8").trim(), v2Week: json("v2-week.json") } : { v2: null })
     }
   };
 };
@@ -57,7 +66,7 @@ try {
   BL.jetData = ${JSON.stringify(reading)};
 })();
 `);
-  console.log(`wrote ${target}: ${reading.commits} commits, ${reading.releases.length} releases, at ${reading.at}`);
+  console.log(`wrote ${target}: ${reading.commits} commits, ${reading.releases.length} releases, ${reading.v2 ? `${reading.v2.commits} on ${feed.V2}` : `no ${feed.V2}`}, at ${reading.at}`);
 } catch (e) {
   console.warn(`keeping the committed jet-data.js: ${e && e.message || e}`);
 }

@@ -240,10 +240,95 @@
     ], "k . x . s . x . k . x . s . x .", "k . x . s . x . s . s . s s s s")
   };
 
+  // ---- the chip's voices, shared with Ooga Raid's music ------------------------------------------------------
+  // The chip on `ctx`, into its own level on `out`: the pulse waves and the triangle's, built from their partials;
+  // two pulse channels sharing one slow vibrato, each through its own depth in cents; the triangle; the noise. Each
+  // channel ({ f, gain, osc, wave, vib, lp, until }) goes onto `chips`, each source through `run` (which starts it and
+  // keeps it to stop); returns the pulse waves by duty.
+  const chipVoices = (ctx, out, run, chips) => {
+    const bus = ctx.createGain(), lfo = run(ctx.createOscillator()), re = new Float32Array(HARMONICS + 1), im = new Float32Array(HARMONICS + 1);
+    bus.gain.value = CHIP;
+    bus.connect(out);
+    lfo.frequency.value = 5.5;
+    const waves = DUTY.map((d) => {
+      for (let k = 1; k <= HARMONICS; k++) { re[k] = Math.sin(2 * Math.PI * k * d) / (Math.PI * k); im[k] = 2 * Math.sin(Math.PI * k * d) ** 2 / (Math.PI * k); }
+      return ctx.createPeriodicWave(re, im);
+    });
+    // The console's triangle: 32 steps, 15 down to 0 and back up, each step's share of a partial integrated exactly.
+    for (let k = 1; k <= HARMONICS; k++) {
+      let a = 0, b = 0;
+      for (let s = 0; s < 32; s++) {
+        const v = (s < 16 ? 15 - s : s - 16) / 7.5 - 1, t0 = Math.PI * k * s / 16, t1 = Math.PI * k * (s + 1) / 16;
+        a += v * (Math.sin(t1) - Math.sin(t0));
+        b += v * (Math.cos(t0) - Math.cos(t1));
+      }
+      re[k] = a / (Math.PI * k);
+      im[k] = b / (Math.PI * k);
+    }
+    const triangle = ctx.createPeriodicWave(re, im);
+    for (let c = 0; c < 3; c++) {
+      const osc = ctx.createOscillator(), gain = ctx.createGain(), ch = { f: osc.frequency, gain: gain.gain, osc, wave: 2, vib: null, lp: null, until: 0 };
+      osc.setPeriodicWave(c < 2 ? waves[2] : triangle);
+      gain.gain.value = 0;
+      osc.connect(gain);
+      gain.connect(bus);
+      if (c < 2) {
+        const vib = ctx.createGain();
+        vib.gain.value = 0;
+        lfo.connect(vib);
+        vib.connect(osc.detune);
+        ch.vib = vib.gain;
+      }
+      run(osc);
+      chips.push(ch);
+    }
+    // The noise: the long-mode shift register (taps 0 and 1) over its whole 32767-step period, so it loops clean.
+    const bits = ctx.createBuffer(1, LFSR, ctx.sampleRate), data = bits.getChannelData(0), shift = ctx.createBufferSource(), lp = ctx.createBiquadFilter(), gate = ctx.createGain();
+    for (let i = 0, r = 1; i < LFSR; i++) { data[i] = r & 1 ? -1 : 1; r = r >> 1 | ((r ^ r >> 1) & 1) << 14; }
+    shift.buffer = bits;
+    shift.loop = true;
+    lp.type = "lowpass";
+    lp.Q.value = 0;
+    gate.gain.value = 0;
+    shift.connect(lp);
+    lp.connect(gate);
+    gate.connect(bus);
+    run(shift);
+    chips.push({ f: shift.playbackRate, gain: gate.gain, osc: null, wave: -1, vib: null, lp: lp.frequency, until: 0 });
+    return waves;
+  };
+  // A tune step's note (MIDI `m`) on chip channel `ch`: the `lead` pulse decaying a little and swelling into vibrato when
+  // held, the triangle at one level, as the console's had no volume; both stop a moment early, so a repeated note parts
+  // from the one before.
+  const chipNote = (ch, lead, m, seconds, peak, at) => {
+    const end = at + seconds - Math.min(0.03, seconds * 0.2);
+    ch.f.setValueAtTime(HZ[m], at);
+    ch.gain.setValueAtTime(0, at);
+    ch.gain.linearRampToValueAtTime(peak, at + 0.004);
+    ch.gain.linearRampToValueAtTime(lead ? peak * 0.6 : peak, end - 0.008);
+    ch.gain.linearRampToValueAtTime(0, end);
+    if (lead && seconds > 0.3) { ch.vib.setValueAtTime(0, at + 0.15); ch.vib.linearRampToValueAtTime(18, Math.min(at + 0.35, end)); ch.vib.setValueAtTime(0, end); }
+  };
+  // A tune step's drum `d` on the noise channel `ch` (see DRUM_RATE) at `k` of its level: the kick's clock drops as it rings.
+  const chipDrum = (ch, d, k, at) => {
+    const end = at + DRUM_S[d];
+    ch.f.setValueAtTime(DRUM_RATE[d], at);
+    if (d === 3) ch.f.exponentialRampToValueAtTime(0.025, end);
+    ch.lp.setValueAtTime(DRUM_LP[d], at);
+    ch.gain.setValueAtTime(0, at);
+    ch.gain.linearRampToValueAtTime(DRUM_PEAK[d] * k, at + 0.002);
+    ch.gain.linearRampToValueAtTime(0, end);
+  };
+
   const create = (withChip = false) => {
     let ctx = null, master = null, send = null, ready = false, muted = false, level = 1, pan = 0, bend = 1;
     let bed = null, bedOn = false, beatAt = 0, beatStep = 0, cricketAt = 0, cricketI = 0, crackAt = 0, roarAt = 0, birdAt = 0, callI = 0, chantAt = 0, gruntI = 0, tapI = 0;
     muted = BL.sound.muted;
+    const soundChannel = BL.sound.channel("arcade");
+    // A retro cabinet's tune shares the chip with its cues, so the page's Music level scales its notes as they are
+    // queued (`musicLevel`), and a change to it queues the notes ahead again at the new level.
+    const musicChannel = withChip ? BL.sound.channel("music") : null;
+    let musicLevel = musicChannel ? musicChannel.level : 1;
     const voices = [], noises = [], drums = [], throats = [], running = [];
     let voiceNext = 0, noiseNext = 0, drumNext = 0, throatNext = 0;
     // The chip's four channels (two pulses, the triangle, the noise: { f, gain, osc, wave, vib, lp, until }, `until`
@@ -258,7 +343,7 @@
       ctx = new AudioContext();
       master = ctx.createGain();
       master.gain.value = muted ? 0 : MASTER;
-      master.connect(ctx.destination);
+      master.connect(soundChannel.node(ctx));
       // A started source, kept to stop on dispose.
       const run = (node) => { node.start(); running.push(node); return node; };
       // The cave's echo: a feedback delay darkening on each return, which the bed, the drums and the throats feed.
@@ -328,7 +413,7 @@
         run(t.osc);
         throats.push(t);
       }
-      if (withChip) buildChip(run);
+      if (withChip) waves = chipVoices(ctx, master, run, chips);
       // The hall's bed, faded in and out by `room` through one gain: the fire's roar (low noise, breathing) and
       // crackle (pops of high noise), two crickets (a high sine each, trilled by a fast square and gated into
       // chirps) and a night bird's whistle.
@@ -378,59 +463,6 @@
       ctx.onstatechange = syncBackground;
       if (bedOn) room(true);
       else syncBackground();
-    };
-    // The chip, into its own level on the master: the pulse waves and the triangle's, built from their partials;
-    // two pulse channels sharing one slow vibrato, each through its own depth in cents; the triangle; the noise.
-    const buildChip = (run) => {
-      const bus = ctx.createGain(), lfo = run(ctx.createOscillator()), re = new Float32Array(HARMONICS + 1), im = new Float32Array(HARMONICS + 1);
-      bus.gain.value = CHIP;
-      bus.connect(master);
-      lfo.frequency.value = 5.5;
-      waves = DUTY.map((d) => {
-        for (let k = 1; k <= HARMONICS; k++) { re[k] = Math.sin(2 * Math.PI * k * d) / (Math.PI * k); im[k] = 2 * Math.sin(Math.PI * k * d) ** 2 / (Math.PI * k); }
-        return ctx.createPeriodicWave(re, im);
-      });
-      // The console's triangle: 32 steps, 15 down to 0 and back up, each step's share of a partial integrated exactly.
-      for (let k = 1; k <= HARMONICS; k++) {
-        let a = 0, b = 0;
-        for (let s = 0; s < 32; s++) {
-          const v = (s < 16 ? 15 - s : s - 16) / 7.5 - 1, t0 = Math.PI * k * s / 16, t1 = Math.PI * k * (s + 1) / 16;
-          a += v * (Math.sin(t1) - Math.sin(t0));
-          b += v * (Math.cos(t0) - Math.cos(t1));
-        }
-        re[k] = a / (Math.PI * k);
-        im[k] = b / (Math.PI * k);
-      }
-      const triangle = ctx.createPeriodicWave(re, im);
-      for (let c = 0; c < 3; c++) {
-        const osc = ctx.createOscillator(), gain = ctx.createGain(), ch = { f: osc.frequency, gain: gain.gain, osc, wave: 2, vib: null, lp: null, until: 0 };
-        osc.setPeriodicWave(c < 2 ? waves[2] : triangle);
-        gain.gain.value = 0;
-        osc.connect(gain);
-        gain.connect(bus);
-        if (c < 2) {
-          const vib = ctx.createGain();
-          vib.gain.value = 0;
-          lfo.connect(vib);
-          vib.connect(osc.detune);
-          ch.vib = vib.gain;
-        }
-        run(osc);
-        chips.push(ch);
-      }
-      // The noise: the long-mode shift register (taps 0 and 1) over its whole 32767-step period, so it loops clean.
-      const bits = ctx.createBuffer(1, LFSR, ctx.sampleRate), data = bits.getChannelData(0), shift = ctx.createBufferSource(), lp = ctx.createBiquadFilter(), gate = ctx.createGain();
-      for (let i = 0, r = 1; i < LFSR; i++) { data[i] = r & 1 ? -1 : 1; r = r >> 1 | ((r ^ r >> 1) & 1) << 14; }
-      shift.buffer = bits;
-      shift.loop = true;
-      lp.type = "lowpass";
-      lp.Q.value = 0;
-      gate.gain.value = 0;
-      shift.connect(lp);
-      lp.connect(gate);
-      gate.connect(bus);
-      run(shift);
-      chips.push({ f: shift.playbackRate, gain: gate.gain, osc: null, wave: -1, vib: null, lp: lp.frequency, until: 0 });
     };
     // Only from a gesture the browser has already counted, so nothing warns in the console.
     const activate = () => {
@@ -800,30 +832,11 @@
     };
 
     // ---- the tunes -----------------------------------------------------------------------------------------
-    // A step's lead or bass note on channel `c`: the lead at the tune's duty, decaying a little and swelling into
-    // vibrato when held; the triangle at one level, as the console's had no volume; both stop a moment early, so a
-    // repeated note parts from the one before.
-    const voice = (c, m, seconds, peak, at) => {
-      const ch = chips[c], end = at + seconds - Math.min(0.03, seconds * 0.2);
-      ch.f.setValueAtTime(HZ[m], at);
-      ch.gain.setValueAtTime(0, at);
-      ch.gain.linearRampToValueAtTime(peak, at + 0.004);
-      ch.gain.linearRampToValueAtTime(c ? peak : peak * 0.6, end - 0.008);
-      ch.gain.linearRampToValueAtTime(0, end);
-      if (!c && seconds > 0.3) { ch.vib.setValueAtTime(0, at + 0.15); ch.vib.linearRampToValueAtTime(18, Math.min(at + 0.35, end)); ch.vib.setValueAtTime(0, end); }
-    };
-    // A step's drum on the noise (see DRUM_RATE): the kick's clock drops as it rings.
-    const strike = (d, k, at) => {
-      const ch = chips[3], end = at + DRUM_S[d];
-      ch.f.setValueAtTime(DRUM_RATE[d], at);
-      if (d === 3) ch.f.exponentialRampToValueAtTime(0.025, end);
-      ch.lp.setValueAtTime(DRUM_LP[d], at);
-      ch.gain.setValueAtTime(0, at);
-      ch.gain.linearRampToValueAtTime(DRUM_PEAK[d] * k, at + 0.002);
-      ch.gain.linearRampToValueAtTime(0, end);
-    };
+    // A step's lead or bass note on channel `c`, and its drum on the noise (`chipNote` and `chipDrum`, below SONGS).
+    const voice = (c, m, seconds, peak, at) => chipNote(chips[c], c === 0, m, seconds, peak, at);
+    const strike = (d, k, at) => chipDrum(chips[3], d, k, at);
     // How loud the tune's note at `t` plays under the duck.
-    const ducked = (t) => t < M.duck ? DUCK : t < M.duck + DUCK_BACK ? DUCK + (1 - DUCK) * (t - M.duck) / DUCK_BACK : 1;
+    const ducked = (t) => musicLevel * (t < M.duck ? DUCK : t < M.duck + DUCK_BACK ? DUCK + (1 - DUCK) * (t - M.duck) / DUCK_BACK : 1);
     // Every step due within the lookahead, on each of its channels no cue holds; a tune that fell behind (a
     // pause, a mute, a delayed timer) carries on from now. Allocation-free.
     const play = () => {
@@ -996,11 +1009,16 @@
       return muted;
     };
     const offSound = BL.sound.subscribe(setMuted);
+    if (musicChannel) musicChannel.subscribe(() => {
+      if (musicLevel === musicChannel.level) return;
+      musicLevel = musicChannel.level;
+      if (ready && M.tune && !M.paused) reduck(ctx.currentTime);
+    });
     return {
       cue, chip, music, pause, activate, setMuted, room, tick,
       get muted() { return muted; },
       dispose() {
-        offSound();
+        offSound(); soundChannel.release(); if (musicChannel) musicChannel.release();
         stopBackground();
         document.removeEventListener("visibilitychange", onVisibility);
         M.tune = null;
@@ -1016,5 +1034,5 @@
     };
   };
 
-  BL.carnivalAudio = { create, SONGS };
+  BL.carnivalAudio = { create, SONGS, tune, chipVoices, chipNote, chipDrum, BASS };
 })();

@@ -68,7 +68,9 @@ export const retiredCharacters = (existing, sourceFor) => {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const out = join(root, "untracked", "new-characters"), retirement = join(out, "retired.json");
   const sourceFor = (file) => { const path = join(root, "src", "characters", file); return existsSync(path) ? readFileSync(path, "utf8") : null; };
-  const readQueued = () => queuedCharacters(createGitHub(process.env.GITHUB_REPOSITORY, process.env.GITHUB_TOKEN), process.env.CHARACTER_BOT_LOGIN);
+  // Against the checked-out commit, so a merged override's superseded revision
+  // cannot fail this build before the coordinator withdraws it from its bundle.
+  const readQueued = () => queuedCharacters(createGitHub(process.env.GITHUB_REPOSITORY, process.env.GITHUB_TOKEN), process.env.CHARACTER_BOT_LOGIN, process.env.GITHUB_SHA);
   if (process.argv[2] === "--retired-artifact") {
     const records = existsSync(retirement) ? JSON.parse(readFileSync(retirement, "utf8")) : [];
     if (!Array.isArray(records) || records.length > MAX_CHARACTERS || new Set(records.map((r) => r?.file)).size !== records.length) throw new Error("Invalid retired character artifact");
@@ -88,7 +90,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     pending = await readQueued();
   }
   // A saved raw snapshot is useful for a reproducible build; the baked jumbotron
-  // deliberately omits first_seen_at and is not an onboarding source.
+  // is not an onboarding source.
   const stats = process.argv[2] && process.argv[2] !== "--merge" ? JSON.parse(readFileSync(process.argv[2], "utf8")) : await readContributorSnapshot();
   const existing = readCharacters(), missing = missingCharacters(contributorRows(stats), existing, pending);
   const retired = retiredCharacters(existing, sourceFor);

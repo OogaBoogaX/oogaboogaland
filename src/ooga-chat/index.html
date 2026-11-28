@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a0a0b">
+  <meta name="ooga-chat-build" content="dev">
+  <title>Ooga Chat</title>
+  <link rel="stylesheet" href="../native.css">
+  <link rel="stylesheet" href="ooga-chat.css">
+  <link rel="stylesheet" href="../chat-hosts.css" data-defer="hosts">
+</head>
+
+<body>
+  <main class="oc" id="ooga-chat" data-mode="loading">
+    <nav class="oc-tabs" role="tablist" aria-label="Ooga Chat panels"></nav>
+    <div class="oc-frame">
+      <header class="oc-title"><h1><span data-sign>Ooga Chat</span></h1></header>
+      <div class="oc-views"></div>
+    </div>
+    <p class="oc-error" role="alert" hidden></p>
+  </main>
+  <script src="../js/sign-glyphs.js"></script>
+  <script src="../js/native-icons.js"></script>
+  <script src="../js/donations.js" data-defer="bananas"></script>
+  <script src="../js/banana-panel.js" data-defer="bananas"></script>
+  <script src="../js/qr.js" data-defer="bananas"></script>
+  <script src="../js/banana-icon.js" data-defer="bananas"></script>
+  <script src="../js/jumbotron-font.js" data-defer="bananas"></script>
+  <script src="../js/factory-kiosk-core.js" data-defer="bananas"></script>
+  <script src="../js/factory-kiosk.js" data-defer="bananas"></script>
+  <script src="../js/donation-popup.js" data-defer="bananas"></script>
+  <script src="../js/chat-policy.js"></script>
+  <script src="../js/emoji-data.js" data-defer="emoji"></script>
+  <script src="../js/reaction-policy.js"></script>
+  <script src="../js/zone-map.js" data-defer="panels"></script>
+  <script src="../js/commons-log.js" data-defer="panels"></script>
+  <script src="../js/format-large.js" data-defer="panels"></script>
+  <script src="../js/roster-panel.js" data-defer="panels"></script>
+  <script src="../js/contributor-identities.js" data-defer="panels"></script>
+  <script src="../js/activity-repos.js" data-defer="panels"></script>
+  <script src="../js/audience-tiles.js"></script>
+  <script src="../js/reaction-bar.js" data-defer="emoji"></script>
+  <script src="../js/voice-handoff.js"></script>
+  <script src="../js/duel-listening.js"></script>
+  <script src="ooga-chat-config.js"></script>
+  <script src="ooga-chat-auth.js"></script>
+  <script src="ooga-chat-roster.js"></script>
+  <script src="ooga-chat-device.js"></script>
+  <script src="ooga-chat-shell.js"></script>
+  <script src="ooga-chat-chunks.js"></script>
+  <script src="../js/microphone-picker.js"></script>
+  <script src="ooga-chat-views.js"></script>
+  <script src="ooga-chat-http.js"></script>
+  <script src="ooga-chat-media.js"></script>
+  <script src="ooga-chat-donor.js" data-defer="bananas"></script>
+  <script src="ooga-chat-commons.js"></script>
+  <script src="ooga-chat-faces.js"></script>
+  <script src="ooga-chat-portraits.js"></script>
+  <script src="ooga-chat-bananas.js" data-defer="bananas"></script>
+  <script src="ooga-chat-panels.js" data-defer="panels"></script>
+  <script src="../js/island-view-data.js" data-defer="hosts"></script>
+  <script src="../js/island-view.js" data-defer="hosts"></script>
+  <script src="../js/chat-hosts.js" data-defer="hosts"></script>
+  <script src="ooga-chat-hosts.js" data-defer="hosts"></script>
+  <script src="../js/math.js" data-defer="live"></script>
+  <script src="../js/daylight.js" data-defer="live"></script>
+  <script src="../js/scene.js" data-defer="live"></script>
+  <script src="../js/compact-geometry.js" data-defer="live"></script>
+  <script src="../js/mirror-ripples.js" data-defer="live"></script>
+  <script src="../js/mirror-body.js" data-defer="live"></script>
+  <script src="../js/dsb-water.js" data-defer="live"></script>
+  <script src="../js/gl-renderer.js" data-defer="live"></script>
+  <script src="../js/build-tasks.js" data-defer="live"></script>
+  <script src="../js/models.js" data-defer="live"></script>
+  <script src="../js/blaze.js" data-defer="live"></script>
+  <script src="../js/hero-body.js" data-defer="live"></script>
+  <script src="../js/characters.js" data-defer="live"></script>
+  <script src="../js/characters.gen.js" data-defer="live"></script>
+  <script src="../js/character-catalog-schema.js" data-defer="live"></script>
+  <script src="../js/island-scene.js" data-defer="live"></script>
+  <script src="../js/equipment-hats.js" data-defer="live"></script>
+  <script src="../js/equipment-hats.gen.js" data-defer="live"></script>
+  <script src="../js/character-equipment.js" data-defer="live"></script>
+  <script src="../js/equipment-wardrobe.js" data-defer="live"></script>
+  <script src="../js/equipment-wardrobe.gen.js" data-defer="live"></script>
+  <script src="../js/character-wardrobe.js" data-defer="live"></script>
+  <script src="../js/island-view-live.js" data-defer="live"></script>
+  <script src="ooga-chat-catalog.js" data-defer="live"></script>
+  <script src="../js/equipment-hat-data.gen.js" data-defer="hats"></script>
+  <script src="../js/equipment-wardrobe-data.gen.js" data-defer="wardrobe"></script>
+  <script src="../js/hub-models.js" data-defer="gear"></script>
+  <script src="ooga-chat-app.js"></script>
+</body>
+
+</html>

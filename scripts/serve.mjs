@@ -30,6 +30,7 @@ const TYPES = {
   ".jpg": "image/jpeg",
   ".webp": "image/webp",
   ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
   ".xml": "application/xml; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
   ".mp4": "video/mp4",
@@ -91,7 +92,7 @@ function readOrNull(path) {
 }
 
 function respond(req, res, path, body) {
-  const extension = extname(path), response = previewResponse(body, TYPES[extension] || "application/octet-stream", req, extension === ".mp4" || extension === ".webm");
+  const extension = extname(path), response = previewResponse(body, TYPES[extension] || "application/octet-stream", req, extension === ".mp4" || extension === ".webm" || extension === ".m4a");
   res.writeHead(response.status, response.headers);
   res.end(response.body);
 }
@@ -102,6 +103,50 @@ function serveFile(req, res, path) {
   respond(req, res, path, body);
 }
 
+// Public, read-only totem feeds use the deployed Worker's edge cache. Never forward local cookies,
+// credentials, query strings or arbitrary paths; sign-in and every write API remain unavailable here.
+async function totemFeed(req, res, pathname) {
+  if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "method not allowed");
+  try {
+    const headers = { Accept: "application/json" };
+    if (req.headers["if-none-match"]) headers["If-None-Match"] = req.headers["if-none-match"];
+    const response = await fetch(`https://oogabooga.land${pathname}`, { headers, redirect: "error", signal: AbortSignal.timeout(10000) });
+    const outgoing = { "Content-Type": "application/json", "Cache-Control": "no-cache" };
+    for (const name of ["etag", "retry-after"]) if (response.headers.has(name)) outgoing[name] = response.headers.get(name);
+    if (response.status === 304) { res.writeHead(304, outgoing); res.end(); return; }
+    if (!response.headers.get("content-type")?.includes("application/json")) throw new Error("feed unavailable");
+    const body = await response.text();
+    res.writeHead(response.status, outgoing);
+    res.end(req.method === "HEAD" ? undefined : body);
+  } catch {
+    res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "60", "Cache-Control": "no-store" });
+    res.end(req.method === "HEAD" ? undefined : '{"error":"totem feed unavailable"}');
+  }
+}
+
+// A lecture's recording (docs/lectures.md): the copy `npm run lecture:script -- --import` keeps in untracked/lectures/,
+// else the one the production Worker serves from R2, asked for with the browser's range and nothing else of its request.
+// Valhodl's music (scripts/keep-music.mjs) the same way, from untracked/keep-music/ or production's /media/keep/.
+const lectureFile = /^\/media\/lectures\/([a-z]+-\d\d-[0-9a-f]{16}\.m4a)$/, keepFile = /^\/media\/keep\/([a-z]+-[0-9a-f]{16}\.mp3)$/;
+async function lectureAudio(req, res, file, folder = "lectures", at = "lectures", type = "audio/mp4") {
+  if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "method not allowed");
+  const kept = readOrNull(join(root, "untracked", folder, file));
+  if (kept) return respond(req, res, file, kept);
+  try {
+    const headers = {};
+    if (req.headers.range) headers.Range = req.headers.range;
+    const response = await fetch(`https://oogabooga.land/media/${at}/${file}`, { method: req.method, headers, redirect: "error", signal: AbortSignal.timeout(30000) });
+    if (response.headers.get("content-type") !== type) return send(res, 404, "not found");
+    const outgoing = { "Content-Type": type, "Cache-Control": "no-store", "Accept-Ranges": "bytes" };
+    for (const name of ["content-length", "content-range"]) if (response.headers.has(name)) outgoing[name] = response.headers.get(name);
+    const body = req.method === "HEAD" ? null : Buffer.from(await response.arrayBuffer());
+    res.writeHead(response.status, outgoing);
+    res.end(body || undefined);
+  } catch {
+    send(res, 503, "recording unavailable");
+  }
+}
+
 const server = createServer((req, res) => {
   // A malformed escape such as `/src/%` throws here; that is the request's fault, not the server's.
   let pathname;
@@ -110,7 +155,12 @@ const server = createServer((req, res) => {
   } catch {
     return send(res, 400, "bad request");
   }
-  if (pathname === "/") return serveFile(req, res, join(site, "index.html"));
+  if (pathname === "/api/repo-totems" || /^\/api\/totems\/[0-3]$/.test(pathname)) return void totemFeed(req, res, pathname);
+  const lecture = lectureFile.exec(pathname);
+  if (lecture) return void lectureAudio(req, res, lecture[1]);
+  const track = keepFile.exec(pathname);
+  if (track) return void lectureAudio(req, res, track[1], "keep-music", "keep", "audio/mpeg");
+  if (pathname === "/")return serveFile(req, res, join(site, "index.html"));
   if (pathname === "/src" || pathname === "/src/") return serveFile(req, res, join(src, "index.html"));
   if (pathname.startsWith("/src/")) {
     // Resolve inside src/ only; a normalized path that escapes it is refused.
