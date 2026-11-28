@@ -17,6 +17,10 @@
   const OVERLAY_PIXELS = 2.6e6;
   const overlayDpr = (width, height, deviceDpr, tierDpr) => Math.min(deviceDpr, tierDpr,
     Math.sqrt(OVERLAY_PIXELS / Math.max(1, width * height)));
+  const overlaySize = (width, height, deviceDpr, tierDpr) => {
+    const dpr = overlayDpr(width, height, deviceDpr, tierDpr);
+    return [Math.max(1, Math.floor(width * dpr)), Math.max(1, Math.floor(height * dpr))];
+  };
   // Sleep marks span 11px to 23px, so the whole font range is a fixed table instead of per-frame strings.
   const ZZZ_FONTS = [];
   for (let size = 11; size <= 23; size++) ZZZ_FONTS[size] = `${size}px ui-monospace, monospace`;
@@ -332,8 +336,10 @@
         overlayW = w;
         overlayH = h;
         overlayRatio = dpr;
-        overlay.width = Math.max(1, Math.round(w * dpr));
-        overlay.height = Math.max(1, Math.round(h * dpr));
+        const size = overlaySize(w, h, window.devicePixelRatio || 1,
+          BL.glRenderer.QUALITY[renderer.quality]?.dpr || 1);
+        overlay.width = size[0];
+        overlay.height = size[1];
         overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
       const ctx = overlayCtx;
@@ -459,5 +465,5 @@
       }
     };
   };
-  BL.fx = { create, overlayDpr, CONFETTI, beatsOf };
+  BL.fx = { create, overlayDpr, overlaySize, CONFETTI, beatsOf };
 })();

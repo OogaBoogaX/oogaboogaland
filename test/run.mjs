@@ -19844,6 +19844,11 @@ const adaptiveQualityChecks = async () => {
   check(Math.abs(3840 * 2160 * capped * capped - 2.6e6) < 1, "Overlay exceeds the pixel budget");
   check(BL.fx.overlayDpr(390, 844, 3, 1.25) === 1.25, "Overlay ignores the tier DPR");
   check(BL.fx.overlayDpr(390, 844, 3, 1.5) === 1.5, "Overlay ignores the device DPR");
+  const reviewerCase = BL.fx.overlaySize(1920, 1200, 2, 1.5);
+  check(reviewerCase[0] === 2039 && reviewerCase[1] === 1274 && reviewerCase[0] * reviewerCase[1] <= 2.6e6, "Overlay allocation rounds above the pixel budget");
+  const allocations = [[3840, 2160], [2160, 3840], [3440, 1440], [1440, 3440], [390, 844]]
+    .map(([w, h]) => BL.fx.overlaySize(w, h, 2, 1.5));
+  check(allocations.every(([w, h]) => w * h <= 2.6e6), "Overlay allocation exceeds the pixel budget at other aspect ratios");
 };
 // ---- Scenes ----
 // A scene is the unit of testing: one Chrome session running that scene's steps, side by side with the
