@@ -324,6 +324,15 @@
       if (lounge) { tilt.quaternion[0] = tilt.quaternion[1] = tilt.quaternion[2] = 0; tilt.quaternion[3] = 1; } else qset(tilt.quaternion, dq.hips);
       // from the support offset as the driver last posed (notePosed), so offsets added below never pile up across syncs
       tilt.position.x = tilt.position.z = 0; tilt.position.y = supportY;
+      // Lying: the new rig has one pose for it, on its right side with its head toward +x. The driver lies with its head
+      // toward -z, on its right side, its left side or its back, so the pose is turned a quarter about the vertical and
+      // then rolled about its own length, at its hips' height, with its hips set where the driver's are (between its legs).
+      if (onSide) { const rq = r.root.quaternion, hp = r.hips.position, lr = dparts.legR.world, ll = dparts.legL.world;
+        qaxis(qa, 0, 1, 0, Math.PI / 2); qaxis(qb, 0, 0, 1, lounge === "left" ? Math.PI : lounge === "back" ? Math.PI / 2 : 0); qmul(tilt.quaternion, qb, qa);
+        PIV[0] = hp.x; PIV[1] = hp.y; PIV[2] = hp.z; if (rq) rotate(PIV, rq);
+        PIV[0] = K * (PIV[0] + r.root.position.x); PIV[1] = K * (PIV[1] + r.root.position.y); PIV[2] = K * (PIV[2] + r.root.position.z) + scaled.position.z;
+        LV[0] = PIV[0]; LV[1] = PIV[1]; LV[2] = PIV[2]; rotate(LV, tilt.quaternion);
+        tilt.position.x = (lr[12] + ll[12]) / 2 - LV[0]; tilt.position.z = (lr[14] + ll[14]) / 2 - LV[2]; tilt.position.y += PIV[1] - LV[1]; }
       // Leaned in toward rock set back at the hands' height (state.climbLean, degrees, its top toward the rock), about
       // its hips, as the new rig's own climbing lean turns it.
       const lean = managed && IN.hold ? (state.climbLean || 0) * IN.climb : 0;
