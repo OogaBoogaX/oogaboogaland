@@ -5184,15 +5184,14 @@ const characterChecks = async () => {
   record("characters: every src/characters file registers one handle, builds a whole Ooga and uses only known hooks", rows.length === CAST && CAST === BL.contributors.roster.length && unique && ordered && rows.every((r) => r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display && r.palette), JSON.stringify(rows.filter((r) => !(r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display && r.palette))));
   Object.assign(BL, { pilot: { WALK: { speed: 2.8, gravity: 9.8 } }, crew: { JUMP_SPEED: 4 } });
   for (const name of ["convex", "agent"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
-  const mouth = { x: 0, z: 0, ry: 0, floorY: 0 }, coatClip = BL.agent.labCoatClip(mouth), suitClip = BL.agent.suitClip(mouth);
-  for (const clip of [coatClip, suitClip]) for (const part of Object.values(clip)) {
-    if (part?.ape) mirrorGeometries.add(part.ape).add(part.code);
-  }
-  for (const suit of suitClip.suits) for (const geo of Object.values(suit)) mirrorGeometries.add(geo);
-  for (const suitColor of [null, ...Array.from({ length: BL.agent.SUIT_COLORS }, (_, i) => i)]) {
-    const rig = BL.agent.create({ groundAt: () => 0, managed: true, coatClip, ...(suitColor === null ? {} : { suitClip, suitColor }) });
-    for (const form of ["ape", "code"]) { rig.setForm(form); collect(rig.root); }
-    rig.dispose();
+  // A gorilla is drawn as the new clanker body (clanker-body.js); the old rig's voxel parts, coat and suits only drive it
+  // off the scene and are never drawn. Its meshes in both forms: every part, the chest's two, the first and the standing
+  // torso weld, and the live sleeve.
+  runInNewContext(await readFile(join(root, "src/js/clanker-model.js"), "utf8"), context);
+  for (const form of ["ape", "code"]) {
+    const M = BL.clankerModel, rig = M.rig(M.sets.B, form);
+    collect(rig.root);
+    for (const geo of [rig.chestGeo, rig.chestWeld, M.weld(rig, 0), M.weld(rig, rig.weldGeos.length - 1)]) if (geo) mirrorGeometries.add(geo);
   }
   for (const variant of [undefined, 0, 1]) {
     const flask = BL.agent.labFlaskGeometry(variant);
@@ -33359,14 +33358,17 @@ scene("hub", { label: "chilling", query: "status=chillin&pos=0&islandworld=0",
     && state.available >= 5 && state.innerOccupied === state.available && state.rings.length > 1 && state.rings.some(([, count]) => count > 1) && state.gap >= -1e-6 && !state.occupiedBeds && !state.spin && Math.abs(state.clubYaw) < 1e-6, JSON.stringify(state));
   const seated = await b.evaluate(`(() => {
     const gorilla = BL.agent.create({ managed: true, groundAt: () => 0 }), motion = { groom: 0, groomPhase: 0 };
-    const parts = [gorilla.parts.head, gorilla.parts.armR, gorilla.parts.armL];
-    gorilla.poseManaged(2, 0, 0, 0, 0, 0, false, false, "sit", motion);
-    const low = parts.map(part => part.rotation.x), high = low.slice();
+    // the drawn head and arms: the new clanker body's (clanker-body.js), each one's turn measured from where it starts
+    const rig = gorilla.body && gorilla.body.rig, parts = rig ? [gorilla.visualHead, rig.armR, rig.armL] : [gorilla.parts.head, gorilla.parts.armR, gorilla.parts.armL];
+    const turn = (part) => part.quaternion ? [...part.quaternion] : [Math.sin(part.rotation.x / 2), 0, 0, Math.cos(part.rotation.x / 2)];
+    gorilla.poseManaged(2, 0, 0, 0, 0, 0, false, false, "sit", motion); BL.scene.updateWorld(gorilla.root, null);
+    const start = parts.map(turn), high = parts.map(() => 0), low = high.slice();
     let compact = true, displacement = 0;
     for (let frame = 0; frame < 9 * 60; frame++) {
       motion.groomPhase = frame / 60;
-      gorilla.poseManaged(1 / 60, 0, 0, 0, 0, 0, false, false, "sit", motion);
-      for (let i = 0; i < parts.length; i++) { low[i] = Math.min(low[i], parts[i].rotation.x); high[i] = Math.max(high[i], parts[i].rotation.x); }
+      gorilla.poseManaged(1 / 60, 0, 0, 0, 0, 0, false, false, "sit", motion); BL.scene.updateWorld(gorilla.root, null);
+      for (let i = 0; i < parts.length; i++) { const q = turn(parts[i]), d = Math.abs(q[0] * start[i][0] + q[1] * start[i][1] + q[2] * start[i][2] + q[3] * start[i][3]);
+        high[i] = Math.max(high[i], 2 * Math.acos(Math.min(1, d))); }
       compact &&= gorilla.sitCompact;
       displacement = Math.max(displacement, Math.hypot(gorilla.root.position.x, gorilla.root.position.y, gorilla.root.position.z));
     }
@@ -35484,14 +35486,16 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
       e.motion.lab = !entering;
       e.gorilla.poseManaged(2, x, 0, z, 3.665191429188082, 0.9, false, !entering, "", e.motion);
       S.updateWorld(e.root, root.world);
-      let head = center(e.parts.head), torso = center(e.parts.torso), maxStep = 0;
+      // the drawn head and torso: the new clanker body's (clanker-body.js), not the off-scene rig that drives it
+      const drawnHead = e.gorilla.visualHead, drawnTorso = e.gorilla.body ? e.gorilla.body.rig.chest : e.parts.torso;
+      let head = center(drawnHead), torso = center(drawnTorso), maxStep = 0;
       const before = e.gorilla.debug.pitch;
       e.motion.lab = entering;
       for (let frame = 1; frame <= 24; frame++) {
         e.gorilla.poseManaged(1 / 30, x + sign * frame * 0.015, 0, z + sign * frame * 0.02598076211353316,
           3.665191429188082, 0.9, false, entering, "", e.motion);
         S.updateWorld(e.root, root.world);
-        const nextHead = center(e.parts.head), nextTorso = center(e.parts.torso);
+        const nextHead = center(drawnHead), nextTorso = center(drawnTorso);
         maxStep = Math.max(maxStep, Math.hypot(...nextHead.map((n, i) => n - head[i])), Math.hypot(...nextTorso.map((n, i) => n - torso[i])));
         head = nextHead; torso = nextTorso;
       }

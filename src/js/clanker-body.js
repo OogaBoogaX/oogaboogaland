@@ -130,16 +130,19 @@
     const g = M.voxelGeometry(vox, { unit: c, palette: ["#1d1a18"] }); g.characterPart = true; return g; };
   const outlines = (r) => { if (r.outlined) return; r.outlined = true;
     const give = (geo, proxy) => { if (geo && geo.outline === undefined) geo.outline = proxy || blocky(geo); };
-    if (r.weldGeos) { const shared = r.weldGeos[0].outline || blocky(r.weldGeos[r.weldGeos.length >> 1]); for (const g of r.weldGeos) give(g, shared); }
+    // (welds made later, as poses ask for them, take the same stand-in as they are made: the rig's onWeld)
+    if (r.weldGeos) { const shared = r.weldGeos[0].outline || blocky(r.weldGeos[0]), prior = r.onWeld; for (const g of r.weldGeos) give(g, shared);
+      r.onWeld = (g, k) => { if (prior) g = prior(g, k); give(g, shared); return g; }; }
     if (r.chestGeo) { give(r.chestGeo); give(r.chestWeld, r.chestGeo.outline); }
     if (r.sleeveNode) r.sleeveNode.geometry.outline = NO_OUTLINE;
     (function w(n) { give(n.geometry); for (const c of n.children) w(c); })(r.root); };
   const now = () => typeof performance !== "undefined" ? performance.now() : 0;
-  // The glyph form, made ready in slices a few seconds after the first body shows (the sleep beam and the ghost hunt
-  // show it), so its first use does not stall a frame building it.
+  // The rest of the fur form's torso welds, then the glyph form, made ready in slices a few seconds after the first body
+  // shows (the sleep beam and the ghost hunt show the glyph form), so their first use does not stall a frame building them.
   let glyphs = false;
   const prepareGlyphs = () => { if (glyphs || !BL.buildTasks || typeof setTimeout === "undefined") return; glyphs = true;
-    setTimeout(() => { if (!BL.clankerModel.ready("code")) BL.buildTasks.run(BL.clankerModel.prepareSteps("code", { until: 0, budget: 8, work: 0 }), null).catch(() => {}); }, 5000); };
+    const M = BL.clankerModel, steps = function* () { const slice = { until: 0, budget: 8, work: 0 }; yield* M.prepareSteps("ape", slice); yield* M.prepareSteps("code", slice); };
+    setTimeout(() => { if (!M.ready("ape") || !M.ready("code")) BL.buildTasks.run(steps(), null).catch(() => {}); }, 5000); };
   const attach = (d) => { const t0 = now(); prepareGlyphs();
     const { root: droot, hips: dhips, state, managed } = d;
     // The scene's root shares the driver root's transform objects, so whatever moves one moves the other.
@@ -173,7 +176,9 @@
     const last = new Float32Array(SOCKETS.length * 3 + 8);
     // A pose a scene has written over: each driver part's turn as the driver last left it, compared at sync.
     const posed = new Float32Array(SOCKETS.length * 3);
-    const notePosed = () => { let k = 0; for (const name of SOCKETS) { const p = dparts[name]; posed[k++] = p ? p.rotation.x : 0; posed[k++] = p ? p.rotation.y : 0; posed[k++] = p ? p.rotation.z : 0; } };
+    // (and, as the driver poses, the controller's support offset, which eases the body up or down a step, as agent.js adds
+    // it to the hips: set here, not at sync, so a body stepped without drawing has it too)
+    const notePosed = () => { tilt.position.y = managed ? (state.supportOffset || 0) / (droot.scale.y || 1) : 0; let k = 0; for (const name of SOCKETS) { const p = dparts[name]; posed[k++] = p ? p.rotation.x : 0; posed[k++] = p ? p.rotation.y : 0; posed[k++] = p ? p.rotation.z : 0; } };
     const overridden = () => { let k = 0; for (const name of SOCKETS) { const p = dparts[name]; if (p && (Math.abs(posed[k] - p.rotation.x) > 1e-6 || Math.abs(posed[k + 1] - p.rotation.y) > 1e-6 || Math.abs(posed[k + 2] - p.rotation.z) > 1e-6)) return true; k += 3; } return false; };
     // What the driver is doing that the new rig has no pose for.
     const acting = () => state.gait === "beat" || state.beat > 0 || (managed && (state.pound > 0 || state.poundCharge > 0 || state.dragging || state.chewing > 0
@@ -209,15 +214,13 @@
       // the driver's breathing (clankers.js swells its chest asleep)
       r.chest.scale.y *= d.chest.scale.y;
       if (r.chestWeld) swap(r.chest, pose[nodes.length * FIELDS] > 0.5 ? r.chestWeld : r.chestGeo);
-      if (r.weldGeos) swap(r.weldNode, r.weldGeos[pose[nodes.length * FIELDS + 1] | 0]);
+      if (r.weldGeos) swap(r.weldNode, BL.clankerModel.weld(r, pose[nodes.length * FIELDS + 1] | 0));
       if (r.sleeveLive) { const g = r.sleeveLive.g, V = g.verts; for (let i = 0; i < V.length; i++) V[i] = pose[sleeveAt + i]; g.revision = (g.revision || 0) + 1;
         // a look painted over the sleeve (the NPC ghost's twin) takes its live shape too
         const shown = r.sleeveNode.geometry; if (shown !== g && shown.verts.length === V.length) { const W = shown.verts; for (let i = 0; i < V.length; i++) W[i] = V[i]; shown.revision = (shown.revision || 0) + 1; } }
       if (r.rain) r.rain((typeof performance !== "undefined" ? performance.now() : 0) / 1000);
       // The driver's whole-body turn at its hips, but for lying and sitting, which the new rig poses itself.
       if (lounge) { tilt.quaternion[0] = tilt.quaternion[1] = tilt.quaternion[2] = 0; tilt.quaternion[3] = 1; } else qset(tilt.quaternion, dq.hips);
-      // and the controller's support offset, which eases the body up or down a step (agent.js adds it to the hips)
-      tilt.position.y = managed ? (state.supportOffset || 0) / (droot.scale.y || 1) : 0;
       // Retargeted head and limbs, eased in and out over a fifth of a second.
       const tnow = now() || clock + 16, dt = Math.min(0.1, Math.max(0, (tnow - clock) / 1000)); clock = tnow;
       const want = acting() || overridden() ? 1 : 0;
@@ -256,7 +259,7 @@
       return out; };
     const liveGeometry = (set) => { for (const f in rigs) { const r = rigs[f].r;
         (function w(n) { if (n.geometry) set.add(n.geometry); for (const c of n.children) w(c); })(r.root);
-        if (r.chestGeo) set.add(r.chestGeo); if (r.chestWeld) set.add(r.chestWeld); if (r.weldGeos) for (const g of r.weldGeos) set.add(g); } };
+        if (r.chestGeo) set.add(r.chestGeo); if (r.chestWeld) set.add(r.chestWeld); if (r.weldGeos) for (const g of r.weldGeos) if (g) set.add(g); } };
     const dispose = () => { if (root.parent) removeChild(root.parent, root); root.beforeWorld = null; };
     show(state.form || "ape"); TIME.attach += now() - t0;
     // The drawn part a driver part stands for (`drawn("head")` is the head a nameplate or an eye is measured on), the

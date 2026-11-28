@@ -533,7 +533,8 @@
       selectCandidates(cave.root);
       if (!visiblePart(cave.root, cave.root)) return result;
       result.visible = true; result.x = (witnessX + 1) * width / 2; result.y = (1 - witnessY) * height / 2;
-      const head = cave.parts.head;
+      // the drawn head (a clanker's new body draws its own: agent.visualHead)
+      const head = cave.visualHead || cave.parts.head;
       if (present(head)) {
         headMinX = Infinity; headMaxX = -Infinity; headTop = Infinity;
         projectHead(head);

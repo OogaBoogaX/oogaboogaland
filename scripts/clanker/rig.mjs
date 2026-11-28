@@ -2058,13 +2058,17 @@ writeFileSync(process.env.OUT || HERE + "../../src/js/clanker-model.js", `// Gen
       // (b112: steady, each step a sleeve and a belly piece, and one chest piece for all; WELDSTEPS 41)
       // (one node shows them all, its mesh swapped for the step's, as the chest's is: a node a step made every renderer and
       // the outline registry carry 41 hidden meshes a gorilla)
-      const K = WELDS, welds = [], bellies = [];
-      for (let k = 0; k < K; k++) { const key = form + ":" + k; if (!MERGED.has(key)) MERGED.set(key, buildMerged(r, form, k / (K - 1)));
-        const W = MERGED.get(key);
-        if (W.sleeve) { bellies.push(W.belly); if (!k) r.chestWeld = W.chest; (r.weldEdges = r.weldEdges || []).push(W.live.a); } else welds.push(W); }
-      r.weldNode = createNode({ geometry: (bellies.length ? bellies : welds)[0] }); r.weldNode.quaternion = [0, 0, 0, 1]; r.weldNode.visible = false; addChild(r.abdomen, r.weldNode);
-      r.weldGeos = bellies.length ? bellies : welds; r.torsoWeld = [r.weldNode];
-      if (bellies.length) { r.weldBelly = true;
+      // (each step's weld is made the first time a pose shows it (weldAt), so a rig needs only the first, which the sleeve
+      // takes its colours and windings from: the 41 took 600 ms on the way to a page's first frame; a form's
+      // prepareSteps makes the rest ahead of use)
+      const K = WELDS, key0 = form + ":0"; r.form = form;
+      if (!MERGED.has(key0)) MERGED.set(key0, buildMerged(r, form, 0));
+      const W0 = MERGED.get(key0), bellies = W0.sleeve;
+      if (bellies) r.chestWeld = W0.chest;
+      r.weldGeos = new Array(K); r.weldEdges = new Array(K); r.weldGeos[0] = bellies ? W0.belly : W0; if (bellies) r.weldEdges[0] = W0.live.a;
+      r.weldNode = createNode({ geometry: r.weldGeos[0] }); r.weldNode.quaternion = [0, 0, 0, 1]; r.weldNode.visible = false; addChild(r.abdomen, r.weldNode);
+      r.torsoWeld = [r.weldNode];
+      if (bellies) { r.weldBelly = true;
         // b112: the sleeve live, one mesh of this gorilla's own, its points worked out from the belly's and the chest's
         // poses every time pose() runs (dynamic: the renderer re-reads its positions when its revision moves), so it
         // joins the two exactly in every pose and the chest moves smoothly; its colours and windings are the first weld's
@@ -2096,6 +2100,12 @@ writeFileSync(process.env.OUT || HERE + "../../src/js/clanker-model.js", `// Gen
       for (const [n, L] of r.rainHosts) { const src = n.visible && rainSrcOf.get(n.geometry); L.geometry = src ? rainFrame(src, f) : null; } };
     pose(r, 1); pose(r, 0); return r;
   };
+  // A rig's weld for step k, made the first time it is asked for on a rig of the form's own (making one poses its rig), and
+  // passed through the rig's onWeld (an outfit paints it, the body gives it an outline stand-in).
+  const BUILDERS = {};
+  const weldAt = (r, k) => { let g = r.weldGeos[k]; if (g) return g; const key = r.form + ":" + k;
+    if (!MERGED.has(key)) MERGED.set(key, buildMerged(BUILDERS[r.form] || (BUILDERS[r.form] = bare(sets.B, r.form)), r.form, k / (WELDS - 1)));
+    const W = MERGED.get(key); g = W.sleeve ? W.belly : W; if (r.onWeld) g = r.onWeld(g, k); r.weldGeos[k] = g; if (W.sleeve) r.weldEdges[k] = W.live.a; return g; };
   // b57: the torso's forward tip on all fours, found once: the tip (degrees) at which the knuckles and the feet stand
   // level, by bisection (the longer back and straighter legs each change it)
   let ABDLOW = 0, ABDTOP = 0, ABDBACK = 0, ABDREADY = false; const abdRange = () => { if (ABDREADY) return; ABDREADY = true; const V = sets.B.ape.abdomen.verts; for (let i = 1; i < V.length; i += 3) { ABDLOW = Math.min(ABDLOW, V[i] / CELL); ABDTOP = Math.max(ABDTOP, V[i] / CELL); ABDBACK = Math.min(ABDBACK, V[i + 1] / CELL); } };
@@ -2121,6 +2131,7 @@ writeFileSync(process.env.OUT || HERE + "../../src/js/clanker-model.js", `// Gen
     // the torso is always one piece (b133): the welded back in every pose, climbing too, its live sleeve following the
     // chest and belly wherever they turn
     const welded = !!r.weldGeos, weldK = welded ? Math.round(Math.max(0, Math.min(1, t)) * (r.weldGeos.length - 1)) : -1, weldF = welded && t < 0.5, weldS = welded && t >= 0.5;
+    if (welded) weldAt(r, weldK);
     if (g) {
       // b54: the in-game gorillas' timing (agent.js OFFSETS): walking, a four-beat walk, each limb a quarter cycle after
       // the one before (right leg, right arm, left leg, left arm); running (g.run toward 1), a gallop, both legs
@@ -2461,12 +2472,13 @@ writeFileSync(process.env.OUT || HERE + "../../src/js/clanker-model.js", `// Gen
   };
   // A form made ready ahead of its first rig, a slice at a time (BL.buildTasks): its parts, then its torso's welds one
   // by one, each a few milliseconds; afterwards rig(sets.B, form) builds nothing but nodes
-  const prepareSteps = function* (form, slice) { const pause = BL.buildTasks.pause;
+  // (first: only the parts and the first weld, what a rig needs to be made; the rest are made as poses ask for them)
+  const prepareSteps = function* (form, slice, first = false) { const pause = BL.buildTasks.pause;
     if (!SETS[form]) { const geos = yield* buildSteps(form, slice); if (!SETS[form]) SETS[form] = geos; yield* pause(slice); }
-    const r = bare(sets.B, form); if (!r.abdomenFour) return;
-    for (let k = 0; k < WELDS; k++) { const key = form + ":" + k; if (MERGED.has(key)) continue; MERGED.set(key, buildMerged(r, form, k / (WELDS - 1))); yield* pause(slice); } };
+    const r = BUILDERS[form] || (BUILDERS[form] = bare(sets.B, form)); if (!r.abdomenFour) return;
+    for (let k = 0; k < (first ? 1 : WELDS); k++) { const key = form + ":" + k; if (MERGED.has(key)) continue; MERGED.set(key, buildMerged(r, form, k / (WELDS - 1))); yield* pause(slice); } };
   const ready = (form) => !!SETS[form] && MERGED.has(form + ":" + (WELDS - 1));
-  BL.clankerModel = { sets, rig, pose, prepareSteps, ready, parts: OUT, groups: [["head", ["head"]], ["torso", ["chest", "abdomen"]], ["upper-arms", ["armR", "armL"]], ["forearms-hands", ["foreR", "foreL"]], ["thighs", ["legR", "legL"]], ["shins-feet", ["shinR", "shinL"]]] };
+  BL.clankerModel = { sets, rig, pose, prepareSteps, ready, weld: weldAt, parts: OUT, groups: [["head", ["head"]], ["torso", ["chest", "abdomen"]], ["upper-arms", ["armR", "armL"]], ["forearms-hands", ["foreR", "foreL"]], ["thighs", ["legR", "legL"]], ["shins-feet", ["shinR", "shinL"]]] };
 })();
 `);
 console.log("waist", WST.map((v) => v.toFixed(2)).join(" "), Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.cells.length])));
