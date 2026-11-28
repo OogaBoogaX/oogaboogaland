@@ -23,7 +23,7 @@ try {
     if (big) big.visible = true; window.__stage = BL.scene.createNode(); BL.scene.addChild(Rt, __stage); })()`);
   const shots = [];
   for (const o of list) {
-    for (const [view, yaw] of [["front", 0], ["three", 0.75]]) {
+    for (const [view, yaw] of (process.env.VIEWS ? JSON.parse(process.env.VIEWS) : [["front", 0], ["three", 0.75]])) {
       await b.evaluate(`(() => { const St = window.__stage; while (St.children.length) BL.scene.removeChild(St, St.children[0]);
         const ground = () => 0, made = (${o.make})(ground);
         made.old.position.x = -0.9; made.new.position.x = 0.9; for (const n of [made.old, made.new]) { n.position.z = 10; BL.scene.addChild(St, n); }

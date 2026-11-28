@@ -10,8 +10,10 @@
   const C = (h, e = 0) => ({ c: hex(h), e });
   // Each outfit: a rule per region, given the face's centre in its part's own frame; null keeps the fur.
   // Regions: chest (waist 0 up to the shoulders ~0.55, z forward), belly (hips -0.11 up to the waist, z forward), arm (the
-  // upper arm), fore (forearm and fist, its wrist at about y -0.5, the fist below), leg, shin, foot, head.
-  const WRIST = -0.5, CUFF = -0.56, WAIST = -0.15;
+  // upper arm), fore (forearm and fist, the thumb leaving the wrist at y -0.49, the fist below), leg, shin, foot, head.
+  // the sleeve's end and the cuff's, on the forearm's rings (every ~0.04 along it): the cuff the last ring before the
+  // thumb leaves the wrist (y -0.49)
+  const WRIST = -0.44, CUFF = -0.485, WAIST = -0.15, WAIST_BACK = 0.05;
   const opening = (x, y, z, w0, w1, top) => z > 0.12 && Math.abs(x) < w0 + (w1 - w0) * Math.max(0, Math.min(1, y / top));
   const OUTFITS = {
     lab: (part, x, y, z) => {
@@ -23,10 +25,10 @@
       return null;
     }
   };
-  SUITS.forEach((P, k) => { const [jacket, lapel, shirt, , trousers, shoe] = P.map((h) => C(h));
+  SUITS.forEach((P, k) => { const [jacket, , shirt, , trousers, shoe] = P.map((h) => C(h));
     OUTFITS["suit" + k] = (part, x, y, z) => {
-      if (part === "chest") { if (opening(x, y, z, 0.04, 0.15, 0.5)) return shirt; if (opening(x, y, z, 0.07, 0.2, 0.5)) return lapel; return jacket; }
-      if (part === "belly") return y < WAIST ? trousers : jacket;
+      if (part === "chest") return jacket;
+      if (part === "belly") return y < WAIST + (WAIST_BACK - WAIST) * Math.max(0, Math.min(1, (0.3 - z) / 0.6)) ? trousers : jacket;
       if (part === "arm") return jacket;
       if (part === "fore") return y > WRIST ? jacket : y > CUFF ? shirt : null;
       if (part === "leg" || part === "shin") return trousers;
@@ -100,7 +102,8 @@
         for (let i = 0; i < V.length; i += 3) P.push(inv(W[0] * V[i] + W[4] * V[i + 1] + W[8] * V[i + 2] + W[12], W[1] * V[i] + W[5] * V[i + 1] + W[9] * V[i + 2] + W[13], W[2] * V[i] + W[6] * V[i + 1] + W[10] * V[i + 2] + W[14]));
         for (const f of n.geometry.faces) for (let k = 1; k + 1 < f.i.length; k++) out.push([P[f.i[0]], P[f.i[k]], P[f.i[k + 1]]]); } return out; };
     const body = tris([r.chest, ...(r.torsoWeld || []), r.sleeveNode]), arms = tris([r.armR, r.armL]), over = body.concat(arms);
-    const BIN = 0.02, bins = new Map(); for (const t of body) { const lo = Math.floor(Math.min(t[0][1], t[1][1], t[2][1]) / BIN), hi = Math.floor(Math.max(t[0][1], t[1][1], t[2][1]) / BIN); for (let b = lo; b <= hi; b++) { if (!bins.has(b)) bins.set(b, []); bins.get(b).push(t); } }
+    const BIN = 0.02, bins = new Map(), legBins = new Map(); for (const t of tris([r.legR, r.legL])) { const lo = Math.floor(Math.min(t[0][1], t[1][1], t[2][1]) / BIN), hi = Math.floor(Math.max(t[0][1], t[1][1], t[2][1]) / BIN); for (let b = lo; b <= hi; b++) { if (!legBins.has(b)) legBins.set(b, []); legBins.get(b).push(t); } }
+    for (const t of body) { const lo = Math.floor(Math.min(t[0][1], t[1][1], t[2][1]) / BIN), hi = Math.floor(Math.max(t[0][1], t[1][1], t[2][1]) / BIN); for (let b = lo; b <= hi; b++) { if (!bins.has(b)) bins.set(b, []); bins.get(b).push(t); } }
     let y0 = 1e9, y1 = -1e9; for (const t of body) for (const p of t) { y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
     // a ray (o, d) against a triangle: its distance, or -1
     const hit = (o, d, t) => { const e1 = [t[1][0] - t[0][0], t[1][1] - t[0][1], t[1][2] - t[0][2]], e2 = [t[2][0] - t[0][0], t[2][1] - t[0][1], t[2][2] - t[0][2]];
@@ -110,8 +113,8 @@
       return (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) / det; };
     const normal = (t) => { const e1 = [t[1][0] - t[0][0], t[1][1] - t[0][1], t[1][2] - t[0][2]], e2 = [t[2][0] - t[0][0], t[2][1] - t[0][1], t[2][2] - t[0][2]], n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]], l = Math.hypot(...n) || 1; return n.map((v) => v / l); };
     // the outermost crossing of a horizontal ray from (0, y, cz) toward (dx, dz): { t, n } with n the outward normal flattened
-    const side = (y, cz, dx, dz) => { y = Math.max(y0 + 0.005, Math.min(y1 - 0.005, y)); const l = Math.hypot(dx, dz) || 1, d = [dx / l, 0, dz / l], o = [0, y, cz]; let best = null;
-      for (const t of bins.get(Math.floor(y / BIN)) || []) { const k = hit(o, d, t); if (k > 0 && (!best || k > best.t)) best = { t: k, tri: t }; }
+    const side = (y, cz, dx, dz, legs = false) => { y = Math.max(y0 + 0.005, Math.min(y1 - 0.005, y)); const l = Math.hypot(dx, dz) || 1, d = [dx / l, 0, dz / l], o = [0, y, cz]; let best = null;
+      for (const t of (bins.get(Math.floor(y / BIN)) || []).concat(legs ? legBins.get(Math.floor(y / BIN)) || [] : [])) { const k = hit(o, d, t); if (k > 0 && (!best || k > best.t)) best = { t: k, tri: t }; }
       if (!best) return null; let n = normal(best.tri); n = [n[0], 0, n[2]]; const nl = Math.hypot(n[0], n[2]) || 1; n = [n[0] / nl, 0, n[2] / nl]; if (n[0] * d[0] + n[2] * d[2] < 0) n = [-n[0], 0, -n[2]];
       return { y, p: [d[0] * best.t, y, cz + d[2] * best.t], n }; };
     // the topmost crossing straight down at (x, z), the upper arms included
@@ -159,29 +162,44 @@
     const gold = (c) => { const m = Math.max(...c) || 1; return c[0] / m > 0.9 && c[1] / m > 0.6 && c[1] / m < 0.85 && c[2] / m < 0.4; };
     const faces = g.faces.filter((f) => !f.i.every((k) => onArm.has(k)) || gold(f.color));
     const made = renormal({ ...g, verts: out, faces }); per.set(r, made); return made; };
-  // A belt of one height all round the waist (in the belly's frame, at `y`): a band standing `off` out from the body,
+  // A belt of one height round the hips (in the belly's frame, from `y` under the belly in front to `back` over the top of
+  // the seat behind): a band standing `off` out from the body and the tops of the thighs,
   // `h` tall, with its top and bottom edges, and a buckle at the front. Cached by rig.
   const belts = new WeakMap();
   const belt = (r, opts = {}) => { const key = JSON.stringify(opts); let per = belts.get(r); if (!per) belts.set(r, per = new Map()); if (per.has(key)) return per.get(key);
-    const W = surface(r), y = opts.y == null ? WAIST : opts.y, h = opts.h || 0.045, off = opts.off || 0.012, n = 64, s = W.slice(y), col = hex(opts.color || "#1f1a17").map((v) => v / 255), brass = hex(opts.brass || "#b8913a").map((v) => v / 255);
-    const ring = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2, rays = [y - h / 2, y + h / 2].map((yy) => W.side(yy, s.cz, Math.sin(a), Math.cos(a))); ring.push(rays); }
-    // the band's outer face follows the widest of its two edges at each angle, so its height is the same all round
+    const W = surface(r), yf = opts.y == null ? WAIST : opts.y, yb = opts.back == null ? WAIST_BACK : opts.back, h = opts.h || 0.045, off = opts.off || 0.012, n = 64, s = W.slice(yf), col = hex(opts.color || "#1f1a17").map((v) => v / 255);
+    // the belt's height round the body: under the belly in front, up over the top of the seat behind
+    const yAt = (a) => yf + (yb - yf) * (1 - Math.cos(a)) / 2;
+    // the band's outer face follows the widest of the body at its top, middle and bottom at each angle, so its height is
+    // the same all round
     const verts = [], faces = [], push = (p) => { verts.push(...p); return verts.length / 3 - 1; };
-    const R = ring.map(([lo, hi], k) => { const a = k / n * Math.PI * 2, d = [Math.sin(a), Math.cos(a)], t = Math.max(Math.hypot(lo.p[0], lo.p[2] - s.cz), Math.hypot(hi.p[0], hi.p[2] - s.cz)) + off;
-      return { out: [d[0] * t, s.cz + d[1] * t], in: [d[0] * (t - off - 0.004), s.cz + d[1] * (t - off - 0.004)] }; });
+    const R = Array.from({ length: n }, (_, k) => { const a = k / n * Math.PI * 2, d = [Math.sin(a), Math.cos(a)], y = yAt(a), rays = [y - h / 2, y, y + h / 2].map((yy) => W.side(yy, s.cz, d[0], d[1], true)), t = Math.max(...rays.map((q) => Math.hypot(q.p[0], q.p[2] - s.cz))) + off;
+      return { y, out: [d[0] * t, s.cz + d[1] * t], in: [d[0] * (t - off - 0.004), s.cz + d[1] * (t - off - 0.004)] }; });
     for (let k = 0; k < n; k++) { const A = R[k], B = R[(k + 1) % n];
-      const q = [push([A.out[0], y - h / 2, A.out[1]]), push([B.out[0], y - h / 2, B.out[1]]), push([B.out[0], y + h / 2, B.out[1]]), push([A.out[0], y + h / 2, A.out[1]])];
-      faces.push({ i: q, color: col });
-      const t = [push([A.in[0], y + h / 2, A.in[1]]), push([A.out[0], y + h / 2, A.out[1]]), push([B.out[0], y + h / 2, B.out[1]]), push([B.in[0], y + h / 2, B.in[1]])]; faces.push({ i: t, color: col });
-      const b = [push([A.in[0], y - h / 2, A.in[1]]), push([B.in[0], y - h / 2, B.in[1]]), push([B.out[0], y - h / 2, B.out[1]]), push([A.out[0], y - h / 2, A.out[1]])]; faces.push({ i: b, color: col }); }
-    const geo = { verts, faces, lines: [] }; const front = R[0].out, bw = opts.buckle || 0.075, bh = h + 0.014, bd = 0.012, bz = front[1] + 0.004;
+      faces.push({ i: [push([A.out[0], A.y - h / 2, A.out[1]]), push([B.out[0], B.y - h / 2, B.out[1]]), push([B.out[0], B.y + h / 2, B.out[1]]), push([A.out[0], A.y + h / 2, A.out[1]])], color: col });
+      faces.push({ i: [push([A.in[0], A.y + h / 2, A.in[1]]), push([A.out[0], A.y + h / 2, A.out[1]]), push([B.out[0], B.y + h / 2, B.out[1]]), push([B.in[0], B.y + h / 2, B.in[1]])], color: col });
+      faces.push({ i: [push([A.in[0], A.y - h / 2, A.in[1]]), push([B.in[0], B.y - h / 2, B.in[1]]), push([B.out[0], B.y - h / 2, B.out[1]]), push([A.out[0], A.y - h / 2, A.out[1]])], color: col }); }
+    const geo = { verts, faces, lines: [] }, y = yf, front = R[0].out, bw = opts.buckle || 0.075, bh = h + 0.014, bd = 0.012, bz = front[1] + 0.004;
     const buckle = M.box({ w: bw, h: bh, d: bd, color: opts.brass || "#b8913a", offset: { x: 0, y, z: bz + bd / 2 } }), hole = M.box({ w: bw * 0.55, h: bh * 0.5, d: 0.004, color: opts.color || "#1f1a17", offset: { x: 0, y, z: bz + bd + 0.002 } });
     const made = M.merge(geo, buckle, hole); per.set(key, made); return made; };
   // A suit's tie, modelled on the old box torso's front (its knot at the collar, its blade ending in a point at the
   // bottom of the chest, above the belly) and wrapped onto the new one like a vest. Cached by suit.
   const ties = [];
   const tie = (k) => ties[k] || (ties[k] = (() => { const P = SUITS[k], z = 0.312, d = 0.012, at = (g) => { const V = g.verts; for (let i = 2; i < V.length; i += 3) V[i] += z; return g; };
-    const knot = at(M.prism([[-0.03, 1.0], [0.03, 1.0], [0.046, 1.06], [-0.046, 1.06]], d * 1.4, P[8])), blade = at(M.prism([[0, 0.62], [0.052, 0.68], [0.029, 1.0], [-0.029, 1.0], [-0.052, 0.68]], d, P[3]));
+    const knot = at(M.prism([[-0.04, 1.0], [0.04, 1.0], [0.06, 1.065], [-0.06, 1.065]], d * 1.4, P[8])), blade = at(M.prism([[0, 0.6], [0.07, 0.67], [0.038, 1.0], [-0.038, 1.0], [-0.07, 0.67]], d, P[3]));
     return M.merge(knot, blade); })());
-  window.__dress = { paint, fit, box, height, torsoBox, hat, hatPlace, wrap, belt, tie, surface, OUTFITS };
+  // A suit's front, as a sports jacket's: the shirt in the V from the collar down to the top button, and a notched lapel
+  // each side (a broad blade up from the button to the notch, the collar above it running round toward the neck), with
+  // the button under the V; modelled on the old box torso's front like the tie, and wrapped on. Cached by suit.
+  const fronts = [];
+  const front = (k) => fronts[k] || (fronts[k] = (() => { const P = SUITS[k], at = (g, z) => { const V = g.verts; for (let i = 2; i < V.length; i += 3) V[i] += z; return g; };
+    const side = (pts, s) => s > 0 ? pts : pts.map(([x, y]) => [-x, y]).reverse(), parts = [at(M.prism([[0, 0.5], [0.19, 1.1], [-0.19, 1.1]], 0.006, P[2]), 0.303)];
+    // the lapels faced a shade lighter than the jacket, so they read against it
+    const facing = "#" + [1, 3, 5].map((n) => Math.round(parseInt(P[0].slice(n, n + 2), 16) * 0.86 + 255 * 0.14).toString(16).padStart(2, "0")).join("");
+    for (const s of [1, -1]) parts.push(at(M.prism(side([[0, 0.5], [0.09, 0.52], [0.3, 0.92], [0.235, 0.965], [0.165, 1.02]], s), 0.012, facing), 0.318),
+      at(M.prism(side([[0.165, 1.02], [0.235, 0.965], [0.29, 1.1], [0.19, 1.1]], s), 0.012, facing), 0.318));
+    const button = (y) => at(M.prism(Array.from({ length: 8 }, (_, a) => [Math.cos(a / 8 * Math.PI * 2) * 0.02, y + Math.sin(a / 8 * Math.PI * 2) * 0.02]), 0.01, P[1]), 0.31);
+    parts.push(button(0.44));
+    return M.merge(...parts); })());
+  window.__dress = { paint, fit, box, height, torsoBox, hat, hatPlace, wrap, belt, tie, front, surface, OUTFITS };
 })();
