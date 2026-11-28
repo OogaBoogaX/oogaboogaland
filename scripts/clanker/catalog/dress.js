@@ -9,7 +9,8 @@
     ["#4a5058", "#363b42", "#efe9d6", "#2f6b46", "#3d434a", "#1a1512", "#1f1a17", "#b8913a", "#1f4a30"]];
   const C = (h, e = 0) => ({ c: hex(h), e });
   // Each outfit: a rule per region, given the face's centre in its part's own frame; null keeps the fur.
-  // Regions: chest (waist 0 up to the shoulders ~0.55, z forward), belly (hips -0.11 up to the waist, z forward), arm (the
+  // Regions: chest (waist 0 up to the shoulders ~0.55, z forward), belly (hips -0.11 up to the waist, z forward; standing,
+  // the belly piece is stretched 1.35 times and lowered 0.175 in the belly's frame, so its 0.15 is the belly's 0.03), arm (the
   // upper arm), fore (forearm and fist, the thumb leaving the wrist at y -0.49, the fist below), leg, shin, foot, head.
   // the sleeve's end and the cuff's, on the forearm's rings (every ~0.04 along it): the cuff the last ring before the
   // thumb leaves the wrist (y -0.49)
@@ -51,9 +52,10 @@
   // The Arcade staff's short sleeves: the uniform's red down the upper arm to one of its rings (they stand square to its
   // length every 0.025, so the cut runs cleanly across it), finished with a ring of gold piping.
   const SLEEVE = { piping: -0.12, cut: -0.145 };
-  // and the coat itself, one piece all round the upper body down to the vest's hem, under the vest's front panels, collar
-  // and trim (its own back and side panels left off, `drop` in the wrap)
-  OUTFITS.staff = (part, x, y, z) => part === "arm" ? (y > SLEEVE.piping ? C("#b3322b") : y > SLEEVE.cut ? C("#f2b63e") : null) : part === "chest" ? C("#b3322b") : part === "belly" ? (y > 0.01 ? C("#b3322b") : null) : null;
+  // and the coat itself, one piece all round the upper body down to the vest's hem (a gold band round its edge, `belt`
+  // with no buckle), under the vest's front panels, collar and trim (its own back, side panels, shoulder yokes and back
+  // trim left off, `drop` in the wrap), with trousers to match
+  OUTFITS.staff = (part, x, y, z) => part === "arm" ? (y > SLEEVE.piping ? C("#b3322b") : y > SLEEVE.cut ? C("#f2b63e") : null) : part === "chest" || part === "belly" || part === "leg" || part === "shin" ? C("#b3322b") : null;
   // A copy of a geometry with its faces recoloured by a rule; cached by geometry and outfit.
   const cache = new Map();
   const painted = (geo, region, outfit) => {
@@ -85,20 +87,39 @@
     const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
     for (const n of [r.chest, ...(r.torsoWeld || []).filter((n) => n.visible)]) { const V = n.geometry.verts, W = n.world; for (let i = 0; i < V.length; i += 3) { const p = inv([0, 1, 2].map((m) => W[m] * V[i] + W[4 + m] * V[i + 1] + W[8 + m] * V[i + 2] + W[12 + m])); for (let m = 0; m < 3; m++) { lo[m] = Math.min(lo[m], p[m]); hi[m] = Math.max(hi[m], p[m]); } } }
     return { min: lo, max: hi }; };
-  // Where a hat sits on the new head: the head's slices measured once a geometry (its half-width across, and its depth
-  // front to back); the brim's line is the first slice above the ears (HATLINE up) narrower than the ears, and the hat is
-  // scaled so the old skull's top (0.6 up, 0.3 half-width, its middle 0.085 forward) lands there at the head's own
-  // half-width, centred over the skull's middle front to back.
-  const hatPlaces = new Map(), OLD_SKULL = { top: 0.6, half: 0.3, mid: 0.085 };
-  const hatPlace = (geo) => { if (hatPlaces.has(geo)) return hatPlaces.get(geo); const V = geo.verts, slice = (y0, y1) => { let hx = 0, z0 = 1e9, z1 = -1e9, n = 0;
-      for (let i = 0; i < V.length; i += 3) if (V[i + 1] >= y0 && V[i + 1] < y1) { n++; hx = Math.max(hx, Math.abs(V[i])); z0 = Math.min(z0, V[i + 2]); z1 = Math.max(z1, V[i + 2]); } return n ? { hx, z0, z1 } : null; };
-    let ears = 0; for (let y = 0.2; y < 0.45; y += 0.02) { const s2 = slice(y, y + 0.02); if (s2) ears = Math.max(ears, s2.hx); }
-    let line = 0.45; for (let y = 0.3; y < 0.62; y += 0.01) { const s2 = slice(y, y + 0.02); if (s2 && s2.hx < ears - 0.02) { line = y; break; } }
-    const at = slice(line, line + 0.03), half = Math.max(at.hx, (at.z1 - at.z0) / 2) * 1.04, place = { line, half, mid: (at.z0 + at.z1) / 2, s: half / OLD_SKULL.half };
-    hatPlaces.set(geo, place); return place; };
-  // A hat built in the old head's frame, put on the new head (the anchor: where the old game placed it in the old head).
-  const hat = (head, geometry, anchor = [0, 0, 0]) => { const P = hatPlace(head.geometry), s = P.s;
-    const n = S.createNode({ geometry, position: { x: anchor[0] * s, y: P.line + (anchor[1] - OLD_SKULL.top) * s, z: P.mid + (anchor[2] - OLD_SKULL.mid) * s }, scale: { x: s, y: s, z: s } }); S.addChild(head, n); return n; };
+  // Does a hat enclose the head? Every point of the head from the hat's lowest edge up, carried into the hat's own frame:
+  // where the hat has a wall at the point's height in its direction from the hat's axis, the point must be inside it by
+  // `margin`; where it has none (below its rim that way), the hat must still be over it (a ray straight up meets it).
+  // Returns how many points poke out and the worst by.
+  const tri = (V, f, k) => [f.i[0], f.i[k], f.i[k + 1]].map((n) => [V[n * 3], V[n * 3 + 1], V[n * 3 + 2]]);
+  const rayHit = (o, d, t) => { const e1 = [t[1][0] - t[0][0], t[1][1] - t[0][1], t[1][2] - t[0][2]], e2 = [t[2][0] - t[0][0], t[2][1] - t[0][1], t[2][2] - t[0][2]];
+    const p = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]], det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2]; if (Math.abs(det) < 1e-12) return -1;
+    const s0 = [o[0] - t[0][0], o[1] - t[0][1], o[2] - t[0][2]], u = (s0[0] * p[0] + s0[1] * p[1] + s0[2] * p[2]) / det; if (u < 0 || u > 1) return -1;
+    const q = [s0[1] * e1[2] - s0[2] * e1[1], s0[2] * e1[0] - s0[0] * e1[2], s0[0] * e1[1] - s0[1] * e1[0]], v = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) / det; if (v < 0 || u + v > 1) return -1;
+    return (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) / det; };
+  const hatTris = new Map();
+  const encloses = (hatGeo, headGeo, pos, s, margin = 0.01) => { let T = hatTris.get(hatGeo); if (!T) { T = []; for (const f of hatGeo.faces) for (let k = 1; k + 1 < f.i.length; k++) T.push(tri(hatGeo.verts, f, k)); hatTris.set(hatGeo, T); }
+    const hb = S.boundsOf(hatGeo), G = hatGeo.verts, mid = (hb.min[1] + hb.max[1]) / 2; let cz0 = 1e9, cz1 = -1e9; for (let i = 0; i < G.length; i += 3) if (G[i + 1] > mid) { cz0 = Math.min(cz0, G[i + 2]); cz1 = Math.max(cz1, G[i + 2]); }
+    const ax = [0, (cz0 + cz1) / 2], V = headGeo.verts; let bad = 0, worst = 0;
+    for (let i = 0; i < V.length; i += 3) { const q = [(V[i] - pos[0]) / s, (V[i + 1] - pos[1]) / s, (V[i + 2] - pos[2]) / s]; if (q[1] < hb.min[1] + 0.01) continue;
+      let up = false, out = 0; const d = [q[0] - ax[0], 0, q[2] - ax[1]], l = Math.hypot(d[0], d[2]) || 1, dir = [d[0] / l, 0, d[2] / l], o = [ax[0], q[1], ax[1]];
+      for (const t of T) { if (!up && rayHit(q, [0, 1, 0], t) > 0) up = true; const k = rayHit(o, dir, t); if (k > out) out = k; }
+      // (out of the hat: past its wall where it has one at that height that way, or with nothing of it overhead; below its
+      // rim, with no wall that way, the head simply shows)
+      const miss = out > 0 ? Math.max(0, l + margin / s - out) : up ? 0 : 1; if (miss > 0) { bad++; worst = Math.max(worst, out > 0 ? miss * s : 1); } }
+    return { bad, worst }; };
+  // A hat on the new head, fitted: its lowest edge just above the brow (BROW, the top of the eyes being 0.45 in the head's
+  // frame), its crown (the hat's upper half, so a cap's peak is left out) centred over the head there front to back, and
+  // the smallest size from SNUG up, 3% at a time, that encloses the head (`encloses`). Cached by hat and head.
+  const BROW = 0.48, SNUG = 0.7, hatFits = new Map();
+  const hat = (head, geometry) => { const key = geometry; let fit = hatFits.get(key);
+    if (!fit) { const hb = S.boundsOf(geometry), V = geometry.verts, mid = (hb.min[1] + hb.max[1]) / 2; let cz0 = 1e9, cz1 = -1e9;
+      for (let i = 0; i < V.length; i += 3) if (V[i + 1] > mid) { cz0 = Math.min(cz0, V[i + 2]); cz1 = Math.max(cz1, V[i + 2]); }
+      const crownZ = (cz0 + cz1) / 2, H = head.geometry.verts; let z0 = 1e9, z1 = -1e9; for (let i = 0; i < H.length; i += 3) if (H[i + 1] >= BROW) { z0 = Math.min(z0, H[i + 2]); z1 = Math.max(z1, H[i + 2]); }
+      const headZ = (z0 + z1) / 2, posOf = (s) => [0, BROW - hb.min[1] * s, headZ - crownZ * s];
+      let s = SNUG, k = 0; while (encloses(geometry, head.geometry, posOf(s), s).bad && k++ < 30) s *= 1.03;
+      fit = { s, pos: posOf(s), grown: s / SNUG }; hatFits.set(key, fit); }
+    const n = S.createNode({ geometry, position: { x: fit.pos[0], y: fit.pos[1], z: fit.pos[2] }, scale: { x: fit.s, y: fit.s, z: fit.s } }); S.addChild(head, n); return n; };
   // The new torso's surface, standing, in the belly's frame: its triangles (chest, the belly piece shown, the live sleeve;
   // `top` adds the upper arms, for what lies over the shoulders), binned by height, with a horizontal and a downward ray.
   const surfaces = new WeakMap();
@@ -163,14 +184,16 @@
     // where a point of the old torso lands on the new one, with the surface's outward normal there (horizontal on the
     // sides; up over the shoulders)
     const under = opts.under, z0 = under ? Math.min(...geometry.verts.filter((v, n) => n % 3 === 2 && under(geometry.verts[n - 2], geometry.verts[n - 1], v))) : 0;
-    // (with panels dropped, `panels` gives the old surface as their outsides, so what lay on them comes down onto the body)
-    const P = opts.panels, oldX = (y) => P && y > P.y0 && y < P.y1 ? Math.max(OLD.hx(y), P.side) : OLD.hx(y), oldZ = (y, z) => P && z < 0 && y > P.y0 && y < P.y1 ? P.back : OLD.hz;
+    // (with panels dropped, `panels` gives the old surface as their outsides, so what lay on them comes down onto the body,
+    // and the vest's own width, not the old torso's, spans the new chest)
+    const P = opts.panels, oldX = (y) => P && y > P.y0 && y < P.y1 ? P.side : OLD.hx(y), oldZ = (y, z) => P && z < 0 && y > P.y0 && y < P.y1 ? P.back : OLD.hz;
     const place = (x, y, z) => { const hx = oldX(y), hz = oldZ(y, z), sideOut = Math.max(Math.abs(x) - hx, Math.abs(z) - hz), topOut = y - OLD.top;
       if (topOut > sideOut && Math.abs(x) < 0.75) { const s0 = W.slice(armY), nx = x * (0.51 / 0.516), nz = s0.cz + z * (s0.hz / OLD.hz), h = W.top(nx, nz);
         if (h != null) return { p: [nx, h.h + gap + Math.max(0, topOut) * hug, nz], n: [0, 1, 0], arm: h.arm }; }
       const ny = hip + y * ky, s = W.slice(ny), ux = x / hx, uz = z / hz, dx = ux * s.hx, dz = uz * s.hz; let hit = W.side(ny, s.cz, dx, dz);
-      // cloth hangs straight down off the widest of the body above it (an apron off the belly, tails off the seat)
-      if (ny < 0.3) for (let h = ny + 0.03; h < Math.min(0.3, ny + 0.45); h += 0.03) { const up = W.side(h, s.cz, dx, dz); if (up && (!hit || Math.hypot(up.p[0], up.p[2] - s.cz) > Math.hypot(hit.p[0], hit.p[2] - s.cz))) hit = { ...up, p: [up.p[0], ny, up.p[2]] }; }
+      // cloth below the old vest's hem hangs straight down off the widest of the body above it (an apron off the belly,
+      // tails off the seat); above it, it follows the body
+      if (ny < 0.3 && opts.drape !== false && (y < 0.22 || z < -0.38 || (under && under(x, y, z)))) for (let h = ny + 0.03; h < Math.min(0.3, ny + 0.45); h += 0.03) { const up = W.side(h, s.cz, dx, dz); if (up && (!hit || Math.hypot(up.p[0], up.p[2] - s.cz) > Math.hypot(hit.p[0], hit.p[2] - s.cz))) hit = { ...up, p: [up.p[0], ny, up.p[2]] }; }
       if (!hit) return { p: [x, ny, z], n: [0, 0, z < 0 ? -1 : 1] };
       // (a piece worn under the rest, an apron's skirt, lies on the body with only its own layers' depths)
       const d = under && under(x, y, z) ? 0.004 + (z - z0) * hug : gap + Math.max(0, sideOut) * hug; return { p: [hit.p[0] + hit.n[0] * d, ny, hit.p[2] + hit.n[2] * d], n: hit.n }; };
@@ -206,7 +229,7 @@
       faces.push({ i: [push([A.in[0], A.y - h / 2, A.in[1]]), push([B.in[0], B.y - h / 2, B.in[1]]), push([B.out[0], B.y - h / 2, B.out[1]]), push([A.out[0], A.y - h / 2, A.out[1]])], color: col }); }
     const geo = { verts, faces, lines: [] }, y = yf, front = R[0].out, bw = opts.buckle || 0.075, bh = h + 0.014, bd = 0.012, bz = front[1] + 0.004;
     const buckle = M.box({ w: bw, h: bh, d: bd, color: opts.brass || "#b8913a", offset: { x: 0, y, z: bz + bd / 2 } }), hole = M.box({ w: bw * 0.55, h: bh * 0.5, d: 0.004, color: opts.color || "#1f1a17", offset: { x: 0, y, z: bz + bd + 0.002 } });
-    const made = M.merge(geo, buckle, hole); per.set(key, made); return made; };
+    const made = opts.buckle === false ? geo : M.merge(geo, buckle, hole); per.set(key, made); return made; };
   // A suit's tie, modelled on the old box torso's front (its knot at the collar, its blade ending in a point at the
   // bottom of the chest, above the belly) and wrapped onto the new one like a vest. Cached by suit.
   const ties = [];
@@ -239,6 +262,16 @@
     // grown about its middle
     const g = M.merge(...parts), V = g.verts; for (let i = 0; i < V.length; i += 3) { const cx = bx, cy = by, K = LABKIT.size; V[i] = cx + (V[i] - cx) * K; V[i + 1] = cy + (V[i + 1] - cy) * K; V[i + 2] = F + (V[i + 2] - F) * 1.4; }
     return g; })());
+  // The lab coat's zipper, down the middle of its front from the collar to the hem, modelled on the old box torso's front
+  // and wrapped on following the body (under the belly too): a tape each side, a row of metal teeth between, and the
+  // slider near the top with its pull hanging from it. Built once.
+  let zipperGeo = null;
+  const zipper = () => zipperGeo || (zipperGeo = (() => { const b = (w, h, d, color, x, y, z) => M.box({ w, h, d, color, offset: { x, y, z } }), F = 0.302, top = 1.08, end = 0.0, parts = [];
+    // (made about twice as wide as it is to show: the wrap narrows what lies across the chest)
+    for (const s of [-1, 1]) parts.push(b(0.05, top - end, 0.005, "#cfcab4", s * 0.035, (top + end) / 2, F + 0.002));
+    for (let y = end + 0.012, k = 0; y < top - 0.012; y += 0.022, k++) parts.push(b(0.03, 0.014, 0.008, "#8e959a", (k % 2 ? 1 : -1) * 0.008, y, F + 0.006));
+    parts.push(b(0.07, 0.075, 0.018, "#7c8388", 0, top - 0.24, F + 0.012), b(0.04, 0.1, 0.008, "#b7bdc0", 0, top - 0.32, F + 0.024));
+    return M.merge(...parts); })());
   // The clean-room hood's visor, in the head's frame: a clear shield curving round the face (an ellipse round the head's
   // middle, out past the muzzle and back beside the cheeks into the hood), in the game's glass, framed in white along its
   // top and bottom. Built once; the glass is two-sided.
@@ -256,5 +289,5 @@
         { i: [push(frame, [u0, yb, w0]), push(frame, [x0, yb, z0]), push(frame, [x1, yb, z1]), push(frame, [u1, yb, w1])], color: white },
         { i: [push(frame, [u1, ya, w1]), push(frame, [x1, ya, z1]), push(frame, [x0, ya, z0]), push(frame, [u0, ya, w0])], color: white }); }
     return { glass, frame }; })());
-  window.__dress = { paint, fit, box, height, torsoBox, hat, hatPlace, wrap, belt, tie, front, labKit, visor, surface, OUTFITS };
+  window.__dress = { paint, fit, box, height, torsoBox, hat, wrap, belt, tie, front, labKit, zipper, visor, surface, encloses, hatFits, OUTFITS };
 })();
