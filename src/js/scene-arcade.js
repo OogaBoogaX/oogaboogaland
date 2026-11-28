@@ -442,7 +442,7 @@
         // The handle sits in the right palm; its tip reaches into the bay as the wrist turns.
         const driver = createNode({ geometry: AM.repairDriver(), position: { x: 0.04, y: -0.84, z: 0.48 },
           rotation: { x: 2.6, y: 0, z: 0 }, scale: { x: 1.54, y: 1.54, z: 1.54 } });
-        addChild(clanker.parts.armR, driver);
+        addChild(clanker.socket("handR"), driver);
         addChild(node, bay, panel, clanker.root);
         repair = { clanker, driver, cabinet: c };
         // The detached panel and worker occupy only this service bay; keep the aisle and fire approach clear.
@@ -1739,7 +1739,8 @@
       if (role.prop >= 0) {
         const [x, py, z, , turn] = PROP_GRIP[role.prop];
         g.prop = createNode({ position: { x, y: py, z }, rotation: { x: turn, y: 0, z: 0 }, geometry: AM.staffProp(role.prop), visible: false });
-        addChild(P[role.hand], g.prop);
+        addChild(g.agent.socket(role.hand === "armR" ? "handR" : "handL"), g.prop);
+        if (PROP_GRIP[role.prop][3] && g.agent.body) g.prop.quaternion = [0, 0, 0, 1];
       }
       addChild(root, g.agent.root);
       s.taken = g;
@@ -1902,7 +1903,9 @@
     if (g.prop) {
       const id = g.role.id, show = id === "gamemaster" || (id === "runner" ? g.carrying : g.phase === "work" && g.job.prop && g.blend > 0.5);
       g.prop.visible = show;
-      if (show && PROP_GRIP[g.role.prop][3]) g.prop.rotation.x = -(a.chest.rotation.x + P[g.role.hand].rotation.x);
+      // held level: its turn undoes the hand's (a frame behind, as the hand's socket follows the body as it is drawn)
+      if (show && g.prop.quaternion) { const q = g.prop.parent.quaternion; g.prop.quaternion[0] = -q[0]; g.prop.quaternion[1] = -q[1]; g.prop.quaternion[2] = -q[2]; g.prop.quaternion[3] = q[3]; }
+      else if (show && PROP_GRIP[g.role.prop][3]) g.prop.rotation.x = -(a.chest.rotation.x + P[g.role.hand].rotation.x);
     }
   };
 
@@ -2255,7 +2258,7 @@
     arcadeScene.input = input;
     arcadeScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      arcade: { blockWatch: AW, get watchGate() { return watchGate; }, get zipline() { return zipline; }, screens, crowd, walkers, bots, spin, play, open, stations, carnival, nearStation, supportAt, slide: SLIDE, railSitter, walkable: walkableFor, flyable: flyableFor, sightClear, pointHidden, blocks, audio, staff, life, get frame() { return shownFrame; }, get doors() { return doors; }, get doorWalk() { return doorWalk; } },
+      arcade: { get staff() { return staff; }, blockWatch: AW, get watchGate() { return watchGate; }, get zipline() { return zipline; }, screens, crowd, walkers, bots, spin, play, open, stations, carnival, nearStation, supportAt, slide: SLIDE, railSitter, walkable: walkableFor, flyable: flyableFor, sightClear, pointHidden, blocks, audio, staff, life, get frame() { return shownFrame; }, get doors() { return doors; }, get doorWalk() { return doorWalk; } },
       // HALLOWEEN: the arena's hunt (its herald's until it has loaded).
       get halloween() { return ghosts ? ghosts.debug : ghostEntry && ghostEntry.debug; },
       get arena() { return { armed, inArena, zone: zoneNow, fence: fenceK, gameMode, along: hallwayAlong, hearing: huntHearing, blendTo: BL.net.state.blendTo, blendT: BL.net.state.blendT }; }

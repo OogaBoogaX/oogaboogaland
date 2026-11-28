@@ -348,7 +348,10 @@
       rig.root.sightHidden = true;
       addChild(group, rig.root);
       const o = owner("brute", i);
-      for (const name in rig.parts) { const part = rig.parts[name]; if (part && part.geometry) target(part, o); }
+      // its drawn body's meshes (clanker-body.js), or without it the rig's own parts
+      const meshes = (node) => { if (node.geometry) target(node, o); for (const child of node.children) meshes(child); };
+      if (rig.body) { for (const r of rig.body.rigs) meshes(r); rig.body.onRig = meshes; }
+      else for (const name in rig.parts) { const part = rig.parts[name]; if (part && part.geometry) target(part, o); }
       rigs.push(rig); bruteOwners.push(o);
     }
     // The skeletons: a crawling upper body in each slot too (ghost-models.js `skeletonParts`), shown in place of the

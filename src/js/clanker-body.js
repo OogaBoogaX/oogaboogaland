@@ -29,6 +29,17 @@
     o[0] = aw * bx + ax * bw + ay * bz - az * by; o[1] = aw * by - ax * bz + ay * bw + az * bx; o[2] = aw * bz + ax * by - ay * bx + az * bw; o[3] = aw * bw - ax * bx - ay * by - az * bz; return o; };
   const qinv = (o, a) => { o[0] = -a[0]; o[1] = -a[1]; o[2] = -a[2]; o[3] = a[3]; return o; };
   const qset = (o, a) => { o[0] = a[0]; o[1] = a[1]; o[2] = a[2]; o[3] = a[3]; return o; };
+  // a turn by `angle` about the unit axis (x, y, z); the shortest turn taking direction a to direction b
+  const qaxis = (o, x, y, z, angle) => { const s = Math.sin(angle / 2); o[0] = x * s; o[1] = y * s; o[2] = z * s; o[3] = Math.cos(angle / 2); return o; };
+  const qarc = (o, ax, ay, az, bx, by, bz) => { const la = Math.hypot(ax, ay, az) || 1, lb = Math.hypot(bx, by, bz) || 1;
+    ax /= la; ay /= la; az /= la; bx /= lb; by /= lb; bz /= lb; const d = ax * bx + ay * by + az * bz;
+    o[0] = ay * bz - az * by; o[1] = az * bx - ax * bz; o[2] = ax * by - ay * bx; o[3] = 1 + d;
+    if (o[3] < 1e-6) { o[0] = 0; o[1] = 0; o[2] = 1; o[3] = 0; }
+    const l = Math.hypot(o[0], o[1], o[2], o[3]); o[0] /= l; o[1] /= l; o[2] /= l; o[3] /= l; return o; };
+  // the vector (x, y, z) turned by q, into `o`
+  const qrot = (o, q, x, y, z) => { const qx = q[0], qy = q[1], qz = q[2], qw = q[3];
+    const tx = 2 * (qy * z - qz * y), ty = 2 * (qz * x - qx * z), tz = 2 * (qx * y - qy * x);
+    o[0] = x + qw * tx + qy * tz - qz * ty; o[1] = y + qw * ty + qz * tx - qx * tz; o[2] = z + qw * tz + qx * ty - qy * tx; return o; };
   // the rotation of a column-major matrix, its columns normalised (a breathing chest is scaled)
   const qmat = (o, m) => { const sx = Math.hypot(m[0], m[1], m[2]) || 1, sy = Math.hypot(m[4], m[5], m[6]) || 1, sz = Math.hypot(m[8], m[9], m[10]) || 1;
     const a = m[0] / sx, d = m[1] / sx, g = m[2] / sx, b = m[4] / sy, e = m[5] / sy, h = m[6] / sy, c = m[8] / sz, f = m[9] / sz, i = m[10] / sz, tr = a + e + i;
@@ -124,6 +135,12 @@
   const LIMBS = [["head", "head", null], ["armR", "armR", "foreR"], ["armL", "armL", "foreL"], ["legR", "legR", "shinR"], ["legL", "legL", "shinL"]];
   // Sockets: whatever a scene hangs on these driver parts.
   const SOCKETS = ["hips", "chest", "torso", "head", "jaw", "armR", "armL", "legR", "legL"];
+  // The new fist's middle in its forearm's frame (its hole runs along x), and how far over the bottom of the driver's
+  // arm its hand is, as the hub measures its grip: the arm sockets carry the old hand onto the new fist.
+  const FIST = [0, -0.66, -0.03], HAND_UP = 0.08, HANDS = { handR: "armR", handL: "armL" };
+  // The drawn part a driver part stands for, and the region (a driver part's name) each new bone belongs to.
+  const DRAWN = { hips: "hips", chest: "chest", torso: "chest", head: "head", jaw: "head", armR: "armR", armL: "armL", legR: "legR", legL: "legL" };
+  const REGION = { head: "head", armR: "armR", foreR: "armR", armL: "armL", foreL: "armL", legR: "legR", shinR: "legR", shinRFoot: "legR", legL: "legL", shinL: "legL", shinLFoot: "legL" };
 
   const TIME = { attach: 0, sync: 0, syncs: 0, rig: 0 };
   // Stand-ins for the outline registry (object-guides.js reads a geometry's `outline` in its place): the smooth body is
@@ -179,11 +196,15 @@
     // One rig a form, made as the form is first shown.
     const rigs = {};
     let rig = null, form = null, pose = null, nodes = null, sleeveAt = 0, retargetK = 0, fistLift = 0;
+    let onRig = null;
     // A change of move eases from the pose last shown (`from`) over a fifth of a second.
     let move = -1, fade = 1;
     const show = (next) => { if (form === next && rig) return; form = next;
       let e = rigs[next]; if (!e) { const tr = now(), M = BL.clankerModel, r = M.rig(M.sets.B, next); outlines(r); TIME.rig += now() - tr; const s = sampler(next), N = walk(r);
-        e = rigs[next] = { r, nodes: N, s, buf: new Float32Array(s.size), from: new Float32Array(s.size), headAt: N.indexOf(r.head) * FIELDS }; addChild(scaled, r.root); }
+        e = rigs[next] = { r, nodes: N, s, buf: new Float32Array(s.size), from: new Float32Array(s.size), headAt: N.indexOf(r.head) * FIELDS, ...regionsOf(r) }; addChild(scaled, r.root);
+        // the new rig's hips stand back of its root; the driver's stand over its root, and so does the body
+        scaled.position.z = -r.hips.position.z * K;
+        if (onRig) onRig(r.root); }
       for (const f in rigs) rigs[f].r.root.visible = f === next;
       rig = e; nodes = e.nodes; pose = e.buf; sleeveAt = nodes.length * FIELDS + 2; fade = 1; };
     // Scratch, reused every sync.
@@ -246,7 +267,8 @@
       for (const name of SOCKETS) { const p = dparts[name]; if (p) qmat(dq[name], p.world); }
       // Native inputs from the driver.
       const lounge = managed ? state.lounge : "", onSide = lounge === "left" || lounge === "right" || lounge === "back";
-      IN.t = Math.max(0, Math.min(1, (QUAD - state.pitch) / (QUAD - UPRIGHT)));
+      // (the driver's chest as it stands, which is its pitch unless a scene has leant it itself)
+      IN.t = Math.max(0, Math.min(1, (QUAD - d.chest.rotation.x) / (QUAD - UPRIGHT)));
       const pace = state.gait === "gallop" ? 1 : 0, still = state.air || lounge || (managed && state.climbBlend > 0.05);
       IN.k = still ? 0 : Math.max(0, Math.min(1, state.speed / 1.2)); IN.run = still ? 0 : pace;
       IN.phase = (state.phase || 0) * Math.PI * 2;
@@ -290,9 +312,13 @@
         n.scale.x = pose[k + 7]; n.scale.y = pose[k + 8]; n.scale.z = pose[k + 9];
         n.visible = pose[k + 10] > 0.5; }
       r.root.visible = true;
-      if (r.chestWeld) r.chest.geometry = pose[nodes.length * FIELDS] > 0.5 ? r.chestWeld : r.chestGeo;
-      if (r.weldGeos) r.weldNode.geometry = BL.clankerModel.weld(r, pose[nodes.length * FIELDS + 1] | 0);
-      if (r.sleeveLive) { const g = r.sleeveLive.g, V = g.verts; for (let i = 0; i < V.length; i++) V[i] = pose[sleeveAt + i]; g.revision = (g.revision || 0) + 1; }
+      // the driver's breathing (clankers.js swells its chest asleep)
+      r.chest.scale.y *= d.chest.scale.y;
+      if (r.chestWeld) swap(r.chest, pose[nodes.length * FIELDS] > 0.5 ? r.chestWeld : r.chestGeo);
+      if (r.weldGeos) swap(r.weldNode, BL.clankerModel.weld(r, pose[nodes.length * FIELDS + 1] | 0));
+      if (r.sleeveLive) { const g = r.sleeveLive.g, V = g.verts; for (let i = 0; i < V.length; i++) V[i] = pose[sleeveAt + i]; g.revision = (g.revision || 0) + 1;
+        // a look painted over the sleeve (the NPC ghost's twin) takes its live shape too
+        const shown = r.sleeveNode.geometry; if (shown !== g && shown.verts.length === V.length) { const W = shown.verts; for (let i = 0; i < V.length; i++) W[i] = V[i]; shown.revision = (shown.revision || 0) + 1; } }
       if (r.rain) r.rain((typeof performance !== "undefined" ? performance.now() : 0) / 1000);
       // The driver's whole-body turn at its hips, but for lying and sitting, which the new rig poses itself.
       if (lounge) { tilt.quaternion[0] = tilt.quaternion[1] = tilt.quaternion[2] = 0; tilt.quaternion[3] = 1; } else qset(tilt.quaternion, dq.hips);
@@ -330,12 +356,22 @@
           // as a local turn under the new bone's parent, from the rig's root down
           worldOf(bone.parent, r, qp); qinv(qc, qp); qmul(qa, qc, qb);
           qlerp(bone.quaternion, bone.quaternion, qa, retargetK);
-          if (lower && r[lower]) qlerp(r[lower].quaternion, r[lower].quaternion, rest[lower + "Local"], retargetK); } }
-      // Anything a scene hung on a driver part goes to its socket, and the sockets follow their driver parts.
+          if (lower && r[lower]) qlerp(r[lower].quaternion, r[lower].quaternion, rest[lower + "Local"], retargetK); }
+        // and each fist brought to where the driver's hand is, the elbow bending to reach it
+        updateWorld(tilt, IDENT); reach(r.armR, r.foreR, dparts.armR, retargetK); reach(r.armL, r.foreL, dparts.armL, retargetK); }
+      // Anything a scene hung on a driver part goes to its socket, and the sockets follow their driver parts; the hands'
+      // (`handR`, `handL`) follow the drawn fists instead, carrying the driver's hand onto the fist's middle.
       for (const name of SOCKETS) { const p = dparts[name]; if (!p) continue; const C = p.children;
         for (let i = C.length - 1; i >= 0; i--) { const c = C[i]; if (own.has(c)) continue; removeChild(p, c); addChild(socket(name), c); } }
-      for (const name in sockets) { const p = dparts[name], s = sockets[name]; if (!p) continue; const W = p.world;
-        qset(s.quaternion, dq[name]); s.position.x = W[12]; s.position.y = W[13]; s.position.z = W[14]; }
+      let fresh = false;
+      for (const name in sockets) { const hand = HANDS[name], p = dparts[hand || name], s = sockets[name]; if (!p) continue; const W = p.world;
+        if (!hand) { qset(s.quaternion, dq[name]); s.position.x = W[12]; s.position.y = W[13]; s.position.z = W[14]; continue; }
+        if (!fresh) { updateWorld(tilt, IDENT); fresh = true; }
+        const F = (hand === "armR" ? r.foreR : r.foreL).world, b = BL.scene.boundsOf(p.geometry);
+        qmat(qa, F); qmul(s.quaternion, qa, restOf(rig.s)[hand === "armR" ? "foreRWorldInv" : "foreLWorldInv"]);
+        qrot(PT, s.quaternion, b.center[0], b.min[1] + HAND_UP, b.center[2]);
+        BL.math.mat4.transformPoint(HAND, F, FIST[0], FIST[1], FIST[2]);
+        s.position.x = HAND[0] - PT[0]; s.position.y = HAND[1] - PT[1]; s.position.z = HAND[2] - PT[2]; }
       // And the driver in the world, for scenes that read its parts.
       updateWorld(droot, parentWorld); TIME.sync += now() - ts;
     };
@@ -350,7 +386,16 @@
         if (r.chestGeo) set.add(r.chestGeo); if (r.chestWeld) set.add(r.chestWeld); if (r.weldGeos) for (const g of r.weldGeos) if (g) set.add(g); } };
     const dispose = () => { if (root.parent) removeChild(root.parent, root); root.beforeWorld = null; };
     show(state.form || "ape"); TIME.attach += now() - t0;
-    return { root, sync, socket, notePosed, liveGeometry, dispose, get rig() { return rig && rig.r; }, get retarget() { return retargetK; } };
+    // The drawn part a driver part stands for (`drawn("head")` is the head a nameplate or an eye is measured on), the
+    // fist's middle in the world (`grip("armL", out)`, once the world is up to date), a rig's nodes by driver part, the
+    // driver part a drawn node stands for, and `onRig(root)`, told of each rig as it is made (the glyph form's later).
+    const drawn = (name) => rig.r[DRAWN[name] || name] || null;
+    const grip = (side, out) => BL.math.mat4.transformPoint(out, side === "armR" ? rig.r.foreR.world : rig.r.foreL.world, FIST[0], FIST[1], FIST[2]);
+    return { root, sync, socket, notePosed, liveGeometry, dispose, drawn, grip, get rig() { return rig && rig.r; }, get retarget() { return retargetK; },
+      get rigs() { return Object.values(rigs).map((e) => e.r.root); },
+      region: (name) => rig.regions[name] || null, regionOf: (node) => { for (const f in rigs) { const reg = rigs[f].regionOf.get(node); if (reg) return reg; } return null; },
+      regionsOf: (root) => { for (const f in rigs) if (rigs[f].r.root === root) return rigs[f].regions; return null; },
+      set onRig(fn) { onRig = fn; } };
   };
   const CHAIN = [];
   // The haul over a top (sync): its parts' ends and the legs' swing back down the wall, degrees, and how far the body
@@ -364,12 +409,47 @@
     v[0] = x + qw * tx + qy * tz - qz * ty; v[1] = y + qw * ty + qz * tx - qx * tz; v[2] = z + qw * tz + qx * ty - qy * tx; return v; };
   // A fist's lowest in the world, as the body stands now: the middle of the fist (the new forearm's frame, as
   // dress.js holds things in it) less its half-height, carried up through the rig's nodes, the body's size and turn.
-  const FIST = [0, -0.66, -0.03], FIST_HALF = 0.08;
+  const FIST_HALF = 0.08;
   const fistY = (r, id, tilt, droot) => { const n0 = r[id]; if (!n0) return -Infinity; FP[0] = FIST[0]; FP[1] = FIST[1]; FP[2] = FIST[2];
     for (let n = n0; n; n = n.parent) { FP[0] *= n.scale.x; FP[1] *= n.scale.y; FP[2] *= n.scale.z; if (n.quaternion) rotate(FP, n.quaternion);
       FP[0] += n.position.x; FP[1] += n.position.y; FP[2] += n.position.z; if (n === r.root) break; }
     FP[0] *= K; FP[1] *= K; FP[2] *= K; rotate(FP, tilt.quaternion);
     return droot.position.y + (droot.scale.y || 1) * (tilt.position.y + FP[1]) - FIST_HALF; };
+  // A swapped mesh (the chest's weld, the belly's) keeps whatever look is painted over it: a geometry painted on (the NPC
+  // ghost's twin) carries `restyle`, which gives the same look of the next one.
+  const swap = (node, src) => { const g = node.geometry; node.geometry = g && g !== src && g.restyle ? g.restyle(src) : src; };
+  // Every node of a rig by the driver part it stands for (`head`, `torso`, `armR`, `armL`, `legR`, `legL`), for looks
+  // laid on a driver part (burns, highlights, hit regions): each with what hangs under it.
+  const regionsOf = (r) => { const names = new Map(); for (const k in r) { const v = r[k]; if (v && v !== r.root && Array.isArray(v.children) && v.position) names.set(v, k); }
+    const regions = { head: [], torso: [], armR: [], armL: [], legR: [], legL: [] }, regionOf = new Map();
+    (function w(n, reg) { const k = names.get(n); if (k && REGION[k]) reg = REGION[k]; regionOf.set(n, reg); regions[reg].push(n); for (const c of n.children) w(c, reg); })(r.root, "torso");
+    return { regions, regionOf }; };
+  // Scratch for the reach and the arm sockets.
+  const HAND = new Float32Array(3), PT = new Float32Array(3), RV = [0, 0, 0];
+  const qd = [0, 0, 0, 1], qA = [0, 0, 0, 1], qF = [0, 0, 0, 1], qT = [0, 0, 0, 1], qi = [0, 0, 0, 1], qL = [0, 0, 0, 1], qs = [0, 0, 0, 1];
+  // An arm brought to the driver's hand, by `k`: the forearm bent about the elbow until the fist is as far from the
+  // shoulder as the hand, keeping the bend's plane, then the whole arm swung about the shoulder onto it. Every world
+  // matrix is in the body root's frame (the driver's parts' too), up to date for the arm's own pose.
+  const reach = (A, F, dpart, k) => { if (!A || !F || !dpart || !dpart.geometry) return;
+    const M4 = BL.math.mat4, b = BL.scene.boundsOf(dpart.geometry), Aw = A.world, Fw = F.world;
+    M4.transformPoint(HAND, dpart.world, b.center[0], b.min[1] + HAND_UP, b.center[2]);
+    M4.transformPoint(PT, Fw, FIST[0], FIST[1], FIST[2]);
+    const sx = Aw[12], sy = Aw[13], sz = Aw[14], ex = Fw[12], ey = Fw[13], ez = Fw[14];
+    const ux = sx - ex, uy = sy - ey, uz = sz - ez, vx = PT[0] - ex, vy = PT[1] - ey, vz = PT[2] - ez;
+    const tx = HAND[0] - sx, ty = HAND[1] - sy, tz = HAND[2] - sz, L1 = Math.hypot(ux, uy, uz), L2 = Math.hypot(vx, vy, vz);
+    if (L1 < 1e-6 || L2 < 1e-6) return;
+    const d = Math.max(Math.abs(L1 - L2) + 0.01, Math.min(L1 + L2 - 0.01, Math.hypot(tx, ty, tz)));
+    const c0 = Math.max(-1, Math.min(1, (ux * vx + uy * vy + uz * vz) / (L1 * L2))), c1 = Math.max(-1, Math.min(1, (L1 * L1 + L2 * L2 - d * d) / (2 * L1 * L2)));
+    // the bend's axis (u x v turns u toward v, so turning v about it opens the elbow); straight, the forearm's own x
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, nl = Math.hypot(nx, ny, nz);
+    if (nl < 1e-6) { nx = Fw[0]; ny = Fw[1]; nz = Fw[2]; nl = Math.hypot(nx, ny, nz) || 1; }
+    qaxis(qd, nx / nl, ny / nl, nz / nl, Math.acos(c1) - Math.acos(c0));
+    qmat(qA, Aw); qmat(qF, Fw); qmul(qT, qd, qF); qinv(qi, qA); qmul(qL, qi, qT);
+    qlerp(F.quaternion, F.quaternion, qL, k);
+    qrot(RV, qd, vx, vy, vz);
+    qarc(qs, RV[0] - ux, RV[1] - uy, RV[2] - uz, tx, ty, tz); qmul(qT, qs, qA);
+    qmat(qF, A.parent.world); qinv(qi, qF); qmul(qL, qi, qT);
+    qlerp(A.quaternion, A.quaternion, qL, k); };
   // A rig's rest for the retarget, once a form: each driven bone's turn in the rig at the standing pose (when the driver's
   // bones hang straight in its body), and each lower part's own local turn there.
   const restOf = (s) => { if (s.rest) return s.rest; const r = s.r, saved = IN.t, rest = {};
@@ -378,7 +458,7 @@
     const local = (node) => { const i = s.nodes.indexOf(node), k = i * FIELDS; return [buf[k], buf[k + 1], buf[k + 2], buf[k + 3]]; };
     const world = (node) => { const out = [0, 0, 0, 1]; const chain = []; for (let n = node; n && n !== r.root; n = n.parent) chain.push(n);
       for (let i = chain.length - 1; i >= 0; i--) qmul(out, out, local(chain[i])); return out; };
-    for (const [, nn, lower] of LIMBS) { if (r[nn]) rest[nn] = world(r[nn]); if (lower && r[lower]) rest[lower + "Local"] = local(r[lower]); }
+    for (const [, nn, lower] of LIMBS) { if (r[nn]) rest[nn] = world(r[nn]); if (lower && r[lower]) { rest[lower + "Local"] = local(r[lower]); rest[lower + "WorldInv"] = qinv([0, 0, 0, 1], world(r[lower])); } }
     return s.rest = rest; };
   BL.clankerBody = { on, attach, K, stats: () => ({ time: { ...TIME }, forms: Object.fromEntries(Object.entries(samplers).map(([f, s]) => [f, { samples: s.cache.size, made: s.made }])) }) };
 })();

@@ -34698,7 +34698,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
     e.climb.active = e.jump.active = e.fire.burning = e.fire.rolling = false; e.root.visible = true;
     e.gorilla.poseManaged(2, 7, e.root.position.y, 0, e.heading, 0, false, false, "", e.motion);
     BL.scene.updateWorld(BL.scenes.hub.root); B.headquarters.solids.props.sync();
-    const originalHeadHidden = !!e.gorilla.parts.head.cameraHidden, originalOogaHeadHidden = !!e.owner.parts.head.cameraHidden, near = B.camera.near;
+    const originalHeadHidden = !!e.gorilla.visualHead.cameraHidden, originalOogaHeadHidden = !!e.owner.parts.head.cameraHidden, near = B.camera.near;
     reticle.dataset.sight = reticle.dataset.close = reticle.dataset.occluded = "true";
     reticle.dataset.hit = "object"; reticle.style.left = "31px"; reticle.style.top = "47px"; reticle.style.setProperty("--reticle-hit", "1");
     const entryEye = { x: 19, y: e.root.position.y + 15, z: 18 };
@@ -34760,7 +34760,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
         focused: P.focused, locked: document.pointerLockElement === canvas, tabConsumed: tab.defaultPrevented,
         nativeCursor: !document.body.classList.contains("carry-cursor-active") && !document.body.classList.contains("aim-cursor-focused"),
         visible: getComputedStyle(reticle).visibility, stroke: getComputedStyle(reticle.querySelector("svg")).stroke,
-        headHidden: !!g().gorilla.parts.head.cameraHidden, mix: camera.orthoMix, cutaway: B.renderOpts.birdsEyeCutaway,
+        headHidden: !!g().gorilla.visualHead.cameraHidden, mix: camera.orthoMix, cutaway: B.renderOpts.birdsEyeCutaway,
         outlined: B.headquarters.cameraCover.outlined, objectLines: B.headquarters.sightGuides.objectCount,
         hudView: button.dataset.view, hudCombat: button.dataset.combat,
         side: (camera.target.x - p.x) * Math.cos(orbit.yaw) - (camera.target.z - p.z) * Math.sin(orbit.yaw),
@@ -35013,7 +35013,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
       // Letting go is teardown's alone now (a scene leaving, an account change): it still clears everything.
       const last = g();
       P.release();
-      const released = { active: P.active, controlled: last.controlled, headHidden: !!last.gorilla.parts.head.cameraHidden,
+      const released = { active: P.active, controlled: last.controlled, headHidden: !!last.gorilla.visualHead.cameraHidden,
         hidden: reticle.hidden, target: reticle.dataset.target, hit: reticle.dataset.hit,
         positionCleared: !reticle.style.left && !reticle.style.top, near: B.camera.near,
         eyeDelta: Math.hypot(B.camera.position.x - eye.x, B.camera.position.y - eye.y, B.camera.position.z - eye.z),
@@ -35082,7 +35082,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
             const reversing = B.pilot.cameraHandoff.active;
             reversal = handoff(B, P, () => tap("t"), () => P.possess(e));
             reversed = reversing && reversal.smooth && !!g() && P.view === view && !P.combat
-              && !!g().gorilla.parts.head.cameraHidden && !!e.owner.parts.head.cameraHidden === originalOogaHeadHidden;
+              && !!g().gorilla.visualHead.cameraHidden && !!e.owner.parts.head.cameraHidden === originalOogaHeadHidden;
           }
           let cursorFreed = true, nativeToOoga = true, nativeToGorilla = true;
           if (combat) {
@@ -35092,7 +35092,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
           }
           const oogaBlend = handoff(B, B.pilot, () => tap("t"));
           const toOoga = !!drivenOf(B, e.owner) && B.pilot.mode === view && B.pilot.aiming === combat;
-          if (reversal) reversed &&= !!e.gorilla.parts.head.cameraHidden === originalHeadHidden;
+          if (reversal) reversed &&= !!e.gorilla.visualHead.cameraHidden === originalHeadHidden;
           if (combat) {
             nativeToOoga = nativeCursor();
             tap("t"); P.update(2);
@@ -35105,7 +35105,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
         BL.net.state.me = null; tap("t");
         const signedOutKeepsBody = !!drivenOf(B, e.owner) && !P.active;
         B.pilot.release(true);
-        const headsRestored = !!e.gorilla.parts.head.cameraHidden === originalHeadHidden && !!e.owner.parts.head.cameraHidden === originalOogaHeadHidden;
+        const headsRestored = !!e.gorilla.visualHead.cameraHidden === originalHeadHidden && !!e.owner.parts.head.cameraHidden === originalOogaHeadHidden;
         pair = { retook, companion, grabKeepsBody, repeatKeepsBody, returned, samePositions, reversed, headsRestored, signedOutKeepsBody };
       } finally { B.pilot.release(true); P.release(); BL.net.state.me = account; BL.net.state.backend = backend; }
       const retakes = [], accountAfter = BL.net.state.me, backendAfter = BL.net.state.backend;

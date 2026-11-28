@@ -515,15 +515,15 @@
     on(window, "keyup", onKeyUp, true);
     // Follow the actual stance while keeping the aim above head and shoulders.
     const shoulderHeight = () => {
-      const head = player.gorilla.parts.head, bounds = BL.scene.boundsOf(head.geometry);
       BL.scene.updateWorld(player.root, player.root.parent.world);
+      const head = player.gorilla.visualHead, bounds = BL.scene.boundsOf(head.geometry);
       const m = head.world;
       const top = m[1] * bounds.center[0] + m[5] * bounds.center[1] + m[9] * bounds.center[2] + m[13]
         + Math.abs(m[1]) * (bounds.max[0] - bounds.min[0]) * 0.5
         + Math.abs(m[5]) * (bounds.max[1] - bounds.min[1]) * 0.5
         + Math.abs(m[9]) * (bounds.max[2] - bounds.min[2]) * 0.5;
       return Math.max(top + 0.16,
-        Math.max(player.gorilla.parts.armR.world[13], player.gorilla.parts.armL.world[13]) + 0.38);
+        Math.max(player.gorilla.drawn("armR").world[13], player.gorilla.drawn("armL").world[13]) + 0.38);
     };
     const updateTarget = () => {
       const p = player.root.position;
@@ -534,8 +534,8 @@
         target.x += Math.sin(player.heading) * ahead; target.y = p.y + 0.15;
         target.z += Math.cos(player.heading) * ahead;
       } else if (view === "first-person") {
-        const head = player.gorilla.parts.head, bounds = BL.scene.boundsOf(head.geometry);
         BL.scene.updateWorld(player.root, player.root.parent.world);
+        const head = player.gorilla.visualHead, bounds = BL.scene.boundsOf(head.geometry);
         mat4.transformPoint(eye, head.world, bounds.center[0], bounds.min[1] + (bounds.max[1] - bounds.min[1]) * 0.65, bounds.max[2] + 0.01);
         target.x = eye[0]; target.y = eye[1]; target.z = eye[2];
       } else if (view === "shoulder") target.y = shoulderHeight();
@@ -849,7 +849,7 @@
     // within its reach, and shown the moment neither holds, wherever the view went.
     const settleHead = () => {
       if (!player) { restoreHead(); return; }
-      const head = player.gorilla.parts.head;
+      const head = player.gorilla.visualHead;
       if (headHidden && headHidden !== head) restoreHead();
       let hide = pilot.judgeHead(player.root, head, !!headHidden);
       if (!hide && view === "first-person" && orbit.dist < 0.65) {

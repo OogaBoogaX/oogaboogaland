@@ -28,6 +28,8 @@
         geometry = BL.ghostStyle(source);
         // HALLOWEEN: a straight round keeps pointing along its line.
         if (source.straight) geometry.straight = true;
+        // A gorilla's drawn body swaps some meshes as it moves (clanker-body.js); a swap keeps the look through this.
+        geometry.restyle = twin;
         twins.set(source, geometry); sources.set(geometry, source);
       }
       if (marking) used.add(geometry);

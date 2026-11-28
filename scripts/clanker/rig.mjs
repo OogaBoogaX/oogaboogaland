@@ -2499,8 +2499,9 @@ writeFileSync(process.env.OUT || HERE + "../../src/js/clanker-model.js", `// Gen
     if (LR || CT) r.hips.quaternion = world.hips;
     // (b201: on a chair (act.seat) the body sits SEATUP blocks over where its feet would rest it, on the chair's seat)
     // (b201: on a chair (act.seat) the body sits SEATUP blocks over where its feet would rest it, on the chair's seat, and
-    // SEATFWD blocks forward, its seat over the chair's)
-    if (act && act.seat) { low -= act.seat * ${+(process.env.SEATUP ?? 3.2)}; r.root.position.z = act.seat * ${+(process.env.SEATFWD ?? 10)} * CELL; } else if (r.root.position.z) r.root.position.z = 0;
+    // SEATFWD blocks forward (0: the game's body already stands its hips over its root, clanker-body.js, which puts the seat
+    // over the chair))
+    if (act && act.seat) { low -= act.seat * ${+(process.env.SEATUP ?? 3.2)}; r.root.position.z = act.seat * ${+(process.env.SEATFWD ?? 0)} * CELL; } else if (r.root.position.z) r.root.position.z = 0;
     r.root.position.y = -low * CELL; r.heel = heel;
     // (b138: with the body held level on all fours, each fist that would go under the ground folds its elbow until it
     // rests on it: a few passes, each adding the depth times GIVEGAIN degrees a block)

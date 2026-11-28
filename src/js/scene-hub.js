@@ -4055,11 +4055,8 @@
   };
   const riderSupportAllowed = (node) => clankerPartOwners.get(node) === grabSupportEntry;
   const clankerGripAt = (entry) => {
-    const arm = entry.gorilla.parts.armL;
     BL.scene.updateWorld(entry.root, entry.root.parent.world);
-    const bounds = BL.scene.boundsOf(arm.geometry);
-    BL.math.mat4.transformPoint(dragHand, arm.world, bounds.center[0], bounds.min[1] + 0.08, bounds.center[2]);
-    return dragHand;
+    return entry.gorilla.grip("armL", dragHand);
   };
   const rageCaptive = (entry) => entry?.capture?.cave || null;
   const rageCaptureEligible = (entry, cave) => !!entry && !!cave && uprightCharacter(cave)
@@ -7815,8 +7812,8 @@
   const combatCameraAnchor = (player, gorilla) => {
     const p = player.root.position, a = COMBAT_CAMERA_HEAD, feet = p.y - (gorilla ? 0 : player.baseY);
     if (gorilla) {
-      const head = player.gorilla.parts.head, bounds = BL.scene.boundsOf(head.geometry);
       updateWorld(player.root, player.root.parent.world);
+      const head = player.gorilla.visualHead, bounds = BL.scene.boundsOf(head.geometry);
       math.mat4.transformPoint(COMBAT_CAMERA_POINT, head.world, bounds.center[0], bounds.min[1] + (bounds.max[1] - bounds.min[1]) * 0.65, bounds.max[2] + 0.01);
       setVec(a, COMBAT_CAMERA_POINT[0], COMBAT_CAMERA_POINT[1], COMBAT_CAMERA_POINT[2]);
     } else setVec(a, p.x, feet + player.headOffset * 0.95 + player.viewLift, p.z);
@@ -9393,7 +9390,7 @@
   };
   const guideEyeAt = (player, out) => {
     if (player.gorilla) {
-      const head = player.gorilla.parts.head, bounds = BL.scene.boundsOf(head.geometry);
+      const head = player.gorilla.visualHead, bounds = BL.scene.boundsOf(head.geometry);
       // The overlay follows rendering, so this is the current posed head,
       // including the low walking stance and a head resting on its pillow.
       math.mat4.transformPoint(GUIDE_EYE, head.world, bounds.center[0], bounds.min[1] + (bounds.max[1] - bounds.min[1]) * 0.65, bounds.max[2] + 0.01);
@@ -11026,15 +11023,19 @@
       }
       const heat = f.burning ? f.heat * (f.rolling ? Math.max(0, 1 - f.rollTime / 3) : 1) : 0;
       for (let j = 0; j < parts.length; j++) { parts[j].ember = 0; parts[j].scorch = 0; }
+      const body = entry.gorilla.body;
       for (let j = 0; j < CLANKER_BURN_PARTS.length; j++) {
-        const part = entry.gorilla.parts[CLANKER_BURN_PARTS[j]];
-        part.ember = spread[j] * heat;
-        part.scorch = spread[j] * f.soot;
+        const name = CLANKER_BURN_PARTS[j], part = body ? entry.gorilla.socket(name) : entry.gorilla.parts[name];
+        const ember = spread[j] * heat, scorch = spread[j] * f.soot;
+        // The drawn body's parts that stand for this one, and what hangs on it.
+        const drawn = body ? body.region(name) : null;
+        if (drawn) for (let k = 0; k < drawn.length; k++) { drawn[k].ember = ember; drawn[k].scorch = scorch; }
+        else { part.ember = ember; part.scorch = scorch; }
         for (let k = 0; k < part.children.length; k++) {
           const child = part.children[k];
           if (child === entry.gorilla.labFlask || !child.geometry) continue;
-          child.ember = part.ember;
-          child.scorch = part.scorch;
+          child.ember = ember;
+          child.scorch = scorch;
         }
       }
       if (f.burning || f.soot > 0.7) {
@@ -11050,7 +11051,7 @@
               pick -= spread[j];
               if (pick < 0) { index = j; break; }
             }
-            const part = entry.gorilla.parts[CLANKER_BURN_PARTS[index]], b = BL.scene.boundsOf(part.geometry), m = part.world;
+            const part = entry.gorilla.drawn(CLANKER_BURN_PARTS[index]), b = BL.scene.boundsOf(part.geometry), m = part.world;
             const x = lerp(b.min[0], b.max[0], Math.random()), y = lerp(b.min[1], b.max[1], Math.random() * spread[index]), z = b.max[2];
             fx.spawnParticle(f.burning ? CLANKER_FIRE[i % 2] : CLANKER_SMOKE,
               m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14],
@@ -11089,16 +11090,19 @@
       left: math.mat4.create(), right: math.mat4.create(), hit: false,
       serial: -1, lastHitAt: -Infinity, powerSpent: false
     };
+    const body = entry.gorilla.body;
     const visit = (node, region = "body") => {
-      if (node === entry.gorilla.parts.head) region = "head";
-      if (node.geometry) {
+      if (node === entry.gorilla.parts.head || body && body.regionOf(node) === "head") region = "head";
+      if (node.geometry || body && body.regionOf(node)) {
         entry.renderParts.push(node);
-        addTarget(node, { kind: "clanker", entry, cave: entry, priority: 2, weaponType: "enemy", hitRegion: region });
+        if (node.geometry) addTarget(node, { kind: "clanker", entry, cave: entry, priority: 2, weaponType: "enemy", hitRegion: region });
         clankerPartOwners.set(node, entry);
       }
       for (const child of node.children) visit(child, region);
     };
     visit(entry.root);
+    // The drawn body's later rigs (its glyph form, made the first time it shows) are targets and parts too.
+    if (body) body.onRig = (rig) => visit(rig);
     clankerMeshes.add(entry.root);
   };
   const CLANKER_TALL_OBSTACLE = {

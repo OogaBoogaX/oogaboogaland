@@ -210,7 +210,10 @@
     addChild(root, agent.root);
     // One owner for every part, so a tap on any limb is a tap on the Agent
     const agentOwner = { kind: "agent", agent };
-    for (const name of ["torso", "head", "armR", "armL", "legR", "legL"]) addProp(agent.parts[name], agentOwner);
+    // The drawn body's meshes (its glyph form's too, as it is first made), or without it the rig's own parts.
+    const props = (node) => { if (node.geometry) addProp(node, agentOwner); for (const child of node.children) props(child); };
+    if (agent.body) { for (const rig of agent.body.rigs) props(rig); agent.body.onRig = props; }
+    else for (const name of ["torso", "head", "armR", "armL", "legR", "legL"]) addProp(agent.parts[name], agentOwner);
     return agent;
   };
   const agentTripleClick = () => {

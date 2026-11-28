@@ -192,7 +192,7 @@
   };
   const renderFaceIcon = (canvas, cave, gorilla = null, px = ICON_PX, unlit = false) => {
     const renderer = iconRendererMod.createRenderer(canvas, { width: px, height: px, transparent: true, unlit });
-    const source = gorilla ? gorilla.parts.head : cave.parts.head, geometry = gorilla ? source.geometry : cave.portraitHead;
+    const source = gorilla ? gorilla.visualHead || gorilla.parts.head : cave.parts.head, geometry = gorilla ? source.geometry : cave.portraitHead;
     const root = createNode(), head = copyPortraitNode(source, source, geometry);
     const bounds = boundsOf(geometry), fit = (!gorilla && cave.traits.gasMask ? 0.68 : 0.78) / Math.max(bounds.radius, 0.05);
     head.position.x = head.position.y = head.position.z = 0;
@@ -619,7 +619,7 @@
       if (el.mode.hidden === showMode) el.mode.hidden = !showMode;
       const showDestinations = visible && destinationNames.length > 0;
       if (el.modeDestination.hidden === showDestinations) el.modeDestination.hidden = !showDestinations;
-      const geometry = selected ? (gorilla ? gorilla.parts.head.geometry : cave.parts.head.geometry) : null;
+      const geometry = selected ? (gorilla ? (gorilla.visualHead || gorilla.parts.head).geometry : cave.parts.head.geometry) : null;
       if (selected && (identityChanged || geometry !== modeGeometry)) {
         renderFaceIcon(el.modeFace, cave, gorilla);
         el.mode.dataset.portrait = "face-crop";

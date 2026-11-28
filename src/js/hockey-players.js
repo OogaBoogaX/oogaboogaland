@@ -187,7 +187,7 @@
           }
           const cave = t.ids[side] ? human(t.ids[side]) : bots[i]?.rig;
           if (!cave || !cave.root.visible) continue;
-          left = top = Infinity; right = -Infinity; head(cave.parts.head, project);
+          left = top = Infinity; right = -Infinity; head(cave.visualHead || cave.parts.head, project);
           if (!Number.isFinite(top)) continue;
           const x = Math.round((left + right) / 2), y = Math.round(top) - 34;
           ctx.strokeText(score, x, y); ctx.fillText(score, x, y);
