@@ -263,3 +263,53 @@ Run `npm run test:unit`, then `CHROME_ARCH=arm64 node scripts/profile-covered-mo
 git add src/js/object-guides.js src/js/scene-hub.js test/run.mjs
 git commit -m "Gate detailed boundary preparation with coarse bounds"
 ```
+
+
+---
+
+### Task 6: Share one BVH between object guides and character visibility
+
+**Files:**
+- Modify: `src/js/character-visibility.js` public export only
+- Modify: `src/js/object-guides.js:338-355`
+- Modify: `test/run.mjs` existing BVH/object-guide fixtures
+
+**Interfaces:**
+- Consumes: `BL.characterVisibility.meshOf(geometry)`, returning `{vertices,indices,order,nodes}` with nodes `{box,from,to,left,right}`.
+- Produces: object-guide typed columns `bounds,left,right,starts,counts,indices,triangleIndices` adapted from that same mesh without rebuilding triangles or BVHs.
+
+- [ ] **Step 1: Add shared-identity and exact-ray regressions**
+
+In the existing object-guide fixture, assert that the descriptor's `indices` and `triangleIndices` are the exact same typed arrays as `BL.characterVisibility.meshOf(geometry).order` and `.indices`. Exercise the existing brute-force visibility and boundary oracles unchanged. Before implementation this identity assertion must fail.
+
+- [ ] **Step 2: Verify the regression fails**
+
+Run `npm run test:unit`; expected FAIL on BVH identity, while independent ray results may already agree.
+
+- [ ] **Step 3: Implement the adapter**
+
+Export `meshOf` beside `create` on `BL.characterVisibility`. In `object-guides.geometryOf`, keep all existing edge/sample/cover-face construction, but replace its independent triangle BVH build with:
+
+```js
+const shared = BL.characterVisibility.meshOf(geometry), count = shared.indices.length / 3;
+const bounds = [], left = [], right = [], starts = [], counts = [];
+for (const node of shared.nodes) {
+  bounds.push(...node.box);
+  left.push(node.left); right.push(node.right);
+  starts.push(node.from); counts.push(node.to - node.from);
+}
+const indices = shared.order, triangleIndices = shared.indices;
+```
+
+Use those arrays in the existing `cached` descriptor, retaining `coverFaces`, `triangleCoverFaces`, samples, lines, and `sphere`. The character builder's leaf size may differ from the old object-guide builder; correctness is judged by the existing exact oracles, not node-for-node layout.
+
+- [ ] **Step 4: Verify green and profile**
+
+Run `npm run test:unit`, then `CHROME_ARCH=arm64 node scripts/profile-covered-movement.mjs --cpu`. Require all exact oracles to pass and a material reduction in on-demand `build` samples without a frame-time regression. Otherwise revert and record why sharing is unsuitable.
+
+- [ ] **Step 5: Commit if both gates pass**
+
+```bash
+git add src/js/character-visibility.js src/js/object-guides.js test/run.mjs
+git commit -m "Share visibility BVH construction between query systems"
+```
