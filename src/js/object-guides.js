@@ -190,7 +190,7 @@
         const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2], vx = v[c] - v[a], vy = v[c + 1] - v[a + 1], vz = v[c + 2] - v[a + 2];
         let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
         const length = Math.hypot(nx, ny, nz);
-        if (length < EPS) continue;
+        if (length < EPS) { triangleCoverFaces.fill(-1, count, count + face.i.length - 2); count += face.i.length - 2; continue; }
         nx /= length; ny /= length; nz /= length;
         let convex = true;
         for (let j = 0; j < face.i.length && convex; j++) {

@@ -1248,7 +1248,14 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     const bounded = guides.entryRecords().length === 3 && guides.stats.boundaryBuilds > 0 && guides.entryRecords().filter(entry => entry.visible).every(entry => entry.boundaryNodes.length >= entry.geometry.counts.length * 4);
     const storage = ${compact} ? bytes === count * 12 && guides.stats.triangleBytes === bytes : true;
     const demand = ${deferred} ? initiallyUnbaked && guides.stats.triangles > 0 : true;
-    guides.dispose();
+    const coverGeometry = { verts: [0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 2, 1, 0, 3, 1, 0, 3, 0, 0], faces: [
+      { i: [0, 1, 2], color: [1, 1, 1] }, { i: [0, 1, 3], color: [1, 1, 1] }, { i: [3, 4, 5, 6], color: [1, 1, 1] }
+    ], lines: [] }, coverRoot = S.createNode({ geometry: coverGeometry });
+    const coverGuides = B.objectGuides.create({ roots: [coverRoot], crew: { cavemen: new Map() } }), coverDescriptor = coverGuides.geometryRecords().get(coverGeometry);
+    const laterCover = coverDescriptor.coverFaces.indexOf(2), aligned = coverDescriptor.triangleCoverFaces;
+    const coverAlignment = aligned.length === 4 && laterCover >= 0 && aligned[0] === coverDescriptor.coverFaces.indexOf(0)
+      && aligned[1] === -1 && aligned[2] === laterCover && aligned[3] === laterCover;
+    coverGuides.dispose(); guides.dispose();
     // Registries share immutable CPU bakes, but refresh and disposal own only their scene entries.
     const shared = M.box({ w: 1, h: 1, d: 1, color: "#fff" }), firstRoot = S.createNode(), secondRoot = S.createNode();
     const firstNode = S.createNode({ geometry: shared, position: { x: 0, y: 0, z: 8 } }), removed = S.createNode({ geometry: shared, position: { x: 2, y: 0, z: 8 } }), secondNode = S.createNode({ geometry: shared, position: { x: 0, y: 0, z: 8 } });
@@ -1403,7 +1410,7 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
       delayed.refresh(); lazyContours &&= delayed.contourScratchClear();
       eager.dispose(); delayed.dispose(); a.dispose(); b.dispose();
     }
-    return { lazyContours, exact, unchanged, bounded, tightBacking, storage, demand, sharedIdentity, nearBounds, nearCases, boundaryHits, gridQueries, deferredExact, deferredGrids, deferredFewer, eagerBoundaryBuilds, deferredBoundaryBuilds, deferredRepeatBoundaryBuilds, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
+    return { lazyContours, exact, unchanged, bounded, tightBacking, storage, demand, sharedIdentity, coverAlignment, nearBounds, nearCases, boundaryHits, gridQueries, deferredExact, deferredGrids, deferredFewer, eagerBoundaryBuilds, deferredBoundaryBuilds, deferredRepeatBoundaryBuilds, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
   })()`, context);
 };
 // Count descriptor users rather than timings, so the first-demand cost scales with actual users.
@@ -52025,6 +52032,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   const storage = await visibilityStorageProof({ compact: true, deferred: true });
   record("visibility storage: exact source doubles and signed zero survive queries, demand and bounded screen BVHs", storage.lazyContours && storage.exact && storage.unchanged && storage.bounded && storage.tightBacking && storage.storage && storage.demand && storage.nearBounds && storage.nearCases > 100 && storage.boundaryHits > 0 && storage.disposed && storage.values > 600, JSON.stringify(storage));
   record("visibility shared BVH: object-guide columns reuse the character mesh's exact typed arrays", storage.sharedIdentity, JSON.stringify(storage));
+  record("visibility cover faces: degenerate fans keep placeholders and later valid triangles retain their cover mapping", storage.coverAlignment, JSON.stringify(storage));
   record("visibility deferred boundaries: coherent queries retain owner grids and match the eager oracle with less preparation", storage.deferredExact && storage.deferredGrids && storage.deferredFewer && storage.deferredRepeatBoundaryBuilds === 0, JSON.stringify(storage));
   record("visibility lifecycle: shared bakes survive removal and replacement; hidden transforms, clips and geometry restore exact queries", storage.lifecycle, JSON.stringify(storage));
   const demandUsers = await visibilityDemandUsersProof();
