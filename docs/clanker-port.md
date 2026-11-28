@@ -95,6 +95,87 @@ Still to do: the seated suit legs, and every hat, prop and vest in each pose its
   - **Streams:** the glyph streams measure the posed body (sleep-beam.js).
 - **Status beams** (npc-status-beams.js), **rage** (clanker-rage.js:688), **reveal** (the lab scene), **swim** (`motion.swim`, a dog paddle).
 
+## Coverage: everything the current gorillas do
+
+A survey of every `BL.agent` call site and every movement the old rig's `poseManaged` takes (`motion.*`). Each item needs a counterpart on the new rig before this is ready for review. Items the steps below already name are left out.
+
+### Grabbing, dragging and throwing an Ooga
+- **The driven gorilla** (`clanker-play.js`: hold the grab key near an Ooga, drag it, release to drop, the throw meter; `grabOoga`, `releaseOoga`, `motion.dragging`, `motion.throwProgress`).
+- **Block Frenzy's gorillas** drag an Ooga by the feet to the edge and throw it off (`block-sim.js`, `scene-block.js`). The dragged Ooga is posed from the gorilla's hand (scene-block.js:1899), so it must read the new fist.
+- **Banana rage** grabs and throws (`clanker-rage.js`).
+- **The new rig needs:**
+  - a grip: ankles held in the fist, through its hole;
+  - a drag gait: walking with the arm back and the Ooga trailing;
+  - a throw: a wind-up and release that `throwProgress` drives.
+
+### Actions and poses the new rig has no form for yet
+- **Ground pound:** a charge, a slam and the triple-tap combo (`pound`, `poundCharge`, `BL.agent.POUND`, `TRIPLE`).
+- **Other moves:** chest beat (`beat`), the rage smash (`smash`, `cancelSmash`) and the poke reaction (`poke`).
+- **Eating:** feeding with the mouth opening (`feed`, `mouth`, `openingSettle`).
+- **Grooming** (`groom`, `groomPhase`, `groomSide`) and **rolling** (`roll`, `rollAngle`, `rollSide`).
+- **Jumping:** take-off and landing phases (`takeoff`, `landing`).
+- **Swimming:** the dog paddle (`swim`).
+- **Sitting and lying:**
+  - sitting with a look and a shift (`sitLook`, `sitShift`), and the B.C.A. desk seat with its swivel chair;
+  - lying in the 20 HQ and basement beds, and the sleep beam's landing check against a bed's pose.
+- **Lab work:** bench reach, squeeze, die roll, run-in, the touch screen (`labWork`, `labReach`, `labSqueeze`, `labRoll`, `labRunIn`, `labTouchArm`) and `workExit`.
+- **Office work:** typing, the abacus and looking about (`officeWork`, `officeHands`, `officeLook`, `officePhase`).
+- **Gaits:** the knuckle, upright and run gaits mapped onto `pose`'s gait (`walkGait`, `walkPhase`, `BL.agent.GAITS`), and `supportOffset`.
+
+### Scenes that pose the old parts directly
+These write rotations on `chest` and `parts.*` themselves, so each needs rewriting for the new rig's quaternions and extra parts:
+- **Ooga Arcade:**
+  - the staff's job poses (sweep, stock, claw, scoop, hand, dust, fan, rail and others, scene-arcade.js);
+  - the Rally repair mechanic;
+  - the air hockey bot's mallet reach (hockey-players.js).
+- **Lightning Jet Hangar:**
+  - the room-fire operator with the extinguisher (hangar-room-fire.js);
+  - the meltdown worker pounding the Jet and brawling (hangar-meltdown.js);
+  - the crew seated at desks, and the loft-window figures clipped to their windows.
+- **Ember Den, the poker room:**
+  - the dealer dealing (poker-models.js);
+  - the walking and seated crowd (poker-crowd.js, unmanaged, `update`);
+  - the table players (poker-games.js) and the terrace server (poker-terrace.js).
+- **The Agent:**
+  - the EntropyLab scene's summoned Agent and its reveal (scene-lab.js);
+  - Right Shift+A Agent play (director.js, `BL.agent.createPlay`, `agentView`, `agentControls`, `agentHandoff`).
+- **Ghost hunt brutes:** the glyph form, the leap and slam, and a hit target per part (ghost-game.js).
+- **Cameos:** the unmanaged glyph-form gorillas in Orbit, Drop and Rally.
+
+### Other players and the network
+- **Remote players:** other players see a driven gorilla from `pose.g = [flags, speed, stride, climb, side, swim]` (worker/src/protocol.js, room.js, remote-players.js).
+  - The new climbing (grab, lean past a lip, the haul over a top) and dragging or throwing need fields there.
+  - That is a protocol change, so the Worker has to deploy first, and the change must stay readable by older pages.
+- **npc-sync:** the host's frames carry the gorillas' plan and hit events (`npc-sync.js`), and followers replay them on their own rigs.
+- **island-world:** the island-world server GameHost is planned to run the gorillas next; its collision sizes have to match the new body.
+
+### Looks and effects layered on the rig
+- **Ghost look:** the NPC ghost look's tinted twins, one per source geometry (`npc-ghosts.js`). The new rig swaps meshes: 41 welds, the live sleeve, glyph-rain layers. Each needs a twin, or a material path.
+- **Tints and highlight:** burn tints, the hover highlight and breathing (`chest.scale.y`, which the chest's weld swap affects).
+- **Beams:** sleep and status beams measure the posed body (sleep-beam.js, npc-status-beams.js); the rage glyph look too.
+- **Reflections:** lower-tier reflections keep only `characterPart` geometry, so every new mesh, worn piece and wrapped outfit must be marked.
+- **Visibility:** the outline through walls and the camera-cover outline of a hidden walker need the driven gorilla's meshes. In first person the head hides, with the near fade.
+- **Picking and targets:** hovering, tooltips and shots use the gorilla's parts as targets (`bodyTarget`, the head as the eye, the left hand as a grip).
+- **Companion styles:** the hub gives each Ooga's companion its style (remote-players.js:115, clankers.js:2152). Check what that sets on the old rig.
+- **Sounds:** sounds timed to the old animation (the pound's impact and others) must follow the new rig's timings.
+
+### Size, collision and behaviour
+- **Sizes and envelopes:** `BL.agent.footprint` and its compact profiles, `bodyRadius`, `bodyHeight`, `bodyMinY`, `bodyHull`, `envelope`, `climbCenter`, `climbPoseClear`, `walkPoseClear`, `labPoseClear` and `walkSupportAt`, all from the new body.
+- **Climbing rules change:** the old gorillas climb more than vertical walls. The new rules (large vertical walls only, the W and S haul, climbing down a walk-off, jumping a run-off) change the routes NPC gorillas plan: bed paths, cliffs, the mirror cave's entry (the "mirror clanker" check).
+- **Outfits in motion:**
+  - The wrapped vests, ties, badges and visor are fitted to the standing torso, but the chest moves on the belly. Each needs splitting between the chest and the belly, or following the weld.
+  - The lab coat and suit clips at the veils must cover the welded torso, the live sleeve and the wrapped pieces.
+
+### Performance
+- **Pose:** 250 to 350 µs a call, allocating. It needs to be allocation-free and about ten times faster, and must work with the hub's settled-pose rate (`animationInterval`).
+- **Faces:** 8,848 visible faces a gorilla. Distance detail levels are needed for the hub's twenty or so, and the Canvas 2D fallback has to cope.
+- **Glyph form:** the code rain re-picks a frame each tick.
+- **Build slices:** the first build of a form has a 79 ms slice (one body part) to split.
+
+### Tests and docs
+- **The suite:** about 600 suite lines touch gorillas: bed landings, passive support, the mirror clanker, lab flask pickup, gorilla controls. They must pass on the new rig without loosening any check.
+- **AGENTS.md:** update every row that describes the old rig (agent.js, clankers.js, clanker-play.js, sleep-beam.js, npc-status-beams.js, npc-ghosts.js and the scenes above).
+
 ## The interface the rest of the game uses
 
 These come from `BL.agent` and each rig: `root`, `parts.{head, torso, armR, armL, legR, legL}`, `hips`, `chest`, and these functions and fields:
