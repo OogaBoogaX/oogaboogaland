@@ -294,9 +294,9 @@
     g.castShadow=false;g.twoSided=true;
     g.imageSurface={rect:[-.5,-.5,1,1],blend:"add",soft:true,cutout:true,fallback:()=>canvas};return g;
   });
-  const outfit=(room,r,lite)=>{
-    const add=(geometry,x=0,y=0,z=0)=>{
-      const n=S.createNode({geometry,position:{x,y,z}});S.addChild(room,n);return n;
+  const outfit=(room,r,lite,windowLight)=>{
+    const add=(geometry,x=0,y=0,z=0,parent=room)=>{
+      const n=S.createNode({geometry,position:{x,y,z}});S.addChild(parent,n);return n;
     };
     const a=r.w/2-.37,b=bayWidth(r)/2,rise=9.04,spring=r.h-rise-.23;
     const column=[],vault=[];
@@ -365,13 +365,13 @@
       }
       for(const s of [-1,1]){
         // From the entrance, read the left wall toward the hearth and the right wall back.
-        const glass=add(glazing(half),s*(a+.185),0,z);
+        const glass=add(glazing(half),s*(a+.185),0,z,windowLight);
         glass.rotation.y=-s*Math.PI/2;
         windows[s<0?j:2*bayCount-1-j]=glass;
-        const ornament=add(flame,s*logoX,logoY,z);
+        const ornament=add(flame,s*logoX,logoY,z,windowLight);
         ornament.rotation.y=-s*Math.PI/2;
         ornament.scale.x=ornament.scale.y=ornament.scale.z=logoScale;
-        const glow=add(crestGlow(),s*(logoX-.085),logoY,z);
+        const glow=add(crestGlow(),s*(logoX-.085),logoY,z,windowLight);
         glow.scale.x=glow.scale.y=3*logoScale;glow.rotation.y=ornament.rotation.y;glow.sightHidden=true;
       }
     }

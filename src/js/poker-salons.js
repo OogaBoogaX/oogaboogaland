@@ -240,7 +240,7 @@
   const build = (lite, vaultDoor, den, onLoungeReady) => {
     let glyph, hearth, heirlooms, entry, wind, landscapes, exterior;
     const glasswork={};
-    const chairs=[],windowLight=S.createNode();
+    const chairs=[],windowLight=S.createNode({visible:false});
     windowLight.lights=new Float32Array(2*BL.pokerCathedral.bayCount*8);
     const root = S.createNode(), solids = [], targets = [], rooms = [];
     // The bookcase hides a whole second scene. Build it once on approach, or immediately for a room spawn.
@@ -253,7 +253,7 @@
       if(!g.lawn)g.lawn=yield* BL.pokerLoungeGrass.buildSteps(r,lite,g.solids,slice);
       const meadow=BL.pokerLoungeGrass.install(room,r,g.lawn,lite);
       yield* BL.buildTasks.pause(slice);
-      const {windows,rect}=BL.pokerLoungeStone.outfit(room,r,lite);
+      const {windows,rect}=BL.pokerLoungeStone.outfit(room,r,lite,windowLight);
       glasswork.windows=windows;
       wind=(time,calm,tier)=>{meadow(time,calm,tier);heirlooms.sway(time,calm);};
       // Crop the bookmatched marble at the edges of each wall.
@@ -284,7 +284,7 @@
       hearth=fireplace(room,r,lite);
       const {table,toys,blanket}=BL.pokerLoungeStone.firesideTable(room,r);
       yield* BL.buildTasks.pause(slice);
-      heirlooms=yield* BL.pokerLoungeHeirlooms.createSteps(room,r,lite,g.solids,blanket,slice);
+      heirlooms=yield* BL.pokerLoungeHeirlooms.createSteps(room,r,lite,g.solids,blanket,slice,windowLight);
       const occluders=chairs.concat(table,toys,heirlooms.treeOccluders,heirlooms.items.filter(prop=>prop.footprint).map(prop=>prop.node));
       landscapes=BL.pokerTimelineGlass.install(room,r,windowLight,windows,rect,occluders,lite,g.lawn.ground,lighting.signal,glasswork);
       gather(room);
@@ -380,7 +380,7 @@
     const show = id => {
       refreshGate();
       if((id===0 || shelf.opened) && !BL.offlineLoungePack && !lounge.ready)lounge.step(Infinity);
-      windowLight.visible=id===0;
+      if(id!==0)windowLight.visible=false;
       facade.visible=id<=0;
       rooms[2].visible = roofScope.root.visible = id !== 1;
       for (let i = 0; i < 2; i++) rooms[i].visible = i === id || i === 0 && id < 0 && shelf.opened;
@@ -389,7 +389,7 @@
     // Seen through the open bookcase, the lounge occupies only the angular opening
     // between the jambs. Adjacent casino windows continue to look out onto the ocean.
     const surfaces=new Set(),left=new Float32Array(4),right=new Float32Array(4),lintel=new Float32Array(4);
-    const gather=n=>{if(n.geometry)surfaces.add(n.geometry);for(const child of n.children)gather(child);};
+    const gather=n=>{if(n===windowLight)return;if(n.geometry)surfaces.add(n.geometry);for(const child of n.children)gather(child);};
     const approach=(position,id)=>{
       if(heirlooms || id!==-1 || BL.offlineLoungePack)return;
       const door=DOORS[0],dx=position.x-door[2],dz=position.z-door[3];
@@ -397,13 +397,17 @@
     };
     let clipped=false;
     const portalView=(eye,id)=>{
-      if(rooms[0].visible)heirlooms?.view(eye);
-      const door=DOORS[0], dz=eye.z-door[3], outside=id<0 && shelf.opened && dz>.001;
+      const door=DOORS[0], dz=eye.z-door[3], outside=id<=0 && shelf.opened && dz>.001;
+      // The room and its glass have different sight lines. An orbit camera can still be
+      // in the casino after the Ooga crosses the sill. Texture loads affect only the children.
+      const r=ROOMS[0],inside=Math.abs(eye.x-r.x)<=r.w/2 && Math.abs(eye.z-r.z)<=r.d/2 && eye.y>=r.y && eye.y<=r.y+r.h;
+      windowLight.visible=id===0 && inside;
+      if(windowLight.visible)heirlooms?.view(eye);
       if(outside!==clipped){
         for(const g of surfaces){g.clipSlab=outside?left:null;g.clipSlab2=outside?right:null;g.clipPlane=outside?lintel:null;}
         clipped=outside;
       }
-      if(!outside)return;
+      if(!outside)return inside;
       const jamb=(plane,side)=>{
         const x=door[2]+side*BL.pokerLoungeDoor.half, dx=x-eye.x, scale=side/(128*Math.hypot(dx,dz));
         plane[0]=dz*scale;plane[2]=dx*scale;
@@ -412,12 +416,13 @@
       jamb(left,-1);jamb(right,1);
       const slope=(BL.pokerLoungeDoor.crown(0)-eye.y)/dz;
       lintel[1]=1;lintel[2]=slope;lintel[3]=-eye.y-slope*eye.z;
+      return inside;
     };
     show(-1);
     const dispose=()=>{lighting.abort();lounge.reset();heirlooms?.dispose();};
     const exteriorView=()=>exterior ??= BL.pokerLoungeExterior.build(ROOMS[0],glasswork,entry,lite);
     return { root, solids, targets, chairs, car, liftPose, approach, dispose, exteriorView, get hearth(){return hearth;}, get wind(){return wind;},
-      get heirlooms(){return heirlooms;}, get landscapes(){return landscapes;}, get entry(){return entry;}, get projector(){return windowLight.projector;}, windowLights:windowLight.lights, portalView, glyph, shelf, roofScope, roofWins, sighting, refreshGate, show };
+      get heirlooms(){return heirlooms;}, get landscapes(){return landscapes;}, get entry(){return entry;}, get projector(){return windowLight.visible?windowLight.projector:null;}, windowLights:windowLight.lights, portalView, glyph, shelf, roofScope, roofWins, sighting, refreshGate, show };
   };
   // Test the whole walking segment against furniture expanded by the visitor's body radius.
   const clear = (set, r, ax, az, bx, bz, radius, bounds = true) => {

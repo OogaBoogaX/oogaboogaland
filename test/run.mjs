@@ -37765,10 +37765,22 @@ scene("poker", { label: "salons", query: "character=portlandhodl", steps: [{ nam
     const approached=Math.hypot(feet.x-book.x,feet.z-book.z)<2.1;
     const shelf=P.salons.shelf,startZ=feet.z;
     D.pilot.action();route.push(P.salon);
-    let turning=false,separated=true;
+    const rose=BL.pokerCathedral.roseGlass(), pane=P.salons.landscapes[0].node;
+    const drawnGlass=()=>{
+      let seen=false;
+      BL.scene.traverseVisible(P.salons.root,n=>{
+        if(n===pane || n.geometry===rose || n.geometry?.imageSurface?.glazing)seen=true;
+      });
+      return seen;
+    };
+    const exterior=[P.room.glazing.walkway,P.terrace.root];
+    const exteriorVisible=on=>exterior.every(group=>group.children.length>0 && group.visible===on);
+    let railsOutside=exteriorVisible(true);
+    let turning=false,separated=true,hiddenFromCasino=!drawnGlass();
     for(let i=0;i<120 && !shelf.ready;i++){
       __ooga.advance(1/60,1/60);
       turning ||= shelf.hinge.rotation.y>0 && !shelf.ready && P.salon===-1;
+      hiddenFromCasino &&= !drawnGlass();
       separated &&= shelf.clear(feet.x,feet.z,feet.x,feet.z,D.pilot.player.bodyRadius);
     }
     const dodged=separated && feet.z>startZ+.20;
@@ -37815,13 +37827,21 @@ scene("poker", { label: "salons", query: "character=portlandhodl", steps: [{ nam
     const collected=visiblePass && !P.salons.targets[6].visible;
     __ooga.advance(1.1,1/30);
     const shut=()=>!shelf.opened && shelf.hinge.rotation.y===0 && P.salons.entry.gap===0;
-    const closedInside=shut();
+    const closedInside=shut(), glassInside=drawnGlass();
+    let railsHidden=exteriorVisible(false);
+    // Even after the body crosses, an orbit camera on the bar side cannot see the painted panels.
+    P.salons.portalView({x:entry.x,y:2,z:entry.z+1},P.salon);
+    const cameraOutside=!drawnGlass();
+    P.salons.portalView(D.camera.position,P.salon);
     D.pilot.navigate({position:{x:entry.x,y:0,z:entry.z-4},yaw:0,pitch:.17,dist:2});
     D.pilot.action();__ooga.advance(1.2,1/30);
     const reopened=shelf.ready && P.salons.entry.gap>2;
+    railsHidden &&= exteriorVisible(false);
     walk("s","KeyS",4);route.push(P.salon);
     __ooga.advance(1.2,1/30);
     const closedOutside=shut();
+    railsOutside &&= exteriorVisible(true);
+    hiddenFromCasino &&= !drawnGlass();
     // Back in the hall, the fixed lamps from slot 13 on are the hall's again, not the lounge's shrine lights.
     const M=BL.pokerModels,fixed=[...M.CLUB_LIGHTS,...M.COLONNADE,...M.LOUNGE_LIGHTS,...M.GAME_LIGHTS],L=BL.scenes.poker.renderOpts.lights;
     const hallLamps=P.salon===-1 && fixed.every((v,i)=>Math.abs(L[13*8+i]-v)<1e-4);
@@ -37863,7 +37883,7 @@ scene("poker", { label: "salons", query: "character=portlandhodl", steps: [{ nam
     __ooga.advance(.15,1/30);
     const sky=wide && donor && hole.radius===41.6 && hole.planetRadius===hole.radius/100 && accretion.time>beforeFlow;
     lens.querySelector('[aria-label="Leave telescope"]').click();
-    return { route, rides, closedInside, reopened, closedOutside, hallLamps, sky, reveal, dodged, reached, sitting, seatedPick, pickInfo, stood, leftChaise, rightChaise, leftByWalking, collected, saved: BL.game.create().state.emberDen, icyCore, hidden: !glyph.parent.visible, scope:roofOpened && opened && moved && zoomed && centered && !lens.open && D.camera.fov>fov };
+    return { route, rides, closedInside, reopened, closedOutside, railsHidden, railsOutside, hiddenFromCasino, glassInside, cameraOutside, hallLamps, sky, reveal, dodged, reached, sitting, seatedPick, pickInfo, stood, leftChaise, rightChaise, leftByWalking, collected, saved: BL.game.create().state.emberDen, icyCore, hidden: !glyph.parent.visible, scope:roofOpened && opened && moved && zoomed && centered && !lens.open && D.camera.fov>fov };
   })()`);
   const obstructed=await b.evaluate(`(()=>{
     const d=BL.pokerSalons.DOORS[0],shelf=BL.pokerSpeakeasy.shelf(true,d[2],d[3]),r=.48;
@@ -37887,6 +37907,8 @@ scene("poker", { label: "salons", query: "character=portlandhodl", steps: [{ nam
   })()`);
   record("poker lounge: recline from the left seat or the right chaise foot, stand by action or movement",route.leftChaise && route.rightChaise && route.stood && route.leftByWalking);
   record("poker lounge: the fireside sectional lets the seated player select the turntable",route.seatedPick,JSON.stringify(route.pickInfo));
+  record("poker bookcase: the waterfront walkway and terrace railings stay outside the chapel and return on exit",route.railsHidden && route.railsOutside,JSON.stringify(route));
+  record("poker bookcase: stained glass stays out of the casino view throughout the swing and appears inside the chapel",route.hiddenFromCasino && route.glassInside && route.cameraOutside,JSON.stringify(route));
   record("poker bookcase: both leaves close after entry, reopen from inside and close after exit", route.closedInside && route.reopened && route.closedOutside, JSON.stringify(route));
   record("poker lounge: walking back to the hall puts the bar, cage, fountain and colonnade lamps back", route.hallLamps);
   record("poker bookcase: a blocked dodge holds the moving leaf clear and the swing resumes once there is room",obstructed);

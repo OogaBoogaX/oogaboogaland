@@ -8,7 +8,7 @@
   const add=(parent,geometry,x=0,y=0,z=0)=>{
     const n=S.createNode({geometry,position:{x,y,z}});S.addChild(parent,n);return n;
   };
-  const createSteps=function* (room,r,lite,solids,blanket,slice){
+  const createSteps=function* (room,r,lite,solids,blanket,slice,windowLight){
     const items=[],record=BL.pokerFiresideRecord.create();
     const item=(title,geometry,x,y,z,open,footprint=null)=>{
       const node=add(room,geometry,x,y,z);
@@ -24,7 +24,7 @@
       ...[.11,.15,.19].map(rad=>M.moved(M.torus(rad,.0025,"#746f6c",.42,24,3),0,.018,0))),-.098,.169,0);
     const arm=add(deck,M.merge(disc(0,0,0,.029,.065,brass),M.beam(0,.065,0,-.03,.05,.25,.017,brass,.48),
       box(-.03,.043,.25,.034,.026,.04,ink)),.18,.168,-.16);
-    const kit={item,add,box,disc,walnut,brass,paper,ink};
+    const kit={item,add,box,disc,walnut,brass,paper,ink,windowLight};
     const updateBridge=BL.pokerLoungeFamily.install(room,r,kit,items,blanket);
     const updateCats=BL.pokerLoungeCats.create(room,r);
     const updateBird=BL.pokerLoungeHummingbird.create(room,r);
