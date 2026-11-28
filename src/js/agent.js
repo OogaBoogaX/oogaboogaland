@@ -1077,7 +1077,7 @@
         else state.idleFor = 2;
       }
       pose(dt);
-      if (newBody) newBody.notePosed();
+      if (newBody) newBody.notePosed(dt);
       const ground = groundAt(root.position.x, root.position.z);
       if (state.air) {
         state.vy -= GRAVITY * dt;
@@ -1321,7 +1321,7 @@
       if (state.supportOffset) {
         hips.position.y += state.supportOffset / scale; measureBody(false);
       }
-      if (newBody) newBody.notePosed();
+      if (newBody) newBody.notePosed(Math.max(0, dt));
     };
     const pointToWorld = (matrix, x, y, z, out) => {
       const px = (matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12]) * scale;
@@ -1899,6 +1899,6 @@
     };
     return { start, stop, update, get active() { return !!agent; }, get agent() { return agent; }, get startedAt() { return startedAt; } };
   };
-  BL.agent = { create, createPlay, labCoatClip, suitClip, SUIT_COLORS: SUITS.length, GAITS, TRIPLE_MS, QUAD, HUNCH, BODY, POUND_TIME, MANAGED_BEAT_TIME, MANAGED_MOTION_RADIUS, MANAGED_MOTION_HEIGHT, MANAGED_SMASH_RADIUS, LAB_RADIUS, LAB_HEIGHT, LAB_CENTERS, LAB_IDLE_RADIUS, LAB_WALK_RADIUS, LAB_SQUEEZE_RADIUS, footprint, torso,
+  BL.agent = { create, createPlay, labCoatClip, suitClip, SUIT_COLORS: SUITS.length, GAITS, TRIPLE_MS, QUAD, HUNCH, BODY, POUND_TIME, MANAGED_BEAT_TIME, BEAT_TIME, CHEW_TIME, SWIM, MANAGED_MOTION_RADIUS, MANAGED_MOTION_HEIGHT, MANAGED_SMASH_RADIUS, LAB_RADIUS, LAB_HEIGHT, LAB_CENTERS, LAB_IDLE_RADIUS, LAB_WALK_RADIUS, LAB_SQUEEZE_RADIUS, footprint, torso,
     labFlaskGeometry: (variant) => variant === undefined ? geometries().labFlask : labFlaskVariants(variant) };
 })();

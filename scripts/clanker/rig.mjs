@@ -2120,6 +2120,7 @@ writeFileSync(process.env.OUT || HERE + "../../src/js/clanker-model.js", `// Gen
   // swing, plus its bend while lifted; the body is lifted onto the lowest knuckle or foot as before, so it bobs.
   const qx = (deg) => { const a = (deg * Math.PI) / 360; return [Math.sin(a), 0, 0, Math.cos(a)]; };
   const qz = (deg) => { const a = (deg * Math.PI) / 360; return [0, 0, Math.sin(a), Math.cos(a)]; };
+  const qy = (deg) => { const a = (deg * Math.PI) / 360; return [0, Math.sin(a), 0, Math.cos(a)]; };
   const BOBMEAN = new Map();
   // b75: act, optional: { air (0-1, the tuck while airborne), land (0-1, the crouch just after landing), climb (0-1),
   // climbPhase (radians) }. Each adds to the limbs' turns (degrees about x: an upper part's own swing, and its lower
@@ -2127,7 +2128,7 @@ writeFileSync(process.env.OUT || HERE + "../../src/js/clanker-model.js", `// Gen
   const STILL = new Map();
   const pose = (r, t, g, act) => {
     if (typeof t !== "number") t = 0;
-    const swing = {}, bend = {}, roll = {}, heel = {}, heelSw = {};
+    const swing = {}, bend = {}, roll = {}, yaw = {}, heel = {}, heelSw = {};
     // the torso is always one piece (b133): the welded back in every pose, climbing too, its live sleeve following the
     // chest and belly wherever they turn
     const welded = !!r.weldGeos, weldK = welded ? Math.round(Math.max(0, Math.min(1, t)) * (r.weldGeos.length - 1)) : -1, weldF = welded && t < 0.5, weldS = welded && t >= 0.5;
@@ -2274,6 +2275,46 @@ writeFileSync(process.env.OUT || HERE + "../../src/js/clanker-model.js", `// Gen
         // (b134: the head held steady while climbing: no nod or turn with the stroke)
         roll.chest = (roll.chest || 0) - cl * 4 * mv * Math.sin(cp);
       }
+      // b201: the in-game gorillas' own moves (agent.js), each a weight 0-1 laid over whatever stance t gives, in degrees as
+      // above (and yaw, about the vertical, positive turning a part's front toward the body's left); act.phase (radians)
+      // runs the periodic ones and act.side (1 the left arm, -1 the right) picks the hand of the one-handed ones. A forearm
+      // takes its upper arm's roll and yaw too, so the elbow stays a hinge. Ground pound (act.pound: both fists straight up
+      // overhead; act.slam: the fists swung down onto the ground ahead, the back folding into the blow), chest beat
+      // (act.beat: elbows out, fists drumming on the chest in turn with the phase), drag and throw (act.drag: the left arm
+      // straight back and low, holding what it drags; act.throw 0-1 swings it up and over the shoulder), swim (act.swim: a
+      // dog paddle, arms stroking in turn under a level body, the legs kicking behind), grooming (act.groom: seated, the
+      // side's hand reaching out to the neighbour's back, picking with the phase), seated rest (act.rest: seated, each hand
+      // lifting a little in turn with the phase), eating (act.eat:
+      // the right fist to the mouth, the head nodding with the phase), a desk seat (act.seat: on a chair, thighs level and
+      // shins hanging; act.type: forearms ahead at the desk, act.tap tapping in turn with the phase; act.abacus: the side's
+      // hand sliding beads with the phase), lab bench work (act.reach: both arms ahead at bench height, act.tap as at the
+      // desk; act.touch: the side's arm reaching up ahead; act.carry: the left arm straight at act.carryArm degrees, as the
+      // driver holds a lab item) and a roll (act.roll: tucked into a ball)
+      { const pd = act.pound || 0, sm = act.slam || 0, bt = act.beat || 0, dg = act.drag || 0, sw = act.swim || 0, gr = act.groom || 0, ea = act.eat || 0;
+        const st = act.seat || 0, ty = act.type || 0, ab = act.abacus || 0, rc = act.reach || 0, to = act.touch || 0, ca = act.carry || 0, ro = act.roll || 0, rs = act.rest || 0;
+        if (pd || sm || bt || dg || sw || gr || ea || st || ty || ab || rc || to || ca || ro || rs) {
+          const ph = act.phase || 0, hand = act.side < 0 ? "R" : "L", tap = act.tap || 0;
+          const turn = (map, limb, lower, deg) => { if (!deg) return; map[limb] = (map[limb] || 0) + deg; map[lower] = (map[lower] || 0) + deg; };
+          for (const s of ["R", "L"]) { const arm = "arm" + s, fore = "fore" + s, leg = "leg" + s, shin = "shin" + s, inS = s === "R" ? 1 : -1, off = s === "R" ? 0 : Math.PI;
+            if (pd) { add(arm, fore, pd * ${+(process.env.POUNDARM ?? -158)}, pd * ${+(process.env.POUNDFORE ?? -12)}); turn(roll, arm, fore, pd * inS * ${+(process.env.POUNDIN ?? -8)}); }
+            if (sm) { add(arm, fore, sm * ${+(process.env.SLAMARM ?? -55)}, sm * ${+(process.env.SLAMFORE ?? -8)}); add(leg, shin, sm * ${+(process.env.SLAMTHIGH ?? -18)}, sm * ${+(process.env.SLAMKNEE ?? 30)}); }
+            if (bt) { const k = 0.5 + 0.5 * Math.sin(ph + off); add(arm, fore, bt * (${+(process.env.BEATARM ?? -60)} + ${+(process.env.BEATSW ?? -10)} * k), bt * (${+(process.env.BEATFORE ?? -30)} + ${+(process.env.BEATBEND ?? 0)} * k)); turn(roll, arm, fore, -bt * inS * ${+(process.env.BEATOUT ?? 50)}); yaw[fore] = (yaw[fore] || 0) + bt * inS * (${+(process.env.BEATYAW ?? 45)} + ${+(process.env.BEATHIT ?? 30)} * k); }
+            if (sw) { const p = Math.sin(ph + off); add(arm, fore, sw * (${+(process.env.SWIMARM ?? -30)} + ${+(process.env.SWIMSTROKE ?? -24)} * p), sw * ${+(process.env.SWIMFORE ?? -30)} * (0.5 + 0.5 * Math.cos(ph + off))); add(leg, shin, sw * (${+(process.env.SWIMLEG ?? 35)} + ${+(process.env.SWIMKICK ?? 12)} * p), sw * ${+(process.env.SWIMKNEE ?? 15)}); }
+            if (gr && s === hand) { add(arm, fore, gr * ${+(process.env.GROOMARM ?? -55)}, gr * (${+(process.env.GROOMFORE ?? -20)} + ${+(process.env.GROOMPICK ?? 10)} * Math.sin(ph))); turn(roll, arm, fore, -gr * inS * ${+(process.env.GROOMOUT ?? 50)}); turn(yaw, arm, fore, -gr * inS * ${+(process.env.GROOMYAW ?? 20)}); }
+            if (rs) { const k = Math.max(0, Math.sin(ph + off)); add(arm, fore, rs * k * ${+(process.env.RESTLIFT ?? -9)}, rs * k * ${+(process.env.RESTBEND ?? -6)}); }
+            if (ea && s === "R") { add(arm, fore, ea * ${+(process.env.EATARM ?? -50)}, ea * ${+(process.env.EATFORE ?? -100)}); turn(yaw, arm, fore, ea * inS * ${+(process.env.EATYAW ?? 25)}); }
+            if (st) add(leg, shin, st * ${+(process.env.SEATTHIGH ?? -80)}, st * ${+(process.env.SEATKNEE ?? 80)});
+            if (ty || rc) { const k = ty + rc, w = Math.max(0, Math.sin(ph + off)) * tap; add(arm, fore, ty * ${+(process.env.TYPEARM ?? -60)} + rc * ${+(process.env.REACHARM ?? -45)}, ty * ${+(process.env.TYPEFORE ?? 0)} + rc * ${+(process.env.REACHFORE ?? -25)} + k * ${+(process.env.TAP ?? -6)} * w); turn(yaw, arm, fore, k * inS * ${+(process.env.TYPEYAW ?? 20)}); }
+            if (ab) { add(arm, fore, ab * ${+(process.env.ABARM ?? -62)}, ab * ${+(process.env.ABFORE ?? 0)}); turn(yaw, arm, fore, ab * inS * ${+(process.env.TYPEYAW ?? 20)} + (s === hand ? ab * ${+(process.env.ABSLIDE ?? 12)} * Math.sin(ph) : 0)); }
+            if (to && s === hand) add(arm, fore, to * (${+(process.env.TOUCHARM ?? -105)} + 4 * Math.sin(ph)), to * ${+(process.env.TOUCHFORE ?? -5)});
+            if (ro) { add(leg, shin, ro * ${+(process.env.ROLLTHIGH ?? -110)}, ro * ${+(process.env.ROLLKNEE ?? 120)}); add(arm, fore, ro * ${+(process.env.ROLLARM ?? -50)}, ro * ${+(process.env.ROLLFORE ?? -70)}); turn(roll, arm, fore, ro * inS * ${+(process.env.ROLLIN ?? 20)}); } }
+          // (drag and carry replace the left arm's own swing, gait and all, with a straight arm)
+          if (dg) { const u = Math.max(0, Math.min(1, act.throw || 0)), e = u * u * (3 - 2 * u), a = ${+(process.env.DRAGARM ?? 66)} + ${+(process.env.THROWARM ?? -166)} * e, a0 = swing.armL || 0, f0 = swing.foreL ?? a0;
+            swing.armL = a0 + (a - a0) * dg; swing.foreL = f0 + (a + ${+(process.env.DRAGFORE ?? -4)} - f0) * dg; turn(roll, "armL", "foreL", dg * (${+(process.env.DRAGROLL ?? 7)} + ${+(process.env.THROWROLL ?? -22)} * e)); turn(yaw, "armL", "foreL", dg * ${+(process.env.THROWYAW ?? -23)} * Math.sin(Math.PI * u)); }
+          if (ca) { const a = act.carryArm || 0, a0 = swing.armL || 0, f0 = swing.foreL ?? a0; swing.armL = a0 + (a - a0) * ca; swing.foreL = f0 + (a + ${+(process.env.CARRYFORE ?? -6)} - f0) * ca; }
+          swing.head = (swing.head || 0) - pd * ${+(process.env.POUNDLOOK ?? 14)} - bt * ${+(process.env.BEATLOOK ?? 8)} + ea * ${+(process.env.EATNOD ?? 8)} * (0.5 + 0.5 * Math.sin(ph)) + (ty + ab) * ${+(process.env.TYPELOOK ?? 12)} + rc * ${+(process.env.TYPELOOK ?? 12)} + ro * ${+(process.env.ROLLHEAD ?? 25)};
+          swing.chest = (swing.chest || 0) - pd * ${+(process.env.POUNDARCH ?? 6)} - bt * ${+(process.env.BEATPUFF ?? 6)} + sm * ${+(process.env.SLAMFOLD ?? 16)} + ro * ${+(process.env.ROLLCURL ?? 20)} + ty * ${+(process.env.TYPELEAN ?? 5)};
+          swing.abdomen = (swing.abdomen || 0) + sm * ${+(process.env.SLAMFOLD ?? 16)} * 0.5 + ro * ${+(process.env.ROLLCURL ?? 20)} + (ty + ab) * ${+(process.env.SEATLEAN ?? 0)}; } }
     }
     const base = { hips: [0, 0, 0, 1] }, world = { hips: g || (act && (act.climb || 0) > 0) ? r.hips.quaternion : [0, 0, 0, 1] }, at = { hips: [0, ${P0[1]}, ${P0[2]}] }, joint = { hips: [0, ${P0[1]}, ${P0[2]}] };
     // (b120: lying, every part's world turn rolled over by LR, the hips' too, so the body turns about the hip as one)
@@ -2307,6 +2348,7 @@ writeFileSync(process.env.OUT || HERE + "../../src/js/clanker-model.js", `// Gen
       if (id === "abdomen" && ${+(process.env.ABDTIP4 ?? 0)} && t < 1) w = qmul(qx(${+(process.env.ABDTIP4 ?? 0)} * (1 - Math.max(0, t))), w);
       if ((g || act || id === "head") && (swing[id] || bend[id])) w = qmul(qx((swing[id] || 0) + (bend[id] || 0)), w);
       if (roll[id]) w = qmul(qz(roll[id]), w);
+      if (yaw[id]) w = qmul(qy(yaw[id]), w);
       // b85: climbing, each forearm turned about its own length back from the standing twist and on by HANDTURN, so the
       // fist's knuckles face the sky and the rock rather than the side
       if (act && (act.climb || 0) > 0 && (id === "foreR" || id === "foreL")) {
@@ -2448,12 +2490,17 @@ writeFileSync(process.env.OUT || HERE + "../../src/js/clanker-model.js", `// Gen
       // as walking, and stops without popping up; it grows to the whole of it with the stride)
       low += (1 - restK) * hold4 * (${+(process.env.FEETREST4 ?? 0.12)} + (${+(process.env.FEETDOWN4 ?? 0.45)} - ${+(process.env.FEETREST4 ?? 0.12)}) * Math.min(1, (g.amp || 0) / 24));
     }
-    if (act && !(g && g.inner) && ((act.air || 0) > 0 || (act.climb || 0) > 0)) {
+    // (b201: swimming too, the body afloat at its stance's height while the limbs stroke under it)
+    if (act && !(g && g.inner) && ((act.air || 0) > 0 || (act.climb || 0) > 0 || (act.swim || 0) > 0)) {
       const key = t.toFixed(2); let s0 = STILL.get(key);
       if (s0 === undefined) { pose(r, t); s0 = r.rawLow; if (STILL.size > 256) STILL.clear(); STILL.set(key, s0); pose(r, t, g, { ...act, held: true }); }
-      if (!act.held) { const k = Math.min(1, Math.max(act.air || 0, act.climb || 0)); low = s0 + (low - s0) * (1 - k); }
+      if (!act.held) { const k = Math.min(1, Math.max(act.air || 0, act.climb || 0, act.swim || 0)); low = s0 + (low - s0) * (1 - k); }
     }
     if (LR || CT) r.hips.quaternion = world.hips;
+    // (b201: on a chair (act.seat) the body sits SEATUP blocks over where its feet would rest it, on the chair's seat)
+    // (b201: on a chair (act.seat) the body sits SEATUP blocks over where its feet would rest it, on the chair's seat, and
+    // SEATFWD blocks forward, its seat over the chair's)
+    if (act && act.seat) { low -= act.seat * ${+(process.env.SEATUP ?? 3.2)}; r.root.position.z = act.seat * ${+(process.env.SEATFWD ?? 10)} * CELL; } else if (r.root.position.z) r.root.position.z = 0;
     r.root.position.y = -low * CELL; r.heel = heel;
     // (b138: with the body held level on all fours, each fist that would go under the ground folds its elbow until it
     // rests on it: a few passes, each adding the depth times GIVEGAIN degrees a block)

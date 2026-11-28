@@ -6,9 +6,12 @@
 // - natively, from the new rig's own poses, sampled once and blended (`pose` is far too slow to run for every gorilla
 //   every frame): its stance from the driver's chest pitch, its walk or gallop from the driver's gait phase and speed,
 //   in the air, landing, climbing, sitting or lying from the driver's state;
-// - its head and limbs retargeted from the driver's joints whenever the driver does something the new rig has no pose
-//   for (a pound, a chest beat, a drag, lab or desk work, grooming, a roll, a swim, eating) or a scene has turned the
-//   driver's parts itself: each bone takes the driver bone's turn in the body's frame over the new bone's rest.
+//   and the driver's own moves (a pound, a chest beat, a drag and throw, a swim, grooming, seated rest, eating, a desk
+//   seat and its work, lab bench work, a roll) from the new rig's poses of them (b201 in scripts/clanker/rig.mjs), a
+//   change from one move to another eased over a fifth of a second;
+// - its head and limbs retargeted from the driver's joints whenever the driver does something the new rig still has no
+//   pose for (leaning back on its hands) or a scene has turned the driver's parts itself: each bone takes the driver
+//   bone's turn in the body's frame over the new bone's rest.
 // Whatever a scene hangs on a driver part is moved onto a socket that follows that part (`socket(name)`, explicitly).
 // `?clanker=0` keeps the old body.
 (() => {
@@ -42,7 +45,7 @@
   // Sampled poses, one table a form, made the first time each is asked for on a rig of the form's own off the scene. A
   // pose is, for every node under the rig's root in a fixed walk's order, its quaternion, position, scale and
   // visibility (11 floats), then whether the chest shows its weld and which torso weld shows, then the live sleeve's points.
-  const FIELDS = 11, PHASES = 24, TS = 20, LIMIT = 900;
+  const FIELDS = 11, PHASES = 24, TS = 20, AS = 12, LIMIT = 1600;
   const walk = (r) => { const out = []; (function w(n) { out.push(n); for (const c of n.children) w(c); })(r.root); return out; };
   const samplers = {};
   const sampler = (form) => { let s = samplers[form]; if (s) return s; const M = BL.clankerModel, r = M.rig(M.sets.B, form), nodes = walk(r);
@@ -58,26 +61,55 @@
     if (s.sleeve) out.set(r.sleeveLive.g.verts, k); return out; };
   // The inputs a native pose is sampled at, each on its own grid: t the stance (0 all fours, 1 standing) in TS steps,
   // phase the gait's in PHASES steps of a cycle, k how fast (0 still to 1 a full stride) and run in quarters, and the
-  // rest (air, land, climb, sit, lay) in quarters; climbing takes its own phase.
-  const IN = { t: 0, phase: 0, k: 0, run: 0, air: 0, land: 0, climb: 0, climbPhase: 0, sit: 0, lay: 0 };
+  // rest (air, land, climb, sit, lay) in quarters; climbing takes its own phase. And one of the driver's moves: its kind,
+  // its variant (sub: bit 0 the right hand, the rest the desk's or bench's work), and its amount u, on a grid of AS
+  // steps; a periodic move (`periodic`) takes the phase grid in place of the gait's, the gait standing still.
+  const IN = { t: 0, phase: 0, k: 0, run: 0, air: 0, land: 0, climb: 0, climbPhase: 0, sit: 0, lay: 0, kind: 0, sub: 0, u: 0, periodic: false };
   const q4 = (v) => Math.max(0, Math.min(4, Math.round(v * 4)));
-  const sample = (s, ti, pi) => { const ki = q4(IN.k), ri = q4(IN.run), ai = q4(IN.air), li = q4(IN.land), ci = q4(IN.climb), si = q4(IN.sit), yi = q4(IN.lay);
-    const moving = ki > 0 && ai === 0 && ci === 0 && si === 0 && yi === 0, climbing = ci > 0, p = moving || climbing ? pi % PHASES : 0;
-    const key = ((((((((ti * PHASES + p) * 5 + ki) * 5 + ri) * 5 + ai) * 5 + li) * 5 + ci) * 5 + si) * 5 + yi) * 2 + (climbing ? 1 : 0);
+  // The moves, and the rig's act fields each is sampled with (u its amount, ph its phase in radians). A smash runs one
+  // path through u: the fists rising overhead to a third of the way, struck down onto the ground to two thirds, and the
+  // body recovering from the blow to 1.
+  const K_SMASH = 1, K_TAP = 2, K_BEAT = 3, K_DRAG = 4, K_SWIM = 5, K_GROOM = 6, K_REST = 7, K_EAT = 8, K_OFFICE = 9, K_LAB = 10, K_ROLL = 11, KINDS = 12, SUBS = 8;
+  const W_TYPE = 1, W_ABACUS = 2, W_LOOK = 3, W_TOUCH = 2, W_CARRY = 3;
+  // a carried lab item's arm, its swing in degrees from straight down (negative ahead), over u
+  const CARRY0 = -130, CARRY1 = 20;
+  const fill = (act, kind, sub, u, ph) => { const work = sub >> 1; act.phase = ph; act.side = sub & 1 ? -1 : 1;
+    if (kind === K_SMASH) { if (u <= 1 / 3) act.pound = 3 * u; else if (u <= 2 / 3) { const s = 3 * u - 1; act.pound = 1 - s; act.slam = s * s * (3 - 2 * s); } else act.slam = 3 - 3 * u; }
+    else if (kind === K_TAP) act.pound = 0.6 * u;
+    else if (kind === K_BEAT) act.beat = u;
+    else if (kind === K_DRAG) { act.drag = 1; act.throw = u; }
+    else if (kind === K_SWIM) act.swim = u;
+    else if (kind === K_GROOM) act.groom = u;
+    else if (kind === K_REST) act.rest = u;
+    else if (kind === K_EAT) act.eat = u;
+    else if (kind === K_OFFICE) { const k = Math.max(0, Math.min(1, (u - 0.6) / 0.3)); act.seat = u;
+      if (work === W_TYPE || work === W_LOOK) { act.type = k; act.tap = work === W_TYPE ? 1 : 0; } else if (work === W_ABACUS) act.abacus = k; }
+    else if (kind === K_LAB) { if (work === W_TYPE) { act.reach = 1; act.tap = 1; } else if (work === W_TOUCH) act.touch = 1; else if (work === W_CARRY) { act.carry = 1; act.carryArm = CARRY0 + (CARRY1 - CARRY0) * u; } }
+    else if (kind === K_ROLL) act.roll = u;
+    return act; };
+  const sample = (s, ti, pi, ui) => { const ki = q4(IN.k), ri = q4(IN.run), ai = q4(IN.air), li = q4(IN.land), ci = q4(IN.climb), si = q4(IN.sit), yi = q4(IN.lay), kind = IN.kind, sub = kind ? IN.sub : 0, periodic = kind > 0 && IN.periodic;
+    const moving = ki > 0 && ai === 0 && ci === 0 && si === 0 && yi === 0, climbing = ci > 0, p = moving || climbing || periodic ? pi % PHASES : 0;
+    const key = ((((((((((((ti * PHASES + p) * 5 + ki) * 5 + ri) * 5 + ai) * 5 + li) * 5 + ci) * 5 + si) * 5 + yi) * 2 + (climbing ? 1 : 0)) * KINDS + kind) * SUBS + sub) * (AS + 1) + (kind ? ui : 0)) * 2 + (periodic ? 1 : 0);
     let out = s.cache.get(key); if (out) return out;
-    if (s.cache.size >= LIMIT) s.cache.clear();
+    // full: the older half goes (a Map keeps its keys in the order they came)
+    if (s.cache.size >= LIMIT) { let n = LIMIT >> 1; for (const old of s.cache.keys()) { s.cache.delete(old); if (--n <= 0) break; } }
     const ph = p / PHASES * Math.PI * 2, k = ki / 4;
     const gait = moving ? { phase: ph, amp: 24 * k, lift: 28 * k, sway: 3 * k, run: ri / 4 } : null;
-    BL.clankerModel.pose(s.r, ti / TS, gait, { air: ai / 4, land: li / 4, climb: ci / 4, climbPhase: climbing ? ph : 0, sit: si / 4, lay: yi / 4 });
+    const act = { air: ai / 4, land: li / 4, climb: ci / 4, climbPhase: climbing ? ph : 0, sit: si / 4, lay: yi / 4 };
+    if (kind) fill(act, kind, sub, ui / AS, periodic ? ph : 0);
+    BL.clankerModel.pose(s.r, ti / TS, gait, act);
     out = record(s, new Float32Array(s.size)); s.cache.set(key, out); s.made++; return out; };
-  // The pose at IN, blended between the samples either side in stance and phase, into `out`; the visibility flags and
-  // the chest's weld from the nearest sample.
+  // The pose at IN, blended between the samples either side in stance, phase and a move's amount, into `out`; the
+  // visibility flags and the chest's weld from the nearest sample.
   const blend = (s, out) => { const tf = Math.max(0, Math.min(1, IN.t)) * TS, t0 = Math.floor(tf), t1 = Math.min(TS, t0 + 1), wt = tf - t0;
-    const phased = IN.k > 0.125 || IN.climb > 0.125, pf = phased ? (((IN.climb > 0.125 ? IN.climbPhase : IN.phase) / (Math.PI * 2)) % 1 + 1) % 1 * PHASES : 0, p0 = Math.floor(pf), wp = pf - p0;
-    const a = sample(s, t0, p0), b = sample(s, t0, p0 + 1), c = sample(s, t1, p0), d = sample(s, t1, p0 + 1), n = s.size;
-    const near = wt < 0.5 ? (wp < 0.5 ? a : b) : (wp < 0.5 ? c : d);
-    const wa = (1 - wt) * (1 - wp), wb = (1 - wt) * wp, wc = wt * (1 - wp), wd = wt * wp;
-    for (let i = 0; i < n; i++) out[i] = a[i] * wa + b[i] * wb + c[i] * wc + d[i] * wd;
+    const phased = IN.k > 0.125 || IN.climb > 0.125 || (IN.kind > 0 && IN.periodic), pf = phased ? (((IN.climb > 0.125 ? IN.climbPhase : IN.phase) / (Math.PI * 2)) % 1 + 1) % 1 * PHASES : 0, p0 = Math.floor(pf), wp = pf - p0;
+    const uf = IN.kind ? Math.max(0, Math.min(1, IN.u)) * AS : 0, u0 = Math.min(AS - 1, Math.floor(uf)), wu = uf - u0, n = s.size;
+    const na = wt < 0.5 ? 0 : 1, nb = wp < 0.5 ? 0 : 1, nc = wu < 0.5 ? 0 : 1; let near = null;
+    for (let i = 0; i < n; i++) out[i] = 0;
+    for (let c = 0; c < 8; c++) { const a = c >> 2, b = (c >> 1) & 1, d = c & 1, w = (a ? wt : 1 - wt) * (b ? wp : 1 - wp) * (d ? wu : 1 - wu);
+      if (!(w > 0)) continue; const smp = sample(s, a ? t1 : t0, p0 + b, u0 + d);
+      for (let i = 0; i < n; i++) out[i] += smp[i] * w;
+      if (a === na && b === nb && d === nc) near = smp; }
     const N = s.nodes.length;
     for (let i = 0; i < N; i++) { const k = i * FIELDS;
       // quaternions are blended as plain numbers above; samples a step apart keep the same hemisphere, so normalising is enough
@@ -145,10 +177,13 @@
     // One rig a form, made as the form is first shown.
     const rigs = {};
     let rig = null, form = null, pose = null, nodes = null, sleeveAt = 0, retargetK = 0;
+    // A change of move eases from the pose last shown (`from`) over a fifth of a second.
+    let move = -1, fade = 1;
     const show = (next) => { if (form === next && rig) return; form = next;
-      let e = rigs[next]; if (!e) { const tr = now(), M = BL.clankerModel, r = M.rig(M.sets.B, next); outlines(r); TIME.rig += now() - tr; const s = sampler(next); e = rigs[next] = { r, nodes: walk(r), s, buf: new Float32Array(s.size) }; addChild(scaled, r.root); }
+      let e = rigs[next]; if (!e) { const tr = now(), M = BL.clankerModel, r = M.rig(M.sets.B, next); outlines(r); TIME.rig += now() - tr; const s = sampler(next), N = walk(r);
+        e = rigs[next] = { r, nodes: N, s, buf: new Float32Array(s.size), from: new Float32Array(s.size), headAt: N.indexOf(r.head) * FIELDS }; addChild(scaled, r.root); }
       for (const f in rigs) rigs[f].r.root.visible = f === next;
-      rig = e; nodes = e.nodes; pose = e.buf; sleeveAt = nodes.length * FIELDS + 2; };
+      rig = e; nodes = e.nodes; pose = e.buf; sleeveAt = nodes.length * FIELDS + 2; fade = 1; };
     // Scratch, reused every sync.
     const qa = [0, 0, 0, 1], qb = [0, 0, 0, 1], qc = [0, 0, 0, 1], qh = [0, 0, 0, 1], qp = [0, 0, 0, 1];
     const dq = {}; for (const name of SOCKETS) dq[name] = [0, 0, 0, 1];
@@ -157,13 +192,47 @@
     const posed = new Float32Array(SOCKETS.length * 3);
     // (and, as the driver poses, the controller's support offset, which eases the body up or down a step, as agent.js adds
     // it to the hips: set here, not at sync, so a body stepped without drawing has it too)
-    const notePosed = () => { tilt.position.y = managed ? (state.supportOffset || 0) / (droot.scale.y || 1) : 0; let k = 0; for (const name of SOCKETS) { const p = dparts[name]; posed[k++] = p ? p.rotation.x : 0; posed[k++] = p ? p.rotation.y : 0; posed[k++] = p ? p.rotation.z : 0; } };
+    // (and the time the driver has posed through since the last sync, which the body's own easing follows)
+    let posedDt = 0;
+    const notePosed = (dt) => { posedDt += dt || 0; tilt.position.y = managed ? (state.supportOffset || 0) / (droot.scale.y || 1) : 0; let k = 0; for (const name of SOCKETS) { const p = dparts[name]; posed[k++] = p ? p.rotation.x : 0; posed[k++] = p ? p.rotation.y : 0; posed[k++] = p ? p.rotation.z : 0; } };
     const overridden = () => { let k = 0; for (const name of SOCKETS) { const p = dparts[name]; if (p && (Math.abs(posed[k] - p.rotation.x) > 1e-6 || Math.abs(posed[k + 1] - p.rotation.y) > 1e-6 || Math.abs(posed[k + 2] - p.rotation.z) > 1e-6)) return true; k += 3; } return false; };
     // What the driver is doing that the new rig has no pose for.
-    const acting = () => state.gait === "beat" || state.beat > 0 || (managed && (state.pound > 0 || state.poundCharge > 0 || state.dragging || state.chewing > 0
-      || state.lab && state.labWork || state.officeSeat > 0.5 || state.groomBlend > 0.05 || state.rollBlend > 0.05 || state.swimBlend > 0.05
-      || state.lounge === "lean-left" || state.lounge === "lean-right" || state.lounge === "lean-back"));
-    let clock = typeof performance !== "undefined" ? performance.now() : 0;
+    const acting = () => managed && (state.lounge === "lean-left" || state.lounge === "lean-right" || state.lounge === "lean-back");
+    // The driver's move, read off its state into IN's kind, sub, u and periodic (and IN.phase, for a periodic one), in
+    // the order the driver's own arms take them (agent.js pose).
+    const A = BL.agent;
+    const moveOf = (lounge) => { let kind = 0, sub = 0, u = 0, ph = 0, periodic = false;
+      const lab = managed && state.lab && !state.labRunIn && !lounge && !state.air && state.rollBlend <= 0.001 && state.climbBlend <= 0.001 && state.pound <= 0 && !state.poundCharge ? state.labWork : "";
+      if (managed && state.dragging) { kind = K_DRAG; u = state.throwProgress; }
+      else if (managed && state.rollBlend > 0.001) { kind = K_ROLL; u = state.rollBlend; }
+      else if (lounge === "sit" && state.groomBlend > 0.05) { kind = K_GROOM; u = state.groomBlend; sub = state.groomSide < 0 ? 1 : 0; ph = state.groomTime * 10.5; periodic = true; }
+      else if (lounge === "sit") { kind = K_REST; u = restMotion(); ph = restTime() * 0.9; periodic = true; }
+      else if (managed && state.officeSeat > 0) { kind = K_OFFICE; u = state.officeSeat; const w = state.officeWork;
+        sub = (w === "type" ? W_TYPE : w === "abacus" ? W_ABACUS : w === "look" ? W_LOOK : 0) << 1 | (state.officeSide < 0 ? 1 : 0);
+        if (w === "type" || w === "abacus") { periodic = true; ph = state.officePhase * (w === "type" ? 11 : 2); } }
+      else if (lab === "type") { kind = K_LAB; sub = W_TYPE << 1; u = 1; periodic = true; ph = state.labPhase * 11; }
+      else if (lab === "touch") { kind = K_LAB; sub = W_TOUCH << 1 | (state.labSide < 0 ? 1 : 0); u = 1; periodic = true; ph = state.labPhase * 2.7; }
+      else if (lab === "carry") { kind = K_LAB; sub = W_CARRY << 1; u = ((d.parts.armL.rotation.x + state.pitch) * 180 / Math.PI - CARRY0) / (CARRY1 - CARRY0); }
+      else if (managed && state.pound > 0) { const t = 1 - state.pound / A.POUND_TIME;
+        if (state.smash) { kind = K_SMASH; if (t < 0.34) u = t / 0.34 / 3; else if (t < 0.46) u = 1 / 3; else if (t < 0.66) u = (1 + (t - 0.46) / 0.2) / 3; else { const e = (1 - t) / 0.34; u = 1 - e * e * (3 - 2 * e) / 3; } }
+        else { kind = K_TAP; u = t < 0.28 ? t / 0.28 : t < 0.58 ? 1 - (t - 0.28) / 0.3 : 0; } }
+      else if (managed && state.poundCharge > 0) { kind = K_SMASH; u = state.poundCharge / 3; }
+      else if (state.gait === "beat" || state.beat > 0) { const T = managed ? A.MANAGED_BEAT_TIME : A.BEAT_TIME, el = T - state.beat;
+        kind = K_BEAT; u = Math.min(1, el * 4) * Math.min(1, state.beat * 4); ph = el * 16; periodic = true; }
+      else if (managed && state.swimBlend > 0.001) { kind = K_SWIM; u = state.swimBlend; ph = state.labPhase * A.SWIM.rate; periodic = true; }
+      else if (managed && state.chewing > 0) { const e = 1 - state.chewing / A.CHEW_TIME; kind = K_EAT; u = Math.sin(Math.PI * Math.min(1, e)); ph = (A.CHEW_TIME - state.chewing) * 29; periodic = IN.k === 0; }
+      IN.kind = kind; IN.sub = sub; IN.u = Math.max(0, Math.min(1, u)); IN.periodic = periodic;
+      if (periodic) { IN.k = 0; IN.phase = ph; } };
+    // Seated rest (agent.js pose): a fidget every few seconds, each gorilla's in its own phase by where it sits.
+    const restTime = () => state.groomTime + droot.position.x * 0.61 + droot.position.z * 0.37;
+    const restMotion = () => { const c = ((restTime() % 9) + 9) % 9; return c > 2 ? Math.sin((c - 2) * Math.PI / 7) ** 2 * (1 - state.groomBlend) : 0; };
+    // The head's own turn, as the driver turns it seated or at a desk, laid over the rig's (its look about the vertical,
+    // and seated its nod), into the pose's head
+    const turnHead = (kind) => { if (kind !== K_GROOM && kind !== K_REST && kind !== K_OFFICE) return; const k = rig.headAt, y = d.parts.head.rotation.y;
+      const x = kind === K_REST ? Math.sin(restTime() * 0.65) * 0.055 * restMotion() - Math.abs(state.sitLook || 0) * 0.065 : 0;
+      qh[0] = Math.sin(x / 2); qh[1] = 0; qh[2] = 0; qh[3] = Math.cos(x / 2); qp[0] = 0; qp[1] = Math.sin(y / 2); qp[2] = 0; qp[3] = Math.cos(y / 2);
+      qmul(qa, qh, qp); qc[0] = pose[k]; qc[1] = pose[k + 1]; qc[2] = pose[k + 2]; qc[3] = pose[k + 3]; qmul(qb, qa, qc);
+      pose[k] = qb[0]; pose[k + 1] = qb[1]; pose[k + 2] = qb[2]; pose[k + 3] = qb[3]; };
     const sync = (parentWorld) => {
       if (!on) return; const ts = now(); TIME.syncs++;
       show(state.form || "ape");
@@ -180,7 +249,18 @@
       IN.air = state.air ? 1 : 0; IN.land = managed ? Math.min(1, state.crouch || 0) : 0;
       IN.climb = managed ? Math.min(1, state.climbBlend || 0) : 0; IN.climbPhase = managed ? (state.climbStride || 0) / 1.2 * Math.PI * 2 : 0;
       IN.sit = lounge === "sit" ? 1 : 0; IN.lay = onSide ? 1 : 0;
-      blend(rig.s, pose);
+      moveOf(lounge);
+      const dt = Math.min(0.1, posedDt); posedDt = 0;
+      const mv = IN.kind * SUBS + IN.sub;
+      if (mv !== move) { if (move >= 0) { rig.from.set(pose); fade = 0; } move = mv; }
+      blend(rig.s, pose); turnHead(IN.kind);
+      // easing from the last move's pose: quaternions the shorter way and normalised, what shows and the weld the new pose's
+      if (fade < 1) { fade = Math.min(1, fade + dt * 5); const m = fade * fade * (3 - 2 * fade), F = rig.from, N = nodes.length;
+        for (let i = 0; i < N; i++) { const k = i * FIELDS, sg = F[k] * pose[k] + F[k + 1] * pose[k + 1] + F[k + 2] * pose[k + 2] + F[k + 3] * pose[k + 3] < 0 ? -1 : 1;
+          for (let j = 0; j < 4; j++) pose[k + j] = sg * F[k + j] + (pose[k + j] - sg * F[k + j]) * m;
+          const l = Math.hypot(pose[k], pose[k + 1], pose[k + 2], pose[k + 3]) || 1; for (let j = 0; j < 4; j++) pose[k + j] /= l;
+          for (let j = 4; j < 10; j++) pose[k + j] = F[k + j] + (pose[k + j] - F[k + j]) * m; }
+        for (let i = sleeveAt; i < pose.length; i++) pose[i] = F[i] + (pose[i] - F[i]) * m; }
       // Applied to the rig: every node's turn, place and size, what shows, the chest's weld and the sleeve.
       for (let i = 0; i < nodes.length; i++) { const n = nodes[i], k = i * FIELDS; let q = n.quaternion;
         if (!q) q = n.quaternion = [0, 0, 0, 1];
@@ -196,7 +276,6 @@
       // The driver's whole-body turn at its hips, but for lying and sitting, which the new rig poses itself.
       if (lounge) { tilt.quaternion[0] = tilt.quaternion[1] = tilt.quaternion[2] = 0; tilt.quaternion[3] = 1; } else qset(tilt.quaternion, dq.hips);
       // Retargeted head and limbs, eased in and out over a fifth of a second.
-      const tnow = now() || clock + 16, dt = Math.min(0.1, Math.max(0, (tnow - clock) / 1000)); clock = tnow;
       const want = acting() || overridden() ? 1 : 0;
       retargetK += (want - retargetK) * Math.min(1, dt * 10);
       if (retargetK > 0.002) { const rest = restOf(rig.s);
@@ -232,7 +311,7 @@
   // A rig's rest for the retarget, once a form: each driven bone's turn in the rig at the standing pose (when the driver's
   // bones hang straight in its body), and each lower part's own local turn there.
   const restOf = (s) => { if (s.rest) return s.rest; const r = s.r, saved = IN.t, rest = {};
-    const keep = { ...IN }; IN.t = 1; IN.k = 0; IN.air = IN.land = IN.climb = IN.sit = IN.lay = 0;
+    const keep = { ...IN }; IN.t = 1; IN.k = 0; IN.air = IN.land = IN.climb = IN.sit = IN.lay = IN.kind = 0; IN.periodic = false;
     const buf = blend(s, new Float32Array(s.size)); Object.assign(IN, keep); IN.t = saved;
     const local = (node) => { const i = s.nodes.indexOf(node), k = i * FIELDS; return [buf[k], buf[k + 1], buf[k + 2], buf[k + 3]]; };
     const world = (node) => { const out = [0, 0, 0, 1]; const chain = []; for (let n = node; n && n !== r.root; n = n.parent) chain.push(n);
