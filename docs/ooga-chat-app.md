@@ -656,8 +656,8 @@ Reload, which hands over to the new worker and reloads once; while the visitor s
 voice. Nothing reloads by itself, so an open page keeps its own compatible files until it reloads, and the bootstrap's
 protocol list keeps an old page from speaking to a server that has moved on (it goes stale instead).
 
-**The M key** mutes or unmutes a speaker's own microphone, and does nothing while typing in a field or editable
-text, composing with an IME, holding a modifier or repeating.
+**The M key** (Shift+M too, as on the island) mutes or unmutes a speaker's own microphone, and does nothing while
+typing in a field or editable text, composing with an IME, holding Ctrl, Meta or Alt or repeating.
 
 **Background and interruptions.** Mobile browsers and installed web apps may suspend JavaScript, playback and capture
 when the screen locks, the app goes to the background, a call comes in or the audio device changes. Ooga Chat does not
