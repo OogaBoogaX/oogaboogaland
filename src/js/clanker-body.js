@@ -113,16 +113,19 @@
     const g = M.voxelGeometry(vox, { unit: c, palette: ["#1d1a18"] }); g.characterPart = true; return g; };
   const outlines = (r) => { if (r.outlined) return; r.outlined = true;
     const give = (geo, proxy) => { if (geo && geo.outline === undefined) geo.outline = proxy || blocky(geo); };
-    if (r.weldGeos) { const shared = r.weldGeos[0].outline || blocky(r.weldGeos[r.weldGeos.length >> 1]); for (const g of r.weldGeos) give(g, shared); }
+    // (welds made later, as poses ask for them, take the same stand-in as they are made: the rig's onWeld)
+    if (r.weldGeos) { const shared = r.weldGeos[0].outline || blocky(r.weldGeos[0]), prior = r.onWeld; for (const g of r.weldGeos) give(g, shared);
+      r.onWeld = (g, k) => { if (prior) g = prior(g, k); give(g, shared); return g; }; }
     if (r.chestGeo) { give(r.chestGeo); give(r.chestWeld, r.chestGeo.outline); }
     if (r.sleeveNode) r.sleeveNode.geometry.outline = NO_OUTLINE;
     (function w(n) { give(n.geometry); for (const c of n.children) w(c); })(r.root); };
   const now = () => typeof performance !== "undefined" ? performance.now() : 0;
-  // The glyph form, made ready in slices a few seconds after the first body shows (the sleep beam and the ghost hunt
-  // show it), so its first use does not stall a frame building it.
+  // The rest of the fur form's torso welds, then the glyph form, made ready in slices a few seconds after the first body
+  // shows (the sleep beam and the ghost hunt show the glyph form), so their first use does not stall a frame building them.
   let glyphs = false;
   const prepareGlyphs = () => { if (glyphs || !BL.buildTasks || typeof setTimeout === "undefined") return; glyphs = true;
-    setTimeout(() => { if (!BL.clankerModel.ready("code")) BL.buildTasks.run(BL.clankerModel.prepareSteps("code", { until: 0, budget: 8, work: 0 }), null).catch(() => {}); }, 5000); };
+    const M = BL.clankerModel, steps = function* () { const slice = { until: 0, budget: 8, work: 0 }; yield* M.prepareSteps("ape", slice); yield* M.prepareSteps("code", slice); };
+    setTimeout(() => { if (!M.ready("ape") || !M.ready("code")) BL.buildTasks.run(steps(), null).catch(() => {}); }, 5000); };
   const attach = (d) => { const t0 = now(); prepareGlyphs();
     const { root: droot, hips: dhips, state, managed } = d;
     // The scene's root shares the driver root's transform objects, so whatever moves one moves the other.
@@ -187,7 +190,7 @@
         n.visible = pose[k + 10] > 0.5; }
       r.root.visible = true;
       if (r.chestWeld) r.chest.geometry = pose[nodes.length * FIELDS] > 0.5 ? r.chestWeld : r.chestGeo;
-      if (r.weldGeos) r.weldNode.geometry = r.weldGeos[pose[nodes.length * FIELDS + 1] | 0];
+      if (r.weldGeos) r.weldNode.geometry = BL.clankerModel.weld(r, pose[nodes.length * FIELDS + 1] | 0);
       if (r.sleeveLive) { const g = r.sleeveLive.g, V = g.verts; for (let i = 0; i < V.length; i++) V[i] = pose[sleeveAt + i]; g.revision = (g.revision || 0) + 1; }
       if (r.rain) r.rain((typeof performance !== "undefined" ? performance.now() : 0) / 1000);
       // The driver's whole-body turn at its hips, but for lying and sitting, which the new rig poses itself.
@@ -220,7 +223,7 @@
       return out; };
     const liveGeometry = (set) => { for (const f in rigs) { const r = rigs[f].r;
         (function w(n) { if (n.geometry) set.add(n.geometry); for (const c of n.children) w(c); })(r.root);
-        if (r.chestGeo) set.add(r.chestGeo); if (r.chestWeld) set.add(r.chestWeld); if (r.weldGeos) for (const g of r.weldGeos) set.add(g); } };
+        if (r.chestGeo) set.add(r.chestGeo); if (r.chestWeld) set.add(r.chestWeld); if (r.weldGeos) for (const g of r.weldGeos) if (g) set.add(g); } };
     const dispose = () => { if (root.parent) removeChild(root.parent, root); root.beforeWorld = null; };
     show(state.form || "ape"); TIME.attach += now() - t0;
     return { root, sync, socket, notePosed, liveGeometry, dispose, get rig() { return rig && rig.r; }, get retarget() { return retargetK; } };

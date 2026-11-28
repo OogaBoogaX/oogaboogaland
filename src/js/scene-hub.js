@@ -11671,9 +11671,9 @@
       BL.solidProps.prepare(geometry);
     }
     if (BL.scenes.bifrost) yield* BL.bifrostIsle.prepareSteps();
-    // The gorillas' new body (clanker-body.js): its parts and torso welds, a slice at a time, so making the companions builds
-    // only nodes; the glyph form follows once the island is playable (clankerGlyphs).
-    if (BL.clankerBody && BL.clankerBody.on) yield* BL.clankerModel.prepareSteps("ape", slice);
+    // The gorillas' new body (clanker-body.js): its parts and first torso weld, a slice at a time, so making the companions
+    // builds only nodes; the other welds and the glyph form follow once the island is playable.
+    if (BL.clankerBody && BL.clankerBody.on) yield* BL.clankerModel.prepareSteps("ape", slice, true);
     // Repo Island's rock, then its walked shells' collision trees, a task each.
     yield* BL.repoIslandModels.rockSteps.steps(slice);
     for (const geometry of [BL.repoIslandModels.rockSteps().soil, BL.repoIslandModels.bridge().stone]) {
