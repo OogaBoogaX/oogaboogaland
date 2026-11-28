@@ -399,7 +399,7 @@
           let entry = entries.get(node);
           if (!entry) {
             const group = groupOf(owner);
-            entry = { node, owner, group, character, geometry, hitTriangle: -1, capacity: 0, source: node.geometry, inverse: BL.math.mat4.create(), world: new Float64Array(16), visible: false, shown: false, clipMinY: -Infinity, worldMinY: -Infinity, worldMaxY: Infinity, x: 0, y: 0, z: 0, radius: 0, hx: 0, hy: 0, hz: 0, scaleX: 0, scaleY: 0, scaleZ: 0, centerY: 0, halfY: 0, boundsGeometry: null, boundaryStamp: -1, boundaryBounds: new Float64Array(4), boundaryTriangles: new Float64Array(0), boundaryBoxes: new Float64Array(0), boundaryNodes: new Float64Array(0), boundaryRay: new Float64Array(12), boundaryHits: new Int32Array([-1, -1]), boundaryGrid: null, boundaryReserve: 0, boundaryNodeReserve: 0 };
+            entry = { node, owner, group, character, geometry, hitTriangle: -1, capacity: 0, source: node.geometry, inverse: BL.math.mat4.create(), world: new Float64Array(16), visible: false, shown: false, clipMinY: -Infinity, worldMinY: -Infinity, worldMaxY: Infinity, x: 0, y: 0, z: 0, radius: 0, hx: 0, hy: 0, hz: 0, scaleX: 0, scaleY: 0, scaleZ: 0, centerY: 0, halfY: 0, boundsGeometry: null, boundaryBounds: new Float64Array(4), boundaryTriangles: new Float64Array(0), boundaryBoxes: new Float64Array(0), boundaryNodes: new Float64Array(0), boundaryRay: new Float64Array(12), boundaryHits: new Int32Array([-1, -1]), boundaryGrid: null, boundaryReserve: 0, boundaryNodeReserve: 0 };
             registered.push(entry); entries.set(node, entry); group.push(entry);
             descriptorUsers.get(geometry)?.add(entry);
           }
@@ -449,7 +449,6 @@
       let capacity = 0;
       stats.boundaryGridBytes = stats.boundaryGridReferences = 0;
       for (const entry of registered) {
-        entry.boundaryStamp = -1;
         if (!entry.group.provider) capacity += entry.capacity;
         const grid = entry.boundaryGrid;
         if (grid) {
@@ -1693,10 +1692,9 @@
       const worldY = cameraY + (cameraView[4] * sx + cameraView[5] * sy - cameraView[6]) * depth;
       return y >= entry.clipMinY && worldY >= entry.worldMinY && worldY <= entry.worldMaxY;
     };
-    const entryBoundaryHit = (e, sx, sy, side, lazy) => {
+    const entryBoundaryHit = (e, sx, sy, side) => {
       stats.boundaryEntries++;
       if (!e.visible) return false;
-      if (lazy && e.boundaryStamp !== collectStamp) { boundaryBounds(e); e.boundaryStamp = collectStamp; }
       const b = e.boundaryBounds, g = e.geometry;
       if (sx < b[0] || sx > b[2] || sy < b[1] || sy > b[3]) return false;
       const nodes = e.boundaryNodes, boxes = e.boundaryBoxes, previous = e.boundaryHits[side];
@@ -1750,30 +1748,30 @@
       }
       return false;
     };
-    const ownerHit = (group, sx, sy, side, lazy) => {
+    const ownerHit = (group, sx, sy, side) => {
       const previous = group.boundaryEntries[side];
       // Adjacent union rays usually cross the same part. This is only a hint:
       // its current visibility, clipping and triangles are still tested. Each
       // side keeps its own hint so the two offset rays cannot evict each other.
-      if (previous && entryBoundaryHit(previous, sx, sy, side, lazy)) return true;
+      if (previous && entryBoundaryHit(previous, sx, sy, side)) return true;
       const grid = group.boundaryGrid;
-      if (!lazy && grid && grid.active) {
+      if (grid && grid.active) {
         const b = grid.bounds;
         if (sx < b[0] || sx > b[2] || sy < b[1] || sy > b[3]) return false;
         const x = Math.min(BOUNDARY_GRID - 1, Math.floor((sx - b[0]) * grid.scaleX)), y = Math.min(BOUNDARY_GRID - 1, Math.floor((sy - b[1]) * grid.scaleY)), cell = y * BOUNDARY_GRID + x;
         for (let n = cell * grid.stride, end = n + grid.counts[cell]; n < end; n++) {
           const entry = group[grid.indices[n]];
-          if (entry !== previous && entryBoundaryHit(entry, sx, sy, side, lazy)) { group.boundaryEntries[side] = entry; return true; }
+          if (entry !== previous && entryBoundaryHit(entry, sx, sy, side)) { group.boundaryEntries[side] = entry; return true; }
         }
         return false;
       }
       for (let i = 0; i < group.length; i++) {
         const entry = group[i];
-        if (entry !== previous && entryBoundaryHit(entry, sx, sy, side, lazy)) { group.boundaryEntries[side] = entry; return true; }
+        if (entry !== previous && entryBoundaryHit(entry, sx, sy, side)) { group.boundaryEntries[side] = entry; return true; }
       }
       return false;
     };
-    const ownerBoundaryAt = (owner, x, y, z, dx, dy, dz, lazy = false) => {
+    const ownerBoundaryAt = (owner, x, y, z, dx, dy, dz) => {
       const group = ownerEntries.get(owner);
       if (!hasCamera || !group) return false;
       const m = cameraView, vx = x - cameraX, vy = y - cameraY, vz = z - cameraZ;
@@ -1791,11 +1789,11 @@
         for (let i = 0; i < group.length; i++) {
           const e = group[i];
           if (e.visible) {
-            if (!lazy) boundaryBounds(e);
+            boundaryBounds(e);
             endDepth = Math.max(endDepth, -(m[2] * (e.x - cameraX) + m[6] * (e.y - cameraY) + m[10] * (e.z - cameraZ)) + e.radius + 0.01);
           }
         }
-        if (!lazy) indexBoundary(group);
+        indexBoundary(group);
         group.boundaryDepth = Math.min(far, endDepth); group.boundaryStamp = collectStamp;
       }
       const endDepth = group.boundaryDepth;
@@ -1803,7 +1801,7 @@
       boundarySpan = endDepth - near;
       boundaryFirstDepth = near + boundarySpan * 1e-5; boundaryLastDepth = endDepth - boundarySpan * 1e-5;
       if (!(endDepth > near)) return false;
-      const left = ownerHit(group, (rx + px) / depth, (ry + py) / depth, 0, lazy);
+      const left = ownerHit(group, (rx + px) / depth, (ry + py) / depth, 0);
       const sx = (rx - px) / depth, sy = (ry - py) / depth;
       if (left) {
         // The first ray already validated this entry. Test its triangle directly for the adjacent ray.
@@ -1813,7 +1811,7 @@
           return false;
         }
       }
-      return left !== ownerHit(group, sx, sy, 1, lazy);
+      return left !== ownerHit(group, sx, sy, 1);
     };
     const refresh = () => {
       contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
