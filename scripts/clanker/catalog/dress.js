@@ -23,12 +23,10 @@
       return null;
     }
   };
-  SUITS.forEach((P, k) => { const [jacket, lapel, shirt, tie, trousers, shoe, belt, brass, knot] = P.map((h) => C(h));
+  SUITS.forEach((P, k) => { const [jacket, lapel, shirt, , trousers, shoe] = P.map((h) => C(h));
     OUTFITS["suit" + k] = (part, x, y, z) => {
-      if (part === "chest") { if (opening(x, y, z, 0.04, 0.15, 0.5)) return Math.abs(x) < 0.03 ? (y > 0.43 ? knot : tie) : shirt;
-        if (opening(x, y, z, 0.07, 0.2, 0.5)) return lapel; return jacket; }
-      if (part === "belly") { if (y < WAIST) return trousers;
-        if (opening(x, y - 0.11, z, 0.02, 0.04, 0.4)) return Math.abs(x) < 0.025 ? tie : shirt; return jacket; }
+      if (part === "chest") { if (opening(x, y, z, 0.04, 0.15, 0.5)) return shirt; if (opening(x, y, z, 0.07, 0.2, 0.5)) return lapel; return jacket; }
+      if (part === "belly") return y < WAIST ? trousers : jacket;
       if (part === "arm") return jacket;
       if (part === "fore") return y > WRIST ? jacket : y > CUFF ? shirt : null;
       if (part === "leg" || part === "shin") return trousers;
@@ -173,11 +171,17 @@
       return { out: [d[0] * t, s.cz + d[1] * t], in: [d[0] * (t - off - 0.004), s.cz + d[1] * (t - off - 0.004)] }; });
     for (let k = 0; k < n; k++) { const A = R[k], B = R[(k + 1) % n];
       const q = [push([A.out[0], y - h / 2, A.out[1]]), push([B.out[0], y - h / 2, B.out[1]]), push([B.out[0], y + h / 2, B.out[1]]), push([A.out[0], y + h / 2, A.out[1]])];
-      faces.push({ i: [q[0], q[1], q[2], q[3]].reverse(), color: col });
-      const t = [push([A.in[0], y + h / 2, A.in[1]]), push([A.out[0], y + h / 2, A.out[1]]), push([B.out[0], y + h / 2, B.out[1]]), push([B.in[0], y + h / 2, B.in[1]])]; faces.push({ i: t.reverse(), color: col });
-      const b = [push([A.in[0], y - h / 2, A.in[1]]), push([B.in[0], y - h / 2, B.in[1]]), push([B.out[0], y - h / 2, B.out[1]]), push([A.out[0], y - h / 2, A.out[1]])]; faces.push({ i: b.reverse(), color: col }); }
+      faces.push({ i: q, color: col });
+      const t = [push([A.in[0], y + h / 2, A.in[1]]), push([A.out[0], y + h / 2, A.out[1]]), push([B.out[0], y + h / 2, B.out[1]]), push([B.in[0], y + h / 2, B.in[1]])]; faces.push({ i: t, color: col });
+      const b = [push([A.in[0], y - h / 2, A.in[1]]), push([B.in[0], y - h / 2, B.in[1]]), push([B.out[0], y - h / 2, B.out[1]]), push([A.out[0], y - h / 2, A.out[1]])]; faces.push({ i: b, color: col }); }
     const geo = { verts, faces, lines: [] }; const front = R[0].out, bw = opts.buckle || 0.075, bh = h + 0.014, bd = 0.012, bz = front[1] + 0.004;
     const buckle = M.box({ w: bw, h: bh, d: bd, color: opts.brass || "#b8913a", offset: { x: 0, y, z: bz + bd / 2 } }), hole = M.box({ w: bw * 0.55, h: bh * 0.5, d: 0.004, color: opts.color || "#1f1a17", offset: { x: 0, y, z: bz + bd + 0.002 } });
     const made = M.merge(geo, buckle, hole); per.set(key, made); return made; };
-  window.__dress = { paint, fit, box, height, torsoBox, hat, hatPlace, wrap, belt, surface, OUTFITS };
+  // A suit's tie, modelled on the old box torso's front (its knot at the collar, its blade ending in a point at the
+  // bottom of the chest, above the belly) and wrapped onto the new one like a vest. Cached by suit.
+  const ties = [];
+  const tie = (k) => ties[k] || (ties[k] = (() => { const P = SUITS[k], z = 0.312, d = 0.012, at = (g) => { const V = g.verts; for (let i = 2; i < V.length; i += 3) V[i] += z; return g; };
+    const knot = at(M.prism([[-0.03, 1.0], [0.03, 1.0], [0.046, 1.06], [-0.046, 1.06]], d * 1.4, P[8])), blade = at(M.prism([[0, 0.62], [0.052, 0.68], [0.029, 1.0], [-0.029, 1.0], [-0.052, 0.68]], d, P[3]));
+    return M.merge(knot, blade); })());
+  window.__dress = { paint, fit, box, height, torsoBox, hat, hatPlace, wrap, belt, tie, surface, OUTFITS };
 })();
