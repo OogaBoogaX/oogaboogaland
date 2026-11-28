@@ -316,7 +316,8 @@
   // a node that will not build or a context that is not running sends the raw track instead.
   let filter = null, filterModule = null, pubSender = null;
   const sendTrack = () => filter && filter.stream === mic && stats.keyFilter && audio && audio.state === "running" ? filter.track : mic.getAudioTracks()[0];
-  const resend = () => { if (pubPc && pubSender && mic) pubSender.replaceTrack(sendTrack()).catch(() => {}); };
+  let switchingMic = false, switchError = "";
+  const resend = () => { if (!switchingMic && pubPc && pubSender && mic) pubSender.replaceTrack(sendTrack()).catch(() => {}); };
   const dropFilter = () => {
     if (!filter) return;
     filter.node.port.postMessage(0);
@@ -752,8 +753,8 @@
       if (token === lifecycle) { stats.joining = false; emit(); }
     }
   };
-  const micConstraints = () => ({ audio: { echoCancellation: true, noiseSuppression: true,
-    autoGainControl: true, ...(stats.deviceId ? { deviceId: { exact: stats.deviceId } } : {}) } });
+  const micConstraints = (deviceId = stats.deviceId) => ({ audio: { echoCancellation: true, noiseSuppression: true,
+    autoGainControl: true, ...(deviceId ? { deviceId: { exact: deviceId } } : {}) } });
   const devices = async () => {
     const list = await navigator.mediaDevices.enumerateDevices();
     return list.filter((device) => device.kind === "audioinput").map((device) => ({ deviceId: device.deviceId, label: device.label }));
@@ -790,15 +791,59 @@
     if (stats.publishing || microphoneWanted) return;
     micGeneration++;
     if (mic) for (const track of mic.getTracks()) track.stop();
-    mic = null; dropFilter();
+    mic = null; stats.deviceId = ""; dropFilter();
     dropMeter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
     if (!up()) { window.clearInterval(speakTimer); speakTimer = 0; }
     emit();
   };
+  const microphone = () => {
+    const track = mic && mic.getAudioTracks()[0];
+    return { active: !!track && track.readyState !== "ended", id: track?.getSettings?.().deviceId || stats.deviceId,
+      label: track?.label || "Microphone", switching: switchingMic, error: switchError,
+      available: !!track && !!navigator.mediaDevices?.enumerateDevices && !stats.joining && !stats.reconnecting && (stats.publishing || stats.preflight) };
+  };
+  // Replace only the outgoing track. Keep the old capture, publication, meter and mute until the browser accepts
+  // the new one. A leave, reconnect or revoked microphone invalidates both awaits; a late capture is stopped.
   const selectDevice = async (deviceId) => {
-    if (stats.publishing || microphoneWanted) dropMic();
-    return preflight(deviceId);
+    if (switchingMic || stats.joining || stats.reconnecting) return false;
+    if (!mic) return microphoneWanted ? false : preflight(deviceId);
+    if (!stats.publishing && !stats.preflight) return false;
+    const old = mic, sender = pubPc && pubSender, pc = pubPc, token = lifecycle, generation = micGeneration;
+    const valid = () => mic === old && lifecycle === token && micGeneration === generation && pubPc === pc;
+    let stream = null;
+    switchingMic = true; switchError = ""; emit();
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(micConstraints(String(deviceId || "")));
+      const track = stream.getAudioTracks()[0];
+      if (!track || track.readyState === "ended") throw new Error("microphone unavailable");
+      track.enabled = false;
+      if (!valid()) return false;
+      if (sender) await sender.replaceTrack(track);
+      if (!valid()) return false;
+      if (track.readyState === "ended") {
+        if (sender) await sender.replaceTrack(sendTrack());
+        throw new Error("microphone stopped");
+      }
+      dropFilter(); dropMeter();
+      mic = stream; stream = null;
+      stats.deviceId = String(deviceId || "");
+      track.onended = micLost;
+      micMeter = ownMeter(mic);
+      gate();
+      for (const t of old.getTracks()) { t.onended = null; t.stop(); }
+      buildFilter().then(resend);
+      return true;
+    } catch {
+      if (valid()) switchError = "Could not switch microphones. Your previous microphone is still selected.";
+      return false;
+    } finally {
+      if (stream) for (const t of stream.getTracks()) t.stop();
+      switchingMic = false;
+      resend();
+      if (!stats.keyFilter) dropFilter();
+      emit();
+    }
   };
   const setReceiveLevel = (value) => {
     const level = Number(value);
@@ -844,7 +889,7 @@
       // Storage off: the choice lasts this page.
     }
     if (wanted) buildFilter().then(resend);
-    else { resend(); dropFilter(); }
+    else if (!switchingMic) { resend(); dropFilter(); }
     emit();
   };
   // The microphone itself went (unplugged, a headset switched off): the speaker would go on hearing everyone and sending
@@ -1145,7 +1190,7 @@
     disarmPassive();
     stats.joining = false; teardown();
     if (mic) for (const t of mic.getTracks()) t.stop();
-    mic = null; dropFilter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
+    mic = null; stats.deviceId = ""; dropFilter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
     dropMeter();
     if (audio) audio.close().catch(() => {});
@@ -1168,7 +1213,7 @@
     micGeneration++; microphoneWanted = stats.micWanted = false; stats.joining = false;
     if (!stats.enabled) clearRelay();
     if (mic) for (const track of mic.getTracks()) track.stop();
-    mic = null; dropFilter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
+    mic = null; stats.deviceId = ""; dropFilter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
     dropMeter();
     if (pubPc) pubPc.close();
@@ -1198,7 +1243,7 @@
     recover.wanted = false; recover.returning = true;
     micGeneration++; microphoneWanted = stats.micWanted = false;
     if (mic) for (const track of mic.getTracks()) track.stop();
-    mic = null; dropFilter(); stats.micLevel = 0;
+    mic = null; stats.deviceId = ""; dropFilter(); stats.micLevel = 0;
     dropMeter();
     emit();
   };
@@ -1470,5 +1515,5 @@
     playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none", relay: relayConfig !== ICE, bare,
     relayRenewals: relayRenewals.map(sample => ({ ...sample })) });
 
-  BL.voice = { support, probe, ICE_BLOCKED, warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setPlayersLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, resumed, stop, setPeers, setOutdoor, subscribe, dispose, inspect, speaking, level, ownLevel, subscribeLevels, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, setRadius, setKeyFilter, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
+  BL.voice = { support, probe, ICE_BLOCKED, warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, microphone, setReceiveLevel, setPlayersLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, resumed, stop, setPeers, setOutdoor, subscribe, dispose, inspect, speaking, level, ownLevel, subscribeLevels, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, setRadius, setKeyFilter, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();

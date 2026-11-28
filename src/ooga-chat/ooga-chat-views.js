@@ -461,12 +461,14 @@
     out.addEventListener("click", () => actions.signOutFrom ? actions.signOutFrom(out, actions.signOut) : actions.signOut(), { signal });
     // The voice buttons, then the name with Sign out beside it on a line of its own under them, in a chat too, as the
     // island's footer has it.
-    const footActions = make("span", "cloud-foot-actions", mute, join);
+    const micPicker = BL.microphonePicker.create();
+    const footActions = make("span", "cloud-foot-actions", mute, micPicker.button, join);
     const node = make("div", "cloud-foot", footActions, muteWhy, joinWhy, make("span", "cloud-foot-who", name, out));
     const update = (state) => {
       set(out, "textContent", state.busy === "signout" ? "Signing out…" : "Sign out");
       set(out, "disabled", !!state.busy);
       const who = state.mode === "live" && state.session;
+      micPicker.update(media, !!who);
       if (!who) return;
       set(name, "textContent", who.identity.display);
       const speaker = state.voice.role === "speaker", allowed = state.room ? { joinVoice: state.room.you?.speak === "eligible" || !!state.voice.elsewhere, why: null } : gates(state, Date.now());
@@ -485,7 +487,7 @@
       set(joinWhy, "textContent", why);
       set(join, "title", why);
     };
-    const dispose = () => listeners.abort();
+    const dispose = () => { micPicker.dispose(); listeners.abort(); };
     // Where focus lands on signing in: the first of the footer's buttons that can be pressed.
     const focus = () => [mute, join, out].find((el) => !el.disabled && !el.hidden).focus();
     return { node, update, focus, dispose, parts: { mute, join, actions: footActions } };
