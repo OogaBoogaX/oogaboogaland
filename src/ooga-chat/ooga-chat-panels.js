@@ -52,11 +52,13 @@
     const end = button("foot-button account-end hc-danger", "End chat"), leave = button("foot-button account-leave", "Leave chat");
     end.addEventListener("click", () => actions.endChat?.(end), { signal });
     leave.addEventListener("click", () => actions.leaveChat?.(leave), { signal });
-    const node = make("div", "account", login, make("span", "account-actions", mute, voice, end, leave), make("span", "account-who", name, out), voiceWhy);
+    const micPicker = BL.microphonePicker.create();
+    const node = make("div", "account", login, make("span", "account-actions", mute, micPicker.button, voice, end, leave), make("span", "account-who", name, out), voiceWhy);
     let last = null;
     const update = (state) => {
       last = state;
       const live = state.mode === "live", who = live && state.session, signing = state.busy === "signout";
+      micPicker.update(media, !!who);
       set(login, "hidden", !!who || signing || !live || !state.boot?.features.github);
       set(login, "disabled", !!state.busy || !state.device.online || state.auth === "checking");
       set(login, "textContent", state.busy === "github" ? PROVIDERS.github[1] : PROVIDERS.github[0]);
@@ -107,6 +109,7 @@
     };
     const off = model.subscribe((kind) => { if (last && (kind === "players" || kind === "welcome")) update(last); });
     const dispose = () => {
+      micPicker.dispose();
       listeners.abort();
       off();
     };

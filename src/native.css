@@ -52,6 +52,43 @@
   box-sizing: border-box;
 }
 
+/* The microphone dialog uses the voice-handoff title, slab and actions, and the same planked frame as the chat
+   dialogs. Both apps load those shared rules; this dialog needs only its sizing and input layout here. */
+.microphone-dialog {
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  padding: 14px 16px 16px;
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  background: var(--planks);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+  font: inherit;
+}
+
+.microphone-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.microphone-dialog p { margin: 0; overflow-wrap: anywhere; }
+.microphone-dialog .voice-handoff-body { display: grid; gap: 12px; }
+.microphone-dialog label { display: grid; gap: 4px; font-size: 11px; }
+.microphone-dialog [role="status"] { color: rgba(243, 239, 228, 0.78); font-size: 11px; }
+.microphone-dialog select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 2px solid var(--stone-dk);
+  border-radius: 6px;
+  background: var(--tablet);
+  color: var(--paper);
+  font: inherit;
+  font-size: 16px;
+}
+.microphone-dialog .foot-button { min-height: 40px; padding: 0 16px; }
+.microphone-dialog select:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+@media (pointer: coarse) {
+  .microphone-dialog .foot-button, .microphone-picker.foot-button { min-height: 44px; }
+}
+
 button,
 input,
 select {
