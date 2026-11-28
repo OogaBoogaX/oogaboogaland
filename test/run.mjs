@@ -47475,6 +47475,7 @@ const cloudPanelChecks = async BL => {
     removeAttribute(k) { delete this.attrs[k]; if (k === "src") { this.src = undefined; this.cleared++; } },
     append(...xs) { for (const x of xs) { if (x.parent) x.remove(); x.parent = this; this.children.push(x); } },
     insertBefore(x, ref) { if (x.parent) x.remove(); x.parent = this; const at = ref ? this.children.indexOf(ref) : -1; this.children.splice(at < 0 ? this.children.length : at, 0, x); return x; },
+    after(node) { if (this.parent) this.parent.insertBefore(node, this.parent.children[this.parent.children.indexOf(this) + 1]); },
     focus() {},
     prepend(x) { x.parent = this; this.children.unshift(x); },
     replaceChildren(...xs) { this.replaced++; for (const c of this.children) c.parent = null; this.children = []; this.append(...xs); },
@@ -47504,7 +47505,7 @@ const cloudPanelChecks = async BL => {
     chatCall: { available: () => false, room: null, subscribe: () => () => {}, hear: () => () => {}, identity: () => null },
     reactions: { mount: (host, options) => { gate = options.handAllowed; }, refresh: () => refreshes.push(gate()) } } };
   const document = { getElementById: $, createElement: el, querySelector: () => el("svg"), addEventListener() {}, removeEventListener() {} };
-  runInNewContext(["src/js/audience-tiles.js", "src/js/cloud-panel.js"].map(file => readFileSync(join(root, file), "utf8")).join("\n"), { window, document, getComputedStyle: () => ({ gridTemplateColumns: "1fr 1fr 1fr 1fr" }), location: { search: "" }, URLSearchParams, MutationObserver: class { constructor(fn) { observers.push(fn); } observe() {} disconnect() {} } });
+  runInNewContext(["src/js/microphone-picker.js", "src/js/audience-tiles.js", "src/js/cloud-panel.js"].map(file => readFileSync(join(root, file), "utf8")).join("\n"), { window, document, getComputedStyle: () => ({ gridTemplateColumns: "1fr 1fr 1fr 1fr" }), location: { search: "" }, URLSearchParams, MutationObserver: class { constructor(fn) { observers.push(fn); } observe() {} disconnect() {} } });
   const P = window.BL.cloudPanel, hear = msg => { for (const fn of subs.audience) fn(msg); }, tick = () => { for (const fn of subs.net) fn(state); };
   const row = (id, role, extra = {}) => ({ id, login: id, provider: "github", role, ...(role === "speaker" ? { source: "world" } : {}), ...extra });
   const asked = sent.map(x => `${x.type}:${x.zone}`).join();
@@ -49688,7 +49689,7 @@ const studioVoiceLifecycleProof = async () => {
       constructor(config){this.config=config;if(++peerAttempts===1&&failFirstPeer)throw Error("probe construction failed");peers.push(this);this.connectionState=stunDead&&config.iceServers.some(s=>s.urls.startsWith("stun:"))?"new":"connected";this.iceGatheringState=gathering;this.localDescription=null;this.handlers=new Map();}
       addEventListener(k,fn){this.handlers.set(k,fn);}
       removeEventListener(k){this.handlers.delete(k);}
-      addTransceiver(track){this.track=track;return {mid:"0"};}
+      addTransceiver(track){this.track=track;return {mid:"0",sender:{replaceTrack:async next=>{if(this.replaceError)throw Error("device switch failed");this.track=next;}}};}
       createOffer(){return Promise.resolve({type:"offer",sdp:candidate?"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n":"v=0"});}
       setLocalDescription(d){this.localDescription=d;return Promise.resolve();}
       setRemoteDescription(){return Promise.resolve();}
@@ -49702,7 +49703,7 @@ const studioVoiceLifecycleProof = async () => {
     const context={window:win,Date:{now:()=>clock.at??Date.now()},document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){},removeItem(){}},AbortController,RTCPeerConnection:Peer,Audio:Sound,MediaStream:class {constructor(tracks){this.tracks=tracks;}getTracks(){return this.tracks;}},navigator:{mediaDevices:{enumerateDevices:async()=>[{kind:"audioinput",deviceId:"synthetic-mic",label:"Synthetic mic"},{kind:"videoinput",deviceId:"camera",label:"Camera"}],getUserMedia:constraints=>{gum++;calls.push({op:"capture",constraints});return permission||Promise.resolve(makeStream());}}},
       fetch:async(url,options)=>{const op=url.split("/").at(-1);calls.push({op,body:JSON.parse(options.body)});if(failing.get(op)>0){failing.set(op,failing.get(op)-1);return {ok:false,status:502,json:async()=>({error:"synthetic failure"})};}if(deferred?.op===op)return deferred.promise;if(op==="publish"&&publishResponse)return publishResponse;if(op==="pull")return {ok:true,json:async()=>({tracks:JSON.parse(options.body).ids.map(id=>({id,mid:String(id)}))})};return {ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})};}};
     runInNewContext(source,context);
-    return {net:win.BL.net,clock,failNext(op,n=1){failing.set(op,n);},fire(delay){const found=[...timers].find(([,task])=>task.delay===delay);if(!found)return false;timers.delete(found[0]);return found[1].fn();},defer(op){let finish;const promise=new Promise(resolve=>{finish=resolve;});deferred={op,promise};return data=>{deferred=null;finish({ok:true,json:async()=>data});};},voice:win.BL.voice,calls,streams,peers,elements,timers,get gum(){return gum;},makeStream,denyPermission(){permission=Promise.reject(Object.assign(Error("denied"),{name:"NotAllowedError"}));},deferPermission(){permission=new Promise(resolve=>{this.resolvePermission=resolve;});},deferPublish(){publishResponse=new Promise(resolve=>{this.resolvePublish=()=>resolve({ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})});});}};
+    return {net:win.BL.net,media:context.navigator.mediaDevices,clock,failNext(op,n=1){failing.set(op,n);},fire(delay){const found=[...timers].find(([,task])=>task.delay===delay);if(!found)return false;timers.delete(found[0]);return found[1].fn();},defer(op){let finish;const promise=new Promise(resolve=>{finish=resolve;});deferred={op,promise};return data=>{deferred=null;finish({ok:true,json:async()=>data});};},voice:win.BL.voice,calls,streams,peers,elements,timers,get gum(){return gum;},makeStream,denyPermission(){permission=Promise.reject(Object.assign(Error("denied"),{name:"NotAllowedError"}));},deferPermission(){permission=new Promise(resolve=>{this.resolvePermission=resolve;});},deferPublish(){publishResponse=new Promise(resolve=>{this.resolvePublish=()=>resolve({ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})});});}};
   };
   const drain=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
   // A gather timeout is inconclusive; only a completed empty gather may refuse the listener.
@@ -49737,6 +49738,46 @@ const studioVoiceLifecycleProof = async () => {
   const publishCancelled=reachedPublish&&!stale.voice.stats.publishing&&!stale.calls.some(c=>c.op==="live")&&stale.streams[0].track.stops===1;stale.voice.dispose();await drain();
   const stopped=fixture();stopped.deferPublish();const stoppedPublish=stopped.voice.enable();await drain();stopped.voice.stop();stopped.resolvePublish();await stoppedPublish;await drain();
   const stopCancelled=!stopped.voice.stats.publishing&&!stopped.voice.stats.enabled&&!stopped.calls.some(c=>c.op==="live")&&stopped.streams[0].track.stops===1;stopped.voice.dispose();await drain();
+  // Device selection replaces the track, not the call, and never revives a microphone after leaving.
+  {
+  const switching=fixture();await switching.voice.enable();switching.voice.setPeers([71]);await drain();
+  switching.voice.setMuted(true);
+  const publisher=switching.peers.find(p=>p.track===switching.streams[0].track),apiBefore=switching.calls.filter(c=>c.op!=="capture").length;
+  const changed=await switching.voice.selectDevice("synthetic-mic");
+  const kept=changed&&switching.voice.stats.publishing&&switching.voice.stats.muted&&publisher.track===switching.streams[1].track
+    &&switching.streams[0].track.stops===1&&!switching.streams[1].track.enabled&&switching.calls.filter(c=>c.op!=="capture").length===apiBefore;
+  publisher.replaceError=true;
+  const failed=!(await switching.voice.selectDevice("missing"))&&switching.streams[1].track.stops===0&&switching.streams[2].track.stops===1
+    &&publisher.track===switching.streams[1].track&&!!switching.voice.microphone().error;
+  publisher.replaceError=false;switching.voice.setMuted(false);switching.deferPermission();
+  const moving=switching.voice.selectDevice("another"),candidate=switching.makeStream();
+  switching.voice.setMuted(true);switching.resolvePermission(candidate);await moving;
+  const muteDuring=switching.voice.stats.muted&&!candidate.track.enabled&&publisher.track===candidate.track;
+  switching.deferPermission();const pendingSwitch=switching.voice.selectDevice("late"),lateMic=switching.makeStream();
+  switching.voice.stop();switching.resolvePermission(lateMic);
+  const cancelled=!(await pendingSwitch)&&lateMic.track.stops===1&&!switching.voice.stats.publishing;
+  switching.voice.dispose();await drain();
+  record("OBL microphone picker: same publication and mute, failed replacement retains capture, mute during acquisition, leave cancels late capture",
+    kept&&failed&&muteDuring&&cancelled,JSON.stringify({kept,failed,muteDuring,cancelled}));
+  }
+  // Once a chosen input is released, unplugging it cannot trap a later Join voice or returning Unmute.
+  const releasedDevices=[];
+  for(const release of ["stop","dropMic","cancelPreflight","hold"]){
+    const f=fixture();
+    if(release==="cancelPreflight")await f.voice.preflight();else await f.voice.enable();
+    await f.voice.selectDevice("usb");
+    const capture=f.media.getUserMedia;
+    f.media.getUserMedia=constraints=>constraints.audio.deviceId?.exact==="usb"
+      ?Promise.reject(Object.assign(Error("unplugged"),{name:"OverconstrainedError"})):capture(constraints);
+    if(release==="hold"){
+      f.net.state.room="connecting";await f.voice.restart();await drain();f.fire(120000);
+      f.net.state.room="live";await f.voice.restart(true);await drain();f.voice.toggle();await drain();
+    }else{f.voice[release]();await f.voice.enable();}
+    releasedDevices.push({release,publishing:f.voice.stats.publishing,defaultInput:!f.calls.filter(c=>c.op==="capture").at(-1).constraints.audio.deviceId});
+    f.voice.dispose();await drain();
+  }
+  record("OBL microphone picker: unplugging a released selection cannot block rejoin, revocation recovery, a cancelled preview or returning Unmute",
+    releasedDevices.every(r=>r.publishing&&r.defaultInput),JSON.stringify(releasedDevices));
   const preview=fixture();const deviceList=await preview.voice.devices();await preview.voice.selectDevice("synthetic-mic");
   const localPreview=preview.voice.stats.preflight&&preview.voice.stats.permission==="granted"&&!preview.voice.stats.publishing&&preview.calls.filter(c=>c.op!=="capture").length===0&&preview.calls[0].constraints.audio.deviceId.exact==="synthetic-mic"&&deviceList.length===1;
   preview.voice.cancelPreflight();const previewReleased=preview.streams[0].track.stops===1&&!preview.voice.stats.preflight;
@@ -49998,15 +50039,19 @@ const listenOnlyMicStatusProof = async () => {
   const back=quiet({});
   // A returning listener's failed ICE probe must say why it failed instead of offering an unexplained Unmute.
   const accountStart=source.indexOf("  const ROOM_WORDS"),accountEnd=source.indexOf("\n  // The microphone's note",accountStart);
-  const nodes=new Map(),element=id=>{if(!nodes.has(id))nodes.set(id,{dataset:{},getAttribute(){return "";},setAttribute(){}});return nodes.get(id);};
+  const nodes=new Map(),makeElement=()=>({dataset:{},getAttribute(){return "";},setAttribute(){},addEventListener(){},after(node){this.picker=node;}}),element=id=>{if(!nodes.has(id))nodes.set(id,makeElement());return nodes.get(id);};
   const voice={stats:{returning:true,muted:true,enabled:false,joining:false,micError:"",error:"WebRTC blocked"},ICE_BLOCKED:"WebRTC blocked",support:()=>({secure:true,webrtc:true,mic:true})};
-  const account={BL:{voice,nativeIcons:{label:(button,text)=>{button.textContent=text;}}},document:{querySelectorAll:()=>[]},$:element};
+  const account={BL:{voice,nativeIcons:{label:(button,text)=>{button.textContent=text;}}},document:{querySelectorAll:()=>[],createElement:makeElement},$:element};
+  runInNewContext(await readFile(join(root,"src/js/microphone-picker.js"),"utf8"),{window:{BL:account.BL},document:account.document});
   runInNewContext(source.slice(accountStart,accountEnd)+";globalThis.showAccount=showAccount;",account);
   const live={backend:true,me:{display:"Listener"},room:"live",online:1};account.showAccount(live);
   const blockedReturn=element("account-mute").textContent==="Voice: WebRTC blocked"&&!element("account-mute").disabled&&!!element("account-mute").title;
   voice.stats.error="";account.showAccount(live);
   const clearedReturn=element("account-mute").textContent==="Unmute"&&element("account-mute").title==="";
-  return {listening,listeningAlone,listeningMuted,afterDrop,speakerAlone,speakerMuted,speakerOn,back,blockedReturn,clearedReturn};
+  const picker=element("account-mute").picker,listenerPickerHidden=picker.hidden;
+  voice.microphone=()=>({active:true,available:true,label:"USB microphone"});account.showAccount(live);
+  const pickerShown=!picker.hidden&&!picker.disabled&&picker.title==="Microphone: USB microphone";
+  return {listening,listeningAlone,listeningMuted,afterDrop,speakerAlone,speakerMuted,speakerOn,back,blockedReturn,clearedReturn,listenerPickerHidden,pickerShown};
 };
 
 // terrain-cache.js under an in-memory IndexedDB and a stand-in Worker: a boot miss must not wait on the Worker (it starts
@@ -51042,12 +51087,56 @@ const oogaChatChecks = async () => {
       let requestId = 0;
       const c = M.create({ broker: () => broker, rtc, target, memory, timers, allowed: () => allowed, stall: () => { stalls++; }, request: (type, fields) => { asked.push({ type, ...fields, id: ++requestId }); return requestId; } });
       const answer = (ok, you, error) => c.heard({ type: "result", requestId: asked.at(-1).id, ok, you, ...(error ? { error: { code: error, retryable: false } } : {}) });
-      return { c, log, asked, tracks, pcs, elements, listeners, answer, get captures() { return captures; }, get stalls() { return stalls; }, hold: (op) => { let go; delay = { op, until: new Promise((r) => { go = r; }) }; return () => { delay = null; go(); }; },
+      return { c, rtc, log, asked, tracks, pcs, elements, listeners, answer, get captures() { return captures; }, get stalls() { return stalls; }, hold: (op) => { let go; delay = { op, until: new Promise((r) => { go = r; }) }; return () => { delay = null; go(); }; },
         play: (held) => { playHeld = held; }, failNext: (op) => { failing = op; },
         fire: (ms) => { const i = waits.findIndex((w) => w && w.ms === ms); if (i < 0) return false; const { fn } = waits[i]; waits[i] = null; fn(); return true; } };
     };
     const snap = (r, connection, speak, zone = "main") => r.c.heard({ type: "snapshot", zone, epoch: 1, revision: 1, participants: [], connection, you: { id: "gh:1", speak } });
     const out = {};
+    // The same media controller serves the standalone app and hosted chats on the island.
+    {
+    const switching = rig(); switching.c.zone("main"); snap(switching, "mic", "eligible"); await flush();
+    const entering = switching.c.join(); await flush(); switching.answer(true, { id: "gh:1", speak: "pending", lease: 9 }); await entering;
+    const publisher = switching.pcs[1], signaling = switching.log.length, received = switching.pcs[0];
+    const changed = await switching.c.selectDevice("usb");
+    const kept = changed && switching.c.state.muted && switching.c.state.role === "speaker" && !received.closed && !publisher.closed
+      && switching.log.length === signaling && publisher.tx[0].track === switching.tracks[1] && !switching.tracks[1].enabled && switching.tracks[0].stops === 1;
+    const sender = publisher.tx[0].sender, replace = sender.replaceTrack;
+    sender.replaceTrack = async () => { throw Error("device switch failed"); };
+    const rejected = !(await switching.c.selectDevice("busy")) && switching.tracks[1].stops === 0 && switching.tracks[2].stops === 1
+      && publisher.tx[0].track === switching.tracks[1] && !!switching.c.microphone().error;
+    sender.replaceTrack = replace;
+    await switching.c.mute();
+    const capture = switching.rtc.getUserMedia;
+    let releaseCapture;
+    switching.rtc.getUserMedia = async (...args) => { await new Promise(resolve => { releaseCapture = resolve; }); return capture(...args); };
+    const changing = switching.c.selectDevice("headset");
+    await switching.c.mute(); releaseCapture(); await changing;
+    const muteDuring = switching.c.state.muted && !switching.tracks.at(-1).enabled;
+    const late = switching.c.selectDevice("late"); await switching.c.leave(); releaseCapture();
+    const cancelled = !(await late) && switching.tracks.at(-1).stops === 1 && !switching.c.stats.capturing && publisher.closed;
+    switching.c.dispose();
+    record("Ooga Chat microphone picker: same publication and receive connection, failed replacement retains capture, mute during acquisition, leave cancels late capture",
+      kept && rejected && muteDuring && cancelled, JSON.stringify({ kept, rejected, muteDuring, cancelled }));
+    }
+    const releasedDevices = [];
+    for (const release of ["leave", "hold"]) {
+      const f = rig(); f.c.zone("main"); snap(f, "devices", "eligible"); await flush();
+      const first = f.c.join(); await flush(); f.answer(true, { id: "gh:1", speak: "pending", lease: 19 }); await first;
+      await f.c.selectDevice("usb");
+      const capture = f.rtc.getUserMedia, constraintsSeen = [];
+      f.rtc.getUserMedia = constraints => {
+        constraintsSeen.push(constraints);
+        return constraints.audio.deviceId?.exact === "usb" ? Promise.reject(Object.assign(Error("unplugged"), { name: "NotFoundError" })) : capture(constraints);
+      };
+      if (release === "hold") { f.c.status("reconnecting"); f.fire(120000); snap(f, "devices-back", "eligible"); }
+      else { await f.c.leave(); f.c.heard({ type: "you", zone: "main", you: { id: "gh:1", speak: "eligible" } }); }
+      const again = f.c.join(); await flush(); f.answer(true, { id: "gh:1", speak: "pending", lease: 20 }); await again; await flush();
+      releasedDevices.push({ release, speaker: f.c.state.role === "speaker", defaultInput: constraintsSeen.length === 1 && !constraintsSeen[0].audio.deviceId });
+      f.c.dispose();
+    }
+    record("Ooga Chat microphone picker: unplugging a released selection cannot block rejoin or recovery after the hold expires",
+      releasedDevices.every(r => r.speaker && r.defaultInput), JSON.stringify(releasedDevices));
     // A listener: hears the zone, never captures, can't join.
     let r = rig({ allowed: false });
     r.c.zone("main"); snap(r, "c1", "none"); await flush();
