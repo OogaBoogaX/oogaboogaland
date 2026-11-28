@@ -8,14 +8,30 @@
     { name: "Cold Storage", x: 1, z: -43, y: 0, w: 13, d: 11, h: 5 },
     { name: "21 Club", x: 10, z: -28, y: 17, w: 18, d: 15, h: 6 }
   ];
+  const club = ROOMS[2], shaft = BL.pokerVault.LIFT;
+  const east = club.x+club.w/2, front = club.z+club.d/2;
+  const stairX = club.x-5.5, stairHalf = 1.24, tread = .37, steps = 9;
+  const onDeck = (x,z) => Math.abs(x-club.x)<=club.w/2 && Math.abs(z-club.z)<=club.d/2;
+  const onBridge = (x,z) => x>=east && x<=shaft.x-shaft.half && Math.abs(z-shaft.z)<=shaft.half;
+  const onStair = (x,z) => Math.abs(x-stairX)<=stairHalf && z>=front && z<front+steps*tread;
+  const stairTop = (i,lite) => {
+    const foot=BL.pokerVault.surfaceAt(stairX,lite);
+    return club.y-(club.y-foot)*i/steps;
+  };
+  const roofHeight = (x,z,lite) => {
+    if (Math.abs(x-shaft.x)<=shaft.half && Math.abs(z-shaft.z)<=shaft.half) return club.y+2.8;
+    if (onDeck(x,z) || onBridge(x,z)) return club.y;
+    if (onStair(x,z)) return Math.max(BL.pokerVault.surfaceAt(x,lite),stairTop(Math.floor((z-front)/tread),lite));
+    return BL.pokerVault.surfaceAt(x,lite);
+  };
   // From, to, local x/z of the control, and local x/z where the player arrives. -1 is the main floor.
   const DOORS = [
     [-1, 0, ROOMS[0].x, -35.87, 0, 3.5, "Whitepaper"],
     [-1, 1, 0, -35.8, 0, 3.5, "Genesis Vault"],
-    [-1, 2, 17.4, -34.25, 5.4, -3.4, "Gate 21"],
+    [-1, 2, shaft.x-shaft.half-.3, shaft.z, east-club.x-.85, shaft.z-club.z, "21 Club lift"],
     [0, -1, 0, 5.1, -19.53, -34.0, "Back to the bar"],
     [1, -1, 0, 5.1, 0, -33, "Back to the hall"],
-    [2, -1, 6.4, -4.6, 17.4, -32, "Gaming floor"],
+    [2, -1, east-club.x-.4, shaft.z-club.z, shaft.x-shaft.half-1.05, shaft.z, "Gaming floor"],
     [0, 0, .035, BL.pokerLoungeStone.tableZ(ROOMS[0])-.43, 0, 0, "Founders pass"]
   ];
   const mesh = (w, h, d, color, x, y, z, emissive = 0) => M.box({ w, h, d, color, emissive, offset: { x, y, z } });
@@ -80,11 +96,21 @@
     } else if (open) {
       // Exposed balcony edge, slim brass posts and two continuous rails looking down to the hall.
       for (const sign of [-1, 1]) for (const y of [0.44, 1]) {
-        slab(0, y, sign * b, r.w, 0.075, 0.09, trim); slab(sign * a, y, 0, 0.09, 0.075, r.d, trim);
+        if(sign<0) {
+          slab(0,y,-b,r.w,.075,.09,trim); slab(-a,y,0,.09,.075,r.d,trim);
+        } else {
+          const stair=stairX-r.x, landing=shaft.z-r.z;
+          for(const [lo,hi] of [[-a,stair-stairHalf],[stair+stairHalf,a]])
+            slab((lo+hi)/2,y,b,hi-lo,.075,.09,trim);
+          for(const [lo,hi] of [[-b,landing-shaft.half],[landing+shaft.half,b]])
+            slab(a,y,(lo+hi)/2,.09,.075,hi-lo,trim);
+        }
       }
       for (const sign of [-1, 1]) {
-        for (let x = -a; x <= a; x += r.w / 6) slab(x, 0.5, sign * b, 0.09, 1, 0.09, trim);
-        for (let z = -b; z < b; z += r.d / 4) slab(sign * a, 0.5, z, 0.09, 1, 0.09, trim);
+        for (let x = -a; x <= a; x += r.w / 6)
+          if(sign<0 || Math.abs(r.x+x-stairX)>stairHalf)slab(x,.5,sign*b,.09,1,.09,trim);
+        for (let z = -b; z < b; z += r.d / 4)
+          if(sign<0 || Math.abs(r.z+z-shaft.z)>shaft.half)slab(sign*a,.5,z,.09,1,.09,trim);
       }
     }
     if (id === 0) {
@@ -279,15 +305,47 @@
         glyph = add(room, g.glyph, 0, 2.22, 0);
       }
     });
-    // A glazed lift shaft at the far right links the two landings visibly from the tables.
-    const lift = [], x = 17.4, z = -35.05;
-    for (const dx of [-0.78, 0.78]) for (const dz of [-0.72, 0.72])
-      lift.push(mesh(0.095, 19.35, 0.095, GOLD, x + dx, 9.675, z + dz));
-    for (const y of [0.02, 2.35, 17.02, 19.35])
-      lift.push(mesh(1.68, 0.085, 1.55, GOLD, x, y, z));
-    const glazing = mesh(1.51, 19.25, 1.38, "#d7ceb9", x, 9.65, z);
-    glazing.glassOpacity = 0.055; glazing.glassGrazing = 0.5; glazing.castShadow = false;
-    add(root, M.merge(...lift)); add(root, glazing);
+    const {x,z,half}=shaft, height=club.y, steel="#253743", light="#77efe4", silver="#adc7cd";
+    const frame=[], cab=[];
+    const panel=(list,w,h,d,color,dx,y,dz,glow=0)=>list.push(mesh(w,h,d,color,dx,y,dz,glow));
+    for(const side of [-1,1]){
+      panel(frame,.16,height+2.8,.20,steel,half,(height+2.8)/2,side*half);
+      panel(frame,.055,height+2.7,.07,light,half-.10,(height+2.7)/2,side*half,.85);
+      for(let y=1;y<height;y+=1)panel(frame,.28,.04,.28,silver,half,y,side*half,.42);
+      panel(cab,.12,2.55,.12,silver,-half+.18,1.26,side*(half-.16));
+      panel(cab,2.28,.075,.07,light,0,1.03,side*(half-.15),.83);
+    }
+    for(const y of [-.08,2.54]){
+      panel(cab,2.45,.16,2.43,steel,0,y,0);
+      panel(cab,2.48,.034,2.46,light,0,y-.025,0,.9);
+    }
+    panel(cab,.14,2.5,.94,steel,half-.18,1.26,0);
+    panel(cab,.045,.84,.26,light,half-.27,1.43,0,.95);
+    panel(frame,half*2,.12,half*2,steel,0,height+2.74,0);
+    panel(frame,half*2+.015,.035,half*2+.015,light,0,height+2.70,0,.85);
+    const bridgeEnd=x-half, bridgeW=bridgeEnd-east;
+    panel(frame,bridgeW,.16,2*half,steel,east+bridgeW/2-x,height-.08,0);
+    for(const side of [-1,1])panel(frame,bridgeW,.055,.07,light,east+bridgeW/2-x,height+.012,side*half,.85);
+    const eave=BL.pokerTerrace.inner-BL.pokerVault.WALL_X;
+    panel(frame,eave,.12,2*BL.pokerTerrace.halfSpan,silver,BL.pokerVault.WALL_X+eave/2-x,BL.pokerVault.FOOT-.06,-z);
+    for(let i=0;i<steps;i++){
+      const top=stairTop(i,lite), dz=front+(i+.5)*tread-z;
+      panel(frame,2*stairHalf,.20,tread+.008,steel,stairX-x,top-.10,dz);
+      panel(frame,2*stairHalf,.035,.04,light,stairX-x,top-.019,dz+tread/2,.78);
+    }
+    add(root,M.merge(...frame),x,0,z);
+    const car=add(root,M.merge(...cab),x,0,z);
+    const glass=mesh(2.24,2.34,.048,"#b4dfdf",0,1.24,0);
+    glass.glassOpacity=.16; glass.glassGrazing=.54; glass.castShadow=false;
+    for(const side of [-1,1])add(car,glass,0,0,side*(half-.16));
+    const leaf=mesh(.08,2.40,1.12,steel,0,1.21,0);
+    const doorLeaf=[add(car,leaf,-half+.13),add(car,leaf,-half+.13)];
+    for(const n of doorLeaf)add(n,mesh(.095,.034,1.10,light,0,1.2,0,.9));
+    const liftPose=(y,open)=>{
+      car.position.y=y;
+      for(let i=0;i<2;i++)doorLeaf[i].position.z=(i?1:-1)*(.56+open*1.07);
+    };
+    liftPose(0,1);
     const roof=ROOMS[2], roofScope=BL.pokerTerrace.mount({x:roof.x,y:roof.y+1.62,z:roof.z-3});
     S.addChild(root,roofScope.root);
     const shelf = BL.pokerSpeakeasy.shelf(lite, DOORS[0][2], DOORS[0][3]);
@@ -358,13 +416,13 @@
     show(-1);
     const dispose=()=>{lighting.abort();lounge.reset();heirlooms?.dispose();};
     const exteriorView=()=>exterior ??= BL.pokerLoungeExterior.build(ROOMS[0],glasswork,entry,lite);
-    return { root, solids, targets, chairs, approach, dispose, exteriorView, get hearth(){return hearth;}, get wind(){return wind;},
+    return { root, solids, targets, chairs, car, liftPose, approach, dispose, exteriorView, get hearth(){return hearth;}, get wind(){return wind;},
       get heirlooms(){return heirlooms;}, get landscapes(){return landscapes;}, get entry(){return entry;}, get projector(){return windowLight.projector;}, windowLights:windowLight.lights, portalView, glyph, shelf, roofScope, roofWins, sighting, refreshGate, show };
   };
   // Test the whole walking segment against furniture expanded by the visitor's body radius.
-  const clear = (set, r, ax, az, bx, bz, radius) => {
+  const clear = (set, r, ax, az, bx, bz, radius, bounds = true) => {
     ax -= r.x; az -= r.z; bx -= r.x; bz -= r.z;
-    if (Math.abs(bx) > r.w / 2 - radius - 0.14 || bz < -r.d / 2 + radius + .14 || r !== ROOMS[0] && bz > r.d / 2 - radius - .14) return false;
+    if (bounds && (Math.abs(bx) > r.w / 2 - radius - 0.14 || bz < -r.d / 2 + radius + .14 || r !== ROOMS[0] && bz > r.d / 2 - radius - .14)) return false;
     for (const f of set) {
       const dx = bx - ax, dz = bz - az, w = f.w + radius, d = f.d + radius;
       if (Math.max(ax, bx) <= f.x - w || Math.min(ax, bx) >= f.x + w || Math.max(az, bz) <= f.z - d || Math.min(az, bz) >= f.z + d) continue;
@@ -397,5 +455,5 @@
     return Math.min(az,bz)>=front || clear(salons.solids[0],r,az>front?ax+slope*(front-az):ax,Math.min(front,az),
       bz>front?ax+slope*(front-az):bx,Math.min(front,bz),radius);
   };
-  BL.pokerSalons = Object.freeze({ ROOMS, DOORS, build, clear, loungeWalk });
+  BL.pokerSalons = Object.freeze({ ROOMS, DOORS, build, clear, loungeWalk, roofHeight, onDeck, onBridge, onStair, stairX, stairHalf });
 })();
