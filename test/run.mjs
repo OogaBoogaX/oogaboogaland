@@ -47532,12 +47532,15 @@ const cloudPanelChecks = async BL => {
   const stats = { enabled: false, joining: false, returning: false, publishing: false, muted: false }, local = new Set();
   let gate = null, visible = true;
   const observers = [];
+  // Keep the real voice-state helper; only icon creation needs the simplified DOM below.
+  const icons = { window: {} };
+  runInNewContext(readFileSync(join(root, "src/js/native-icons.js"), "utf8"), icons);
   const window = { BL: { audience: BL.audience, reactionPolicy: BL.reactionPolicy,
     net: { state, subscribe: sub("net"), subscribeAudience: sub("audience"), subscribeReactions: sub("reactions"), subscribeChatMembers: sub("chatMembers"), sendAudience: (type, fields) => { sent.push({ type, ...fields }); return true; }, logout() {} },
     voice: { stats, support: () => ({ secure: true, webrtc: true, mic: true }), subscribe: sub("voice"), subscribeLevels: () => () => {}, level: () => 0, ownLevel: () => 0, mutedLocally: login => local.has(login), muteLocal: (login, on) => on ? local.add(login) : local.delete(login), setMuted() {}, toggle() {}, leave() {}, speaking: () => false, inEarshot: () => true },
     hud: { voiceIcon: el("svg"), voiceWords: (look, self) => `${look}${self ? " (you)" : ""}`, renderFaceIcon() {}, showAccount() {} },
     models: { caveman: () => ({}) }, contributors: { traitsFor: () => ({}) }, characters: { get: name => name === "ooga" ? {} : null },
-    nativeIcons: { svg: () => el("svg"), voice: () => el("svg"), label: (button, text) => { button.textContent = text; } }, sheet: { visible: () => visible, watchViews() {}, attending: () => false, setBadge() {} },
+    nativeIcons: { ...icons.window.BL.nativeIcons, svg: () => el("svg"), voice: () => el("svg"), label: (button, text) => { button.textContent = text; } }, sheet: { visible: () => visible, watchViews() {}, attending: () => false, setBadge() {} },
     // Hosted chats off (no call-v1): the panel keeps Main Island's roster.
     chatCall: { available: () => false, room: null, subscribe: () => () => {}, hear: () => () => {}, identity: () => null },
     reactions: { mount: (host, options) => { gate = options.handAllowed; }, refresh: () => refreshes.push(gate()) } } };
