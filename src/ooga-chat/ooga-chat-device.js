@@ -7,11 +7,11 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  // M mutes or unmutes only a plain press: not while typing in a field or composing with an IME, not with a modifier
-  // held, and not on key repeat.
+  // M mutes or unmutes as the island's M does: Shift+M too, but not while typing in a field or composing with an IME,
+  // not with Ctrl, Meta or Alt held, and not on key repeat.
   const isMuteKey = (event) => {
     if (event.key !== "m" && event.key !== "M") return false;
-    if (event.repeat || event.isComposing || event.keyCode === 229 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return false;
+    if (event.repeat || event.isComposing || event.keyCode === 229 || event.ctrlKey || event.metaKey || event.altKey) return false;
     const target = event.target;
     if (!target) return true;
     if (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName || "")) return false;

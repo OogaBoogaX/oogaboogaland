@@ -5203,6 +5203,20 @@ const characterChecks = async () => {
   for (const name of ["terrain", "sign-glyphs", "hub-models"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
   const worn = [BL.hubModels.jetpack(), BL.hubModels.jetFlame()];
   for (const geo of worn) mirrorGeometries.add(geo);
+  // A record run uploads its ghost only when the Ooga's look passes the shared replay codec, which the Worker also
+  // reads; the modelled hands' eleven-corner faces failed it for every Ooga, so no level had a record ghost (#897).
+  Object.assign(context, { BL, TextEncoder, TextDecoder });
+  for (const name of ["cloud-hopper-replay-codec", "cloud-hopper-ghost"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
+  const unreplayable = all.filter(c => {
+    BL.models.setScope("character-replay");
+    const actor = BL.models.caveman(BL.contributors.traitsFor(c.handle)), ghost = BL.cloudHopperGhost.create({ root: BL.scene.createNode(), renderer: { releaseGeometry() {} } });
+    actor.baseY = 0.5; ghost.begin(actor, "ooga-player");
+    const recording = ghost.finish(0.1, actor), bytes = recording?.appearance && BL.cloudHopperReplayCodec.encode({ ...recording,
+      version: 1, game: "cloud-hopper-l1", playerId: 1, courseVersion: 1, seed: 1, driftTime: 0 });
+    BL.models.release("character-replay", []); BL.models.setScope(null);
+    return !bytes;
+  }).map(c => c.handle);
+  record("characters: every Ooga's look passes the Cloud Hopper replay codec, so a record run uploads its ghost (regression: #897)", unreplayable.length === 0, JSON.stringify(unreplayable));
   const spare = BL.models.spareMagazine();
   collect(spare.node);
   for (const name of ["jumbotron-font", "jumbotron", "factory-kiosk-core", "factory-kiosk", "factory-models", "kortik-models", "tess"])
@@ -18521,7 +18535,7 @@ const cloudHopperRecordChecks = async () => {
       H.setReplayState('loading'); const busy = button.getAttribute('aria-busy') === 'true';
       H.setReplayState('on'); const on = button.getAttribute('aria-pressed') === 'true';
       H.setReplayState('error'); const retry = !button.disabled && button.title.includes('retry');
-      H.setReplayState('unavailable'); const missing = button.disabled && button.title === 'No winning replay yet';
+      H.setReplayState('unavailable'); const missing = button.disabled && button.title === 'This record has no saved replay';
       H.setLevels({ selected: 2, unlocked: 4, bests: [0, 26540, 0, 0] });
       H.setHighscores({ highscores: { 'long-player-name-with-thirty-nine-chars': 19740 }, achieved: {} });
       H.setHighscoreStatus('stale'); H.show('ready');
@@ -50960,14 +50974,15 @@ const oogaChatChecks = async () => {
       Object.values(lifecycle).every(Boolean), JSON.stringify(lifecycle));
   } finally { rmSync(out, { recursive: true, force: true }); }
 
-  // M mutes only a plain press outside a field, composition, modifier or repeat.
+  // M mutes outside a field, composition, Ctrl/Meta/Alt or repeat; Shift+M too, as on the island.
   const D = load(["src/ooga-chat/ooga-chat-device.js"], { window: {} }).oogaChatDevice;
   const key = (extra = {}) => ({ key: "m", target: { tagName: "BUTTON", closest: () => null }, ...extra });
   const keys = { plain: D.isMuteKey(key()) && D.isMuteKey(key({ key: "M" })) && D.isMuteKey(key({ target: null })),
-    refused: [{ repeat: true }, { isComposing: true }, { keyCode: 229 }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { key: "n" },
+    shifted: D.isMuteKey(key({ key: "M", shiftKey: true })),
+    refused: [{ repeat: true }, { isComposing: true }, { keyCode: 229 }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { key: "n" },
       { target: { tagName: "INPUT" } }, { target: { tagName: "TEXTAREA" } }, { target: { tagName: "DIV", isContentEditable: true } },
       { target: { tagName: "SPAN", closest: () => ({}) } }].every((extra) => !D.isMuteKey(key(extra))) };
-  record("Ooga Chat M key: a plain M mutes, never while typing in a field or editable text, composing, holding a modifier or repeating",
+  record("Ooga Chat M key: M and Shift+M mute (regression: Shift+M was refused), never while typing in a field or editable text, composing, holding Ctrl, Meta or Alt or repeating",
     Object.values(keys).every(Boolean), JSON.stringify(keys));
 
   // Ooga Chat's marks are the island's own: DSB Land's paths as the island draws them.
