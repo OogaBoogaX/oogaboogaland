@@ -77,7 +77,8 @@
   // the hands work on the rock (0 hanging still to 1 a full stroke), in quarters. And one of the driver's moves: its kind,
   // its variant (sub: bit 0 the right hand, the rest the desk's or bench's work), and its amount u, on a grid of AS
   // steps; a periodic move (`periodic`) takes the phase grid in place of the gait's, the gait standing still.
-  const IN = { t: 0, phase: 0, k: 0, run: 0, air: 0, land: 0, climb: 0, climbPhase: 0, sit: 0, lay: 0, hold: 0, move: 0, kind: 0, sub: 0, u: 0, periodic: false };
+  const IN = { t: 0, phase: 0, k: 0, run: 0, air: 0, land: 0, climb: 0, climbPhase: 0, sit: 0, lay: 0, arms: 0, hold: 0, move: 0, kind: 0, sub: 0, u: 0, periodic: false };
+  let attached = 0;
   const q4 = (v) => Math.max(0, Math.min(4, Math.round(v * 4)));
   // The moves, and the rig's act fields each is sampled with (u its amount, ph its phase in radians). A smash runs one
   // path through u: the fists rising overhead to a third of the way, struck down onto the ground to two thirds, and the
@@ -100,15 +101,15 @@
     else if (kind === K_LAB) { if (work === W_TYPE) { act.reach = 1; act.tap = 1; } else if (work === W_TOUCH) act.touch = 1; else if (work === W_CARRY) { act.carry = 1; act.carryArm = CARRY0 + (CARRY1 - CARRY0) * u; } }
     else if (kind === K_ROLL) act.roll = u;
     return act; };
-  const sample = (s, ti, pi, ui) => { const ki = q4(IN.k), ri = q4(IN.run), ai = q4(IN.air), li = q4(IN.land), ci = q4(IN.climb), si = q4(IN.sit), yi = q4(IN.lay), kind = IN.kind, sub = kind ? IN.sub : 0, periodic = kind > 0 && IN.periodic;
+  const sample = (s, ti, pi, ui) => { const ki = q4(IN.k), ri = q4(IN.run), ai = q4(IN.air), li = q4(IN.land), ci = q4(IN.climb), si = q4(IN.sit), yi = q4(IN.lay), ar = yi ? IN.arms : 0, kind = IN.kind, sub = kind ? IN.sub : 0, periodic = kind > 0 && IN.periodic;
     const climbing = ci > 0 && IN.hold > 0, mi = ci > 0 ? q4(climbing ? IN.move : 0) : 0, moving = ki > 0 && ai === 0 && !climbing && si === 0 && yi === 0, p = moving || climbing || periodic ? pi % PHASES : 0;
-    const key = (((((((((((((ti * PHASES + p) * 5 + ki) * 5 + ri) * 5 + ai) * 5 + li) * 5 + ci) * 5 + si) * 5 + yi) * 5 + mi) * 2 + (climbing ? 1 : 0)) * KINDS + kind) * SUBS + sub) * (AS + 1) + (kind ? ui : 0)) * 2 + (periodic ? 1 : 0);
+    const key = ((((((((((((((ti * PHASES + p) * 5 + ki) * 5 + ri) * 5 + ai) * 5 + li) * 5 + ci) * 5 + si) * 5 + yi) * 5 + mi) * 2 + (climbing ? 1 : 0)) * KINDS + kind) * SUBS + sub) * (AS + 1) + (kind ? ui : 0)) * 2 + (periodic ? 1 : 0)) * 8 + ar;
     let out = s.cache.get(key); if (out) return out;
     // full: the older half goes (a Map keeps its keys in the order they came)
     if (s.cache.size >= LIMIT) { let n = LIMIT >> 1; for (const old of s.cache.keys()) { s.cache.delete(old); if (--n <= 0) break; } }
     const ph = p / PHASES * Math.PI * 2, k = ki / 4;
     const gait = moving ? { phase: ph, amp: 24 * k, lift: 28 * k, sway: 3 * k, run: ri / 4 } : null;
-    const act = { air: ai / 4, land: li / 4, climb: ci / 4, climbPhase: climbing ? ph : 0, climbMove: mi / 4, sit: si / 4, lay: yi / 4 };
+    const act = { air: ai / 4, land: li / 4, climb: ci / 4, climbPhase: climbing ? ph : 0, climbMove: mi / 4, sit: si / 4, lay: yi / 4, layArms: ar };
     if (kind) fill(act, kind, sub, ui / AS, periodic ? ph : 0);
     BL.clankerModel.pose(s.r, ti / TS, gait, act);
     out = record(s, new Float32Array(s.size)); s.cache.set(key, out); s.made++; return out; };
@@ -198,7 +199,7 @@
     let rig = null, form = null, pose = null, nodes = null, sleeveAt = 0, retargetK = 0, fistLift = 0;
     let onRig = null;
     // A change of move eases from the pose last shown (`from`) over a fifth of a second.
-    let move = -1, fade = 1;
+    let move = -1, fade = 1, lastLounge = "", lies = attached++;
     const show = (next) => { if (form === next && rig) return; form = next;
       let e = rigs[next]; if (!e) { const tr = now(), M = BL.clankerModel, r = M.rig(M.sets.B, next); outlines(r); TIME.rig += now() - tr; const s = sampler(next), N = walk(r);
         e = rigs[next] = { r, nodes: N, s, buf: new Float32Array(s.size), from: new Float32Array(s.size), headAt: N.indexOf(r.head) * FIELDS, ...regionsOf(r) }; addChild(scaled, r.root);
@@ -275,6 +276,9 @@
       IN.air = state.air ? 1 : 0; IN.land = managed ? Math.min(1, state.crouch || 0) : 0;
       IN.climb = managed ? Math.min(1, state.climbBlend || 0) : 0; IN.climbPhase = managed ? (state.climbStride || 0) / 1.2 * Math.PI * 2 : 0;
       IN.sit = lounge === "sit" ? 1 : 0; IN.lay = onSide ? 1 : 0;
+      // the arms lying: the next of the rig's sets each time it lies down or turns over (on its side four, on its back
+      // three of its own), starting from where this gorilla came in the attach order, so a crowd lying down shows them all
+      if (onSide && lounge !== lastLounge) lies++; lastLounge = lounge; IN.arms = lounge === "back" ? 4 + lies % 3 : lies & 3;
       // Climbing as the clanker studio shows it (docs/clanker-port.md): on the rock its hands work as hard as it moves;
       // walking up to a large wall it rises into the climb, the gait going on (0.85 of the climb at the rock); hauling
       // over a top (state.haul, 0 hanging on the wall to 1 standing on it) in three parts: hanging on (to HAUL_A) its
@@ -462,7 +466,7 @@
   // A rig's rest for the retarget, once a form: each driven bone's turn in the rig at the standing pose (when the driver's
   // bones hang straight in its body), and each lower part's own local turn there.
   const restOf = (s) => { if (s.rest) return s.rest; const r = s.r, saved = IN.t, rest = {};
-    const keep = { ...IN }; IN.t = 1; IN.k = 0; IN.air = IN.land = IN.climb = IN.sit = IN.lay = IN.kind = 0; IN.periodic = false;
+    const keep = { ...IN }; IN.t = 1; IN.k = 0; IN.air = IN.land = IN.climb = IN.sit = IN.lay = IN.arms = IN.kind = 0; IN.periodic = false;
     const buf = blend(s, new Float32Array(s.size)); Object.assign(IN, keep); IN.t = saved;
     const local = (node) => { const i = s.nodes.indexOf(node), k = i * FIELDS; return [buf[k], buf[k + 1], buf[k + 2], buf[k + 3]]; };
     const world = (node) => { const out = [0, 0, 0, 1]; const chain = []; for (let n = node; n && n !== r.root; n = n.parent) chain.push(n);

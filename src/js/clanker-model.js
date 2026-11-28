@@ -1340,6 +1340,16 @@
       // arms hanging with the hands low in front. Lying: pose() rolls the whole body over (LAYROLL, about its front axis)
       // and here it curls: thighs up, knees bent, the lower arm forward under the head and the upper one over the body
       { const sit = act.sit || 0, lay = act.lay || 0;
+        // (the arms lying, by act.layArms: [bottom arm's swing, its elbow, its roll, top arm's swing, its elbow, its roll].
+        // 0 the bottom forearm under the head as a pillow and the top arm across the body; 1 the bottom arm reaching out
+        // along the ground and the top one lying along the side, its hand on the hip; 2 both forearms folded in front of
+        // the chest, curled up; 3 the top arm thrown up over the head and the bottom hand in front of the face;
+        // 4 to 6 lying on its back, below)
+        const LA = [[-120, -60, -12, 30, -30, 15],
+          [-85, -10, -12, 8, -8, 0], [-55, -95, -10, -35, -85, 12], [-70, -70, -12, -150, -45, 8],
+          // (on its back, the body turning the side pose over: 4 both arms resting on the ground at its sides, 5 both hands
+          // behind its head, 6 one hand behind its head and the other at its side. A forward reach would point at the sky.)
+          [0, -10, -20, 0, -10, -20], [-165, -110, -25, -165, -110, -25], [-165, -110, -25, 0, -10, -20]][Math.min(6, Math.max(0, act.layArms | 0))];
         if (sit || lay) for (const s of ["R", "L"]) {
           // (b129: sitting, the legs straight out in front (thighs SITTHIGH -86, knees straight) and the arms down at the
           // sides, turned out ARMSITROLL from the body, a little forward, the knuckles on the ground beside the hips)
@@ -1351,11 +1361,11 @@
           // (b160: the bottom leg straighter (LAYTHIGHB, LAYKNEEB), the top one bent with its knee forward (LAYTHIGH, LAYKNEE),
           // as someone lies on their side)
           add("leg" + s, "shin" + s, sit * -86 + lay * (under ? 0 : 0), sit * 0 + lay * (under ? 0 : 0));
-          add("arm" + s, "fore" + s, sit * 0 + lay * (under ? -120 : 30), sit * -15 + lay * (under ? -60 : -30));
+          add("arm" + s, "fore" + s, sit * 0 + lay * (under ? LA[0] : LA[3]), sit * -15 + lay * (under ? LA[1] : LA[4]));
           if (lay && s === "R") roll.head = (roll.head || 0) + lay * 0 * ("R" === "R" ? 1 : -1);
           // (b161: the forearm takes the same roll as its upper arm, so the elbow stays a hinge: rolled on its own it was
           // turned off the hinge, the elbow seeming to bend backwards)
-          if (lay) { const ar = lay * inS * (under ? -12 : 15); roll["arm" + s] = (roll["arm" + s] || 0) + ar; roll["fore" + s] = (roll["fore" + s] || 0) + ar;
+          if (lay) { const ar = lay * inS * (under ? LA[2] : LA[5]); roll["arm" + s] = (roll["arm" + s] || 0) + ar; roll["fore" + s] = (roll["fore" + s] || 0) + ar;
             roll["leg" + s] = (roll["leg" + s] || 0) + lay * inS * (under ? 15 : 15); }
           if (sit) roll["arm" + s] = (roll["arm" + s] || 0) + sit * (s === "R" ? 1 : -1) * 0; }
         if (sit) { swing.abdomen = (swing.abdomen || 0) - sit * 6; swing.head = (swing.head || 0) + sit * 4; } }
