@@ -76,6 +76,9 @@
       if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); compactCursors.set(geometry, cursor); }
       return BL.compactGeometry.readFace(geometry, index, cursor);
     };
+    // What the registry bakes for a node: its geometry's `outline` stand-in where it has one (a clanker's smooth body:
+    // clanker-body.js), else the geometry itself.
+    const shapeOf = (node) => { const g = node.geometry; return g && g.outline !== undefined ? g.outline : g; };
     const geometryOf = (geometry) => {
       if (!geometry || excluded.has(geometry) || geometry.matrixGlyph || !geometry.faces || !geometry.faces.length) return null;
       let cached = geometries.get(geometry);
@@ -394,12 +397,12 @@
       if (aliases.has(node)) owner = aliases.get(node);
       if (character < 0 && characterRoots.has(owner)) character = characterRoots.get(owner);
       if (node.geometry && !node.instanceData) {
-        const geometry = geometryOf(node.geometry);
+        const geometry = geometryOf(shapeOf(node));
         if (geometry) {
           let entry = entries.get(node);
           if (!entry) {
             const group = groupOf(owner);
-            entry = { node, owner, group, character, geometry, hitTriangle: -1, capacity: 0, source: node.geometry, inverse: BL.math.mat4.create(), world: new Float64Array(16), visible: false, shown: false, clipMinY: -Infinity, worldMinY: -Infinity, worldMaxY: Infinity, x: 0, y: 0, z: 0, radius: 0, hx: 0, hy: 0, hz: 0, scaleX: 0, scaleY: 0, scaleZ: 0, centerY: 0, halfY: 0, boundsGeometry: null, boundaryBounds: new Float64Array(4), boundaryTriangles: new Float64Array(0), boundaryBoxes: new Float64Array(0), boundaryNodes: new Float64Array(0), boundaryRay: new Float64Array(12), boundaryHits: new Int32Array([-1, -1]), boundaryGrid: null, boundaryReserve: 0, boundaryNodeReserve: 0 };
+            entry = { node, owner, group, character, geometry, hitTriangle: -1, capacity: 0, source: shapeOf(node), inverse: BL.math.mat4.create(), world: new Float64Array(16), visible: false, shown: false, clipMinY: -Infinity, worldMinY: -Infinity, worldMaxY: Infinity, x: 0, y: 0, z: 0, radius: 0, hx: 0, hy: 0, hz: 0, scaleX: 0, scaleY: 0, scaleZ: 0, centerY: 0, halfY: 0, boundsGeometry: null, boundaryBounds: new Float64Array(4), boundaryTriangles: new Float64Array(0), boundaryBoxes: new Float64Array(0), boundaryNodes: new Float64Array(0), boundaryRay: new Float64Array(12), boundaryHits: new Int32Array([-1, -1]), boundaryGrid: null, boundaryReserve: 0, boundaryNodeReserve: 0 };
             registered.push(entry); entries.set(node, entry); group.push(entry);
             descriptorUsers.get(geometry)?.add(entry);
           }
@@ -739,9 +742,9 @@
         planeX = Math.sqrt(1 + tanX * tanX); planeY = Math.sqrt(1 + tanY * tanY);
       }
       for (let n = 0; n < registered.length; n++) {
-        const entry = registered[n], node = entry.node, geometry = geometries.get(node.geometry), w = node.world;
+        const entry = registered[n], node = entry.node, shape = shapeOf(node), geometry = geometries.get(shape), w = node.world;
         // Initialized hidden entries cannot block rays; reappearing ones refresh through the shown transition.
-        if (!entry.shown && entry.source === node.geometry && entry.boundsGeometry === geometry && !visible(node)) continue;
+        if (!entry.shown && entry.source === shape && entry.boundsGeometry === geometry && !visible(node)) continue;
         let worldChanged = false;
         for (let i = 0; i < 16; i++) if (entry.world[i] !== w[i]) { worldChanged = true; entry.world[i] = w[i]; }
         // Scale and vertical bounds follow the matrix and geometry only; visibility is still read every frame.
@@ -760,14 +763,14 @@
         const worldMinY = node.geometry?.clipMinY ?? -Infinity, worldMaxY = node.geometry?.clipMaxY ?? Infinity;
         const shown = !!geometry && centerY + halfY >= worldMinY && centerY - halfY <= worldMaxY && worldMinY <= worldMaxY && !node.mirrorPortal && reveal < 1 && scaleX * scaleY * scaleZ > 1e-12 && visible(node) && (!entry.group.provider || !entry.group.provider.includes || entry.group.provider.includes(node)), active = shown && entry.owner !== actorRoot;
         const wasActive = entry.visible, wasShown = entry.shown;
-        const moved = worldChanged || wasShown !== shown || entry.source !== node.geometry || entry.clipMinY !== clipMinY || entry.worldMinY !== worldMinY || entry.worldMaxY !== worldMaxY;
+        const moved = worldChanged || wasShown !== shown || entry.source !== shape || entry.clipMinY !== clipMinY || entry.worldMinY !== worldMinY || entry.worldMaxY !== worldMaxY;
         if ((moved || active !== wasActive) && entry.owner !== actorRoot) emissionDirty = true;
         if (node.sightSolid && (moved || active !== wasActive) && (active || wasActive)) structuralChanged = true;
         // Both the departed and newly occupied volumes can affect cached sight rays; distant moving scenery cannot
         // invalidate either.
         const perceptionMoved = entry.character < 0 && (moved || active !== wasActive);
         if (perceptionMoved && wasActive) invalidatePerception(entry);
-        entry.visible = active; entry.shown = shown; entry.source = node.geometry; entry.clipMinY = clipMinY; entry.worldMinY = worldMinY; entry.worldMaxY = worldMaxY;
+        entry.visible = active; entry.shown = shown; entry.source = shape; entry.clipMinY = clipMinY; entry.worldMinY = worldMinY; entry.worldMaxY = worldMaxY;
         if (geometry && entry.geometry !== geometry) { setEntryGeometry(entry, "geometry", geometry); entry.hitTriangle = -1; entry.boundaryHits.fill(-1); }
         if (moved) {
           if (active || wasActive) { occlusionChanged = true; if (entry.character < 0) perceptionChanged = true; }
@@ -1368,7 +1371,7 @@
     let cameraPropEntry = null, cameraPropSource = null, cameraPropFace = -1, cameraPropStamp = -1, cameraPropAll = false, cameraPropCount = 0;
     let cameraPropClip = -Infinity, cameraPropMin = -Infinity, cameraPropMax = Infinity;
     const cameraPropFaceBlocked = (e, faceIndex, dx, dy, dz, hx, hy, hz, ex, ey, ez, allProps) => {
-      const g = e.node.geometry;
+      const g = shapeOf(e.node);
       const cached = cameraPropEntry === e && cameraPropSource === g && cameraPropFace === faceIndex && cameraPropStamp === collectStamp && cameraPropAll === allProps
         && cameraPropClip === e.clipMinY && cameraPropMin === e.worldMinY && cameraPropMax === e.worldMaxY;
       let nx = 0, ny = 0, nz = 0, front, wx, wy, wz, retreat, v, m, face;
@@ -1446,7 +1449,7 @@
       // still searches every blocker.
       for (let n = -1; n < cameraOccluderCount; n++) {
         const e = n < 0 ? cameraCoverEntry : cameraOccluders[n];
-        if (!e || !e.visible || n < 0 && (e.source !== cameraCoverSource || e.node.geometry !== cameraCoverSource) || e.owner === actor.root || e.owner === owner || !allProps && !propsBlockActor && !e.node.sightSolid) continue;
+        if (!e || !e.visible || n < 0 && (e.source !== cameraCoverSource || shapeOf(e.node) !== cameraCoverSource) || e.owner === actor.root || e.owner === owner || !allProps && !propsBlockActor && !e.node.sightSolid) continue;
         const t = length ? Math.max(0, Math.min(1, ((e.x - cameraX) * dx + (e.y - cameraY) * dy + (e.z - cameraZ) * dz) / length)) : 0;
         if ((e.x - cameraX - dx * t) ** 2 + (e.y - cameraY - dy * t) ** 2 + (e.z - cameraZ - dz * t) ** 2 > (radius + e.radius) ** 2) continue;
         // A face covering the whole box must also block its center ray: reject clear candidates before scanning every
@@ -1511,7 +1514,7 @@
         const entry = group[n];
         if (!entry.shown) continue;
         present = true;
-        const vertices = entry.node.geometry.verts, samples = entry.geometry.samples, w = entry.node.world, m = cameraView;
+        const vertices = shapeOf(entry.node).verts, samples = entry.geometry.samples, w = entry.node.world, m = cameraView;
         // The frustum is convex, so its six planes need only the actual mesh vertices; a clipped part means the whole
         // character is not visible.
         for (let i = 0; i < vertices.length; i += 3) {
@@ -1818,7 +1821,7 @@
       // Registration boundaries size every reused buffer from actual scene contents; the frame path never grows
       // them or discards visible items.
       const live = new Set(), wanted = new Set();
-      const visit = (node) => { if (live.has(node)) return; live.add(node); if (node.geometry) wanted.add(node.geometry); for (const child of node.children) visit(child); };
+      const visit = (node) => { if (live.has(node)) return; live.add(node); if (node.geometry) { wanted.add(node.geometry); wanted.add(shapeOf(node)); } for (const child of node.children) visit(child); };
       for (const node of roots) visit(node);
       for (const cave of crew.cavemen.values()) {
         visit(cave.root);

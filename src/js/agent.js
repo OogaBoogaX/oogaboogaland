@@ -553,6 +553,8 @@
     const labItemRotation = managed ? new Float32Array([0, 0, 0, 1]) : null;
     const labArmRotation = managed ? new Float32Array(4) : null, labUprightRotation = managed ? new Float32Array(4) : null;
     const labGripOffset = managed ? new Float32Array(3) : null;
+    // where the lab item hangs: the left arm, or with the new body its socket (set once the body is attached)
+    let armLHost = parts.armL;
     if (labFlask) addChild(parts.armL, labFlask);
     addChild(hips, parts.legR, parts.legL, chest);
     addChild(root, hips);
@@ -1075,6 +1077,7 @@
         else state.idleFor = 2;
       }
       pose(dt);
+      if (newBody) newBody.notePosed();
       const ground = groundAt(root.position.x, root.position.z);
       if (state.air) {
         state.vy -= GRAVITY * dt;
@@ -1317,6 +1320,7 @@
       if (motion && Number.isFinite(motion.supportOffset) && motion.supportOffset) {
         hips.position.y += motion.supportOffset / scale; measureBody(false);
       }
+      if (newBody) newBody.notePosed();
     };
     const pointToWorld = (matrix, x, y, z, out) => {
       const px = (matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12]) * scale;
@@ -1350,22 +1354,24 @@
     const holdLabItem = (node) => {
       if (!managed || !node || !node.geometry || labFlask !== labPlaceholder) return false;
       if (node.parent) removeChild(node.parent, node);
-      removeChild(parts.armL, labPlaceholder);
+      removeChild(armLHost, labPlaceholder);
       labFlask = node; envelopeParts[7] = previewNodes[9] = node;
       const bounds = boundsOf(node.geometry);
       labGripY = Number.isFinite(node.geometry.labGripY) ? node.geometry.labGripY : bounds.max[1] * 0.85;
       node.scale.x = node.scale.y = node.scale.z = 1 / scale;
       node.quaternion = labItemRotation; node.visible = true;
-      addChild(parts.armL, node); positionLabItem(); refreshGeometry(); measureBody();
+      addChild(armLHost, node); positionLabItem(); refreshGeometry(); measureBody();
+      if (newBody) newBody.notePosed();
       return true;
     };
     const releaseLabItem = () => {
       if (!managed || labFlask === labPlaceholder) return null;
       const node = labFlask;
-      removeChild(parts.armL, node); node.quaternion = null;
+      removeChild(armLHost, node); node.quaternion = null;
       labFlask = labPlaceholder; envelopeParts[7] = previewNodes[9] = labPlaceholder;
       labGripY = geos.labFlask.labGripY;
-      addChild(parts.armL, labPlaceholder); refreshGeometry(); measureBody();
+      addChild(armLHost, labPlaceholder); refreshGeometry(); measureBody();
+      if (newBody) newBody.notePosed();
       return node;
     };
     const previewFrom = managed ? new Float64Array(envelopeParts.length * 80) : null;
@@ -1597,6 +1603,7 @@
       }
       // Restore the live pose exactly; recompute bounds without moving its body again.
       refreshGeometry(); measureBody(false);
+      if (newBody) newBody.notePosed();
       return clear;
     };
     const walkPreviewStart = { x: 0, y: 0, z: 0, heading: 0, planning: false, interval: 0.08 };
@@ -1686,21 +1693,29 @@
       return out;
     };
     if (managed) measureBody();
+    // The new clanker's body (clanker-body.js): this rig becomes its driver, off the scene, and `root` the body's. The
+    // lab item is held on the left arm's socket, which follows that arm.
+    const newBody = BL.clankerBody && BL.clankerBody.on && BL.clankerModel ? BL.clankerBody.attach({ root, hips, chest, torso, parts, state, managed }) : null;
+    armLHost = newBody ? newBody.socket("armL") : parts.armL;
+    if (newBody && labPlaceholder) { removeChild(parts.armL, labPlaceholder); addChild(armLHost, labPlaceholder); }
+    if (newBody) newBody.notePosed();
     // Only the form on show: the other set is released, so no scene keeps another
     // scene's Agent geometry resident. A swap re-uploads six small voxel parts.
     const liveGeometry = (set) => {
+      if (newBody) { newBody.liveGeometry(set); if (managed) set.add(labFlask.geometry); return; }
       for (const name of PART_NAMES) set.add(parts[name].geometry);
       if (managed) set.add(parts.jaw.geometry);
       if (managed) set.add(labFlask.geometry);
     };
     const dispose = () => {
       if (root.parent) removeChild(root.parent, root);
+      if (newBody) newBody.dispose();
       state.route = null;
       state.pace = null;
       onIdle = null;
     };
     const agent = {
-      root, parts, hips, chest, update, setForm, setGait, walk, pace, place, poke, jump, reveal, setDriven, drive, toggleStyle, liveGeometry, dispose,
+      root: newBody ? newBody.root : root, parts, hips, chest, update, setForm, setGait, walk, pace, place, poke, jump, reveal, setDriven, drive, toggleStyle, liveGeometry, dispose,
       managed, poseManaged, climbPoseClear, climbCenter, bodyHull, walkPoseClear, walkSupportAt, labPoseClear, mouth, bodyTarget, envelope, feed, pound, cancelSmash, beat, holdLabItem, releaseLabItem,
       get labFlask() { return labFlask; },
       get labItem() { return labFlask === labPlaceholder ? null : labFlask; },
@@ -1735,6 +1750,10 @@
       get form() { return state.form; },
       set onIdle(fn) { onIdle = fn; },
       get walking() { return !!state.route; },
+      // the new body: a socket that follows a driver part (`hips`, `chest`, `torso`, `head`, `jaw`, `armR`, `armL`,
+      // `legR`, `legL`), for what a scene hangs on it, and the new rig itself; without the body, the part itself
+      socket: (name) => newBody ? newBody.socket(name) : name === "hips" ? hips : name === "chest" ? chest : parts[name],
+      get body() { return newBody; },
       debug: {
         get form() { return state.form; },
         get gait() { return state.gait; },

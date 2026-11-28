@@ -1192,11 +1192,15 @@
       // b107: a weld every 1/(WELDSTEPS-1) of the way from all fours to standing; pose() shows the one nearest the pose,
       // so the back stays one piece while it stands up or drops down (the chest is at most half a step off its weld)
       // (b112: steady, each step a sleeve and a belly piece, and one chest piece for all; WELDSTEPS 41)
+      // (one node shows them all, its mesh swapped for the step's, as the chest's is: a node a step made every renderer and
+      // the outline registry carry 41 hidden meshes a gorilla)
       const K = WELDS, welds = [], bellies = [];
       for (let k = 0; k < K; k++) { const key = form + ":" + k; if (!MERGED.has(key)) MERGED.set(key, buildMerged(r, form, k / (K - 1)));
-        const W = MERGED.get(key), node = (g) => { const n = createNode({ geometry: g }); n.quaternion = [0, 0, 0, 1]; n.visible = false; addChild(r.abdomen, n); return n; };
-        if (W.sleeve) { bellies.push(node(W.belly)); if (!k) r.chestWeld = W.chest; (r.weldEdges = r.weldEdges || []).push(W.live.a); } else welds.push(node(W)); }
-      if (bellies.length) { r.torsoWeld = r.weldBelly = bellies;
+        const W = MERGED.get(key);
+        if (W.sleeve) { bellies.push(W.belly); if (!k) r.chestWeld = W.chest; (r.weldEdges = r.weldEdges || []).push(W.live.a); } else welds.push(W); }
+      r.weldNode = createNode({ geometry: (bellies.length ? bellies : welds)[0] }); r.weldNode.quaternion = [0, 0, 0, 1]; r.weldNode.visible = false; addChild(r.abdomen, r.weldNode);
+      r.weldGeos = bellies.length ? bellies : welds; r.torsoWeld = [r.weldNode];
+      if (bellies.length) { r.weldBelly = true;
         // b112: the sleeve live, one mesh of this gorilla's own, its points worked out from the belly's and the chest's
         // poses every time pose() runs (dynamic: the renderer re-reads its positions when its revision moves), so it
         // joins the two exactly in every pose and the chest moves smoothly; its colours and windings are the first weld's
@@ -1209,7 +1213,7 @@
         pose(r, 0, null, null, 0); const V = g.verts;
         g.faces.forEach((f, n) => { let nx = 0, ny = 0, nz = 0; for (let c = 0; c < 4; c++) { const a = f.i[c] * 3, e = f.i[(c + 1) % 4] * 3; nx += (V[a + 1] - V[e + 1]) * (V[a + 2] + V[e + 2]); ny += (V[a + 2] - V[e + 2]) * (V[a] + V[e]); nz += (V[a] - V[e]) * (V[a + 1] + V[e + 1]); }
           const R = L0.faces[n].n; if (nx * R[0] + ny * R[1] + nz * R[2] < 0) f.i.reverse(); });
-      } else r.torsoWeld = welds;
+      }
     }
     // b175: the glyph form's whole body glows brighter: every face's glow CODEGLOW times its own plus CODEGLOWADD (at
     // most 1), every mesh of it once (the welds' and the swapped chest's too; the rain keeps its own)
@@ -1252,7 +1256,7 @@
     const swing = {}, bend = {}, roll = {}, heel = {}, heelSw = {};
     // the torso is always one piece (b133): the welded back in every pose, climbing too, its live sleeve following the
     // chest and belly wherever they turn
-    const welded = !!r.torsoWeld, weldK = welded ? Math.round(Math.max(0, Math.min(1, t)) * (r.torsoWeld.length - 1)) : -1, weldF = welded && t < 0.5, weldS = welded && t >= 0.5;
+    const welded = !!r.weldGeos, weldK = welded ? Math.round(Math.max(0, Math.min(1, t)) * (r.weldGeos.length - 1)) : -1, weldF = welded && t < 0.5, weldS = welded && t >= 0.5;
     if (g) {
       // b54: the in-game gorillas' timing (agent.js OFFSETS): walking, a four-beat walk, each limb a quarter cycle after
       // the one before (right leg, right arm, left leg, left arm); running (g.run toward 1), a gallop, both legs
@@ -1491,7 +1495,7 @@
       // held where it is, so it hangs no lower than the chest beside it; standing it eases back to the full stomach
       const kz = false ? 1 : 1 - (1 - 1) * (1 - t); r.abdomenMesh.scale.z = kz; r.abdomenMesh.position.z = ABDBACK * (1 - kz) * CELL;
       if (r.abdomenFour) { const A = r.abdomenMesh, F = r.abdomenFour; F.scale.y = A.scale.y; F.scale.z = A.scale.z; F.position.y = A.position.y; F.position.z = A.position.z; const four = !false && t < 0.35; F.visible = four; A.visible = !four; }
-      if (r.weldBelly) { const A = r.abdomenMesh; for (const n of r.weldBelly) { n.scale.x = A.scale.x; n.scale.y = A.scale.y; n.scale.z = A.scale.z; n.position.x = A.position.x; n.position.y = A.position.y; n.position.z = A.position.z; } r.weldBelly.forEach((n, k) => { n.visible = k === weldK; }); }
+      if (r.weldBelly) { const A = r.abdomenMesh, n = r.weldNode; n.scale.x = A.scale.x; n.scale.y = A.scale.y; n.scale.z = A.scale.z; n.position.x = A.position.x; n.position.y = A.position.y; n.position.z = A.position.z; }
       if (r.sleeveLive) { r.sleeveNode.visible = welded; if (welded) { const S = r.sleeveLive, A = r.abdomenMesh, Ea = r.weldEdges[weldK], Eb = S.b, R = S.ring, V = S.g.verts, map = S.map, N = S.N, T = S.T;
         const sx = A.scale.x, sy = A.scale.y, sz = A.scale.z, px = A.position.x, py = A.position.y, pz = A.position.z, q = r.chest.quaternion, cp = r.chest.position;
         const qx = q[0], qy = q[1], qz = q[2], qw = q[3], dbx = 2 * (qx * qy - qw * qz), dby = 1 - 2 * (qx * qx + qz * qz), dbz = 2 * (qy * qz + qw * qx);
@@ -1504,7 +1508,7 @@
             R[o] = h00 * ax + h01 * bx + h11 * L * dbx; R[o + 1] = h00 * ay + h10 * L + h01 * by + h11 * L * dby; R[o + 2] = h00 * az + h01 * bz + h11 * L * dbz; } }
         for (let v = 0; v < map.length; v++) { const o = map[v] * 3; V[v * 3] = R[o]; V[v * 3 + 1] = R[o + 1]; V[v * 3 + 2] = R[o + 2]; }
         S.g.revision++; } }
-      if (r.torsoWeld) { r.torsoWeld.forEach((n, k) => { n.visible = k === weldK; }); r.chest.geometry = welded ? (r.chestWeld || null) : r.chestGeo; if (welded) { r.abdomenFour.visible = false; r.abdomenMesh.visible = false; } } }
+      if (r.weldGeos) { r.weldNode.visible = welded; if (welded) r.weldNode.geometry = r.weldGeos[weldK]; r.chest.geometry = welded ? (r.chestWeld || null) : r.chestGeo; if (welded) { r.abdomenFour.visible = false; r.abdomenMesh.visible = false; } } }
     let low = 1e9, lowH = 1e9; const footW = {};
     for (const [id] of FEET) if (/^fore/.test(id)) for (const p of BOXES[id] || []) lowH = Math.min(lowH, qrot(world[id], p)[1] + at[id][1]);
     const sitFree = act && (act.sit || 0) > 0 && !((act.lay || 0) > 0) && true;

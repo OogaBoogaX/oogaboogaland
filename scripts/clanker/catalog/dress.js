@@ -69,6 +69,7 @@
     for (const [id, region] of Object.entries(REGION)) if (r[id] && r[id].geometry) r[id].geometry = painted(r[id].geometry, region, outfit);
     if (r.chestGeo) r.chestGeo = painted(r.chestGeo, "chest", outfit); if (r.chestWeld) r.chestWeld = painted(r.chestWeld, "chest", outfit);
     for (const n of [r.abdomenMesh, r.abdomenFour, ...(r.torsoWeld || [])]) if (n && n.geometry) n.geometry = painted(n.geometry, "belly", outfit);
+    if (r.weldGeos) r.weldGeos = r.weldGeos.map((g) => painted(g, "belly", outfit));
     if (r.sleeveNode && r.sleeveNode.geometry) { const g = r.sleeveNode.geometry, V = g.verts, rule = OUTFITS[outfit], scale = g.faces.some((f) => f.color.some((v) => v > 1)) ? 1 : 1 / 255;
       // (the live sleeve between belly and chest is this rig's own: recoloured in place, as the waist (belly's top))
       for (const f of g.faces) { const c = rule("belly", 0, 0.3, -1); if (c) { f.color = c.c.map((v) => v * scale); f.emissive = c.e; } } }

@@ -15,6 +15,33 @@ The clanker gorillas are being rebuilt on a new rig, worked out in `untracked/cl
   - `dress.js` is the first pass at dressing the new body.
 - `src/js/clanker-model.js` is not loaded by the page yet. Nothing in the game changes until the steps below land.
 
+## How the game shows it: the driver and the body
+
+`src/js/clanker-body.js` (`BL.clankerBody`) puts the new rig on every gorilla without changing what the gorillas do:
+
+- **The driver.** `BL.agent.create` still builds and runs the old rig, off the scene. Its behaviour, collision envelope, previews and compact profiles stay as they were, and so do the poses scenes write on `parts.*`. The hub's movement planning and the suite's checks keep their meaning.
+- **The body.** The scene gets `root`, a node that shares the driver root's position, rotation and scale, holding the new rig scaled to the old height (0.956). A hook in `BL.scene.updateWorld` (`beforeWorld`) brings it up to date just before anything reads world matrices.
+- **Native poses.** Standing up, walking, galloping, jumping, landing, climbing, sitting and lying come from the new rig's own `pose`:
+  - its stance comes from the driver's chest pitch, and its gait phase and stride from the driver's;
+  - `pose` is far too slow to run per gorilla per frame (250 to 350 µs, allocating), so poses are sampled once on a rig of their own, on a grid (stance in 20 steps, phase in 24, the rest in quarters);
+  - each frame blends the samples either side, which allocates nothing.
+- **Retargeted head and limbs.** When the driver does something the new rig has no pose for, or a scene has turned its parts, the head and limbs take the driver's bones, eased over a fifth of a second. That covers a pound, a chest beat, a drag, lab or desk work, grooming, a roll, a swim and eating. The torso stays native, with the stance from the pitch, so the welded belly and live sleeve stay whole.
+- **Whole-body turns.** The driver's hips (rolling, the slope underfoot) tilt the whole body; lying and sitting are the new rig's own poses.
+- **Sockets.** `agent.socket(name)` gives a node that follows a driver part, for what a scene hangs on the gorilla. Anything still hung on a driver part is moved onto its socket. The lab item is held on the left arm's socket.
+- **Outlines.** The outline registry (`object-guides.js`) reads a geometry's `outline` stand-in where it has one: each new mesh's surface in 10 cm blocks, merged. The torso welds share one stand-in and the live sleeve has none.
+- **Preparing a form.** The hub prepares the fur form in its slices (`prepareSteps`) and the glyph form at idle once the page is playable.
+- `?clanker=0` keeps the old body, for comparison.
+
+Status of this design (next steps below):
+
+- **Boot time:** the hub is ready about 0.8 s later than with the old body (3.9 s against 3.1 s), from building the form's parts and 41 torso welds. With every Ooga working (`status=clankin`) it is ready at 23 s against 11.5 s. The cost is in the outline pass's camera-cover check (`cameraPropFaceBlocked`), not yet explained, since the stand-ins did not change it.
+- **Retargeted limbs** keep the old rig's straight arm (the forearm stays at its rest bend), and held things sit where the old hand was. Those are the next refinements, with the new moves themselves.
+- **The hub's browser checks** (`node test/run.mjs --browser-only hub`): 601 of 616 pass. With the body switched off, the failing checks pass, so these are the body's to fix:
+  - the gorilla fixtures time out booting, which is the outline pass above: "gorilla work apron descent", "gorilla lab carry jump", "gorilla population restoration", and on a retry "hub host hand-back" and "hub working arrival";
+  - "gorilla traversal" (a driven gorilla over crates, barrels and rocks);
+  - "hub game-only combat", "hub ak", "hub melee" and "hub jetpack" find no driven Ooga after possessing one. Possessing works in a separate probe, so this needs the session itself looked at; the runner says STOP on "hub game-only combat", so it is not to be rerun blind;
+  - "live nameplates": a gorilla's name tooltip sits lower than its live nameplate, one reading the old head and the other the new.
+
 ## The new rig, against the current one
 
 - **Shape.** The body is a set of smooth lofted parts with a welded torso, not voxel boxes:
