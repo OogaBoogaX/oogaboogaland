@@ -572,7 +572,7 @@
       labPalmLift: 0, labBench: null, labTouchArm: false, labTouchSide: 1,
       labArmOffsetX: 0, labArmOffsetY: 0, labArmOffsetZ: 0,
       suit: false, suitSplit: false, seatLegs: false, officeRise: 0, officeSeat: 0, officeWork: "", officePhase: 0, officeLook: 0, officeSide: 1,
-      shrugRX: 0, shrugRY: 0, shrugRZ: 0, shrugLX: 0, shrugLY: 0, shrugLZ: 0
+      shrugRX: 0, shrugRY: 0, shrugRZ: 0, shrugLX: 0, shrugLY: 0, shrugLZ: 0, supportOffset: 0
     };
     const positionLabItem = () => {
       if (!managed || labFlask === labPlaceholder && !state.labPreviewItem) return;
@@ -1317,8 +1317,9 @@
       pose(Math.max(0, dt));
       measureBody();
       // The controller supplies the whole rig's support offset; limbs never correct it.
-      if (motion && Number.isFinite(motion.supportOffset) && motion.supportOffset) {
-        hips.position.y += motion.supportOffset / scale; measureBody(false);
+      state.supportOffset = motion && Number.isFinite(motion.supportOffset) ? motion.supportOffset : 0;
+      if (state.supportOffset) {
+        hips.position.y += state.supportOffset / scale; measureBody(false);
       }
       if (newBody) newBody.notePosed();
     };
@@ -1754,6 +1755,8 @@
       // `legR`, `legL`), for what a scene hangs on it, and the new rig itself; without the body, the part itself
       socket: (name) => newBody ? newBody.socket(name) : name === "hips" ? hips : name === "chest" ? chest : parts[name],
       get body() { return newBody; },
+      // the head as drawn: the new rig's (whose vertices a nameplate stands over), or without the body the part itself
+      get visualHead() { return newBody ? newBody.rig.head : parts.head; },
       debug: {
         get form() { return state.form; },
         get gait() { return state.gait; },

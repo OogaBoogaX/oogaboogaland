@@ -34,13 +34,14 @@ The clanker gorillas are being rebuilt on a new rig, worked out in `untracked/cl
 
 Status of this design (next steps below):
 
-- **Boot time:** the hub is ready about 0.8 s later than with the old body (3.9 s against 3.1 s), from building the form's parts and 41 torso welds. With every Ooga working (`status=clankin`) it is ready at 23 s against 11.5 s. The cost is in the outline pass's camera-cover check (`cameraPropFaceBlocked`), not yet explained, since the stand-ins did not change it.
+- **Boot time:**
+  - **Ordinary boot:** the hub is ready about 0.75 s later than with the old body (3.8 s against 3.1 s). Building the fur form's parts and 41 torso welds moved into the hub's slices, but its cost is still on the way to ready.
+  - **Every Ooga working** (`status=clankin`): ready at 14.7 s against 11.5 s. That cost is the perception pass asking whether each gorilla is concealed from the camera (`concealed`, then `cameraPropFaceBlocked`), patch by patch. The stand-ins (solid, in 15 cm blocks, 856 faces a gorilla against the old body's 1,931) brought it down from 23 s. What remains is mostly the new rig's 14 meshes against the old one's 8.
 - **Retargeted limbs** keep the old rig's straight arm (the forearm stays at its rest bend), and held things sit where the old hand was. Those are the next refinements, with the new moves themselves.
-- **The hub's browser checks** (`node test/run.mjs --browser-only hub`): 601 of 616 pass. With the body switched off, the failing checks pass, so these are the body's to fix:
-  - the gorilla fixtures time out booting, which is the outline pass above: "gorilla work apron descent", "gorilla lab carry jump", "gorilla population restoration", and on a retry "hub host hand-back" and "hub working arrival";
-  - "gorilla traversal" (a driven gorilla over crates, barrels and rocks);
-  - "hub game-only combat", "hub ak", "hub melee" and "hub jetpack" find no driven Ooga after possessing one. Possessing works in a separate probe, so this needs the session itself looked at; the runner says STOP on "hub game-only combat", so it is not to be rerun blind;
-  - "live nameplates": a gorilla's name tooltip sits lower than its live nameplate, one reading the old head and the other the new.
+- **The hub's browser checks** (`node test/run.mjs --browser-only hub`): after the fixes, every check that failed with the body passes except these:
+  - **"gorilla traversal":** stepping off a crate the visible body must move less than 0.3 m a step. The controller's support offset now carries onto the body; whether that is enough is not yet confirmed.
+  - **"live nameplates":** a gorilla's live nameplate must stand where its NPC name tooltip does. The nameplate now measures the drawn head (`agent.visualHead`); whether the tooltip measures the same is not yet confirmed.
+  - **"hub game-only combat":** the runner said STOP on it, so it is for the maintainer. It found no driven Ooga after possessing one, and the same session's "hub ak", "hub melee" and "hub jetpack" pass now.
 
 ## The new rig, against the current one
 
