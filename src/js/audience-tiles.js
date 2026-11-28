@@ -102,7 +102,7 @@
       set(entry.hand, "title", t.hand ? `${t.display} has ${t.hand} up` : "");
       set(entry.voice, "hidden", !speaker || t.reconnecting);
       if (speaker) {
-        if (entry.voice.dataset.voice !== t.look) entry.voice.dataset.voice = t.look;
+        BL.nativeIcons.setVoiceLook(entry.voice, t.look);
         attr(entry.voice, "aria-pressed", String(t.micPressed));
         set(entry.voice, "disabled", t.micDisabled);
         attr(entry.voice, "aria-label", t.micWords);

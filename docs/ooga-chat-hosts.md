@@ -574,11 +574,11 @@ As built (`src/js/island-view.js`, drawn by the shared views, chat-hosts.js, in 
   long its frames take). `live.pin({ hour, day, time })` pins its clock for a check. Ooga Chat fetches it with the renderer as its own `live` chunk only for a device it is
   chosen for (never prefetched and never in the service worker's shell, `OPT_IN`).
 - **Full screen** (Ooga Chat): a button on the view lays it over the page in a layer of its own with the app's column
-  beside it (under it on a screen taller than it is wide), in the browser's own full screen where there is one; the
-  button again, or Escape, puts it back in the strip. The view runs to the screen's edges with no border, and the chat's
-  panel meets it with no gap: as tall as it side by side, its roster of faces across the panel's whole width from the
-  seam. The app's tabs are hidden, and the chat's title line (Back and the title, a host's Requests) floats over the
-  view's top left corner with no plate, where it stood before, the land's tag and the fold button left out. The seam is
+  beside it (under it on a window taller than it is wide), filling the tab's window while the browser's tabs and
+  toolbar stay visible. The button again, or Escape, puts it back in the strip. The view runs to the window's edges
+  with no border, and the chat's panel meets it with no gap: as tall as it side by side, its roster of faces across the
+  panel's whole width from the seam. The app's tabs are hidden, and the chat's title line (Back and the title, a host's
+  Requests) floats over the view's top left corner with no plate, where it stood before, the land's tag and the fold button left out. The seam is
   the split: unmarked until a pointer is over it (the resize cursor and a thin purple line along it) or it has the
   keyboard's focus, it is dragged, or moved a twentieth at a time with the arrows, to give the view more or less of the
   screen (`--iv-split`, `--iv-side`; localStorage `ooga-island-view-split`).
