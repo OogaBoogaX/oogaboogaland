@@ -13,7 +13,7 @@
   // upper arm), fore (forearm and fist, the thumb leaving the wrist at y -0.49, the fist below), leg, shin, foot, head.
   // the sleeve's end and the cuff's, on the forearm's rings (every ~0.04 along it): the cuff the last ring before the
   // thumb leaves the wrist (y -0.49)
-  const WRIST = -0.44, CUFF = -0.485, WAIST = -0.15, WAIST_BACK = 0.05;
+  const WRIST = -0.44, CUFF = -0.485, WAIST = -0.15, WAIST_BACK = 0.05, HEM = -0.24;
   const opening = (x, y, z, w0, w1, top) => z > 0.12 && Math.abs(x) < w0 + (w1 - w0) * Math.max(0, Math.min(1, y / top));
   const OUTFITS = {
     lab: (part, x, y, z) => {
@@ -28,7 +28,7 @@
   SUITS.forEach((P, k) => { const [jacket, , shirt, , trousers, shoe] = P.map((h) => C(h));
     OUTFITS["suit" + k] = (part, x, y, z) => {
       if (part === "chest") return jacket;
-      if (part === "belly") return y < WAIST + (WAIST_BACK - WAIST) * Math.max(0, Math.min(1, (0.3 - z) / 0.6)) ? trousers : jacket;
+      if (part === "belly") return y < HEM ? trousers : jacket;
       if (part === "arm") return jacket;
       if (part === "fore") return y > WRIST ? jacket : y > CUFF ? shirt : null;
       if (part === "leg" || part === "shin") return trousers;
@@ -162,7 +162,7 @@
     const gold = (c) => { const m = Math.max(...c) || 1; return c[0] / m > 0.9 && c[1] / m > 0.6 && c[1] / m < 0.85 && c[2] / m < 0.4; };
     const faces = g.faces.filter((f) => !f.i.every((k) => onArm.has(k)) || gold(f.color));
     const made = renormal({ ...g, verts: out, faces }); per.set(r, made); return made; };
-  // A belt of one height round the hips (in the belly's frame, from `y` under the belly in front to `back` over the top of
+  // A belt of one height round the hips, for a suit with its jacket off: a buttoned jacket covers it (in the belly's frame, from `y` under the belly in front to `back` over the top of
   // the seat behind): a band standing `off` out from the body and the tops of the thighs,
   // `h` tall, with its top and bottom edges, and a buckle at the front. Cached by rig.
   const belts = new WeakMap();
@@ -186,20 +186,22 @@
   // bottom of the chest, above the belly) and wrapped onto the new one like a vest. Cached by suit.
   const ties = [];
   const tie = (k) => ties[k] || (ties[k] = (() => { const P = SUITS[k], z = 0.312, d = 0.012, at = (g) => { const V = g.verts; for (let i = 2; i < V.length; i += 3) V[i] += z; return g; };
-    const knot = at(M.prism([[-0.04, 1.0], [0.04, 1.0], [0.06, 1.065], [-0.06, 1.065]], d * 1.4, P[8])), blade = at(M.prism([[0, 0.6], [0.07, 0.67], [0.038, 1.0], [-0.038, 1.0], [-0.07, 0.67]], d, P[3]));
+    const knot = at(M.prism([[-0.04, 1.0], [0.04, 1.0], [0.06, 1.065], [-0.06, 1.065]], d * 1.4, P[8])), blade = at(M.prism([[0, 0.66], [0.066, 0.72], [0.038, 1.0], [-0.038, 1.0], [-0.066, 0.72]], d, P[3]));
     return M.merge(knot, blade); })());
   // A suit's front, as a sports jacket's: the shirt in the V from the collar down to the top button, and a notched lapel
   // each side (a broad blade up from the button to the notch, the collar above it running round toward the neck), with
   // the button under the V; modelled on the old box torso's front like the tie, and wrapped on. Cached by suit.
   const fronts = [];
   const front = (k) => fronts[k] || (fronts[k] = (() => { const P = SUITS[k], at = (g, z) => { const V = g.verts; for (let i = 2; i < V.length; i += 3) V[i] += z; return g; };
-    const side = (pts, s) => s > 0 ? pts : pts.map(([x, y]) => [-x, y]).reverse(), parts = [at(M.prism([[0, 0.5], [0.19, 1.1], [-0.19, 1.1]], 0.006, P[2]), 0.303)];
+    const side = (pts, s) => s > 0 ? pts : pts.map(([x, y]) => [-x, y]).reverse(), parts = [at(M.prism([[0, 0.62], [0.19, 1.1], [-0.19, 1.1]], 0.006, P[2]), 0.303)];
     // the lapels faced a shade lighter than the jacket, so they read against it
     const facing = "#" + [1, 3, 5].map((n) => Math.round(parseInt(P[0].slice(n, n + 2), 16) * 0.86 + 255 * 0.14).toString(16).padStart(2, "0")).join("");
-    for (const s of [1, -1]) parts.push(at(M.prism(side([[0, 0.5], [0.09, 0.52], [0.3, 0.92], [0.235, 0.965], [0.165, 1.02]], s), 0.012, facing), 0.318),
-      at(M.prism(side([[0.165, 1.02], [0.235, 0.965], [0.29, 1.1], [0.19, 1.1]], s), 0.012, facing), 0.318));
+    // (the lapels cross a little over the middle where they meet at the button, as a buttoned jacket's do; the near one
+    // stands a hair further out)
+    for (const s of [1, -1]) parts.push(at(M.prism(side([[-0.02, 0.6], [0.09, 0.6], [0.3, 0.93], [0.235, 0.965], [0.16, 1.02]], s), 0.012, facing), s > 0 ? 0.318 : 0.322),
+      at(M.prism(side([[0.16, 1.02], [0.235, 0.965], [0.29, 1.1], [0.19, 1.1]], s), 0.012, facing), 0.318));
     const button = (y) => at(M.prism(Array.from({ length: 8 }, (_, a) => [Math.cos(a / 8 * Math.PI * 2) * 0.02, y + Math.sin(a / 8 * Math.PI * 2) * 0.02]), 0.01, P[1]), 0.31);
-    parts.push(button(0.44));
+    parts.push(button(0.56));
     return M.merge(...parts); })());
   window.__dress = { paint, fit, box, height, torsoBox, hat, hatPlace, wrap, belt, tie, front, surface, OUTFITS };
 })();
