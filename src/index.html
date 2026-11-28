@@ -1994,30 +1994,7 @@
       </div>
     </dialog>
     <div id="poker" data-scene="poker" hidden>
-      <aside class="poker-panel fold-panel fold-right" id="poker-panel" aria-label="The Ember Den lobby">
-        <div class="panel-head"><div><p class="poker-kicker">THE UNDERGROUND BANANA CLUB</p><h3>The Ember Den</h3></div><button class="panel-fold" type="button" data-fold="poker-panel" aria-label="Close table list">−</button></div>
-        <div class="poker-mode-picker" aria-label="Choose how to play">
-          <button class="poker-primary" type="button" data-poker-action="quick"><span>Play a practice hand</span><small>Take a seat with computer opponents</small></button>
-          <button type="button" data-poker="connect" data-poker-action="connect"><span>Join live tables</span><small>Play with people · Ooga sign-in</small></button>
-          <button type="button" data-poker="practice" data-poker-action="practice" hidden>Back to practice</button>
-          <button type="button" data-poker="reconnect-floor" data-poker-action="reconnect" hidden>Reconnect to live tables</button>
-        </div>
-        <p class="poker-mode-note" data-poker="live-label">Practice is ready now. Live tables need a connected poker service.</p>
-        <button type="button" class="poker-return" data-poker="return" data-poker-action="return" hidden><span data-poker="return-label">Back to your table</span><small data-poker="floor-turn"></small></button>
-        <div class="poker-lobby-head"><h4>Find your table</h4><span data-poker="lobby-count">10 tables</span></div>
-        <div class="poker-filters" role="group" aria-label="Filter tables"><button type="button" data-poker-filter="all" aria-pressed="true">All tables</button><button type="button" data-poker-filter="open" aria-pressed="false">Open seats</button><button type="button" data-poker-filter="playing" aria-pressed="false">In play</button></div>
-        <div class="poker-tables" data-poker="tables" aria-label="Ten poker tables"></div>
-        <p class="poker-empty-list" data-poker="empty-list" hidden>No tables match. Try All tables.</p>
-        <details class="poker-lobby-options"><summary>Connection options</summary>
-          <label class="poker-nickname">Local service name <input data-poker="nickname" maxlength="32" value="Ooga" autocomplete="off"></label>
-          <p>Signed-in tables use your Ooga name. Recovery is saved on this device.</p>
-          <button type="button" data-poker="forget" data-poker-action="forget" hidden>Forget recovery on this device</button>
-        </details>
-        <p class="poker-notice" data-poker="floor-notice" role="status" aria-live="polite"></p>
-        <p class="poker-help" data-coarse="Walk up to a chair and tap Open table.">Walk up to a chair · press Y to open its table</p>
-        <button class="poker-exit" type="button" data-poker-action="exit">Return to ₿IFRÖST</button>
-      </aside>
-      <button class="panel-edge" type="button" data-fold="poker-panel" aria-controls="poker-panel">Tables</button>
+      <button type="button" class="poker-return" data-poker="return" data-poker-action="return" hidden><span data-poker="return-label">Back to your table</span><small data-poker="floor-turn"></small></button>
       <div class="poker-carry" data-poker="approach" role="group" aria-labelledby="poker-approach-title" hidden>
         <p class="poker-carry-hint" id="poker-approach-title"></p>
         <div class="poker-carry-actions"><button type="button" class="poker-primary" data-poker-action="open-nearby" aria-keyshortcuts="Y">Open table<span class="poker-open-key"> (Y)</span></button><button type="button" data-poker-action="pass-table">Keep walking</button></div>
@@ -2080,6 +2057,17 @@
         <section data-table-pane="history" hidden><div class="poker-activity"><h4>This hand</h4><div class="poker-log" data-poker="log" aria-label="Public action history">Take a seat to get started.</div></div><details class="poker-history"><summary>Recent hands</summary><ol data-poker="history"></ol></details></section>
         <section data-table-pane="options" hidden><div class="poker-rail-title"><span class="poker-kicker">AT THE TABLE</span><span data-poker="seat-count">0 / 9</span></div><dl class="poker-table-facts"><div><dt>Blinds</dt><dd>5 / 10</dd></div><div><dt>Starting stack</dt><dd>1,000</dd></div><div><dt>Hand</dt><dd data-poker="hand-number">—</dd></div></dl><p><span data-poker="voice-label">Table voice</span></p><div class="poker-table-footer"><div><div class="poker-preferences"><label><input type="checkbox" data-poker-option="auto" checked>Auto deal in practice</label><label><input type="checkbox" data-poker-option="sound">Table sounds</label></div><div class="poker-buttons"><button type="button" data-poker="pause" data-poker-action="pause" aria-pressed="false">Pause practice</button><button type="button" data-poker="stand" data-poker-action="stand" hidden>Leave seat</button></div></div>
 
+        <div class="poker-mode-picker" aria-label="Choose how to play">
+          <button class="poker-primary" type="button" data-poker-action="quick"><span>Play a practice hand</span><small>Take a seat with computer opponents</small></button>
+          <button type="button" data-poker="connect" data-poker-action="connect"><span>Join live tables</span><small>Play with people · Ooga sign-in</small></button>
+          <button type="button" data-poker="practice" data-poker-action="practice" hidden>Back to practice</button>
+        </div>
+        <p class="poker-mode-note" data-poker="live-label">Practice is ready now. Live tables need a connected poker service.</p>
+        <details class="poker-lobby-options"><summary>Connection options</summary>
+          <label class="poker-nickname">Local service name <input data-poker="nickname" maxlength="32" value="Ooga" autocomplete="off"></label>
+          <p>Signed-in tables use your Ooga name. Recovery is saved on this device.</p>
+          <button type="button" data-poker="forget" data-poker-action="forget" hidden>Forget recovery on this device</button>
+        </details>
               <details class="poker-fairness" data-poker="fairness" hidden><summary>Shuffle &amp; hand verification</summary><p data-poker="fair-status"></p><p class="poker-proof-root" data-poker="proof-root"></p><div class="poker-buttons"><button type="button" data-poker="verify" data-poker-action="verify">Verify hand</button><button type="button" data-poker="export" data-poker-action="export">Download record</button></div><label>Check a saved record <input type="file" data-poker="audit-file" accept=".json,application/json"></label><p>Experimental, unaudited protocol. Proof checks cannot rule out collusion, compromised devices or deliberate disconnections. Folded cards stay private.</p></details>
               <details class="poker-rules"><summary>How to play</summary><p>Make the best five-card hand from your two private cards and the five community cards. Check when no bet is owed, call to match, raise to increase the bet, or fold to leave this hand.</p><p>The bet amount is your total for this round. Presets only choose an amount. All-ins create side pots; ties split pots. Banana chips are free, have no cash value and cannot be bought, transferred or redeemed. No rake.</p><p>Walk the floor asks before giving up your seat. In practice, Leave seat during a hand checks or folds your remaining turns and releases the seat afterward. Live players must stay connected after folding and leave between hands.</p><p>Live contributions and betting turns have a 90-second deadline. If it expires, the hand cancels and committed chips return. Signed-in recovery works on the same browser and device: reconnect before the deadline. Anonymous local-service keys are lost on reload. Use Forget recovery after standing to remove saved keys.</p><p>Voice follows the table you watch. Walking returns to floor voice. Spectators can join table conversations; private cards remain hidden.</p></details></div></section>
         <div class="poker-sheet-content"></div>

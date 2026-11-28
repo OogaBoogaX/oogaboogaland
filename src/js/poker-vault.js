@@ -40,6 +40,18 @@
   const rgbs = new Map(), rgb = hex => { if (!rgbs.has(hex)) rgbs.set(hex, hexToRgb(hex)); return rgbs.get(hex); };
   // A point on the arch at angle a from the ridge (positive toward +x), r from the centre: [x, y].
   const at = (a, r = RADIUS) => [r * Math.sin(a), CENTRE_Y + r * Math.cos(a)];
+  // The lift passes through the easternmost pane between two ribs on both mesh tiers.
+  const LIFT = Object.freeze({ x: 21.65, z: -26.9, half: 1.3 });
+  const facets = {};
+  for (const tier of ["full", "lite"]) facets[tier] = JOINS[tier].map(a => at(a));
+  const surfaceAt = (x, lite) => {
+    const joins = facets[lite ? "lite" : "full"], dx = Math.abs(x);
+    for (let i = 1; i < joins.length; i++) {
+      const a = joins[i-1], b = joins[i];
+      if (dx <= b[0]) return a[1] + (b[1]-a[1]) * (dx-a[0]) / (b[0]-a[0]);
+    }
+    return FOOT;
+  };
   // One face through the points (each [x, y, z]), wound so its normal points along `out`.
   const quad = (geo, pts, hex, out, emissive = 0) => {
     let nx = 0, ny = 0, nz = 0;
@@ -88,11 +100,12 @@
     M.box({ w: RIDGE_BEAM.flange, h: RIDGE_BEAM.lip, d: END_Z * 2, color: PALE_GOLD, offset: { y: RIDGE_UNDER + RIDGE_BEAM.lip / 2 } })));
   // A turned gold boss where each inner rib crosses the ridge.
   const boss = () => once("boss", () => M.lathe({ segments: 12, color: GOLD, profile: [[0, RIDGE_UNDER], [0.2, RIDGE_UNDER], [0.17, RIDGE_UNDER - 0.08], [0.08, RIDGE_UNDER - 0.16], [0, RIDGE_UNDER - 0.22]] }));
-  // One pane a facet row, one metre along z about z 0, facing down into the hall, on the +x side (a node turned half
+  // One pane a facet row, one metre along z about z 0, visible from the hall and the rooftop, on the +x side (a node turned half
   // about y lays it on the -x side): flat between two joins on the arch, nearly clear and faintly cool.
   const pane = (a, b) => once("pane:" + a + ":" + b, () => {
     const geo = M.merge(), [x0, y0] = at(a), [x1, y1] = at(b), m = (a + b) / 2;
     quad(geo, [[x0, y0, -0.5], [x1, y1, -0.5], [x1, y1, 0.5], [x0, y0, 0.5]], GLAZE.color, [-Math.sin(m), -Math.cos(m), 0]);
+    M.face(geo, geo.faces[0].i.slice().reverse(), rgb(GLAZE.color));
     return glaze(geo, GLAZE.roof);
   });
   const panes = lite => { const js = JOINS[lite ? "lite" : "full"]; return js.slice(0, -1).map((a, k) => pane(a, js[k + 1])); };
@@ -157,7 +170,23 @@
     for (const z of RIBS) put(p.rib, 0, 0, z);
     if (p.boss) for (const z of RIBS.slice(1, -1)) put(p.boss, 0, 0, z);
     for (const [z, length] of BAYS) {
-      p.panes.forEach((geo, k) => { for (const s of [1, -1]) { const n = put(geo, 0, 0, z); n.scale.z = length; if (s < 0) n.rotation.y = Math.PI; } });
+      p.panes.forEach((geo, k) => { for (const side of [1, -1]) {
+        if (side < 0 || k !== p.panes.length-1 || Math.abs(LIFT.z-z) >= length/2) {
+          const n = put(geo, 0, 0, z); n.scale.z = length; if (side < 0) n.rotation.y = Math.PI;
+          continue;
+        }
+        const [x0,y0] = at(js[k]), [x1,y1] = at(js[k+1]);
+        // A uniform scale in the cross section keeps each strip on the original glass plane.
+        const strip = (left,right,near,far) => {
+          const scale=(right-left)/(x1-x0);
+          const y=y0+(y1-y0)*(left-x0)/(x1-x0);
+          const n=put(geo,left-scale*x0,y-scale*y0,(near+far)/2);
+          n.scale.x=n.scale.y=scale; n.scale.z=far-near;
+        };
+        const near=LIFT.z-LIFT.half, far=LIFT.z+LIFT.half;
+        strip(x0,x1,z-length/2,near); strip(x0,x1,far,z+length/2);
+        strip(x0,LIFT.x-LIFT.half,near,far); strip(LIFT.x+LIFT.half,x1,near,far);
+      } });
       // Purlins on every join between the ridge and the foot, stopping at the ribs' webs.
       for (let k = 1; k < js.length - 1; k++) for (const s of [1, -1]) {
         const n = put(p.purlin, 0, CENTRE_Y, z); n.scale.z = length - RIB.web; n.rotation.z = -s * js[k];
@@ -176,5 +205,5 @@
   };
   /** The underside of the purlin over the lamp rows, at x on that row (|x| near LAMP_X). */
   const lampHang = x => CENTRE_Y + Math.sqrt((RADIUS - PURLIN.depth + 0.01) ** 2 - x * x) - 0.01;
-  BL.pokerVault = Object.freeze({ SPRING, FOOT, RIDGE, RADIUS, CENTRE_Y, HALF_SPAN, LAMP_X, END_Z, RIBS, BAYS, JOINS, GLAZE, glaze, build, parts, hang, lampHang, feet });
+  BL.pokerVault = Object.freeze({ WALL_X, WALL_Z, LIFT, surfaceAt, SPRING, FOOT, RIDGE, RADIUS, CENTRE_Y, HALF_SPAN, LAMP_X, END_Z, RIBS, BAYS, JOINS, GLAZE, glaze, build, parts, hang, lampHang, feet });
 })();

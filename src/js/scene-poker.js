@@ -262,10 +262,14 @@
   };
   let salons = null, salon = -1, telescope = null, byScope = false, photo = null, terraceScope = null, updateWall = null, shownWins = null, nextMorningCheck = 0;
   let tablePrompt, tableQuestion, offeredTable = -1, passedTable = -1;
-  let wantTerracePack = true;
+  let wantTerracePack = true, liftRide = null, atClub = false, promenade = false;
+  const roofLevel = () => salon===2;
+  const highTerrace = (x,y) => salon<0 && x>=BL.pokerVault.WALL_X && y>=BL.pokerVault.FOOT-.02;
+  const roofApproach = () => avatar && highTerrace(avatar.root.position.x,avatar.root.position.y-avatar.baseY);
+  const roofHeight = (x,z) => BL.pokerSalons.roofHeight(x,z,renderer.kind==="canvas2d");
   const onTerrace = (x, z) => salon < 0 && BL.pokerTerrace.contains(x, z);
-  const terracePackAllowed = cave => cave === avatar && pilot.player === cave && !seated && !panel.focused && !leaving &&
-    carry.phase === IDLE && onTerrace(cave.root.position.x, cave.root.position.z);
+  const terracePackAllowed = cave => cave === avatar && pilot.player === cave && !seated && !cave.camp.seat && !panel.focused && !leaving &&
+    carry.phase === IDLE && !liftRide && (roofLevel() || roofApproach() || onTerrace(cave.root.position.x, cave.root.position.z));
   const packState = { owned: false, equipped: false, fuel: 0, blocked: false };
   const jetpackStatus = cave => {
     packState.owned = !!cave?.jetpackOwned;
@@ -314,7 +318,7 @@
   };
   const nearScope = () => {
     const mount=salon===2?salons.roofScope:terraceScope, p=avatar.root.position;
-    return (salon===-1 || salon===2) && Math.hypot(p.x-mount.station.x,p.z-mount.station.z)<=2.65;
+    return !liftRide && Math.abs(p.y-avatar.baseY-(mount.station.y-1.62))<.4 && (salon===-1 || salon===2) && Math.hypot(p.x-mount.station.x,p.z-mount.station.z)<=2.65;
   };
   const useScope = () => {
     if (!pilot.player || seated || carry.phase !== IDLE || panel.focused || seatTable >= 0 || !nearScope()) {
@@ -324,7 +328,7 @@
   };
   const nearPhoto = () => {
     const at=BL.pokerClub.booth,p=avatar.root.position;
-    return salon<0 && Math.hypot(p.x-at.x,p.z-at.z-3.52)<=2.9;
+    return salon<0 && p.y-avatar.baseY<.4 && Math.hypot(p.x-at.x,p.z-at.z-3.52)<=2.9;
   };
   const usePhoto = () => {
     if(pilot.player && !seated && carry.phase===IDLE && !panel.focused && seatTable<0 && nearPhoto())photo.open();
@@ -335,8 +339,26 @@
   const currentSalon = () => salon < 0 ? null : BL.pokerSalons.ROOMS[salon];
   const floorWalk = (ax,az,bx,bz,y,h,actor) => {
     if(actor===avatar){
-      if(actor.jet && y>.18 && onTerrace(ax,az) && !onTerrace(bx,bz))return false;
+      if(liftRide)return false;
+      if(roofLevel() || highTerrace(ax,y)){
+        const V=BL.pokerVault,R=BL.pokerSalons,c=R.ROOMS[2],r=actor.bodyRadius,shaft=V.LIFT;
+        if(Math.abs(bz)>V.WALL_Z-r || bx < -V.WALL_X+r) return false;
+        if(bx>V.WALL_X && (Math.abs(bz)>BL.pokerTerrace.halfSpan-r || bx>BL.pokerTerrace.outer(bz)-r))return false;
+        if(bx>=BL.pokerTerrace.inner)return true;
+        if(Math.abs(bx-shaft.x)<shaft.half+r && Math.abs(bz-shaft.z)<shaft.half+r && y<c.y+2.8)return false;
+        if(roofHeight(bx,bz)>y+.24)return false;
+        const deck=R.onDeck(bx,bz);
+        if(y<c.y+1.05 && deck!==R.onDeck(ax,az) &&
+          !((R.onStair(ax,az) || R.onStair(bx,bz)) && Math.abs(bx-R.stairX)<R.stairHalf-r) &&
+          !(R.onBridge(ax,az) || R.onBridge(bx,bz)))return false;
+        return !deck || y>c.y+2 || R.clear(salons.solids[2],c,ax,az,bx,bz,r,false);
+      }
+      if(y>.18 && onTerrace(ax,az) && !onTerrace(bx,bz))return false;
       if(salon<0 && terraceScope && !terraceScope.guestsClear(ax,az,bx,bz,actor.bodyRadius))return false;
+      if(salon<0 && (promenade || onTerrace(ax,az))){
+        if(BL.pokerTerrace.promenadeClear(ax,az,bx,bz,actor.bodyRadius))return true;
+        if(promenade && !onTerrace(ax,az))return false;
+      }
       if(salon<=0 && Math.min(az,bz)<-32) return BL.pokerSalons.loungeWalk(salons,ax,az,bx,bz,y,h,actor);
       if(salon>=0) return BL.pokerSalons.clear(salons.solids[salon],currentSalon(),ax,az,bx,bz,actor.bodyRadius);
     }
@@ -349,7 +371,7 @@
   // The act button shows only with touch sticks, so a desktop visitor reads the same action as a line: "Space: sit",
   // or "<heirloom> · Space: look". Written on a change only; `actTitle` names the heirloom the label is about.
   let actPrompt=false,actShown="",actTitle="";
-  const ACT_WORDS={"SIT":"sit","LIE DOWN":"lie down","STAND UP!":"stand up","TAKE PASS":"take the founder’s pass","LOOK":"look",
+  const ACT_WORDS={"LIFT":"use the elevator","SIT":"sit","LIE DOWN":"lie down","STAND UP!":"stand up","TAKE PASS":"take the founder’s pass","LOOK":"look",
     "BUILD":"build","TAKE APART":"take apart","WET THE STONES":"wet the stones","CHOOSE ART":"choose the art","OPEN DOORS":"open the doors","TO THE BAR":"back to the bar"};
   const showLoungeAct=act=>{
     const key=act?act+actTitle:"";
@@ -360,9 +382,43 @@
     actPrompt=true;hud.setAct(act);
     if(!coarse)hud.hint(actTitle?`${actTitle} · Space: ${ACT_WORDS[act]}`:`Space: ${ACT_WORDS[act]}`,600000);
   };
+  const boothReach=1.85;
+  const canSitOutside=()=>salon<0 && pilot.player===avatar && !seated && !panel.focused && !liftRide &&
+    carry.phase===IDLE && !scripted() && !telescope.active && !photo.active && !avatar.camp.seat &&
+    onTerrace(avatar.root.position.x,avatar.root.position.z) && Math.abs(avatar.root.position.y-avatar.baseY)<.16;
+  const boothSeatAt=(x,z,reach)=>{
+    let nearest=null,distance=reach**2;
+    for(const {seat} of terraceScope.seatNodes){
+      const d=(x-seat.x)**2+(z-seat.z)**2;
+      if(d<=distance){nearest=seat;distance=d;}
+    }
+    return nearest;
+  };
+  const nearbyBoothSeat=()=>canSitOutside()?boothSeatAt(avatar.root.position.x,avatar.root.position.z,boothReach):null;
+  const sitAtBooth=seat=>{
+    if(avatar.camp.seat?.kind==="booth")return people.standPlayer(avatar);
+    const p=avatar.root.position;
+    if(!canSitOutside() || Math.hypot(p.x-seat.x,p.z-seat.z)>boothReach)return false;
+    const seatedHere=people.sitPlayer({kind:"booth",x:seat.x,y:.61,z:seat.z,ry:seat.ry,
+      floor:0,walkAt:{x:p.x,z:p.z}});
+    if(seatedHere){
+      pilot.controls.reset();
+      pilot.turnToward(seat.pit.x,.67,seat.pit.z);
+    }
+    return seatedHere;
+  };
   const loungeAct=()=>{
     actTitle="";
-    if(salon!==0 || !pilot.player || exterior || salons.heirlooms?.modal || carry.phase!==IDLE || scripted())return null;
+    if(!pilot.player || exterior || salons.heirlooms?.modal || carry.phase!==IDLE || scripted() || liftRide)return null;
+    if(salon!==0){
+      if(avatar.camp.seat?.kind==="booth")return "STAND UP!";
+      if(nearbyBoothSeat()){actTitle="Terrace booth";return "SIT";}
+      const i=roofLevel()?5:2;
+      if(!seated && !panel.focused && seatTable<0 && doorAvailable(i) && doorDistance(i,avatar.root.position)<=2.9){
+        actTitle=doorHint(i);return "LIFT";
+      }
+      return null;
+    }
     if(loungeChair)return loungeChair.node.chaiseExtension?"LIE DOWN":"STAND UP!";
     if(onChaise())return null;
     const p=avatar.root.position,pass=salons.targets[6];
@@ -478,7 +534,13 @@
     }else pilot.turnToward(r.x,1.4,r.z-r.d/2+1);
     hud.toast(chair.chaiseExtension?"Use Action again to lie down · move to stand":"Move or use the sectional to stand");
   };
-  const ground = (x, z, from, to, actor) => salon >= 0 && (!actor || actor === avatar) ? currentSalon().y : 0;
+  const ground = (x,z,from,to,actor) => {
+    if(actor && actor!==avatar)return 0;
+    if(liftRide)return avatar.root.position.y-avatar.baseY;
+    if(roofLevel() || roofApproach())return x>=BL.pokerTerrace.inner?0:roofHeight(x,z);
+    if(promenade)return BL.pokerGlazing.TERRACE.top;
+    return salon>=0?currentSalon().y:0;
+  };
   const salonClamp = (p, r, margin) => {
     p.x = clamp(p.x, r.x - r.w / 2 + margin, r.x + r.w / 2 - margin);
     p.z = clamp(p.z, r.z - r.d / 2 + margin, r.z + r.d / 2 - margin);
@@ -494,14 +556,16 @@
     }
     p.y = clamp(p.y, r.y + 0.55, r.y + ceiling);
   };
-  const doorAvailable = i => salons.targets[i].visible && (i === 0
+  const doorAvailable = i => !promenade && !liftRide && salons.targets[i].visible && (i === 0
     ? salon <= 0 && !salons.shelf.opened : BL.pokerSalons.DOORS[i][0] === salon);
   const doorDistance=(i,p)=>{
     if(i===0 && salon===0){
       const r=currentSalon(),outside=Math.max(0,Math.abs(p.x-r.x)-BL.pokerLoungeDoor.half);
       return Math.hypot(outside,p.z-r.z-r.d/2);
     }
-    const t=salons.targets[i].position;return Math.hypot(p.x-t.x,p.z-t.z);
+    const t=salons.targets[i].position;
+    if(Math.abs(p.y-avatar.baseY-(currentSalon()?.y || 0))>1)return Infinity;
+    return Math.hypot(p.x-t.x,p.z-t.z);
   };
   const nearDoor = () => {
     if (seated || !avatar || !salons) return -1;
@@ -553,13 +617,58 @@
       }
       return;
     }
+    if(i===2 || i===5){
+      const startY=salon===2?currentSalon().y:0, endY=BL.pokerSalons.ROOMS[2].y-startY;
+      liftRide={door:i,time:0,startY,endY,fromX:p.x,fromZ:p.z,parked:salons.car.position.y};
+      pilot.navigate({position:{x:p.x,y:startY,z:p.z},yaw:Math.PI/2,pitch:.13,dist:3});
+      hud.toast(startY?"Descending to the gaming floor":"Ascending to the 21 Club");
+      return;
+    }
+    arrive(i);
+  };
+  const arrive = i => {
+    const d=BL.pokerSalons.DOORS[i];
     salon = d[1]; salons.show(salon); const r = currentSalon();
     // The vault is sealed in opaque ice and the camera stays inside its arch.
     // Cull the exterior branches together while their tables and live events keep time.
     room.root.visible = terraceScope.root.visible = cosmos.root.visible = mirror.glass.parent.visible = salon !== 1;
+    atClub=salon===2;
     const position = { x: d[4] + (r ? r.x : 0), y: r ? r.y : 0, z: d[5] + (r ? r.z : 0) };
     pilot.navigate({ position, yaw: salon < 0 || i === 2 ? Math.PI : 0, pitch: 0.2, dist: 3 });
     keepCameraInside(); hud.setAreaLabel(r ? r.name : "Ember Den"); hud.toast(r ? r.name : "Ember Den");
+  };
+  // Call the car, board through the open leaves, travel, then step out at the other landing.
+  const liftEase = k => { k=clamp(k,0,1); return k*k*(3-2*k); };
+  const stepLift = dt => {
+    const ride=liftRide, shaft=BL.pokerVault.LIFT, p=avatar.root.position;
+    const call=ride.parked===ride.startY?0:1.65, board=.62, doors=.34, travel=2.85;
+    const t=ride.time+=dt;
+    let y=ride.startY,open=1;
+    if(t<call){
+      const u=t/call;
+      y=ride.parked+(ride.startY-ride.parked)*liftEase((u-.15)/.70);
+      open=1-liftEase(u/.15)+liftEase((u-.85)/.15);
+    } else {
+      const local=t-call;
+      const walk=liftEase(local/board);
+      const moving=local-board-doors;
+      y+=(ride.endY-ride.startY)*liftEase(moving/travel);
+      open=1-liftEase((local-board)/doors)+liftEase((moving-travel)/doors);
+      const exit=liftEase((moving-travel-doors)/board);
+      const d=BL.pokerSalons.DOORS[ride.door],r=BL.pokerSalons.ROOMS[d[1]];
+      p.x=ride.fromX+(shaft.x-ride.fromX)*walk+(d[4]+(r?.x || 0)-shaft.x)*exit;
+      p.z=ride.fromZ+(shaft.z-ride.fromZ)*walk+(d[5]+(r?.z || 0)-shaft.z)*exit;
+      p.y=avatar.baseY+y;
+      if(exit===1){
+        salons.liftPose(ride.endY,1);liftRide=null;arrive(ride.door);return;
+      }
+    }
+    salons.liftPose(y,open);
+  };
+  const upperView = () => liftRide || roofLevel() || roofApproach();
+  const clampUpper = p => {
+    if(!liftRide && p.x<=BL.pokerVault.WALL_X && Math.abs(p.z)<=BL.pokerVault.WALL_Z)
+      p.y=Math.max(p.y,BL.pokerVault.surfaceAt(p.x,renderer.kind==="canvas2d")+.26);
   };
   const byBookcase=(p,margin)=>{
     if(!salons || salon>0 || salon<0 && (!salons.shelf.opened || !avatar || Math.abs(avatar.root.position.x-BL.pokerSalons.ROOMS[0].x)>3 || avatar.root.position.z>-31))return false;
@@ -570,9 +679,11 @@
     if(salon===0 && Math.abs(p.x-r.x)+margin>salons.entry.gap)p.z=Math.min(p.z,front-margin);
     p.y=clamp(p.y,.55,(p.z>front-margin?BL.pokerLoungeDoor.crown(Math.abs(p.x-r.x)+margin):r.h)-margin);return true;
   };
-  const clampTarget = p => { if(byBookcase(p,.20))return; if (salon > 0 || salon===0 && p.z < -34) { salonClamp(p, currentSalon(), 0.6); return; } p.x = clamp(p.x, -22, eastLimit(p, 22)); p.z = clamp(p.z, -34, 34); p.y = clamp(p.y, 0.5, onTerrace(p.x,p.z)?Infinity:7); };
+  const clampTarget = p => { if(promenade){p.y=Math.max(.5,p.y);return;} if(upperView()){clampUpper(p);return;} if(byBookcase(p,.20))return; if (salon > 0 || salon===0 && p.z < -34) { salonClamp(p, currentSalon(), 0.6); return; } p.x = clamp(p.x, -22, eastLimit(p, 22)); p.z = clamp(p.z, -34, 34); p.y = clamp(p.y, 0.5, onTerrace(p.x,p.z)?Infinity:7); };
   const clampCamera = p => {
     const x = p.x, y = p.y, z = p.z;
+    if(promenade){p.y=Math.max(.35,y);return p.y!==y;}
+    if(upperView()){clampUpper(p);return p.y!==y;}
     // Stay inside the wall finishes and columns, with clearance for the camera's near plane.
     if(byBookcase(p,.16))return p.x!==x || p.y!==y || p.z!==z;
     if (salon > 0 || salon===0 && p.z < -34) { salonClamp(p, currentSalon(), 0.24); return p.x !== x || p.y !== y || p.z !== z; }
@@ -622,7 +733,7 @@
     panel.setFocused(focused);
     BL.net.setPokerVoice(focused ? selected : null); audio.setSeated(focused);
   };
-  const modeAction = name => !leaving && !panel.focused && (seatTable < 0 || pendingStand) && pilot.modeAction(name);
+  const modeAction = name => !liftRide && !leaving && !panel.focused && (seatTable < 0 || pendingStand) && pilot.modeAction(name);
   const placeInAisle = () => {
     if (!avatar) return;
     // A tell cut short by standing settles before the standing pose takes the arms back, and the chair forgets it.
@@ -753,7 +864,7 @@
     updatePanel();
   };
   const select = i => {
-    if (salon >= 0 || !Number.isInteger(i) || i < 0 || i >= 10) return;
+    if (liftRide || salon >= 0 || !Number.isInteger(i) || i < 0 || i >= 10) return;
     if (seatTable >= 0 && i !== seatTable) { panel.notice("Stand from your current table before switching tables."); return; }
     if (session.live && i !== selected) { try { session.live.action("watch", i); } catch (e) { panel.notice(e.message); return; } }
     // A table view while carrying puts the guest down; a walk to a chair stops; a seat saved elsewhere is let go.
@@ -797,6 +908,7 @@
     finally { if (visitId === visit) { pendingLive = null; connecting = false; if (panel) { panel.setConnecting(false); updatePanel(); } } }
   };
   const action = (name, value, expectedVersion) => {
+    if(liftRide)return;
     if (salon >= 0) { hud.toast("Return to the gaming floor to use a table."); return; }
     if (name === "pass-table" || name === "open-nearby") {
       const index = offeredTable;
@@ -1173,7 +1285,7 @@
       presets[name] = { yaw: Math.PI, pitch: 1.48, dist: 7.1 * BL.pokerModels.TABLE_K, target: { x: table.x, y: BL.pokerModels.FELT_Y + 0.03, z: table.z } };
       VIEW_NAMES[name] = `Table ${i + 1}`;
     }
-    visit++; seated = false; salon = -1;
+    visit++; seated = false; salon = -1; liftRide=null; atClub=false; promenade=false;
     tableView = false;
     owner = new Array(90).fill(null); lastOwner = new Array(90).fill(null); lastBody = new Array(90).fill(null);
     presenceInput = { tables: BL.pokerModels.TABLES, seats: BL.pokerModels.SEATS, remotes: BL.net.remotes, zone: null, live: false, heroId: null, seatOf };
@@ -1219,7 +1331,7 @@
     input = BL.interact.create({ canvas: ctx.canvas, renderer: ctx.renderer, camera, hooks });
     pilot = BL.pilot.create({ renderer: ctx.renderer, canvas: ctx.canvas, camera, hud, presets, landing: "entrance", pitch: [-0.1, 1.3], dist: [3, 32],
       follow: { y: 0.9, min: 3, max: 7, pitch: [0.25, 0.8] },
-      clampTarget, clampCamera, observeOrbit: keepCameraInside, jetpackStatus, ceilingAt: (x,z) => onTerrace(x,z) ? Infinity : salon < 0 ? 8.5 : currentSalon().y + currentSalon().h - 0.2, coarse: matchMedia("(pointer: coarse)").matches, mayPossess,
+      clampTarget, clampCamera, observeOrbit: keepCameraInside, jetpackStatus, ceilingAt: (x,z) => promenade || upperView() || onTerrace(x,z) ? Infinity : salon < 0 ? 8.5 : currentSalon().y + currentSalon().h - 0.2, coarse: matchMedia("(pointer: coarse)").matches, mayPossess,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: ground } });
     Object.assign(hooks, pilot.hooks, {
       onZoom:(factor,gesture,x,y)=>{
@@ -1232,21 +1344,21 @@
         if(!exterior)return pilot.hooks.onOrbit(dx,dy);
         exteriorYaw-=dx*.004;exteriorPitch=clamp(exteriorPitch+dy*.003,-.31,1.08);
       },
-      onHover: (hit, p) => { if(exterior)return; if(salon===0){hud.tooltip.hide();return;} if (hit?.owner.kind === "portrait") hud.tooltip.show("Take a moon portrait",p.x,p.y); else if (hit?.owner.kind === "telescope") hud.tooltip.show("Look through the telescope", p.x, p.y); else if (hit?.owner.kind === "salon" && doorAvailable(hit.owner.index)) hud.tooltip.show(doorHint(hit.owner.index), p.x, p.y); else if (salon >= 0) hud.tooltip.hide(); else if (hit?.owner.kind === "poker") hud.tooltip.show(`Table ${hit.owner.index + 1} · ${pilot.player ? "walk up to a chair" : "select to watch"}`, p.x, p.y); else if (hit?.owner.kind === "placard") hud.tooltip.show(BL.pokerStatues.tip(hit.owner.index), p.x, p.y); else if (hit?.owner.kind === "music") hud.tooltip.show("Lounge music · select for credits", p.x, p.y); else if (hit?.owner.kind === "game") hud.tooltip.show(BL.pokerGames.TOOLTIP[BL.pokerModels.GAMES[hit.owner.index].kind], p.x, p.y); else hud.tooltip.hide(); },
-      onTap: hit => { if(exterior)return; if(hit?.owner.kind==="landscape" && salon===0) salons.heirlooms.open(hit.owner.prop,pilot); else if(hit?.owner.kind==="heirloom") useHeirloom(hit.owner.prop); else if(hit?.owner.kind==="loungeChair") sitLounge(hit.owner.chair); else if(hit?.owner.kind === "portrait") usePhoto(); else if (hit?.owner.kind === "telescope") useScope(); else if (hit?.owner.kind === "salon") useDoor(hit.owner.index); else if (salon >= 0) return; else if (hit?.owner.kind === "poker") pickFloorTable(hit.owner.index); else if (hit?.owner.kind === "placard") openPlacard(hit.owner.index); else if (hit?.owner.kind === "music") openCredits(); else if (hit?.owner.kind === "poker-exit") leaveFloor(); else if (hit?.owner.kind === "game") hud.toast(BL.pokerGames.WATCH_ONLY); }
+      onHover: (hit, p) => { if(exterior)return; if(salon===0){hud.tooltip.hide();return;} if(hit?.owner.kind==="booth" && salon<0)hud.tooltip.show(avatar.camp.seat?.kind==="booth"?"Stand up":"Sit in the booth",p.x,p.y); else if (hit?.owner.kind === "portrait") hud.tooltip.show("Take a moon portrait",p.x,p.y); else if (hit?.owner.kind === "telescope") hud.tooltip.show("Look through the telescope", p.x, p.y); else if (hit?.owner.kind === "salon" && doorAvailable(hit.owner.index)) hud.tooltip.show(doorHint(hit.owner.index), p.x, p.y); else if (salon >= 0) hud.tooltip.hide(); else if (hit?.owner.kind === "poker") hud.tooltip.show(`Table ${hit.owner.index + 1} · ${pilot.player ? "walk up to a chair" : "select to watch"}`, p.x, p.y); else if (hit?.owner.kind === "placard") hud.tooltip.show(BL.pokerStatues.tip(hit.owner.index), p.x, p.y); else if (hit?.owner.kind === "music") hud.tooltip.show("Lounge music · select for credits", p.x, p.y); else if (hit?.owner.kind === "game") hud.tooltip.show(BL.pokerGames.TOOLTIP[BL.pokerModels.GAMES[hit.owner.index].kind], p.x, p.y); else hud.tooltip.hide(); },
+      onTap: hit => { if(exterior || liftRide)return; if(hit?.owner.kind==="booth" && salon<0)sitAtBooth(hit.owner.seat); else if(hit?.owner.kind==="landscape" && salon===0) salons.heirlooms.open(hit.owner.prop,pilot); else if(hit?.owner.kind==="heirloom") useHeirloom(hit.owner.prop); else if(hit?.owner.kind==="loungeChair") sitLounge(hit.owner.chair); else if(hit?.owner.kind === "portrait") usePhoto(); else if (hit?.owner.kind === "telescope") useScope(); else if (hit?.owner.kind === "salon") useDoor(hit.owner.index); else if (salon >= 0) return; else if (hit?.owner.kind === "poker") pickFloorTable(hit.owner.index); else if (hit?.owner.kind === "placard") openPlacard(hit.owner.index); else if (hit?.owner.kind === "music") openCredits(); else if (hit?.owner.kind === "poker-exit") leaveFloor(); else if (hit?.owner.kind === "game") hud.toast(BL.pokerGames.WATCH_ONLY); }
     });
     hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
     hud.setAreaLabel("Ember Den");
     hud.el.modeDestination.title = "Ember Den · choose a table";
     hud.el.modeDestinationLabel.textContent = "Ember Den views. Open Map to choose a table";
     const presetView = name => {
-      if (salon >= 0 || leaving || panel.focused || seatTable >= 0 && !pendingStand || !VIEW_NAMES[name]) return false;
+      if (liftRide || salon >= 0 || leaving || panel.focused || seatTable >= 0 && !pendingStand || !VIEW_NAMES[name]) return false;
       tableView = name !== "entrance";
       pilot.goPreset(name); hud.setDetachedView(name, true);
       return true;
     };
     hud.onPreset(presetView);
-    hud.onAction((a, v) => { if (a === "jetpack-toggle") toggleTerracePack(); else if (a === "leave") leaveFloor(); else if (a === "reset-view") pilot.resetCamera(); else if (a === "act") { if (carry.phase === HOLD) throwNow(); else if (!scripted()) pilot.action(); } else if (a === "mode-preset") return presetView(v); else if (a.startsWith("mode-")) modeAction(a); });
+    hud.onAction((a, v) => { if(liftRide)return; if (a === "jetpack-toggle") toggleTerracePack(); else if (a === "leave") leaveFloor(); else if (a === "reset-view") pilot.resetCamera(); else if (a === "act") { if (carry.phase === HOLD) throwNow(); else if (!scripted()) pilot.action(); } else if (a === "mode-preset") return presetView(v); else if (a.startsWith("mode-")) modeAction(a); });
     fx = BL.fx.create({ root, input, hooks, hud, game: ctx.game, world, renderer: ctx.renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 5, z: -34 } });
     // Canvas 2D paints every face on the CPU, so it gets a lighter set of the same fittings.
     BL.pokerModels.setLite(ctx.renderer.kind === "canvas2d");
@@ -1271,6 +1383,7 @@
     cosmos = Themes.hang({ canvas: ctx.renderer.kind === "canvas2d", sparse: ctx.renderer.kind === "canvas2d" || ctx.renderer.quality === "low" });
     const terrace = BL.pokerTerrace.build(ctx.renderer.kind === "canvas2d");
     terraceScope=terrace; S.addChild(root, terrace.root, room.hall.aquarium.root);
+    for(const {node,seat} of terrace.seatNodes){input.add(node,{kind:"booth",seat});targets.push(node);}
     weather=BL.pokerClub.weather(root,ctx.renderer.kind==="canvas2d");
     const portrait=BL.pokerClub.portraitCourt(terrace.root,ctx.renderer.kind==="canvas2d");
     input.add(portrait,{kind:"portrait"});targets.push(portrait);
@@ -1311,8 +1424,9 @@
     const name = [world.pilot, requested, BL.net.preferredCharacter()?.handle].find(n => BL.contributors.activeRoster.some(c => c.name === n && mayPick(c))) || (BL.contributors.activeRoster.find(mayPick) || BL.contributors.activeRoster[0]).name;
     world.pilot = null;
     const playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
-    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: false, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: ground, walkable: floorWalk, jetpackAllowed:terracePackAllowed, useNear: () => { if (carry.phase === HOLD) { throwNow(); return true; } if (scripted()) return true; if(salons.heirlooms?.modal)return true; if(loungeChair){sitLounge(loungeChair.node);return true;} if(salon===0 && useLoungeItem())return true; const chair=chairNear(); if(chair){sitLounge(chair);return true;} if (avatar.jet && avatar.root.position.y - avatar.baseY > .18) return false; if (nearPhoto()) { usePhoto(); return true; } if (nearScope()) { useScope(); return true; } const door = nearDoor(); if (door >= 0) { useDoor(door); return true; } if (salon >= 0) return true; const i = nearPlacard(); if (i >= 0) openPlacard(i); else if (nearMusic()) openCredits(); else if (nearGame()) hud.toast(BL.pokerGames.WATCH_ONLY); else return false; return true; }, residentPose: cave => {
+    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: false, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: ground, walkable: floorWalk, jetpackAllowed:terracePackAllowed, useNear: () => { if(liftRide)return true; if (carry.phase === HOLD) { throwNow(); return true; } if (scripted()) return true; if(salons.heirlooms?.modal)return true; if(loungeChair){sitLounge(loungeChair.node);return true;} if(salon===0 && useLoungeItem())return true; const chair=chairNear(); if(chair){sitLounge(chair);return true;} if (avatar.jet && avatar.hop > .18) return false; const boothSeat=nearbyBoothSeat(); if(boothSeat && sitAtBooth(boothSeat))return true; if (nearPhoto()) { usePhoto(); return true; } if (nearScope()) { useScope(); return true; } const door = nearDoor(); if (door >= 0) { useDoor(door); return true; } if (roofLevel()) return false; if (salon >= 0) return true; const i = nearPlacard(); if (i >= 0) openPlacard(i); else if (nearMusic()) openCredits(); else if (nearGame()) hud.toast(BL.pokerGames.WATCH_ONLY); else return false; return true; }, residentPose: cave => {
       // Walking to a chair, lifting, winding up and throwing, the scene poses the visitor's Ooga itself.
+      if(cave===avatar && liftRide)return true;
       if(cave===avatar && bridgeTime){
         const u=Math.min(1,(1.24-bridgeTime)/.30,bridgeTime/.28);
         const p=cave.parts;
@@ -1341,6 +1455,8 @@
     avatar.root.rotation.y = Math.PI; pilot.possess(avatar);
     // A reload of this tab stands where the Ooga stood on the floor (visit-spot.js), while it can walk on from there.
     const stood = ctx.from === null ? BL.visitSpot.take("poker", "") : null;
+    promenade=!!stood && !loungeStart && Math.abs(stood.y-BL.pokerGlazing.TERRACE.top)<.005 &&
+      !onTerrace(stood.x,stood.z) && BL.pokerTerrace.promenadeClear(stood.x,stood.z,stood.x,stood.z,avatar.bodyRadius);
     entranceView = false;
     if (loungeStart && BL.offlineLoungePack) {
       const door=BL.pokerSalons.DOORS[0];
@@ -1366,6 +1482,11 @@
         chaisePose(cave);return;
       }
       if(cave.root.quaternion===chaiseRotation)cave.root.quaternion=null;
+      // A booth sitter shares the cushion position and hip height in the ordinary body pose.
+      if(BL.pokerTerrace.contains(rec.x,rec.z) && Math.abs(rec.y-(.61+.08*cave.traits.height-cave.baseY))<.07 &&
+        boothSeatAt(rec.x,rec.z,.10)){
+        BL.pokerModels.sitPose(cave);return;
+      }
       const state = BL.pokerPresence.stateOf(BL.pokerModels.TABLES, BL.pokerModels.SEATS, owner, rec);
       if (state === 1) {
         BL.pokerModels.sitPose(cave);
@@ -1398,7 +1519,7 @@
     mirror.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
     if (seatTable >= 0 && !pendingStand) sit(session.tables[seatTable].snapshot().seats.findIndex(s => s?.id === HERO));
     while (faces.length < BL.pokerRules.SEATS) { const f = { key: "", cave: null, tag: null, paint: canvas => BL.hud.renderFaceIcon(canvas, f.cave, null, 96) }; faces.push(f); }
-    panel = BL.pokerHud.create(action, select, faceFor, emote, hud, npcAt); panel.setDealer(room.tables[0].agent);
+    panel = BL.pokerHud.create(action, faceFor, emote, hud, npcAt); panel.setDealer(room.tables[0].agent);
     Themes.light(renderOpts, renderer.kind);
     if (salon===0) Object.assign(renderOpts,loungeFill);
     installHallLamps();
@@ -1415,7 +1536,7 @@
     gameCtx.crowd = crowd;
     seatSmokes = Array.from({ length: SEAT_SMOKES }, (_, i) => BL.pokerCrowd.smoke({ root: room.root, lite: renderer.kind === "canvas2d", seed: 7919 * (i + 1) }));
     scene.root = root; scene.camera = camera; scene.input = input;
-    scene.debug = { camera, pilot, hud, crew: people, cavemen: people.cavemen, controls: pilot.controls, poker: { session, room, salons, get salon() { return salon; }, action, select, snapshots, renderOpts, crowd, audio, cosmos, games: room.games, react: onReaction, get selected() { return selected; }, get carry() { return carry; }, get flyer() { return flyer; }, get walker() { return walker; }, get returns() { return returns; }, get reticle() { return reticle; }, get musicPlaque() { return musicPlaque; }, openCredits, npcAt,
+    scene.debug = { camera, pilot, hud, crew: people, cavemen: people.cavemen, controls: pilot.controls, poker: { session, room, salons, terrace, get salon() { return salon; }, action, select, snapshots, renderOpts, crowd, audio, cosmos, games: room.games, react: onReaction, get selected() { return selected; }, get carry() { return carry; }, get flyer() { return flyer; }, get walker() { return walker; }, get returns() { return returns; }, get reticle() { return reticle; }, get musicPlaque() { return musicPlaque; }, openCredits, npcAt,
       // The tells' state by chair and their public views by table, read only; `calm` stands in for the reduced-motion wish.
       get tells() { return tells; }, get tellViews() { return tellViews; }, get calm() { return calm; }, set calm(on) { calm = !!on; } } };
     if (new URLSearchParams(location.search).get("pokerLive") === "1") action("connect");
@@ -1430,9 +1551,9 @@
     renderOpts.directStrength=base.directStrength+.67*dawn;
     if(elapsed>=nextMorningCheck){game.expireDenWins();nextMorningCheck=elapsed+1;}
     if(shownWins!==game.state.emberDen.wins){shownWins=game.state.emberDen.wins;updateWall(shownWins);salons.roofWins(shownWins);}
-    salons.approach(avatar.root.position,salon);
+    if(!promenade)salons.approach(avatar.root.position,salon);
     const passageVisible=salons.shelf.opened;
-    salons.shelf.update(dt,salon<=0?avatar:null,floorWalk);
+    salons.shelf.update(dt,salon<=0 && !promenade?avatar:null,floorWalk);
     if(passageVisible && !salons.shelf.opened)salons.show(salon);
     salons.entry?.slide(salons.shelf.hinge.rotation.y/1.61);
     const hearthPulse=salons.hearth?.(elapsed,calm) ?? 0;
@@ -1447,8 +1568,25 @@
       if(bridgeTime<=dt || !pilot.player || pilot.controls.axes.x || pilot.controls.axes.y || loungeChair || onChaise())finishBridgePose();
       else bridgeTime-=dt;
     }
+    const riding=!!liftRide, tookOffOutside=roofApproach();
+    const fromTerrace=onTerrace(avatar.root.position.x,avatar.root.position.z);
     people.update(dt, elapsed);
-    if(salon<=0 && salons.shelf.opened){
+    const pos=avatar.root.position;
+    promenade=(promenade || fromTerrace) && salon<0 && !onTerrace(pos.x,pos.z) && (promenade || pos.y-avatar.baseY<.18) &&
+      BL.pokerTerrace.promenadeClear(pos.x,pos.z,pos.x,pos.z,avatar.bodyRadius);
+    if(riding)stepLift(dt);
+    else if(pilot.player && (salon<0 || roofLevel())){
+      const p=avatar.root.position, feet=p.y-avatar.baseY;
+      const upper=p.x<BL.pokerTerrace.inner && feet>=BL.pokerVault.FOOT-.24 && (roofLevel() || tookOffOutside);
+      if(upper!==roofLevel()){
+        salon=upper?2:-1;salons.show(salon);atClub=false;hud.setAreaLabel(upper?"Casino rooftop":"Ember Den");
+      }
+      const insideClub=upper && BL.pokerSalons.onDeck(p.x,p.z);
+      if(upper && atClub!==insideClub){
+        atClub=insideClub;hud.setAreaLabel(atClub?"21 Club":"Casino rooftop");
+      }
+    }
+    if(!riding && !promenade && salon<=0 && salons.shelf.opened){
       const next=avatar.root.position.z<BL.pokerSalons.DOORS[0][3]?0:-1;
       if(next!==salon){
         if(next!==0)salons.heirlooms.away();
@@ -1576,7 +1714,7 @@
     crowdTimer += dt;
     if (crowdTimer >= 1) { crowdTimer = 0; crowd.setCap(crowdCap()); }
     mirror.phase.update(dt, elapsed); mirror.body.update(dt); mirror.body.time = mirror.phase.ripples.time;
-    if (pilot.player && (seatTable < 0 || pendingStand) && Math.abs(avatar.root.position.x) < BL.bifrostModels.WINDOW.halfW
+    if (!promenade && !liftRide && salon<0 && avatar.root.position.y-avatar.baseY<1 && pilot.player && (seatTable < 0 || pendingStand) && Math.abs(avatar.root.position.x) < BL.bifrostModels.WINDOW.halfW
       && avatar.root.position.z + avatar.bodyRadius > BL.pokerModels.EXIT_Z && !leaving) leaveFloor();
     // All ten table lights fit the lowest renderer tier; selected table goes first.
     const near = selected, lights = renderOpts.lights;
@@ -1743,7 +1881,7 @@
     if (offeredTable >= 0 && e.key.toLowerCase() === "y" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
       e.preventDefault(); action("open-nearby"); return true;
     }
-    if(exterior){exitExterior();if(e.key==="Escape")return true;} if(salons?.heirlooms?.modal)return true; if(photo.active){if(e.key==="Escape")photo.close();return true;} if (telescope.active) { if (e.key === "Escape") telescope.close(); return true; } if (BL.controls.matches(e,"jetpack") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && toggleTerracePack()) {e.preventDefault();return true;} if (BL.controls.matches(e, "view") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && modeAction("mode-toggle")) { e.preventDefault(); return true; } if (BL.controls.matches(e, "escape")) { if (panel.closeEmoteMenu()) return true; if (carry.phase >= LIFT) { if (carry.npc) putDown(); return true; } if (carry.phase === WALK) { dropRequest(); return true; } if (panel.focused) panel.requestWalk(); else if (seatTable >= 0 && !pendingStand) action("stand"); else if (!pilot.escape()) leaveFloor(); return true; } if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera(); return false; };
+    if(liftRide)return true; if(exterior){exitExterior();if(e.key==="Escape")return true;} if(salons?.heirlooms?.modal)return true; if(photo.active){if(e.key==="Escape")photo.close();return true;} if (telescope.active) { if (e.key === "Escape") telescope.close(); return true; } if (BL.controls.matches(e,"jetpack") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && toggleTerracePack()) {e.preventDefault();return true;} if (BL.controls.matches(e, "view") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && modeAction("mode-toggle")) { e.preventDefault(); return true; } if (BL.controls.matches(e, "escape")) { if (panel.closeEmoteMenu()) return true; if (carry.phase >= LIFT) { if (carry.npc) putDown(); return true; } if (carry.phase === WALK) { dropRequest(); return true; } if (panel.focused) panel.requestWalk(); else if (seatTable >= 0 && !pendingStand) action("stand"); else if (!pilot.escape()) leaveFloor(); return true; } if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera(); return false; };
   const leave = () => {
     exitExterior();
     visit++; pendingLive?.dispose(); pendingLive = null;
