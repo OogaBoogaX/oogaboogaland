@@ -147,7 +147,7 @@
   const wraps = new WeakMap();
   const wrap = (r, geometry, opts = {}) => { let per = wraps.get(geometry); if (!per) wraps.set(geometry, per = new WeakMap()); if (per.has(r)) return per.get(r);
     const W = surface(r), hip = -0.207, armY = 0.711, ky = (armY - hip) / OLD.arm, hug = opts.hug == null ? 0.55 : opts.hug, gap = opts.gap == null ? 0.008 : opts.gap;
-    const g = subdivide(geometry, opts.edge || 0.035), V = g.verts, out = new Array(V.length), onArm = new Set();
+    const g = subdivide(geometry, opts.edge || 0.035), V = g.verts, out = new Array(V.length), onArm = new Set(), flat = [];
     for (let i = 0; i < V.length; i += 3) { const x = V[i], y = V[i + 1], z = V[i + 2], hx = OLD.hx(y), sideOut = Math.max(Math.abs(x) - hx, Math.abs(z) - OLD.hz), topOut = y - OLD.top;
       let p = null;
       if (topOut > sideOut && Math.abs(x) < 0.75) { const s0 = W.slice(armY), nx = x * (0.51 / 0.516), nz = s0.cz + z * (s0.hz / OLD.hz), h = W.top(nx, nz);
@@ -156,7 +156,11 @@
         // cloth hangs straight down off the widest of the body above it (an apron off the belly, tails off the seat)
         if (ny < 0.3) for (let h = ny + 0.03; h < Math.min(0.3, ny + 0.45); h += 0.03) { const up = W.side(h, s.cz, dx, dz); if (up && (!hit || Math.hypot(up.p[0], up.p[2] - s.cz) > Math.hypot(hit.p[0], hit.p[2] - s.cz))) hit = { ...up, p: [up.p[0], ny, up.p[2]] }; }
         if (hit) { const d = gap + Math.max(0, sideOut) * hug; p = [hit.p[0] + hit.n[0] * d, ny, hit.p[2] + hit.n[2] * d]; } else p = [x, ny, z]; }
-      out[i] = p[0]; out[i + 1] = p[1]; out[i + 2] = p[2]; }
+      out[i] = p[0]; out[i + 1] = p[1]; out[i + 2] = p[2]; if (opts.straight && opts.straight(x, y, z)) flat.push(i); }
+    // a piece hung straight (an apron's skirt): one flat plane in front of the furthest of the body it hangs off, its
+    // layers kept in their order and its width scaled with the body's, rather than following the body round
+    if (flat.length) { let front = -1e9, z0 = 1e9; for (const i of flat) { front = Math.max(front, out[i + 2]); z0 = Math.min(z0, V[i + 2]); }
+      for (const i of flat) { out[i] = V[i] * (0.39 / 0.43); out[i + 2] = front + (V[i + 2] - z0) * hug; } }
     // what came down on the upper arm is left off (the sleeve is painted there, and the arm swings apart from the belly),
     // all but gold (the gamemaster's epaulettes)
     const gold = (c) => { const m = Math.max(...c) || 1; return c[0] / m > 0.9 && c[1] / m > 0.6 && c[1] / m < 0.85 && c[2] / m < 0.4; };
