@@ -1762,8 +1762,6 @@ body[data-active-scene="block"] .mode-hud {
   background: none;
   color: var(--muted);
   cursor: pointer;
-  /* Grey to green comes on fairly quickly as a voice starts and lets go slowly, so pauses between words never blink. */
-  transition: color 0.9s ease-in-out;
 }
 
 .roster-voice svg {
@@ -1811,10 +1809,13 @@ body[data-active-scene="block"] .mode-hud {
   outline-offset: 2px;
 }
 
+/* A short fade only as speech ends; new sound and mute changes take their colour immediately. */
+.roster-voice[data-voice="on"][data-voice-fade="true"] {
+  transition: color 0.25s ease-out;
+}
+
 .roster-voice[data-voice="speaking"] {
   color: var(--ok);
-  transition-duration: 0.4s;
-  transition-timing-function: ease-out;
 }
 
 .roster-voice[data-voice="muted"] {
@@ -1824,7 +1825,7 @@ body[data-active-scene="block"] .mode-hud {
 /* The microphone (native-icons.js `mic`): hollow in voice; speaking, its capsule fills from the bottom with the voice's
    level (`--lv`, written by the page each meter read, eased between reads, full where no level is known); crossed out
    when muted or silenced here. */
-.roster-voice .mic-level { transform: scaleY(0); transition: transform 0.15s linear; }
+.roster-voice .mic-level { transform: scaleY(0); transition: transform 0.05s linear; }
 .roster-voice[data-voice="speaking"] .mic-level { transform: scaleY(var(--lv, 1)); }
 .roster-voice .mic-gap,
 .roster-voice .mic-slash { display: none; }
@@ -1840,7 +1841,7 @@ body[data-active-scene="block"] .mode-hud {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .roster-voice, .roster-voice .mic-level { transition: none; }
+  .roster-voice[data-voice="on"][data-voice-fade="true"], .roster-voice .mic-level { transition: none; }
 }
 
 @media (pointer: coarse) {
