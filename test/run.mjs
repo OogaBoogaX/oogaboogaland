@@ -1264,11 +1264,15 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     const entry = first.entryRecords()[0], replacement = !first.geometryRecords().has(shared) && first.geometryRecords().has(larger)
       && entry.geometry === first.geometryRecords().get(larger) && entry.boundsGeometry === entry.geometry
       && entry.boundaryReserve >= 96 && entry.boundaryTriangles.length >= 960 && entry.boundaryNodes.length >= entry.geometry.counts.length * 4;
-    let nearBounds = true, nearCases = 0, boundaryHits = 0, gridQueries = 0;
+    for (const x of [3, 5, 7, 9, 11, 13, 15]) S.addChild(firstRoot, S.createNode({ geometry: shared, position: { x, y: 0, z: 8 } }));
+    first.refresh();
+    const deferred = B.objectGuides.create({ roots: [firstRoot], crew: { cavemen: new Map() } });
+    let nearBounds = true, nearCases = 0, boundaryHits = 0, gridQueries = 0, deferredExact = true, deferredGrids = true, eagerBoundaryBuilds = 0, deferredBoundaryBuilds = 0, deferredRepeatBoundaryBuilds = 0;
     for (const depth of [-1, 0.05, 0.1, 0.3, 1, 8]) {
       firstNode.position.z = depth;
       Object.assign(firstNode.rotation, { x: 0.17, y: 0.31, z: 0.23 });
       Object.assign(firstNode.scale, { x: 1.3, y: 0.7, z: 1.1 });
+      const eagerBefore = first.stats.boundaryBuilds;
       query(first, firstRoot);
       const points = [];
       for (const face of larger.faces) for (let n = 0; n < face.i.length; n++) for (const t of [0, 0.0001, 0.25, 0.2501, 0.5, 0.5001, 0.75, 0.7501, 0.9999, 1]) {
@@ -1288,6 +1292,19 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
       const coherent = points.map(p => first.ownerBoundaryAt(firstRoot, ...p));
       const reversed = points.slice().reverse().map(p => first.ownerBoundaryAt(firstRoot, ...p)).reverse();
       gridQueries += first.stats.boundaryGridQueries - beforeGrid;
+      if (depth === 8) {
+        const eagerBuilds = first.stats.boundaryBuilds - eagerBefore;
+        for (let i = 0; i < points.length; i++) {
+          // Isolate one exact query and its coherent repeat, so a miss elsewhere cannot hide deferred parts.
+          S.updateWorld(firstRoot); deferred.collect(actor, 0, 0, 8, camera, 1.6, null, 0, ${deferred}); if (${deferred}) deferred.result.ensureContours();
+          const before = deferred.stats.boundaryBuilds, firstHit = deferred.ownerBoundaryAt(firstRoot, ...points[i], true);
+          const repeatBefore = deferred.stats.boundaryBuilds, coherentHit = deferred.ownerBoundaryAt(firstRoot, ...points[i], true);
+          deferredExact &&= coherent[i] === firstHit && coherent[i] === coherentHit;
+          deferredGrids &&= first.ownerRecords()[0].boundaryGrid.active && deferred.ownerRecords()[0].boundaryGrid.active;
+          eagerBoundaryBuilds += eagerBuilds; deferredBoundaryBuilds += deferred.stats.boundaryBuilds - before;
+          deferredRepeatBoundaryBuilds += deferred.stats.boundaryBuilds - repeatBefore;
+        }
+      }
       // Use the same exact triangle predicate as the oracle, with every screen bound open.
       for (const e of first.entryRecords()) {
         for (const boxes of [e.boundaryBounds, e.boundaryBoxes, e.boundaryNodes]) for (let i = 0; i < boxes.length; i += 4) {
@@ -1303,7 +1320,8 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
       }
     }
     nearBounds &&= gridQueries > 0;
-    first.dispose(); query(second, secondRoot);
+    const deferredFewer = deferredBoundaryBuilds < eagerBoundaryBuilds;
+    first.dispose(); deferred.dispose(); query(second, secondRoot);
     const survivor = second.stats.registered === 1 && second.stats.triangles === 12 && second.entryRecords()[0].visible
       && second.geometryRecords().get(shared).triangleIndices.every((value, i) => value === sharedIndices[i]);
     const released = first.entryRecords().length === 0 && first.geometryRecords().size === 0 && first.stats.triangleBytes === 0;
@@ -1382,7 +1400,7 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
       delayed.refresh(); lazyContours &&= delayed.contourScratchClear();
       eager.dispose(); delayed.dispose(); a.dispose(); b.dispose();
     }
-    return { lazyContours, exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, gridQueries, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
+    return { lazyContours, exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, gridQueries, deferredExact, deferredGrids, deferredFewer, eagerBoundaryBuilds, deferredBoundaryBuilds, deferredRepeatBoundaryBuilds, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
   })()`, context);
 };
 // Count descriptor users rather than timings, so the first-demand cost scales with actual users.
@@ -52003,6 +52021,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   record("camera hiding: a head held by two owners stays hidden until both let go, in either order, and shows as it was before", heads.join() === "true,false,true,false,false,true", heads.join());
   const storage = await visibilityStorageProof({ compact: true, deferred: true });
   record("visibility storage: exact source doubles and signed zero survive queries, demand and bounded screen BVHs", storage.lazyContours && storage.exact && storage.unchanged && storage.bounded && storage.tightBacking && storage.storage && storage.demand && storage.nearBounds && storage.nearCases > 100 && storage.boundaryHits > 0 && storage.disposed && storage.values > 600, JSON.stringify(storage));
+  record("visibility deferred boundaries: coherent queries retain owner grids and match the eager oracle with less preparation", storage.deferredExact && storage.deferredGrids && storage.deferredFewer && storage.deferredRepeatBoundaryBuilds === 0, JSON.stringify(storage));
   record("visibility lifecycle: shared bakes survive removal and replacement; hidden transforms, clips and geometry restore exact queries", storage.lifecycle, JSON.stringify(storage));
   const demandUsers = await visibilityDemandUsersProof();
   record("visibility demand: first demand visits only descriptor users and releases replaced, removed and disposed entries", demandUsers.rows.every(row => row.visits === row.count && row.released && row.resolved) && demandUsers.boundsTracked && demandUsers.replacementReleased && demandUsers.bothResolved && demandUsers.disposed, JSON.stringify(demandUsers));
