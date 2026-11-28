@@ -10426,6 +10426,28 @@ const gameRulesChecks = async () => {
     // and each tool's gun is one cached mesh a team, kept modest.
     let modelsLoad = "";
     try { runInNewContext(await readFile(new URL("../src/js/block-models.js", import.meta.url), "utf8"), context); } catch (e) { modelsLoad = String(e); }
+    // Ooga Town (Block Frenzy's first map) has no z-fighting: no two up-facing faces of different colours lie in one plane
+    // over the same ground, unless a face just above (within 10 cm) covers where they meet. The saloon's and store's
+    // cream caps once sat level with their walls' tops and flickered red and teal through the cream.
+    if (BL.blockModels && BL.blockSim) {
+      const S = BL.blockSim, g = BL.blockModels.arena(S.MAPS.indexOf("town")), v = g.verts, ups = [];
+      for (const f of g.faces) {
+        const P = f.i.map((k) => [v[k * 3], v[k * 3 + 1], v[k * 3 + 2]]);
+        if (P.length < 3 || P.some((p) => Math.abs(p[1] - P[0][1]) > 1e-6)) continue;
+        if ((P[1][2] - P[0][2]) * (P[2][0] - P[0][0]) - (P[1][0] - P[0][0]) * (P[2][2] - P[0][2]) <= 0) continue;
+        ups.push({ y: P[0][1], c: f.color.join(), x0: Math.min(...P.map((p) => p[0])), x1: Math.max(...P.map((p) => p[0])), z0: Math.min(...P.map((p) => p[2])), z1: Math.max(...P.map((p) => p[2])) });
+      }
+      const fights = [];
+      for (let i = 0; i < ups.length; i++) for (let j = i + 1; j < ups.length; j++) {
+        const a = ups[i], b = ups[j];
+        if (a.c === b.c || Math.abs(a.y - b.y) > 1e-3) continue;
+        const x0 = Math.max(a.x0, b.x0), x1 = Math.min(a.x1, b.x1), z0 = Math.max(a.z0, b.z0), z1 = Math.min(a.z1, b.z1);
+        if (x1 - x0 < 1e-3 || z1 - z0 < 1e-3) continue;
+        if (ups.some((u) => u.y > a.y + 1e-3 && u.y <= a.y + 0.1 && u.x0 <= x0 + 1e-6 && u.x1 >= x1 - 1e-6 && u.z0 <= z0 + 1e-6 && u.z1 >= z1 - 1e-6)) continue;
+        fights.push({ y: +a.y.toFixed(3), colours: [a.c, b.c], at: [+x0.toFixed(2), +z0.toFixed(2)] });
+      }
+      record("block town: no two different-coloured top faces share a plane where they show (no z-fighting on the wall caps)", ups.length > 300 && fights.length === 0, JSON.stringify({ ups: ups.length, fights: fights.slice(0, 8) }));
+    }
     {
       const BM = BL.blockModels || {}, sources = ["scene-block.js", "arcade-scene-models.js"].map(f => readFileSync(new URL(`../src/js/${f}`, import.meta.url), "utf8")).join("\n");
       const placed = [...new Set([...sources.matchAll(/\bBM\.(\w+)/g)].map(m => m[1]))], absent = placed.filter(n => BM[n] === undefined);

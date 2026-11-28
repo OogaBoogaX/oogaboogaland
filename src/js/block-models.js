@@ -621,7 +621,8 @@
     } else if (kind === "saloon" || kind === "store") {
       put(TOWN[kind], w, h, d, x, y, z);
       if (bottom === 0) put(TOWN[kind + "Dark"], w + 0.04, 0.4, d + 0.04, x, 0.2, z);
-      put(TOWN.cream, w + 0.04, 0.14, d + 0.04, x, top - 0.07, z);
+      // The cream cap stands 2 cm proud of the wall's top: a top face level with the wall's flickers (z-fighting).
+      put(TOWN.cream, w + 0.04, 0.14, d + 0.04, x, top - 0.05, z);
     } else if (kind === "saloonSign" || kind === "storeSign") {
       // The board over the front door, standing proud of the wall it shares, under a cream cornice.
       put(TOWN.dark, w, h, d + 0.08, x, y, z);
@@ -654,7 +655,7 @@
       put("#3fb6e0", w - 0.5, 0.04, d - 0.5, x, top + 0.005, z, 0.25);
     } else if (kind === "column") {
       put("#b9b2a6", w, h, d, x, y, z);
-      put(TOWN.cream, w + 0.3, 0.2, d + 0.3, x, top - 0.1, z);
+      put(TOWN.cream, w + 0.3, 0.2, d + 0.3, x, top - 0.08, z);
     } else if (kind === "coin") {
       // The gold coin: a disc on its edge across the street, a ₿ standing proud on both faces, each row's runs merged.
       const R = w / 2, u = 0.2;
