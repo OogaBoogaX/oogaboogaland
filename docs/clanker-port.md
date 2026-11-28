@@ -44,24 +44,30 @@ The clanker gorillas are being rebuilt on a new rig, worked out in `untracked/cl
 | Fur form | everywhere | agent.js:410 | rig palette | the rig's own `ape` set |
 | Glyph form | Orbit, Drop, Rally, ghost hunt (x1.25), rage, sleep beam | agent.js:411 | rig palette | the rig's own `code` set |
 | Lab coat | EntropyLab (hub lab mouth) | `labTorsoVox` :323, `labArmVox` :338, `labCoatClip` :432 | recoloured voxels, clipped at the mouth | painted: coat over chest and belly, the chest open, a collar, sleeves to a cuff at the wrist |
-| B.C.A. suits x3 | B.C.A. office | `SUITS` :346, `suitTorsoVox` :360, `suitArmVox` :371, `suitLegVox` :372, `suitSeatVox` :375, `suitClip` :455 | recoloured voxels, clipped at the veil; seated legs | painted: jacket, lapels, shirt, tie and knot, belt and buckle, trousers, shoes, cuffs (no seated legs yet) |
-| Hard hat | Lightning Factory (x0.72) | factory-scene-models.js:2219, scene-factory.js:1647 | rigid, on the head | refitted to the new head |
-| Hard hat and hi-vis vest | Lightning Jet Hangar (x0.86) | hangar-models.js:2771, scene-hangar.js:1344 | rigid box vest | hat refitted; the vest painted (navy, two yellow bands) |
-| Staff hats x4, vests x5, props x5 | Ooga Arcade staff (x0.72), six roles (scene-arcade.js:1435) | arcade-scene-models.js `staffHat` :4603, `staffVest` :4709, `staffProp` :4762, `PROP_GRIP` scene-arcade.js:1473 | rigid, modelled to the old box torso | hats and props refitted; **the vests stretched onto the new torso balloon. They need remodelling for the new body** |
+| B.C.A. suits x3 | B.C.A. office | `SUITS` :346, `suitTorsoVox` :360, `suitArmVox` :371, `suitLegVox` :372, `suitSeatVox` :375, `suitClip` :455 | recoloured voxels, clipped at the veil; seated legs | painted: jacket, lapels, shirt, tie and knot, trousers, shoes, cuffs; a thin belt of one height all round the waist with a brass buckle (`belt`) (no seated legs yet) |
+| Hard hat | Lightning Factory (x0.72) | factory-scene-models.js:2219, scene-factory.js:1647 | rigid, on the head | seated on the new head (`hat`) |
+| Hard hat and hi-vis vest | Lightning Jet Hangar (x0.86) | hangar-models.js:2771, scene-hangar.js:1344 | rigid box vest | hat seated; the vest painted (navy, two yellow bands) |
+| Staff hats x4, vests x5, props x5 | Ooga Arcade staff (x0.72), six roles (scene-arcade.js:1435) | arcade-scene-models.js `staffHat` :4603, `staffVest` :4709, `staffProp` :4762, `PROP_GRIP` scene-arcade.js:1473 | rigid, modelled to the old box torso | hats seated; vests shrink-wrapped onto the new torso (`wrap`), the shoulder pieces down on the sloped shoulders and aprons and tails hanging off the belly; tools through the fist's hole, pointing ahead; the tray level between both fists, elbows bent |
 | Rally repair mechanic | Arcade service bay (x0.65) | scene-arcade.js:399 | staff hat 2, vest 2, a held driver, a fixed pose | not yet (same pieces as the mechanic, plus its pose) |
-| Ringmaster's hat | air hockey bot (x0.72) | hockey-players.js:138 | rigid | refitted |
+| Ringmaster's hat | air hockey bot (x0.72) | hockey-players.js:138 | rigid | seated on the new head |
 | Poker dealer jacket | Ember Den (x1.16) | poker-models.js:350 | rigid boxes | painted: jacket, shirt front, gold tie, sleeves, cuffs |
 | Clank arm and red visor | Block Frenzy, Clanktown (x1.35) | block-models.js:1542 | rigid, hand-placed against the old voxels | refitted to the forearm and the head |
-| Lab flask | EntropyLab hub workers | agent.js:385, `holdLabItem` :1350 | held in the left hand at the old fist | in the new left fist |
+| Lab flask | EntropyLab hub workers | agent.js:385, `holdLabItem` :1350 | held in the left hand at the old fist | hanging by its neck from the new left fist |
 | Ghost brutes | ghost hunt arena (x1.25) | ghost-game.js:346 | glyph form, a hit target per part | glyph form |
 | NPC ghost look, burn tints, breathing, highlight | hub | npc-ghosts.js, scene-hub.js:10383, clankers.js:6265, scene-hub.js:6419 | materials and scales on the parts | carry over to whatever parts the new rig has |
 
-The pass-1 versions are fitted generically:
+The new versions are fitted in `dress.js`:
 
 - **Painted outfits** recolour copies of the body's own meshes by region rules (chest, belly, arm, forearm, leg, shin, foot), cached by geometry and outfit.
-- **Rigid pieces** keep their place on the matching new part, mapped from the old part's box to the new one.
+- **Hats** (`hat`) sit on the new head where it narrows above the ears, scaled to its width there and centred front to back.
+- **Vests** modelled on the old box torso (`wrap`) are split finely and shrink-wrapped onto the new torso's surface, standing as far off it as they stood off the old one (a little over half), in the belly's frame. What lay over the old torso's top comes down onto the shoulders, and cloth below the waist hangs straight down off the widest of the body above it.
+- **The suit belt** (`belt`) is a band of one height all round the waist, following the body's outline, with a brass buckle.
+- **Held things** follow the new fist: its middle is at y -0.66, z -0.03 in the forearm's frame, and its hole runs along x, which hanging points ahead on the right forearm and behind on the left. A tool's handle runs through the hole. The ticket roll sits in the grip, the flask hangs by its neck, and the tray is held level between both fists with the elbows bent (the game's carry pose will do this).
+- **Other rigid pieces** keep their place on the matching new part, mapped from the old part's box to the new one.
 
-Each still needs a proper look-over; the Arcade vests and the seated suit legs need real work.
+Close-ups for checking them: `node scripts/clanker/catalog/hands.mjs [hand|head|torso] [names...]` writes `hands.png`, `heads.png` or `torsos.png`, old and new from the side and the front.
+
+Still to do: the seated suit legs, and every hat, prop and vest in each pose its scene uses (the vests are wrapped on the standing torso, and the chest moves on the belly).
 
 ## Places (one `create` each; scale)
 
@@ -122,7 +128,7 @@ The new rig has more parts (forearm, shin and foot apart from the upper arm and 
    - collision shapes and body sizes from the new body;
    - the old gaits mapped onto `pose`.
 3. **Outfits:** move pass 1 into the game, as painted outfit sets and refitted pieces. Then:
-   - remodel the Arcade vests and the poker jacket for the new torso;
+   - split each wrapped vest at the waist between the chest and the belly, so it follows the chest's pose;
    - make the seated suit legs;
    - look over every hat, prop and visor in every pose its scene uses.
 4. **Transitions:**
