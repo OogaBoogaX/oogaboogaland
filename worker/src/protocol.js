@@ -52,6 +52,12 @@ import "../../src/js/reaction-policy.js";
 //                                                room keeps its seat while it is away and others beam it out
 //                 { t: "hp", v, ko }             the driven body's health (normalized 0-100) and knockout flag
 //                 pose.g                         optional gorilla locomotion: [flags, speed, stride, climb, side, swim]
+//                 pose.gx                        optional, with g, the new gorilla body's climbing and dragging, whole
+//                                                numbers: [rise into a climb walking up to a wall (0-100), lean into
+//                                                the rock (0-30 degrees), the haul over a top (0-100, -1 none), the
+//                                                top over the feet (cm, -400 to 400), 1 + the throw (0-100) while
+//                                                dragging an Ooga (0 not)]; a page sending none, or anything else, has
+//                                                none, and an older page ignores it (GORILLA_EXTRA)
 //                 pose.j                         optional jetpack, for drawing only: 1 while an Ooga wears one, plus its
 //                                                flame's power (0-3) times 2; absent is none
 //                 pose.w                         optional weapons, for drawing only: the one in an Ooga's hand (1 its
@@ -82,6 +88,7 @@ import "../../src/js/reaction-policy.js";
 // Room → client:  welcome { you, players, tickHz, now, loopEpoch, connectionToken }, join { p }, leave { id, reason },
 //                 body { id, name }, state { now, ps: [id, x, y, z, yaw, ...], gs?, js? }, kick { reason },
 //                 state.gs                       gorilla locomotion in [id, ...g] runs; welcome/join carry g too
+//                 state.gxs                      the same for gx in [id, ...gx] runs; welcome/join carry gx too
 //                 state.js                       [id, j] pairs for every player with a jetpack; anyone else in ps has
 //                                                none; welcome/join carry j too
 //                 state.ws                       [id, w] pairs for every player holding a weapon, the same way
@@ -296,6 +303,8 @@ export const PIN_WAIT_MS = 60000;
 // only.
 export const DANCE_FEATURE = "dance-v1";
 export const DANCE_MAX = 9;
+// pose.gx, the new gorilla body's climbing and dragging: each place's least and most (see the header).
+export const GORILLA_EXTRA = Object.freeze([[0, 100], [0, 30], [-1, 100], [-400, 400], [0, 101]].map(Object.freeze));
 // A driven Ooga's own shots and strikes, relayed for drawing only (nothing is hit and nothing is kept): a burst is
 // three bananas 0.09 s apart, every 0.44 s at most, and a shot never flies past SHOT_RANGE.
 export const SHOT_HZ = 12;
@@ -417,6 +426,11 @@ export const parseClientMessage = (text) => {
       if (!Array.isArray(g) || g.length !== 6 || !g.every(finite) || !Number.isInteger(g[0]) || g[0] < 0 || g[0] > 127) return null;
       pose.g = [g[0], round(Math.max(-20, Math.min(20, g[1]))), round(Math.max(-1e6, Math.min(1e6, g[2]))),
         round(Math.max(-1, Math.min(1, g[3]))), round(Math.max(-1, Math.min(1, g[4]))), round(Math.max(0, Math.min(1, g[5])))];
+      // The new body's extra: bounded whole numbers, or dropped without dropping the pose, so a later page's longer
+      // list never costs it its locomotion.
+      const gx = msg.gx;
+      if (Array.isArray(gx) && gx.length === GORILLA_EXTRA.length && gx.every(Number.isInteger))
+        pose.gx = gx.map((v, i) => Math.max(GORILLA_EXTRA[i][0], Math.min(GORILLA_EXTRA[i][1], v)));
     }
     if (msg.j !== undefined) {
       if (!Number.isInteger(msg.j) || msg.j < 0 || msg.j > 7) return null;

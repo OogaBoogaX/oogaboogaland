@@ -47989,6 +47989,16 @@ const integrationChecks = async BL => {
   const cleared=remote.g===null&&remote.bodyKind==="ooga";
   gm({t:"body",id:72,name:"gorilla:w-s-bitcoin"});gm({t:"state",ps:[],gs:[72,4,2,3,0,-1,0]});
   record("integration gorilla reception: late-join, streamed locomotion and sleep share cached storage, absent or invalid state cannot erase it, and body changes clear stale gorilla pose before reuse",joined&&reused&&retained&&slept&&cleared&&remote.g===storage&&remote.g[4]===-1,JSON.stringify({joined,reused,retained,slept,cleared}));
+  // The new body's extra (net.js gx) rides beside g: sent with it, read from gxs, none from an older room or a bad list.
+  g.advance(101);g.net.sendPose(20,3,4,.5,motion,0,0,null,0,0,[40,12,55,-120,31]);
+  const sentExtra=poses().at(-1).gx?.join()==="40,12,55,-120,31"&&poses().at(-1).g.join()===motion.join();
+  g.advance(101);g.net.sendPose(21,3,4,.5,motion,0,0,null,0,0,[40,12.5,55,-120,31]);
+  const badSent=Object.hasOwn(poses().at(-1),"g")&&!Object.hasOwn(poses().at(-1),"gx");
+  gm({t:"state",ps:[],gs:[72,4,2,3,0,0,0],gxs:[72,0,10,50,30,0]});const readExtra=remote.gx?.join()==="0,10,50,30,0";
+  gm({t:"state",ps:[],gs:[72,4,2,3,0,0,0]});const olderRoom=remote.gx===null&&remote.g===storage;
+  gm({t:"state",ps:[],gs:[72,4,2,3,0,0,0],gxs:[72,0,99,50,30,0]});const boundedRead=remote.gx===null&&remote.g===storage;
+  record("integration gorilla extra: the new body's climb, haul and drag ride a gorilla's pose beside g, a bad extra is dropped alone, and a page reads them from gxs and none from an older room",sentExtra&&badSent&&readExtra&&olderRoom&&boundedRead,JSON.stringify({sentExtra,badSent,readExtra,olderRoom,boundedRead}));
+  g.advance(101);
   g.net.setBody(gorilla);g.net.sendPose(2,3,4,.5,motion);const beforeRejoin=poses().length;
   gm({t:"kick",reason:"replaced"});g.net.rejoin();gw=g.sockets.at(-1);gm({t:"welcome",you:{id:71},players:[{id:72,login:"peer",body:"gorilla:w-s-bitcoin",zone:"outside",g:[1,0,0,0,0,0]}],now:Date.now()});
   g.net.sendPose(2,3,4,.5,motion);

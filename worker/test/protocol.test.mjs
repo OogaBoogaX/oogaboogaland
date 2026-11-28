@@ -14,6 +14,18 @@ test("poses inside the bounds are accepted, rounded and their yaw wrapped", () =
   }
   const g = parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, g: [127, 30, -2e6, 2, -2, 3] }));
   assert.deepEqual(g.g, [127, 20, -1e6, 1, -1, 1], "gorilla locomotion, including sleep, is bounded independently of position");
+  const gx = (v) => parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, g: [4, 0, 1, 1, 0, 0], gx: v }));
+  assert.deepEqual(gx([40, 12, 55, -120, 31]).gx, [40, 12, 55, -120, 31], "the new body's climb, haul and drag ride the pose");
+  assert.deepEqual(gx([500, -3, -9, 9000, 900]).gx, [100, 0, -1, 400, 101], "each place of the extra is bounded");
+  for (const bad of [[1, 2, 3, 4], [1, 2, 3, 4, 5, 6], [1, 2.5, 3, 4, 5], "1", null, [1, 2, 3, 4, "5"]]) {
+    const m = gx(bad);
+    assert.equal(m && m.t, "pose", `a pose with a bad extra ${JSON.stringify(bad)} keeps its locomotion`);
+    assert.deepEqual(m.g, [4, 0, 1, 1, 0, 0]);
+    assert.equal("gx" in m, false, "and drops only the extra");
+  }
+  assert.equal("gx" in parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, gx: [1, 2, 3, 4, 5] })), false, "the extra rides only with locomotion");
+  const wide = JSON.stringify({ t: "pose", x: -159.999, y: -129.999, z: -159.999, yaw: -3.142, g: [127, -20, -1e6, -1, -1, 1], gx: [100, 30, 100, -400, 101] });
+  assert.ok(wide.length <= MESSAGE_MAX, "the largest gorilla pose with its extra fits the message cap");
   assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, j: 7 })).j, 7, "a worn jetpack at full thrust rides the pose");
   assert.equal("j" in parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, j: 0 })), false, "no jetpack adds nothing");
   assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, w: 255 })).w, 255, "the gun in hand, aimed, with every round, rides the pose");

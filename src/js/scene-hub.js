@@ -9268,7 +9268,14 @@
         | (gorilla.sleep.stage === "asleep" ? 64 : 0);
       g[1] = gorilla.speed; g[2] = m.climbStride; g[3] = m.climbDirection; g[4] = m.climbSide; g[5] = m.swim;
       if (g[0] & 64) g[3] = gorilla.sleep.pose === "left" ? -1 : gorilla.sleep.pose === "right" ? 1 : 0;
-      BL.net.sendPose(p.x, p.y, p.z, gorilla.heading, g);
+      // The new body's climbing and dragging (net.js `gx`): the rise into a climb, the lean into the rock, the haul over
+      // a top and the top over its feet, and an Ooga dragged with how far its throw is wound.
+      const gx = gorilla.netExtra, hauling = Number.isFinite(m.haul);
+      gx[0] = Math.round(Math.max(0, Math.min(1, m.climbApproach || 0)) * 100); gx[1] = Math.round(Math.max(0, Math.min(30, m.climbLean || 0)));
+      gx[2] = hauling ? Math.round(Math.max(0, Math.min(1, m.haul)) * 100) : -1;
+      gx[3] = hauling ? Math.round(Math.max(-4, Math.min(4, m.haulTop - p.y)) * 100) : 0;
+      gx[4] = m.dragging ? 1 + Math.round(Math.max(0, Math.min(1, m.throwProgress || 0)) * 100) : 0;
+      BL.net.sendPose(p.x, p.y, p.z, gorilla.heading, g, 0, 0, null, 0, 0, gx);
       BL.net.setHealth(gorilla.health.value / gorilla.health.max * 100, gorilla.health.value <= 0);
     } else if (driven.camp.seat && driven.camp.seat.kind === "hammock") {
       // Entry/exit share the actual body transform; settled rest shares a still seat, with no sway traffic.
@@ -12585,7 +12592,7 @@
         if (on) {
           body.root.sightHidden = true;
           body.netBody = body.npc.netBody;
-          body.netMotion = new Float64Array(6);
+          body.netMotion = new Float64Array(6); body.netExtra = new Int16Array(5);
           registerClanker(body);
           guideBody(body, true);
           npcGhosts?.set(body.npc, true);
@@ -12606,7 +12613,7 @@
     shared.fireThreats = () => clankers.list;
     for (const entry of clankers.list) {
       entry.netBody = BL.net.gorillaBody(entry.owner.traits.name);
-      entry.netMotion = new Float64Array(6);
+      entry.netMotion = new Float64Array(6); entry.netExtra = new Int16Array(5);
       registerClanker(entry);
     }
     resetRageThrowMap(false);
