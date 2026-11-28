@@ -254,7 +254,7 @@ export class Room extends DurableObject {
 
   record(ws, a) {
     if (this.env?.EQUIPMENT_ENABLED === "1") a = { ...a, equipment: equipmentRoom.saved(this, a.equipment, a.login, a.id), equipmentReady: !!a.equipment };
-    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], roomLock: null, blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, savedAt: 0, posePending: false, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: a.joinedAt || Date.now() };
+    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, g: null, gx: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], roomLock: null, blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, savedAt: 0, posePending: false, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: a.joinedAt || Date.now() };
   }
 
   // Read once, then restore that snapshot. Only a value rejected by explicit validation is deleted; a failed write or an
@@ -312,11 +312,11 @@ export class Room extends DurableObject {
 
   attachment(p) {
     const equipment = this.env?.EQUIPMENT_ENABLED === "1" ? { equipment: p.equipment || null, equipmentSession: p.equipmentSession || null } : {};
-    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, block: p.block || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, resumeKey: p.resumeKey, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, d: p.d, voice: p.voice, muted: p.muted, call: !!p.call, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, props: !!p.props, ...(p.catalogRoster ? { catalogRoster: p.catalogRoster } : {}), visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm, audienceZone: p.audienceZone || null, outdoor: p.outdoor || null, ...(p.travel ? { travel: true } : {}), ...equipment, ...duel.saved(p) };
+    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, block: p.block || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, resumeKey: p.resumeKey, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, gx: p.gx, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, d: p.d, voice: p.voice, muted: p.muted, call: !!p.call, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, props: !!p.props, ...(p.catalogRoster ? { catalogRoster: p.catalogRoster } : {}), visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm, audienceZone: p.audienceZone || null, outdoor: p.outdoor || null, ...(p.travel ? { travel: true } : {}), ...equipment, ...duel.saved(p) };
   }
 
   view(p) {
-    return { id: p.id, login: p.login, display: p.display, body: p.body, zone: p.zone, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, d: p.d, voice: inVoice(p), muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, blendTo: p.blendTo, blendK: p.blendK,
+    return { id: p.id, login: p.login, display: p.display, body: p.body, zone: p.zone, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, gx: p.gx, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, d: p.d, voice: inVoice(p), muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, blendTo: p.blendTo, blendK: p.blendK,
       ...(this.inCall(p) ? { call: true } : {}) };
   }
 
@@ -954,7 +954,7 @@ export class Room extends DurableObject {
     } else if (msg.t === "pose") {
       if (!takeToken(p.bucket, MOVE_HZ, p.seenAt)) return;
       p.x = msg.x; p.y = msg.y; p.z = msg.z; p.yaw = msg.yaw;
-      if (msg.g && p.body && p.body.startsWith("gorilla:")) p.g = msg.g;
+      if (msg.g && p.body && p.body.startsWith("gorilla:")) { p.g = msg.g; p.gx = msg.gx || null; }
       // Only an Ooga wears a jetpack or holds a weapon; a pose without one says it has none.
       const ooga = !!p.body && !p.body.startsWith("gorilla:");
       p.j = ooga && msg.j ? msg.j : 0;
@@ -1150,7 +1150,7 @@ export class Room extends DurableObject {
       // Another body, or none: its normalized health is reported afresh.
       p.hp = 100;
       p.ko = false;
-      p.g = null;
+      p.g = p.gx = null;
       p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined; p.d = undefined;
       if (!p.body) this.leaveStudio(p);
       this.broadcast({ t: "body", id: p.id, name: p.body });
@@ -1238,7 +1238,7 @@ export class Room extends DurableObject {
     // No await between checking and assigning: concurrent requests have exactly one winner.
     const at = seat.outdoor ? CABINETS.slot(msg.slot) : seat;
     p.cabinet = { id: msg.id, q: msg.q };
-    p.x = at.x; p.y = at.y; p.z = at.z; p.yaw = at.yaw; p.g = null; p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined; p.d = undefined;
+    p.x = at.x; p.y = at.y; p.z = at.z; p.yaw = at.yaw; p.g = p.gx = null; p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined; p.d = undefined;
     p.blendTo = null; p.blendK = 0;
     audienceRoom.check(this, p);
     // A seat drops the player's duel frames and poses (above), so a duel or challenge under way ends here.
@@ -1309,7 +1309,7 @@ export class Room extends DurableObject {
     this.clearPasses(p);
     this.send(p.ws, { t: "release", name: p.body, reason });
     p.body = null;
-    p.g = null;
+    p.g = p.gx = null;
     p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined; p.d = undefined;
     this.leaveStudio(p);
     this.chalkLetGo(p);
@@ -1351,10 +1351,11 @@ export class Room extends DurableObject {
     if (!this.dirty) return;
     this.dirty = false;
     this.inspect.count("snapshots");
-    const ps = [], gs = [], js = [], weapons = [], visuals = [], rests = [], dances = [];
+    const ps = [], gs = [], gxs = [], js = [], weapons = [], visuals = [], rests = [], dances = [];
     for (const p of this.players.values()) {
       ps.push(p.id, p.x, p.y, p.z, p.yaw);
       if (p.g) gs.push(p.id, ...p.g);
+      if (p.g && p.gx) gxs.push(p.id, ...p.gx);
       if (p.j) js.push(p.id, p.j);
       if (p.w) weapons.push(p.id, p.w);
       if (p.v) visuals.push([p.id, p.va, ...p.v]);
@@ -1363,6 +1364,7 @@ export class Room extends DurableObject {
     }
     const state = { t: "state", now: Date.now(), ps };
     if (gs.length) state.gs = gs;
+    if (gxs.length) state.gxs = gxs;
     if (js.length) state.js = js;
     if (weapons.length) state.ws = weapons;
     if (visuals.length) state.vs = visuals;

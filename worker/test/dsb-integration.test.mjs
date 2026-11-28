@@ -64,8 +64,18 @@ test("room broadcasts DSB zone changes, persists them and keeps ownership enforc
   const state = sent.filter(m => m.t === "state").at(-1);
   assert.deepEqual(state.ps, [1, -45, 55, -43, 0.7], "legacy position records keep five fields");
   assert.deepEqual(state.gs, [1, ...g]);
+  assert.equal(state.gxs, undefined, "an older page's companion sends no extra, and none is relayed");
+  const gx = [0, 12, 40, 85, 0];
+  room.webSocketMessage(ws, JSON.stringify({ t: "pose", x: -45, y: 55, z: -43, yaw: 0.7, g, gx }));
+  clearTimeout(room.poseTimer); room.savePoses();
+  assert.deepEqual(attachment.gx, gx, "the new body's haul survives hibernation");
+  assert.deepEqual(room.view(player).gx, gx, "late joiners see the haul too");
+  room.snapshot();
+  assert.deepEqual(sent.filter(m => m.t === "state").at(-1).gxs, [1, ...gx], "the extra is relayed in its own runs, gs unchanged");
+  assert.deepEqual(sent.filter(m => m.t === "state").at(-1).gs, [1, ...g]);
   room.webSocketMessage(ws, JSON.stringify({ t: "pose", x: -45, y: 55, z: -43, yaw: 0.7, g: [5, 0, 12.5, 0, 0, 0] }));
   assert.ok(room.dirty, "changing stance with no positional movement still schedules a snapshot");
+  assert.equal(player.gx, null, "a pose with locomotion and no extra has none");
   room.webSocketMessage(ws, JSON.stringify({ t: "body", name: "YellowBrokeIt" }));
   assert.equal(player.g, null, "switching back to the Ooga clears companion state");
   room.webSocketMessage(ws, JSON.stringify({ t: "pose", x: -45, y: 40, z: -43, yaw: 0, g }));
