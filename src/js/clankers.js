@@ -33,6 +33,14 @@
   const JUMP_SAMPLES = 20, MAX_JUMP = 8.5;
   const CLIMB_POINTS = 128, CLIMB_RADIUS = 1.05, CLIMB_HEIGHT = 3.1, CLIMB_STANDOFF = 0.87;
   const CLIMB_SPEED = 2.1, CLIMB_APPROACH_SPEED = 3.15, CLIMB_CREST_SPEED = 2.75, CLIMB_TURN_TIME = 0.24, CLIMB_MOUNT_DISTANCE = 0.75;
+  // The driven gorilla takes hold only of a large wall (the clanker studio's rule, docs/clanker-port.md): rock that
+  // rises WALL_RISE over its footing within WALL_SPAN of where it first stands taller than WALL_STEP (out of a jump's
+  // reach, and steeper than the voxel terraces of a hill), so a low ledge is jumped onto and a hill it can walk is
+  // walked, never climbed; from the air, rock rising WALL_AIR_RISE over its feet. It climbs down only over a drop of
+  // WALL_RISE within WALL_SPAN past an edge. Walking up to a wall it rises into the climb from WALL_APPROACH out.
+  const WALL_RISE = 2.5, WALL_SPAN = 2, WALL_STEP = 0.45, WALL_AIR_RISE = 2, WALL_APPROACH = 1.2, WALL_REACH = 2.4;
+  // Where the hands are on the rock over the root, for the lean into rock set back above a lip (at most 30 degrees).
+  const CLIMB_HAND_RISE = 2;
   const WALL_RECT_SAMPLES = 4, WALL_ENTER_SHARE = 0.25, TOP_EXIT_SHARE = 0.75;
   const ROLL_SECONDS = 3, ROLL_ENTRY_SECONDS = 0.45, ROLL_RECOVER_SECONDS = 0.8, SOOT_SECONDS = 10, MOTION_RADIUS = BL.agent.MANAGED_MOTION_RADIUS, MOTION_HEIGHT = BL.agent.MANAGED_MOTION_HEIGHT;
   const FIRE_FLEE_REACH = 8, FIRE_FLEE_CLEAR = 10, FIRE_MEMORY = 1.5;
@@ -2205,6 +2213,7 @@
           groundRects: { flat: { x: 0, y: 0, z: 0, heading: 0 }, angled: { x: 0, y: 0, z: 0, heading: 0, groundX: 0, groundZ: 0, steep: false, walkable: true } },
           walkPhase: NaN, roll: 0, rollAngle: 0, rollSide: 0, smash: false, dragging: false, throwProgress: 0,
           climb: 0, climbBlend: NaN, openingSettle: 0, climbStride: 0, climbDirection: 0, climbSide: 0, mantle: 0, groom: 0, groomSide: 1, groomPhase: 0,
+          climbApproach: 0, climbLean: 0, haul: NaN, haulTop: 0,
           sitWait: 3, sitTime: 0, sitLook: 0, sitShift: 0, sitLookTarget: 0, sitShiftTarget: 0,
           office: false, officeRise: 0, officeSeat: 0, officeWork: "", officePhase: i * 0.53, officeLook: 0, officeSide: 1, officeHands: new Float64Array(6),
           lab: false, labRunIn: false, workExit: false, labWork: "", labPhase: i * 0.71, labSide: 1, labDt: 1 / 30, labReach: 0, labGripY: 0.53105, labItemGeometry: null, labSqueeze: false,
@@ -3377,6 +3386,27 @@
       }
       return false;
     };
+    // How far along a heading the first rock taller than a step stands, from a point at a height, when it is a large
+    // wall (rising `rise` over that height within WALL_SPAN of it); -1 when there is none within reach or it is no wall.
+    const largeWallAhead = (x, z, y, heading, reach, rise = WALL_RISE) => {
+      const sx = Math.sin(heading), sz = Math.cos(heading);
+      for (let d = 0; d <= reach; d += 0.05) {
+        if (!(climbSurfaceAt(x + sx * d, z + sz * d) > y + WALL_STEP)) continue;
+        for (let f = d; f <= d + WALL_SPAN; f += 0.1) if (climbSurfaceAt(x + sx * f, z + sz * f) >= y + rise) return d;
+        return -1;
+      }
+      return -1;
+    };
+    // Whether the ground falls WALL_RISE under a height within WALL_SPAN past a point along a heading.
+    const largeDropAt = (x, z, y, sx, sz) => {
+      for (let f = 0; f <= WALL_SPAN; f += 0.1) if (climbSurfaceAt(x + sx * f, z + sz * f) <= y - WALL_RISE) return true;
+      return false;
+    };
+    // The first rock along a heading at a height, within 1.6 m; -1 for none.
+    const faceDepthAt = (x, y, z, sx, sz) => {
+      for (let d = 0; d <= 1.6; d += 0.04) if (climbSolidAt(x + sx * d, y, z + sz * d)) return d;
+      return -1;
+    };
     const roofEdgeCrossing = (e, x, z, heading) => {
       if (!climbSurfaceAt || !inClimbArea(e)) return false;
       const p = e.root.position, side = e.root.scale.x * 0.7;
@@ -3601,6 +3631,25 @@
         }
         return;
       }
+      if (c.mountPending && e.controlled && c.fromTop && !c.waitRelease && vertical > 0.05) {
+        // The driven gorilla's haul down over the edge goes by the keys both ways, as its haul up does: W takes it back
+        // up the way it came (raised first, then back over the edge) to stand on the top again, and no key holds it.
+        const startY = c.handoffStartY, back = Math.hypot(c.handoffStartX - p.x, c.handoffStartZ - p.z);
+        const y = p.y < startY - 0.001 ? Math.min(startY, p.y + distance) : p.y;
+        const step = y === p.y ? Math.min(back, distance) : 0;
+        const x = back > 0 ? p.x + (c.handoffStartX - p.x) * step / back : p.x;
+        const z = back > 0 ? p.z + (c.handoffStartZ - p.z) * step / back : p.z;
+        if (climbClear(e, p.x, p.y, p.z, x, y, z, heading, true, true)) { p.x = x; p.y = y; p.z = z; c.blocked = 0; }
+        m.climb = m.climbBlend = handoffProgress(c, p); m.climbDirection = m.climbSide = 0;
+        if (back - step < 0.03 && Math.abs(p.y - startY) < 0.03) {
+          const floor = support(e, p.x, p.z, p.y, STEP);
+          if (Number.isFinite(floor) && Math.abs(floor - p.y) < 0.1) finishRectangleClimb(e, floor, heading + Math.PI);
+        }
+        return;
+      }
+      if (c.mountPending && e.controlled && c.fromTop && !c.waitRelease && vertical > -0.05) {
+        m.climb = m.climbBlend = handoffProgress(c, p); m.climbDirection = m.climbSide = 0; return;
+      }
       if (c.mountPending) {
         // Slide the ground rectangle over the rim until the wall rectangle
         // carries it. No mantle pose or precomputed arc changes the root.
@@ -3666,6 +3715,26 @@
             break;
           }
           if (Number.isFinite(c.freeTargetY)) c.handoffDirection = 1;
+        }
+        if (c.handoffDirection === 1 && e.controlled && vertical < 0.05) {
+          // The driven gorilla's haul over the top goes by W and S both ways (the clanker studio's): S takes it back
+          // the way it came (back off the edge, then down) onto the wall again, and no key holds it where it is.
+          m.climb = m.climbBlend = 1 - Math.sqrt(handoffProgress(c, p));
+          if (vertical > -0.05) return;
+          // Its way up came straight up, then up and over together: back the same way where it can, else back off the
+          // edge level or straight down, each step swept as every climbing step is.
+          const out = (p.x - c.handoffStartX) * sx + (p.z - c.handoffStartZ) * sz;
+          const retreat = out > 0.001 ? Math.min(out, distance) : 0;
+          let x = p.x - sx * retreat, z = p.z - sz * retreat, y = Math.max(c.handoffStartY, p.y - (retreat || distance));
+          let clear = climbClear(e, p.x, p.y, p.z, x, y, z, heading, true, true);
+          if (!clear && retreat) { y = p.y; clear = climbClear(e, p.x, p.y, p.z, x, y, z, heading, true, true); }
+          if (!clear && retreat) { x = p.x; z = p.z; y = Math.max(c.handoffStartY, p.y - distance); clear = y < p.y && climbClear(e, p.x, p.y, p.z, x, y, z, heading, true, true); }
+          if (clear) {
+            p.x = x; p.y = y; p.z = z; c.blocked = 0;
+            m.climb = m.climbBlend = 1 - Math.sqrt(handoffProgress(c, p));
+            if ((p.x - c.handoffStartX) * sx + (p.z - c.handoffStartZ) * sz < 0.001 && p.y - c.handoffStartY < 0.001) { c.handoffDirection = 0; m.climb = m.climbBlend = 1; }
+          } else if ((c.blocked += dt) > 0.5) { c.handoffDirection = 0; c.blocked = 0; }
+          return;
         }
         if (c.handoffDirection === 1) {
           m.climb = m.climbBlend = 1 - Math.sqrt(handoffProgress(c, p));
@@ -5726,6 +5795,9 @@
             || !cliffRiserAhead(baseX, baseZ, outward, -1, 3.2))) continue;
           for (let edge = 0.2; edge <= 3.2; edge += 0.2) {
             if (climbSurfaceAt(baseX + sx * edge, baseZ + sz * edge) >= p.y - 0.8) continue;
+            // The driven gorilla climbs down only over a large wall: a drop of WALL_RISE just past the edge. Any other edge
+            // it walks off.
+            if (e.controlled && !largeDropAt(baseX + sx * edge, baseZ + sz * edge, p.y, sx, sz)) break;
             const distance = edge + CLIMB_STANDOFF;
             let x = baseX + sx * distance, z = baseZ + sz * distance;
             const y = p.y - (autonomousChill(e) ? 1.8 : 0.7);
@@ -5759,8 +5831,11 @@
       const d = e.drive, c = e.climb, p = e.root.position;
       if (!inClimbArea(e) || (!e.controlled && !d.airborne) || elapsed < c.airAttachAfter || !climbSolidAt || !climbSurfaceAt) return false;
       const speed = Math.hypot(d.vx, d.vz);
-      if (speed < 0.2) return false;
-      const travelHeading = Math.atan2(d.vx, d.vz);
+      // The driven gorilla in the air takes hold of a wall it is falling past with the keys let go, as well as one it
+      // jumps at: unless the keys point away from it.
+      const drifting = e.controlled && d.airborne && speed < 0.2;
+      if (speed < 0.2 && !drifting) return false;
+      const travelHeading = drifting ? e.heading : Math.atan2(d.vx, d.vz);
       if (ctx.stairAt && ctx.stairAt(p.x, p.y, p.z)
         || !d.airborne && walkingRampAt(p.x, p.y, p.z, travelHeading)
           && !cliffRiserAhead(p.x, p.z, travelHeading, 1)) return false;
@@ -5778,14 +5853,18 @@
       const sx = Math.sin(heading), sz = Math.cos(heading);
       // Ground travel along a room wall must keep sliding. Only a terrain
       // riser starts a grounded climb; airborne contact can attach directly.
-      if (!descending && (d.vx * sx + d.vz * sz < 0.2
+      const keys = Math.hypot(d.x, d.z), away = e.controlled && d.airborne && keys > 0.05 && (d.x * sx + d.z * sz) / keys < -0.2;
+      if (!descending && ((e.controlled && d.airborne ? away : d.vx * sx + d.vz * sz < 0.2)
         || !d.airborne && !cliffRiserAhead(p.x, p.z, heading, 1)
         || wallContactShare(e, p.x, p.y, p.z, heading) < WALL_ENTER_SHARE)) return false;
+      // Only a large wall: on the ground one rising WALL_RISE sheer, in the air one rising WALL_AIR_RISE over the feet.
+      if (e.controlled && !d.airborne && largeWallAhead(p.x, p.z, p.y, heading, WALL_REACH) < 0) return false;
       let wall = NaN;
       for (let distance = 0.35; distance <= 1.3; distance += 0.08) {
         if (climbSolidAt(p.x + sx * distance, p.y + (descending ? 0.25 : 0.85), p.z + sz * distance)) { wall = distance; break; }
       }
       if (!Number.isFinite(wall)) return false;
+      if (e.controlled && d.airborne && largeWallAhead(p.x, p.z, p.y, heading, wall + 0.6, WALL_AIR_RISE) < 0) return false;
       for (let offset = 0; offset < 3; offset++) {
         // Move only the short distance from airborne contact to a real grip.
         // Trying a little farther out handles projecting voxel edges.
@@ -6121,6 +6200,9 @@
             const floor = support(e, p.x + dx, p.z + dz, p.y, PROP_STEP, facing);
             const deepDrop = !Number.isFinite(floor) || floor < p.y - PROP_STEP
               || climbSurfaceAt && climbSurfaceAt(p.x + Math.sin(direction) * 2.2, p.z + Math.cos(direction) * 2.2) < p.y - PROP_STEP;
+            // Running off an edge it jumps from it, its run carrying it out; walking off a large wall climbs down.
+            if (e.controlled && d.run && !backing && (!Number.isFinite(floor) || floor < p.y - PROP_STEP)
+              && beginDrivenJump(e)) return;
             if (deepDrop ? (!d.run || backing) && beginEdgeClimb(e, direction) : attachContactWall(e)) return;
           }
           if (holdClimbSearch(e)) return;
@@ -6207,6 +6289,31 @@
       if (e.speed > 0 && (p.x - oldX) * Math.sin(e.heading) + (p.z - oldZ) * Math.cos(e.heading) < 0) e.speed = -e.speed;
       if (!d.airborne && d.resume && !e.controlled) resumeEntry(e);
     };
+    // What the new body shows of the driven gorilla's climb (clanker-body.js, through agent.js), shown only: the
+    // driver's pose and every clearance check stay as they were. The rise into the climb while walking up to a large
+    // wall; the lean into rock set back at the hands' height, above a lip; and the haul over a top, from hanging on the
+    // wall (0) to standing on the top (1), with the top's height. NPC gorillas show none of it.
+    const climbPresentation = (e, dt) => {
+      const m = e.motion, c = e.climb, d = e.drive, p = e.root.position;
+      m.haul = NaN; m.haulTop = p.y;
+      if (!e.controlled || !climbSurfaceAt || !climbSolidAt) { m.climbApproach = m.climbLean = 0; return; }
+      if (c.active && c.free && c.handoffDirection === 1) { m.haul = handoffProgress(c, p); m.haulTop = c.freeTargetY; }
+      else if (c.active && c.free && c.mountPending && c.fromTop) { m.haul = 1 - handoffProgress(c, p); m.haulTop = c.handoffStartY; }
+      let lean = 0;
+      if (c.active && c.free && !c.handoffDirection && !c.mountPending) {
+        const sx = Math.sin(e.heading), sz = Math.cos(e.heading);
+        const low = faceDepthAt(p.x, p.y + 0.5, p.z, sx, sz), high = faceDepthAt(p.x, p.y + CLIMB_HAND_RISE, p.z, sx, sz);
+        if (low >= 0 && high >= 0) lean = clamp(Math.atan2(high - low, CLIMB_HAND_RISE) * 180 / Math.PI, 0, 30);
+      }
+      m.climbLean = damp(m.climbLean, lean, 9, dt);
+      let near = 0;
+      if (!c.active && !d.airborne && !e.jump.active && Math.abs(e.speed) > 0.1 && d.x * d.x + d.z * d.z > 0.0025 && inClimbArea(e) && caveAt(p.x, p.y, p.z) < 0
+        && Math.cos(Math.atan2(d.x, d.z) - e.heading) > 0.5) {
+        const gap = largeWallAhead(p.x, p.z, p.y, e.heading, WALL_REACH);
+        if (gap >= 0) near = clamp(1 - (gap - CLIMB_STANDOFF) / WALL_APPROACH, 0, 1);
+      }
+      m.climbApproach = damp(m.climbApproach, near, 10, dt);
+    };
     const poseEntry = (e, dt, beforeX, beforeY, beforeZ) => {
       const p = e.root.position;
       if (e.climb.active && e.climb.holdPose) {
@@ -6273,6 +6380,7 @@
         p.x = beforeX; p.y = beforeY; p.z = beforeZ;
         e.heading = e.root.rotation.y; e.speed = 0; return false;
       }
+      climbPresentation(e, dt);
       // Route/contact transitions stay at the simulation rate. Only settled,
       // stationary rests and desk gestures can sample their rig less often.
       const animation = e.animation, work = e.motion.labWork, office = e.motion.officeWork;

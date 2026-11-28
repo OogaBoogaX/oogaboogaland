@@ -58,22 +58,24 @@
     if (s.sleeve) out.set(r.sleeveLive.g.verts, k); return out; };
   // The inputs a native pose is sampled at, each on its own grid: t the stance (0 all fours, 1 standing) in TS steps,
   // phase the gait's in PHASES steps of a cycle, k how fast (0 still to 1 a full stride) and run in quarters, and the
-  // rest (air, land, climb, sit, lay) in quarters; climbing takes its own phase.
-  const IN = { t: 0, phase: 0, k: 0, run: 0, air: 0, land: 0, climb: 0, climbPhase: 0, sit: 0, lay: 0 };
+  // rest (air, land, climb, sit, lay) in quarters; climbing takes its own phase. `hold` is a climb on the rock (its own
+  // phase, no gait) against the rise into one while still walking up to a wall (the gait goes on); `move` is how hard
+  // the hands work on the rock (0 hanging still to 1 a full stroke), in quarters.
+  const IN = { t: 0, phase: 0, k: 0, run: 0, air: 0, land: 0, climb: 0, climbPhase: 0, sit: 0, lay: 0, hold: 0, move: 0 };
   const q4 = (v) => Math.max(0, Math.min(4, Math.round(v * 4)));
   const sample = (s, ti, pi) => { const ki = q4(IN.k), ri = q4(IN.run), ai = q4(IN.air), li = q4(IN.land), ci = q4(IN.climb), si = q4(IN.sit), yi = q4(IN.lay);
-    const moving = ki > 0 && ai === 0 && ci === 0 && si === 0 && yi === 0, climbing = ci > 0, p = moving || climbing ? pi % PHASES : 0;
-    const key = ((((((((ti * PHASES + p) * 5 + ki) * 5 + ri) * 5 + ai) * 5 + li) * 5 + ci) * 5 + si) * 5 + yi) * 2 + (climbing ? 1 : 0);
+    const climbing = ci > 0 && IN.hold > 0, mi = ci > 0 ? q4(climbing ? IN.move : 0) : 0, moving = ki > 0 && ai === 0 && !climbing && si === 0 && yi === 0, p = moving || climbing ? pi % PHASES : 0;
+    const key = (((((((((ti * PHASES + p) * 5 + ki) * 5 + ri) * 5 + ai) * 5 + li) * 5 + ci) * 5 + si) * 5 + yi) * 5 + mi) * 2 + (climbing ? 1 : 0);
     let out = s.cache.get(key); if (out) return out;
     if (s.cache.size >= LIMIT) s.cache.clear();
     const ph = p / PHASES * Math.PI * 2, k = ki / 4;
     const gait = moving ? { phase: ph, amp: 24 * k, lift: 28 * k, sway: 3 * k, run: ri / 4 } : null;
-    BL.clankerModel.pose(s.r, ti / TS, gait, { air: ai / 4, land: li / 4, climb: ci / 4, climbPhase: climbing ? ph : 0, sit: si / 4, lay: yi / 4 });
+    BL.clankerModel.pose(s.r, ti / TS, gait, { air: ai / 4, land: li / 4, climb: ci / 4, climbPhase: climbing ? ph : 0, climbMove: mi / 4, sit: si / 4, lay: yi / 4 });
     out = record(s, new Float32Array(s.size)); s.cache.set(key, out); s.made++; return out; };
   // The pose at IN, blended between the samples either side in stance and phase, into `out`; the visibility flags and
   // the chest's weld from the nearest sample.
   const blend = (s, out) => { const tf = Math.max(0, Math.min(1, IN.t)) * TS, t0 = Math.floor(tf), t1 = Math.min(TS, t0 + 1), wt = tf - t0;
-    const phased = IN.k > 0.125 || IN.climb > 0.125, pf = phased ? (((IN.climb > 0.125 ? IN.climbPhase : IN.phase) / (Math.PI * 2)) % 1 + 1) % 1 * PHASES : 0, p0 = Math.floor(pf), wp = pf - p0;
+    const held = IN.climb > 0.125 && IN.hold > 0, phased = IN.k > 0.125 || held, pf = phased ? (((held ? IN.climbPhase : IN.phase) / (Math.PI * 2)) % 1 + 1) % 1 * PHASES : 0, p0 = Math.floor(pf), wp = pf - p0;
     const a = sample(s, t0, p0), b = sample(s, t0, p0 + 1), c = sample(s, t1, p0), d = sample(s, t1, p0 + 1), n = s.size;
     const near = wt < 0.5 ? (wp < 0.5 ? a : b) : (wp < 0.5 ? c : d);
     const wa = (1 - wt) * (1 - wp), wb = (1 - wt) * wp, wc = wt * (1 - wp), wd = wt * wp;
@@ -141,7 +143,7 @@
     const socket = (name) => { let s = sockets[name]; if (!s) { s = sockets[name] = createNode(); s.quaternion = [0, 0, 0, 1]; addChild(root, s); } return s; };
     // One rig a form, made as the form is first shown.
     const rigs = {};
-    let rig = null, form = null, pose = null, nodes = null, sleeveAt = 0, retargetK = 0;
+    let rig = null, form = null, pose = null, nodes = null, sleeveAt = 0, retargetK = 0, fistLift = 0;
     const show = (next) => { if (form === next && rig) return; form = next;
       let e = rigs[next]; if (!e) { const tr = now(), M = BL.clankerModel, r = M.rig(M.sets.B, next); outlines(r); TIME.rig += now() - tr; const s = sampler(next); e = rigs[next] = { r, nodes: walk(r), s, buf: new Float32Array(s.size) }; addChild(scaled, r.root); }
       for (const f in rigs) rigs[f].r.root.visible = f === next;
@@ -161,6 +163,7 @@
     let clock = typeof performance !== "undefined" ? performance.now() : 0;
     const sync = (parentWorld) => {
       if (!on) return; const ts = now(); TIME.syncs++;
+      const tnow = ts || clock + 16, dtSync = Math.min(0.1, Math.max(0, (tnow - clock) / 1000)); clock = tnow;
       show(state.form || "ape");
       const r = rig.r;
       // The driver's parts relative to its root (for the retarget and the sockets), then in the world (for scenes that read them).
@@ -175,6 +178,23 @@
       IN.air = state.air ? 1 : 0; IN.land = managed ? Math.min(1, state.crouch || 0) : 0;
       IN.climb = managed ? Math.min(1, state.climbBlend || 0) : 0; IN.climbPhase = managed ? (state.climbStride || 0) / 1.2 * Math.PI * 2 : 0;
       IN.sit = lounge === "sit" ? 1 : 0; IN.lay = onSide ? 1 : 0;
+      // Climbing as the clanker studio shows it (docs/clanker-port.md): on the rock its hands work as hard as it moves;
+      // walking up to a large wall it rises into the climb, the gait going on (0.85 of the climb at the rock); hauling
+      // over a top (state.haul, 0 hanging on the wall to 1 standing on it) in three parts: hanging on (to HAUL_A) its
+      // arms come down onto the top from the climb's hold, the body still upright on the wall; over (to HAUL_B) it comes
+      // forward over the edge, going down onto all fours, its legs swung back down the wall (HAUL_LEG); up (to the end)
+      // its feet come over onto the top and it takes the stance it walks in. Every part is a function of how far over it
+      // is, so it runs back exactly as it came.
+      const tNat = IN.t, hauling = managed && Number.isFinite(state.haul);
+      IN.hold = managed && (state.climbBlend > 0.001 || hauling) ? 1 : 0; IN.move = managed ? state.climbMove || 0 : 0;
+      let legSwing = 0, haulT = 0;
+      if (hauling) { const T = haulT = state.haul, a = ease(T / HAUL_A), b = ease((T - HAUL_A) / (HAUL_B - HAUL_A)), c = ease((T - HAUL_B) / (1 - HAUL_B));
+        IN.climb = 1 - a; IN.move *= Math.max(0, 1 - T / 0.25);
+        IN.t = T < HAUL_A ? tNat + (0.8 - tNat) * a : T < HAUL_B ? 0.8 - 0.6 * b : 0.2 + (tNat - 0.2) * c;
+        legSwing = HAUL_LEG * (T < HAUL_B ? ease(T / 0.15) : 1 - c);
+      } else if (!IN.hold && managed) IN.climb = Math.max(IN.climb, 0.85 * (state.climbApproach || 0));
+      // on the rock and rising into it, upright
+      IN.t += (Math.max(IN.t, 0.9) - IN.t) * IN.climb;
       blend(rig.s, pose);
       // Applied to the rig: every node's turn, place and size, what shows, the chest's weld and the sleeve.
       for (let i = 0; i < nodes.length; i++) { const n = nodes[i], k = i * FIELDS; let q = n.quaternion;
@@ -190,10 +210,33 @@
       if (r.rain) r.rain((typeof performance !== "undefined" ? performance.now() : 0) / 1000);
       // The driver's whole-body turn at its hips, but for lying and sitting, which the new rig poses itself.
       if (lounge) { tilt.quaternion[0] = tilt.quaternion[1] = tilt.quaternion[2] = 0; tilt.quaternion[3] = 1; } else qset(tilt.quaternion, dq.hips);
+      tilt.position.x = tilt.position.z = 0;
       // and the controller's support offset, which eases the body up or down a step (agent.js adds it to the hips)
       tilt.position.y = managed ? (state.supportOffset || 0) / (droot.scale.y || 1) : 0;
+      // Leaned in toward rock set back at the hands' height (state.climbLean, degrees, its top toward the rock), about
+      // its hips, as the new rig's own climbing lean turns it.
+      const lean = managed && IN.hold ? (state.climbLean || 0) * IN.climb : 0;
+      if (lean > 0.01) { const rq = r.root.quaternion, hp = r.hips.position, ha = lean * Math.PI / 360;
+        qa[0] = Math.sin(ha); qa[1] = qa[2] = 0; qa[3] = Math.cos(ha);
+        PIV[0] = hp.x; PIV[1] = hp.y; PIV[2] = hp.z; if (rq) rotate(PIV, rq);
+        PIV[0] = K * (PIV[0] + r.root.position.x); PIV[1] = K * (PIV[1] + r.root.position.y); PIV[2] = K * (PIV[2] + r.root.position.z);
+        LV[0] = PIV[0]; LV[1] = PIV[1]; LV[2] = PIV[2]; rotate(LV, qa); LV[0] = PIV[0] - LV[0]; LV[1] = PIV[1] - LV[1]; LV[2] = PIV[2] - LV[2];
+        rotate(LV, tilt.quaternion); tilt.position.x += LV[0]; tilt.position.y += LV[1]; tilt.position.z += LV[2];
+        qmul(tilt.quaternion, tilt.quaternion, qa); }
+      // Hauling over a top, its legs swung back from the hips, and the body held with its higher fist's lowest on the
+      // top (the root never above it), eased in and out at the ends of the haul.
+      if (legSwing) for (const side of LEGS) { const bone = r[side]; if (!bone) continue; const ha = legSwing * Math.PI / 360;
+        qb[0] = Math.sin(ha); qb[1] = qb[2] = 0; qb[3] = Math.cos(ha);
+        worldOf(bone.parent, r, qp); qinv(qc, qp); qmul(qa, qc, qb); qmul(qa, qa, qp); qmul(bone.quaternion, qa, bone.quaternion); }
+      let fistWant = 0;
+      if (hauling) { const sy = droot.scale.y || 1, rootY = droot.position.y + tilt.position.y * sy;
+        const top = Math.max(fistY(r, "foreR", tilt, droot), fistY(r, "foreL", tilt, droot));
+        const w = ease(haulT / 0.1) * (1 - ease((haulT - 0.9) / 0.1));
+        fistWant = Math.max(-HAUL_LIFT, Math.min(HAUL_LIFT, Math.min(state.haulTop - rootY, state.haulTop - top))) * w; }
+      fistLift += (fistWant - fistLift) * Math.min(1, dtSync * 12);
+      if (Math.abs(fistLift) > 1e-4) tilt.position.y += fistLift / (droot.scale.y || 1);
       // Retargeted head and limbs, eased in and out over a fifth of a second.
-      const tnow = now() || clock + 16, dt = Math.min(0.1, Math.max(0, (tnow - clock) / 1000)); clock = tnow;
+      const dt = dtSync;
       const want = acting() || overridden() ? 1 : 0;
       retargetK += (want - retargetK) * Math.min(1, dt * 10);
       if (retargetK > 0.002) { const rest = restOf(rig.s);
@@ -226,6 +269,23 @@
     return { root, sync, socket, notePosed, liveGeometry, dispose, get rig() { return rig && rig.r; }, get retarget() { return retargetK; } };
   };
   const CHAIN = [];
+  // The haul over a top (sync): its parts' ends and the legs' swing back down the wall, degrees, and how far the body
+  // may be moved to hold its fists on the top, metres.
+  const HAUL_A = 0.4, HAUL_B = 0.78, HAUL_LEG = 35, HAUL_LIFT = 0.6, LEGS = ["legR", "legL"];
+  const ease = (u) => { u = Math.max(0, Math.min(1, u)); return u * u * (3 - 2 * u); };
+  const PIV = [0, 0, 0], LV = [0, 0, 0], FP = [0, 0, 0];
+  // v turned by the quaternion q, in place
+  const rotate = (v, q) => { const x = v[0], y = v[1], z = v[2], qx = q[0], qy = q[1], qz = q[2], qw = q[3];
+    const tx = 2 * (qy * z - qz * y), ty = 2 * (qz * x - qx * z), tz = 2 * (qx * y - qy * x);
+    v[0] = x + qw * tx + qy * tz - qz * ty; v[1] = y + qw * ty + qz * tx - qx * tz; v[2] = z + qw * tz + qx * ty - qy * tx; return v; };
+  // A fist's lowest in the world, as the body stands now: the middle of the fist (the new forearm's frame, as
+  // dress.js holds things in it) less its half-height, carried up through the rig's nodes, the body's size and turn.
+  const FIST = [0, -0.66, -0.03], FIST_HALF = 0.08;
+  const fistY = (r, id, tilt, droot) => { const n0 = r[id]; if (!n0) return -Infinity; FP[0] = FIST[0]; FP[1] = FIST[1]; FP[2] = FIST[2];
+    for (let n = n0; n; n = n.parent) { FP[0] *= n.scale.x; FP[1] *= n.scale.y; FP[2] *= n.scale.z; if (n.quaternion) rotate(FP, n.quaternion);
+      FP[0] += n.position.x; FP[1] += n.position.y; FP[2] += n.position.z; if (n === r.root) break; }
+    FP[0] *= K; FP[1] *= K; FP[2] *= K; rotate(FP, tilt.quaternion);
+    return droot.position.y + (droot.scale.y || 1) * (tilt.position.y + FP[1]) - FIST_HALF; };
   // A rig's rest for the retarget, once a form: each driven bone's turn in the rig at the standing pose (when the driver's
   // bones hang straight in its body), and each lower part's own local turn there.
   const restOf = (s) => { if (s.rest) return s.rest; const r = s.r, saved = IN.t, rest = {};
