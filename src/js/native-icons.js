@@ -154,12 +154,18 @@
     }
     if (words.textContent !== text) words.textContent = text;
   };
+  // Only speaking to idle fades: new speech and either mute change take their colour at once.
+  const setVoiceLook = (el, look) => {
+    if (el.dataset.voice === look) return;
+    el.dataset.voiceFade = String(el.dataset.voice === "speaking" && look === "on");
+    el.dataset.voice = look;
+  };
   // A voice's shown level from one meter reading (its RMS): the raw level against a loud voice's (LEVEL_FULL), so a soft
   // microphone shows soft, rising at once and falling LEVEL_FALL of the way down each reading, so words never step.
-  const LEVEL_FULL = 0.2, LEVEL_FALL = 0.45;
+  const LEVEL_FULL = 0.2, LEVEL_FALL = 0.7;
   const shapeLevel = (shown, rms) => {
     const raw = Math.min(1, rms / LEVEL_FULL), next = raw >= shown ? raw : shown + (raw - shown) * LEVEL_FALL;
     return next < 0.01 ? 0 : next;
   };
-  BL.nativeIcons = { svg, fill, voice, link, mic, label, drawMic, shapeLevel, LINK_WORDS, names: Object.keys(ICONS), ICONS };
+  BL.nativeIcons = { svg, fill, voice, link, mic, label, drawMic, setVoiceLook, shapeLevel, LINK_WORDS, names: Object.keys(ICONS), ICONS };
 })();
