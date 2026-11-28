@@ -135,7 +135,7 @@
         const face = readFace(geometry, index);
         if (face.visibility !== false && face.i.length > 2) slots += face.i.length - 2;
       }
-      const v = geometry.verts, triangleIndices = new Uint32Array(slots * 3), triangleBounds = new Float64Array(slots * 6), triangleCoverFaces = new Int32Array(slots), coverFaces = [], edgeMap = new Map(), planes = new Map();
+      const v = geometry.verts, triangleCoverFaces = new Int32Array(slots), coverFaces = [], edgeMap = new Map(), planes = new Map();
       let count = 0;
       // Witnesses dedupe by rounded coordinates, first point kept, in insertion order: an open-addressing table of
       // id + 1 over each id's rounded key triplet, doubled at half load.
@@ -222,13 +222,7 @@
         const nu = Math.max(1, Math.ceil((bounds[u + 3] - bounds[u]) / SURFACE_STEP)), nw = Math.max(1, Math.ceil((bounds[w + 3] - bounds[w]) / SURFACE_STEP));
         interior((u === 0 ? centerX : u === 1 ? centerY : centerZ) / face.i.length, (w === 0 ? centerX : w === 1 ? centerY : centerZ) / face.i.length);
         for (let iu = 0; iu < nu; iu++) for (let iw = 0; iw < nw; iw++) interior(bounds[u] + (bounds[u + 3] - bounds[u]) * (iu + 0.5) / nu, bounds[w] + (bounds[w + 3] - bounds[w]) * (iw + 0.5) / nw);
-        for (let j = 1; j < face.i.length - 1; j++, count++) {
-          const b = face.i[j] * 3, c = face.i[j + 1] * 3, t = count * 3, box = count * 6;
-          triangleIndices[t] = a; triangleIndices[t + 1] = b; triangleIndices[t + 2] = c;
-          triangleCoverFaces[count] = coverIndex;
-          triangleBounds[box] = Math.min(v[a], v[b], v[c]); triangleBounds[box + 1] = Math.min(v[a + 1], v[b + 1], v[c + 1]); triangleBounds[box + 2] = Math.min(v[a + 2], v[b + 2], v[c + 2]);
-          triangleBounds[box + 3] = Math.max(v[a], v[b], v[c]); triangleBounds[box + 4] = Math.max(v[a + 1], v[b + 1], v[c + 1]); triangleBounds[box + 5] = Math.max(v[a + 2], v[b + 2], v[c + 2]);
-        }
+        for (let j = 1; j < face.i.length - 1; j++, count++) triangleCoverFaces[count] = coverIndex;
         for (let j = 0; j < face.i.length; j++) {
           const a = face.i[j] * 3, b = face.i[(j + 1) % face.i.length] * 3, ak = vertexIds[a / 3], bk = vertexIds[b / 3], key = ak < bk ? ak * 67108864 + bk : bk * 67108864 + ak;
           const existing = edgeMap.get(key);
@@ -336,23 +330,15 @@
         }
       }
       if (!count) return null;
-      const indices = Uint32Array.from({ length: count }, (_, i) => i), scratch = BL.math.sortScratch(count), bounds = [], left = [], right = [], starts = [], counts = [];
-      // Centroid sort keys computed once rather than inside every comparison.
-      const keys = new Float64Array(count * 3);
-      for (let i = 0; i < count; i++) for (let axis = 0; axis < 3; axis++) keys[i * 3 + axis] = triangleBounds[i * 6 + axis] + triangleBounds[i * 6 + axis + 3];
-      const build = (lo, hi) => {
-        const id = left.length, b = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
-        for (let n = lo; n < hi; n++) { const at = indices[n] * 6; for (let axis = 0; axis < 3; axis++) { b[axis] = Math.min(b[axis], triangleBounds[at + axis]); b[axis + 3] = Math.max(b[axis + 3], triangleBounds[at + axis + 3]); } }
-        bounds.push(...b); left.push(-1); right.push(-1); starts.push(lo); counts.push(hi - lo);
-        if (hi - lo <= 8) return id;
-        let axis = 0; if (b[4] - b[1] > b[3] - b[0]) axis = 1; if (b[5] - b[2] > b[axis + 3] - b[axis]) axis = 2;
-        BL.math.sortByKey(indices, lo, hi, keys, 3, axis, scratch);
-        const middle = (lo + hi) >> 1;
-        left[id] = build(lo, middle); right[id] = build(middle, hi); counts[id] = 0;
-        return id;
-      };
-      if (count) build(0, count);
-      cached = { lines: edgeLines, samples, sampleBounds, coverFaces: new Uint32Array(coverFaces), triangleCoverFaces: count === slots ? triangleCoverFaces : triangleCoverFaces.slice(0, count), edgeStarts, edgeNormals: new Float64Array(edgeNormals), vertices: v, triangleIndices: count === slots ? triangleIndices : triangleIndices.slice(0, count * 3), indices, bounds: new Float64Array(bounds), left: new Int32Array(left), right: new Int32Array(right), starts: new Uint32Array(starts), counts: new Uint32Array(counts), sphere: BL.scene.boundsOf(geometry) };
+      const shared = BL.characterVisibility.meshOf(geometry), bounds = [], left = [], right = [], starts = [], counts = [];
+      count = shared.indices.length / 3;
+      for (const node of shared.nodes) {
+        bounds.push(...node.box);
+        left.push(node.left); right.push(node.right);
+        starts.push(node.from); counts.push(node.to - node.from);
+      }
+      const indices = shared.order, triangleIndices = shared.indices;
+      cached = { lines: edgeLines, samples, sampleBounds, coverFaces: new Uint32Array(coverFaces), triangleCoverFaces: count === slots ? triangleCoverFaces : triangleCoverFaces.slice(0, count), edgeStarts, edgeNormals: new Float64Array(edgeNormals), vertices: v, triangleIndices, indices, bounds: new Float64Array(bounds), left: new Int32Array(left), right: new Int32Array(right), starts: new Uint32Array(starts), counts: new Uint32Array(counts), sphere: BL.scene.boundsOf(geometry) };
       const bake = { faces: BL.compactGeometry?.storageOf(geometry) ? null : geometry.faces.map((face) => face.visibility === false ? null : face.i), compact: BL.compactGeometry?.storageOf(geometry) || null, record: cached };
       if (baked) baked.push(bake); else bakes.set(geometry.verts, [bake]);
       stats.triangles += count; stats.triangleBytes += cached.triangleIndices.byteLength; stats.samples += samples.length / 3;
@@ -891,7 +877,7 @@
       while (top) {
         const id = stack[--top];
         if (!boxHit(g.bounds, id * 6, x, y, z, dx, dy, dz)) continue;
-        if (!g.counts[id]) { stack[top++] = g.left[id]; stack[top++] = g.right[id]; continue; }
+        if (g.left[id] >= 0) { stack[top++] = g.left[id]; stack[top++] = g.right[id]; continue; }
         for (let i = g.starts[id], end = i + g.counts[id]; i < end; i++) {
           const at = g.indices[i] * 9;
           if (triangleBlocks(e, at, x, y, z, dx, dy, dz, ay, vy)) { e.hitTriangle = at; return false; }
@@ -1614,7 +1600,7 @@
       const nodes = entry.boundaryNodes, boxes = entry.boundaryBoxes;
       for (let id = geometry.counts.length - 1; id >= 0; id--) {
         const at = id * 4;
-        if (geometry.counts[id]) {
+        if (geometry.left[id] < 0) {
           let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
           for (let n = geometry.starts[id], end = n + geometry.counts[id]; n < end; n++) {
             const box = geometry.indices[n] * 4;
@@ -1763,7 +1749,7 @@
         const id = stack[--top], at = id * 4;
         stats.boundaryNodes++;
         if (sx < nodes[at] || sx > nodes[at + 2] || sy < nodes[at + 1] || sy > nodes[at + 3]) continue;
-        if (!g.counts[id]) { stack[top++] = g.left[id]; stack[top++] = g.right[id]; continue; }
+        if (g.left[id] >= 0) { stack[top++] = g.left[id]; stack[top++] = g.right[id]; continue; }
         // The exact triangle query checks finite depth and every clip plane;
         // a second local-space ray/box query adds no hit information here.
         for (let n = g.starts[id], end = n + g.counts[id]; n < end; n++) {

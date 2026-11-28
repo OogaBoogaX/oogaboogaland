@@ -603,5 +603,5 @@
       dispose: () => { if (warming) cancelIdleCallback(warming); warming = 0; active.length = candidates.length = candidateCount = 0; records = new WeakMap(); memo = new WeakMap(); hitEntry = null; }
     };
   };
-  BL.characterVisibility = { create };
+  BL.characterVisibility = { create, meshOf };
 })();

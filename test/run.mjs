@@ -1184,7 +1184,7 @@ const cutawayBoundsProof = async () => {
 
 const visibilityStorageProof = async ({ compact = false, deferred = false } = {}) => {
   const context = { window: {}, performance };
-  for (const name of ["math", "scene", "models", "object-guides", "sight-guides"]) {
+  for (const name of ["math", "scene", "models", "character-visibility", "object-guides", "sight-guides"]) {
     let source = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
     if (name === "object-guides") source = source.replace("return { collect, clear,", "return { contourScratchClear: () => !contoursPending && contourActor === null && contourRetained === null && contourRetainedCount === 0, ownerRecords: () => ownerGroups, geometryRecords: () => geometries, entryRecords: () => registered, collect, clear,");
     runInNewContext(source, context);
@@ -1216,13 +1216,16 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
       lazyContours &&= guides.contourScratchClear();
     }
     guides.ownerBoundaryAt(owner, 0, 0.2, 8, 1, 0, 0);
-    let values = 0, exact = true, tightBacking = true, bytes = 0, count = 0;
+    let values = 0, exact = true, tightBacking = true, bytes = 0, count = 0, sharedIdentity = true;
     for (const [source, geometry] of guides.geometryRecords()) {
+      const shared = B.characterVisibility.meshOf?.(source);
+      sharedIdentity &&= !!shared && geometry.indices === shared.order && geometry.triangleIndices === shared.indices;
       const v = source.verts, expected = [];
+      // The shared fan retains zero-area faces, which the exact ray predicate rejects;
+      // edge and sample construction above still applies its original degenerate-face filter.
       for (const face of source.faces) {
-        const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3;
-        const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2], vx = v[c] - v[a], vy = v[c + 1] - v[a + 1], vz = v[c + 2] - v[a + 2];
-        if (Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) < 1e-6) continue;
+        if (face.visibility === false) continue;
+        const a = face.i[0] * 3;
         for (let j = 1; j < face.i.length - 1; j++) {
           const b = face.i[j] * 3, c = face.i[j + 1] * 3;
           expected.push(v[a], v[a + 1], v[a + 2], v[b] - v[a], v[b + 1] - v[a + 1], v[b + 2] - v[a + 2], v[c] - v[a], v[c + 1] - v[a + 1], v[c + 2] - v[a + 2]);
@@ -1400,13 +1403,13 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
       delayed.refresh(); lazyContours &&= delayed.contourScratchClear();
       eager.dispose(); delayed.dispose(); a.dispose(); b.dispose();
     }
-    return { lazyContours, exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, gridQueries, deferredExact, deferredGrids, deferredFewer, eagerBoundaryBuilds, deferredBoundaryBuilds, deferredRepeatBoundaryBuilds, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
+    return { lazyContours, exact, unchanged, bounded, tightBacking, storage, demand, sharedIdentity, nearBounds, nearCases, boundaryHits, gridQueries, deferredExact, deferredGrids, deferredFewer, eagerBoundaryBuilds, deferredBoundaryBuilds, deferredRepeatBoundaryBuilds, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
   })()`, context);
 };
 // Count descriptor users rather than timings, so the first-demand cost scales with actual users.
 const visibilityDemandUsersProof = async () => {
   const context = { window: { demandVisits: 0 }, performance };
-  for (const name of ["math", "scene", "models", "object-guides"]) {
+  for (const name of ["math", "scene", "models", "character-visibility", "object-guides"]) {
     let source = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
     if (name === "object-guides") source = source
       .replace("return { collect, clear,", "return { geometryRecords: () => geometries, entryRecords: () => registered, descriptorUsers: () => descriptorUsers, collect, clear,")
@@ -1450,7 +1453,7 @@ const visibilityDemandUsersProof = async () => {
 // states, its sightHidden effects left out, forgotten while still in the scene, and nothing left over take after take.
 const separateBodyRegistryProof = async () => {
   const context = { window: {}, performance };
-  for (const name of ["math", "scene", "models", "object-guides"]) {
+  for (const name of ["math", "scene", "models", "character-visibility", "object-guides"]) {
     let source = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
     if (name === "object-guides") source = source.replace("return { collect, clear,", "return { geometryRecords: () => geometries, entryRecords: () => registered, ownerRecords: () => ownerGroups, descriptorUsers: () => descriptorUsers, collect, clear,");
     runInNewContext(source, context);
@@ -48638,7 +48641,7 @@ const visibilitySourceBakeProof = () => {
   const math = readFileSync(new URL("../src/js/math.js", import.meta.url), "utf8");
   const source = readFileSync(new URL("../src/js/character-visibility.js", import.meta.url), "utf8");
   const compact = readFileSync(new URL("../src/js/compact-geometry.js", import.meta.url), "utf8");
-  const expose = source.replace("BL.characterVisibility = { create };", "BL.characterVisibility = { create }; window.__meshProof={meshOf,meshes,startMesh,builds};");
+  const expose = source.replace("BL.characterVisibility = { create, meshOf };", "BL.characterVisibility = { create, meshOf }; window.__meshProof={meshOf,meshes,startMesh,builds};");
   return runInNewContext(math + "\n" + compact + "\n" + expose + `
 (() => {
     const {meshOf,meshes,startMesh,builds}=window.__meshProof;
@@ -52021,6 +52024,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   record("camera hiding: a head held by two owners stays hidden until both let go, in either order, and shows as it was before", heads.join() === "true,false,true,false,false,true", heads.join());
   const storage = await visibilityStorageProof({ compact: true, deferred: true });
   record("visibility storage: exact source doubles and signed zero survive queries, demand and bounded screen BVHs", storage.lazyContours && storage.exact && storage.unchanged && storage.bounded && storage.tightBacking && storage.storage && storage.demand && storage.nearBounds && storage.nearCases > 100 && storage.boundaryHits > 0 && storage.disposed && storage.values > 600, JSON.stringify(storage));
+  record("visibility shared BVH: object-guide columns reuse the character mesh's exact typed arrays", storage.sharedIdentity, JSON.stringify(storage));
   record("visibility deferred boundaries: coherent queries retain owner grids and match the eager oracle with less preparation", storage.deferredExact && storage.deferredGrids && storage.deferredFewer && storage.deferredRepeatBoundaryBuilds === 0, JSON.stringify(storage));
   record("visibility lifecycle: shared bakes survive removal and replacement; hidden transforms, clips and geometry restore exact queries", storage.lifecycle, JSON.stringify(storage));
   const demandUsers = await visibilityDemandUsersProof();
