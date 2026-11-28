@@ -48739,12 +48739,23 @@ const visibilitySourceBakeProof = () => {
     globalThis.requestIdleCallback = fn => { idle.set(++nextIdle, fn); return nextIdle; };
     globalThis.cancelIdleCallback = id => idle.delete(id);
     globalThis.performance = { now: () => clock++ };
-    const warmRoot = { children: [{ geometry: warmGeometry, children: [] }] };
+    const warmRoot = { visible: true, children: [
+      { geometry: warmGeometry, visible: true, children: [] },
+      { geometry: warmGeometry, visible: true, children: [] }
+    ] };
+    const ineligible = [
+      { visible: false },
+      { cameraHidden: true },
+      { geometry: { surfaceOverlay: true } },
+      { smokeOpacity: 0.5 }
+    ].map((props, i) => ({ geometry: { ...warmGeometry, surfaceOverlay: i === 2 }, visible: true, children: [], ...props }));
+    for (const node of ineligible) warmRoot.children.push(node);
     const visibility = window.BL.characterVisibility.create({ root: warmRoot, renderer: {}, camera: {} });
     visibility.warm();
     while (idle.size && warmSlices < 1000) {
       const [id, fn] = idle.entries().next().value; idle.delete(id); fn({ timeRemaining: () => 10 }); warmSlices++;
     }
+    check(ineligible.every(node => !meshes.has(node.geometry)), "Idle warmer baked a node the exact query cannot use");
     const warmed = meshes.get(warmGeometry);
     check(warmSlices > 1 && warmSlices < 1000 && warmed && !builds.has(warmGeometry), "Large idle bake was skipped, did not yield or did not finish");
     check(JSON.stringify(warmed.nodes) === JSON.stringify(warmExpected.nodes) && warmed.indices.every((v, i) => v === warmExpected.indices[i]), "Idle and synchronous bakes differ");

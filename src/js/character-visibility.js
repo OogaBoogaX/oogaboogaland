@@ -259,15 +259,18 @@
       entry.maxX = minDepth > near ? maxX + margin : Infinity; entry.maxY = minDepth > near ? maxY + margin : Infinity;
       entry.minDepth = minDepth - 1e-6 * Math.max(1, Math.abs(minDepth));
     };
+    // Smoke and phase fields are translucent; their effects do not cover UI. Surface overlays (`surfaceOverlay`: the
+    // path's 25k tiles, banner marks, totem paint) lie on a backing that already covers whatever they would. Not every
+    // `depthOffset` geometry is one: the ₿IFRÖST arch's stone takes the offset only to win its joins with the ridge.
+    const blockerGeometry = (node) => {
+      const geometry = node.geometry;
+      return geometry && geometry.faces && geometry.faces.length && !geometry.matrixGlyph && !geometry.surfaceOverlay
+        && !geometry.mirrorRippleOnly && !node.mirrorRippleOnly && !node.mirrorPortal
+        && !(node.smokeOpacity < 1) && !(renderOpts?.birdsEyeCutaway && geometry.cutawayHide);
+    };
     const visit = (node) => {
       if (!node.visible || node.cameraHidden) return;
-      const geometry = node.geometry;
-      // Smoke and phase fields are translucent; their effects do not cover UI. Surface overlays (`surfaceOverlay`: the
-      // path's 25k tiles, banner marks, totem paint) lie on a backing that already covers whatever they would. Not every
-      // `depthOffset` geometry is one: the ₿IFRÖST arch's stone takes the offset only to win its joins with the ridge.
-      if (geometry && geometry.faces && geometry.faces.length && !geometry.matrixGlyph && !geometry.surfaceOverlay
-        && !geometry.mirrorRippleOnly && !node.mirrorRippleOnly && !node.mirrorPortal
-        && !(node.smokeOpacity < 1) && !(renderOpts?.birdsEyeCutaway && geometry.cutawayHide)) {
+      if (blockerGeometry(node)) {
         if (node.instanceData) {
           const data = node.instanceData, count = node.drawInstanceCount === undefined ? node.instanceCount : Math.min(node.instanceCount, node.drawInstanceCount);
           for (let i = 0; i < count; i++) if (data[i * 20 + 18] >= -1) add(node, data, i * 20, i);
@@ -547,22 +550,22 @@
     let warming = 0, msPerTriangle = 0.01;
     const warm = () => {
       if (warming || typeof requestIdleCallback === "undefined") return;
-      const pending = [];
+      const pending = new Set();
       const collect = (node) => {
+        if (!node.visible || node.cameraHidden) return;
         const geometry = node.geometry;
-        if (geometry && geometry.faces && geometry.faces.length && !geometry.matrixGlyph
-          && !geometry.mirrorRippleOnly && !node.mirrorRippleOnly && !node.mirrorPortal && !meshes.has(geometry)) pending.push(geometry);
+        if (blockerGeometry(node) && !meshes.has(geometry)) pending.add(geometry);
         for (const child of node.children) collect(child);
       };
       collect(root);
       const slice = (deadline) => {
         warming = 0;
         const until = performance.now() + Math.min(2, deadline.timeRemaining());
-        while (pending.length) {
+        while (pending.size) {
           const remaining = Math.min(deadline.timeRemaining(), until - performance.now());
           if (remaining <= 0) break;
-          const geometry = pending[pending.length - 1];
-          if (meshes.has(geometry)) { pending.pop(); continue; }
+          const geometry = pending.values().next().value;
+          if (meshes.has(geometry)) { pending.delete(geometry); continue; }
           const existing = builds.get(geometry);
           let triangles = existing?.triangles ?? 0;
           if (!existing) {
@@ -574,21 +577,21 @@
           const estimated = triangles * msPerTriangle + 1;
           if (estimated > remaining || existing) {
             // Ownership wrappers retain meshOf's exact source-sharing checks.
-            if (geometry.matrixSourceGeometry) { pending.pop(); continue; }
+            if (geometry.matrixSourceGeometry) { pending.delete(geometry); continue; }
             const work = startMesh(geometry);
             work.triangles = triangles;
             work.slice.until = until;
             const next = work.steps.next();
-            if (next.done) { meshes.set(geometry, next.value); builds.delete(geometry); pending.pop(); }
+            if (next.done) { meshes.set(geometry, next.value); builds.delete(geometry); pending.delete(geometry); }
             else break;
             continue;
           }
           const start = performance.now();
           meshOf(geometry);
-          pending.pop();
+          pending.delete(geometry);
           if (triangles) { const rate = (performance.now() - start) / triangles; msPerTriangle = msPerTriangle ? msPerTriangle * 0.8 + rate * 0.2 : rate; }
         }
-        if (pending.length) warming = requestIdleCallback(slice);
+        if (pending.size) warming = requestIdleCallback(slice);
       };
       warming = requestIdleCallback(slice);
     };
