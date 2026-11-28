@@ -1184,7 +1184,7 @@ const cutawayBoundsProof = async () => {
 
 const visibilityStorageProof = async ({ compact = false, deferred = false } = {}) => {
   const context = { window: {}, performance };
-  for (const name of ["math", "scene", "models", "object-guides", "sight-guides"]) {
+  for (const name of ["math", "scene", "models", "character-visibility", "object-guides", "sight-guides"]) {
     let source = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
     if (name === "object-guides") source = source.replace("return { collect, clear,", "return { contourScratchClear: () => !contoursPending && contourActor === null && contourRetained === null && contourRetainedCount === 0, ownerRecords: () => ownerGroups, geometryRecords: () => geometries, entryRecords: () => registered, collect, clear,");
     runInNewContext(source, context);
@@ -1216,13 +1216,16 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
       lazyContours &&= guides.contourScratchClear();
     }
     guides.ownerBoundaryAt(owner, 0, 0.2, 8, 1, 0, 0);
-    let values = 0, exact = true, tightBacking = true, bytes = 0, count = 0;
+    let values = 0, exact = true, tightBacking = true, bytes = 0, count = 0, sharedIdentity = true;
     for (const [source, geometry] of guides.geometryRecords()) {
+      const shared = B.characterVisibility.meshOf?.(source);
+      sharedIdentity &&= !!shared && geometry.indices === shared.order && geometry.triangleIndices === shared.indices;
       const v = source.verts, expected = [];
+      // The shared fan retains zero-area faces, which the exact ray predicate rejects;
+      // edge and sample construction above still applies its original degenerate-face filter.
       for (const face of source.faces) {
-        const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3;
-        const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2], vx = v[c] - v[a], vy = v[c + 1] - v[a + 1], vz = v[c + 2] - v[a + 2];
-        if (Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) < 1e-6) continue;
+        if (face.visibility === false) continue;
+        const a = face.i[0] * 3;
         for (let j = 1; j < face.i.length - 1; j++) {
           const b = face.i[j] * 3, c = face.i[j + 1] * 3;
           expected.push(v[a], v[a + 1], v[a + 2], v[b] - v[a], v[b + 1] - v[a + 1], v[b + 2] - v[a + 2], v[c] - v[a], v[c + 1] - v[a + 1], v[c + 2] - v[a + 2]);
@@ -1245,7 +1248,14 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     const bounded = guides.entryRecords().length === 3 && guides.stats.boundaryBuilds > 0 && guides.entryRecords().filter(entry => entry.visible).every(entry => entry.boundaryNodes.length >= entry.geometry.counts.length * 4);
     const storage = ${compact} ? bytes === count * 12 && guides.stats.triangleBytes === bytes : true;
     const demand = ${deferred} ? initiallyUnbaked && guides.stats.triangles > 0 : true;
-    guides.dispose();
+    const coverGeometry = { verts: [0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 2, 1, 0, 3, 1, 0, 3, 0, 0], faces: [
+      { i: [0, 1, 2], color: [1, 1, 1] }, { i: [0, 1, 3], color: [1, 1, 1] }, { i: [3, 4, 5, 6], color: [1, 1, 1] }
+    ], lines: [] }, coverRoot = S.createNode({ geometry: coverGeometry });
+    const coverGuides = B.objectGuides.create({ roots: [coverRoot], crew: { cavemen: new Map() } }), coverDescriptor = coverGuides.geometryRecords().get(coverGeometry);
+    const laterCover = coverDescriptor.coverFaces.indexOf(2), aligned = coverDescriptor.triangleCoverFaces;
+    const coverAlignment = aligned.length === 4 && laterCover >= 0 && aligned[0] === coverDescriptor.coverFaces.indexOf(0)
+      && aligned[1] === -1 && aligned[2] === laterCover && aligned[3] === laterCover;
+    coverGuides.dispose(); guides.dispose();
     // Registries share immutable CPU bakes, but refresh and disposal own only their scene entries.
     const shared = M.box({ w: 1, h: 1, d: 1, color: "#fff" }), firstRoot = S.createNode(), secondRoot = S.createNode();
     const firstNode = S.createNode({ geometry: shared, position: { x: 0, y: 0, z: 8 } }), removed = S.createNode({ geometry: shared, position: { x: 2, y: 0, z: 8 } }), secondNode = S.createNode({ geometry: shared, position: { x: 0, y: 0, z: 8 } });
@@ -1264,11 +1274,15 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     const entry = first.entryRecords()[0], replacement = !first.geometryRecords().has(shared) && first.geometryRecords().has(larger)
       && entry.geometry === first.geometryRecords().get(larger) && entry.boundsGeometry === entry.geometry
       && entry.boundaryReserve >= 96 && entry.boundaryTriangles.length >= 960 && entry.boundaryNodes.length >= entry.geometry.counts.length * 4;
-    let nearBounds = true, nearCases = 0, boundaryHits = 0, gridQueries = 0;
+    for (const x of [3, 5, 7, 9, 11, 13, 15]) S.addChild(firstRoot, S.createNode({ geometry: shared, position: { x, y: 0, z: 8 } }));
+    first.refresh();
+    const deferred = B.objectGuides.create({ roots: [firstRoot], crew: { cavemen: new Map() } });
+    let nearBounds = true, nearCases = 0, boundaryHits = 0, gridQueries = 0, deferredExact = true, deferredGrids = true, eagerBoundaryBuilds = 0, deferredBoundaryBuilds = 0, deferredRepeatBoundaryBuilds = 0;
     for (const depth of [-1, 0.05, 0.1, 0.3, 1, 8]) {
       firstNode.position.z = depth;
       Object.assign(firstNode.rotation, { x: 0.17, y: 0.31, z: 0.23 });
       Object.assign(firstNode.scale, { x: 1.3, y: 0.7, z: 1.1 });
+      const eagerBefore = first.stats.boundaryBuilds;
       query(first, firstRoot);
       const points = [];
       for (const face of larger.faces) for (let n = 0; n < face.i.length; n++) for (const t of [0, 0.0001, 0.25, 0.2501, 0.5, 0.5001, 0.75, 0.7501, 0.9999, 1]) {
@@ -1288,6 +1302,19 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
       const coherent = points.map(p => first.ownerBoundaryAt(firstRoot, ...p));
       const reversed = points.slice().reverse().map(p => first.ownerBoundaryAt(firstRoot, ...p)).reverse();
       gridQueries += first.stats.boundaryGridQueries - beforeGrid;
+      if (depth === 8) {
+        const eagerBuilds = first.stats.boundaryBuilds - eagerBefore;
+        for (let i = 0; i < points.length; i++) {
+          // Isolate one exact query and its coherent repeat, so a miss elsewhere cannot hide deferred parts.
+          S.updateWorld(firstRoot); deferred.collect(actor, 0, 0, 8, camera, 1.6, null, 0, ${deferred}); if (${deferred}) deferred.result.ensureContours();
+          const before = deferred.stats.boundaryBuilds, firstHit = deferred.ownerBoundaryAt(firstRoot, ...points[i], true);
+          const repeatBefore = deferred.stats.boundaryBuilds, coherentHit = deferred.ownerBoundaryAt(firstRoot, ...points[i], true);
+          deferredExact &&= coherent[i] === firstHit && coherent[i] === coherentHit;
+          deferredGrids &&= first.ownerRecords()[0].boundaryGrid.active && deferred.ownerRecords()[0].boundaryGrid.active;
+          eagerBoundaryBuilds += eagerBuilds; deferredBoundaryBuilds += deferred.stats.boundaryBuilds - before;
+          deferredRepeatBoundaryBuilds += deferred.stats.boundaryBuilds - repeatBefore;
+        }
+      }
       // Use the same exact triangle predicate as the oracle, with every screen bound open.
       for (const e of first.entryRecords()) {
         for (const boxes of [e.boundaryBounds, e.boundaryBoxes, e.boundaryNodes]) for (let i = 0; i < boxes.length; i += 4) {
@@ -1303,7 +1330,8 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
       }
     }
     nearBounds &&= gridQueries > 0;
-    first.dispose(); query(second, secondRoot);
+    const deferredFewer = deferredBoundaryBuilds < eagerBoundaryBuilds;
+    first.dispose(); deferred.dispose(); query(second, secondRoot);
     const survivor = second.stats.registered === 1 && second.stats.triangles === 12 && second.entryRecords()[0].visible
       && second.geometryRecords().get(shared).triangleIndices.every((value, i) => value === sharedIndices[i]);
     const released = first.entryRecords().length === 0 && first.geometryRecords().size === 0 && first.stats.triangleBytes === 0;
@@ -1382,13 +1410,13 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
       delayed.refresh(); lazyContours &&= delayed.contourScratchClear();
       eager.dispose(); delayed.dispose(); a.dispose(); b.dispose();
     }
-    return { lazyContours, exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, gridQueries, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
+    return { lazyContours, exact, unchanged, bounded, tightBacking, storage, demand, sharedIdentity, coverAlignment, nearBounds, nearCases, boundaryHits, gridQueries, deferredExact, deferredGrids, deferredFewer, eagerBoundaryBuilds, deferredBoundaryBuilds, deferredRepeatBoundaryBuilds, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
   })()`, context);
 };
 // Count descriptor users rather than timings, so the first-demand cost scales with actual users.
 const visibilityDemandUsersProof = async () => {
   const context = { window: { demandVisits: 0 }, performance };
-  for (const name of ["math", "scene", "models", "object-guides"]) {
+  for (const name of ["math", "scene", "models", "character-visibility", "object-guides"]) {
     let source = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
     if (name === "object-guides") source = source
       .replace("return { collect, clear,", "return { geometryRecords: () => geometries, entryRecords: () => registered, descriptorUsers: () => descriptorUsers, collect, clear,")
@@ -1432,7 +1460,7 @@ const visibilityDemandUsersProof = async () => {
 // states, its sightHidden effects left out, forgotten while still in the scene, and nothing left over take after take.
 const separateBodyRegistryProof = async () => {
   const context = { window: {}, performance };
-  for (const name of ["math", "scene", "models", "object-guides"]) {
+  for (const name of ["math", "scene", "models", "character-visibility", "object-guides"]) {
     let source = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
     if (name === "object-guides") source = source.replace("return { collect, clear,", "return { geometryRecords: () => geometries, entryRecords: () => registered, ownerRecords: () => ownerGroups, descriptorUsers: () => descriptorUsers, collect, clear,");
     runInNewContext(source, context);
@@ -19850,6 +19878,19 @@ const adaptiveQualityChecks = async () => {
   record("adaptive quality: warmup, transitions, a scene readying the next, background frames and isolated spikes do not lower quality", r.warmup && r.ignoresPauses && r.ignoresSpikes && r.fallback, JSON.stringify(r));
   record("adaptive quality: steps one tier at a time and stops at the lowest", r.bounded, JSON.stringify(r));
   record("adaptive quality: boot cost seeds the opening tier, only ever downward", r.bootFast && r.bootMedium && r.bootLow && r.bootOneWay && r.bootKeepsCoarse && r.bootMemory && r.memoryBoot, JSON.stringify(r));
+  const context = { window: { BL: { models: { particleGeometry: () => ({}) }, scene: {} } } };
+  runInNewContext(await readFile(join(root, "src/js/fx.js"), "utf8"), context);
+  const BL = context.window.BL;
+  const check = (ok, message) => record(`overlay: ${message}`, ok);
+  const capped = BL.fx.overlayDpr(3840, 2160, 2, 1.5);
+  check(Math.abs(3840 * 2160 * capped * capped - 2.6e6) < 1, "Overlay exceeds the pixel budget");
+  check(BL.fx.overlayDpr(390, 844, 3, 1.25) === 1.25, "Overlay ignores the tier DPR");
+  check(BL.fx.overlayDpr(390, 844, 3, 1.5) === 1.5, "Overlay ignores the device DPR");
+  const reviewerCase = BL.fx.overlaySize(1920, 1200, 2, 1.5);
+  check(reviewerCase[0] === 2039 && reviewerCase[1] === 1274 && reviewerCase[0] * reviewerCase[1] <= 2.6e6, "Overlay allocation rounds above the pixel budget");
+  const allocations = [[3840, 2160], [2160, 3840], [3440, 1440], [1440, 3440], [390, 844]]
+    .map(([w, h]) => BL.fx.overlaySize(w, h, 2, 1.5));
+  check(allocations.every(([w, h]) => w * h <= 2.6e6), "Overlay allocation exceeds the pixel budget at other aspect ratios");
 };
 // ---- Scenes ----
 // A scene is the unit of testing: one Chrome session running that scene's steps, side by side with the
@@ -48625,7 +48666,7 @@ const visibilitySourceBakeProof = () => {
   const math = readFileSync(new URL("../src/js/math.js", import.meta.url), "utf8");
   const source = readFileSync(new URL("../src/js/character-visibility.js", import.meta.url), "utf8");
   const compact = readFileSync(new URL("../src/js/compact-geometry.js", import.meta.url), "utf8");
-  const expose = source.replace("BL.characterVisibility = { create };", "BL.characterVisibility = { create }; window.__meshProof={meshOf,meshes,startMesh,builds};");
+  const expose = source.replace("BL.characterVisibility = { create, meshOf };", "BL.characterVisibility = { create, meshOf }; window.__meshProof={meshOf,meshes,startMesh,builds};");
   return runInNewContext(math + "\n" + compact + "\n" + expose + `
 (() => {
     const {meshOf,meshes,startMesh,builds}=window.__meshProof;
@@ -48757,12 +48798,23 @@ const visibilitySourceBakeProof = () => {
     globalThis.requestIdleCallback = fn => { idle.set(++nextIdle, fn); return nextIdle; };
     globalThis.cancelIdleCallback = id => idle.delete(id);
     globalThis.performance = { now: () => clock++ };
-    const warmRoot = { children: [{ geometry: warmGeometry, children: [] }] };
+    const warmRoot = { visible: true, children: [
+      { geometry: warmGeometry, visible: true, children: [] },
+      { geometry: warmGeometry, visible: true, children: [] }
+    ] };
+    const ineligible = [
+      { visible: false },
+      { cameraHidden: true },
+      { geometry: { surfaceOverlay: true } },
+      { smokeOpacity: 0.5 }
+    ].map((props, i) => ({ geometry: { ...warmGeometry, surfaceOverlay: i === 2 }, visible: true, children: [], ...props }));
+    for (const node of ineligible) warmRoot.children.push(node);
     const visibility = window.BL.characterVisibility.create({ root: warmRoot, renderer: {}, camera: {} });
     visibility.warm();
     while (idle.size && warmSlices < 1000) {
       const [id, fn] = idle.entries().next().value; idle.delete(id); fn({ timeRemaining: () => 10 }); warmSlices++;
     }
+    check(ineligible.every(node => !meshes.has(node.geometry)), "Idle warmer baked a node the exact query cannot use");
     const warmed = meshes.get(warmGeometry);
     check(warmSlices > 1 && warmSlices < 1000 && warmed && !builds.has(warmGeometry), "Large idle bake was skipped, did not yield or did not finish");
     check(JSON.stringify(warmed.nodes) === JSON.stringify(warmExpected.nodes) && warmed.indices.every((v, i) => v === warmExpected.indices[i]), "Idle and synchronous bakes differ");
@@ -52086,6 +52138,9 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   record("camera hiding: a head held by two owners stays hidden until both let go, in either order, and shows as it was before", heads.join() === "true,false,true,false,false,true", heads.join());
   const storage = await visibilityStorageProof({ compact: true, deferred: true });
   record("visibility storage: exact source doubles and signed zero survive queries, demand and bounded screen BVHs", storage.lazyContours && storage.exact && storage.unchanged && storage.bounded && storage.tightBacking && storage.storage && storage.demand && storage.nearBounds && storage.nearCases > 100 && storage.boundaryHits > 0 && storage.disposed && storage.values > 600, JSON.stringify(storage));
+  record("visibility shared BVH: object-guide columns reuse the character mesh's exact typed arrays", storage.sharedIdentity, JSON.stringify(storage));
+  record("visibility cover faces: degenerate fans keep placeholders and later valid triangles retain their cover mapping", storage.coverAlignment, JSON.stringify(storage));
+  record("visibility deferred boundaries: coherent queries retain owner grids and match the eager oracle with less preparation", storage.deferredExact && storage.deferredGrids && storage.deferredFewer && storage.deferredRepeatBoundaryBuilds === 0, JSON.stringify(storage));
   record("visibility lifecycle: shared bakes survive removal and replacement; hidden transforms, clips and geometry restore exact queries", storage.lifecycle, JSON.stringify(storage));
   const demandUsers = await visibilityDemandUsersProof();
   record("visibility demand: first demand visits only descriptor users and releases replaced, removed and disposed entries", demandUsers.rows.every(row => row.visits === row.count && row.released && row.resolved) && demandUsers.boundsTracked && demandUsers.replacementReleased && demandUsers.bothResolved && demandUsers.disposed, JSON.stringify(demandUsers));
