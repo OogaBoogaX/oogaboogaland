@@ -178,3 +178,49 @@ Record both movement rows, hotspot ranking, `objectGuides.stats`, browser, DPR, 
 - [ ] **Step 4: Write evidence and update the draft PR**
 
 Include exact before/after values, methodology, checks, and remaining gaps. Mark ready only if the improvement is material and reproducible; otherwise keep draft and investigate the remaining projected-boundary cost rather than claiming completion.
+
+
+---
+
+### Task 4: Prepare projected boundaries only when the lazy sight query reaches them
+
+**Files:**
+- Modify: `src/js/object-guides.js:1695-1815`
+- Modify: `src/js/scene-hub.js:12790-12798`
+- Modify: `test/run.mjs` existing owner-boundary fixture
+
+**Interfaces:**
+- Consumes: existing exact eager `ownerBoundaryAt(owner,x,y,z,dx,dy,dz)` behavior and entry hit hints.
+- Produces: optional final `lazy` boolean. Default `false` retains eager preparation and existing tests. The hub's sight-guide options pass `true`. Lazy mode still uses identical triangle/depth/clip predicates.
+
+- [ ] **Step 1: Add an eager-oracle regression**
+
+In the existing near-boundary fixture, create a second registry over the same geometry. For the same world/camera and query points, compare default eager calls with `ownerBoundaryAt(...,true)` calls. Require identical booleans and fewer `boundaryBuilds` after a coherent second lazy query. Keep every existing eager assertion unchanged.
+
+- [ ] **Step 2: Verify the regression fails**
+
+Run: `npm run test:unit`
+Expected: FAIL because the current implementation eagerly prepares all visible owner parts and has no lazy final argument.
+
+- [ ] **Step 3: Implement lazy preparation**
+
+Propagate a `lazy` flag through `ownerBoundaryAt`, `ownerHit`, and `entryBoundaryHit`. In eager mode retain the existing group-wide `boundaryBounds` and `indexBoundary` calls. In lazy mode:
+
+- compute only `endDepth` up front;
+- try `group.boundaryEntries[side]` before other parts;
+- call `boundaryBounds(entry)` only when `entry.boundaryStamp !== collectStamp` and the exact entry query is reached;
+- do not build `indexBoundary(group)` until/unless a separate later task proves it beneficial;
+- keep the exact same `ownerHit` boolean result and depth/triangle/clip tests.
+
+In `scene-hub.js`, wrap the existing function once in `guideOptions` so its sight path passes `true` without allocating a closure per query.
+
+- [ ] **Step 4: Verify correctness and profile**
+
+Run `npm run test:unit` and require all checks to pass. Then run `CHROME_ARCH=arm64 node scripts/profile-covered-movement.mjs --cpu` and compare against the preserved baseline. Keep lazy mode only if exact results match and both preparation count and delivered frame metrics improve materially; otherwise revert it and record the negative result.
+
+- [ ] **Step 5: Commit if the oracle and performance evidence pass**
+
+```bash
+git add src/js/object-guides.js src/js/scene-hub.js test/run.mjs
+git commit -m "Prepare covered-view boundaries on demand"
+```
