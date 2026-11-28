@@ -11,7 +11,7 @@
   // Each outfit: a rule per region, given the face's centre in its part's own frame; null keeps the fur.
   // Regions: chest (waist 0 up to the shoulders ~0.55, z forward), belly (hips -0.11 up to the waist, z forward), arm (the
   // upper arm), fore (forearm and fist, its wrist at about y -0.5, the fist below), leg, shin, foot, head.
-  const WRIST = -0.5, CUFF = -0.56;
+  const WRIST = -0.5, CUFF = -0.56, WAIST = -0.15;
   const opening = (x, y, z, w0, w1, top) => z > 0.12 && Math.abs(x) < w0 + (w1 - w0) * Math.max(0, Math.min(1, y / top));
   const OUTFITS = {
     lab: (part, x, y, z) => {
@@ -27,7 +27,7 @@
     OUTFITS["suit" + k] = (part, x, y, z) => {
       if (part === "chest") { if (opening(x, y, z, 0.04, 0.15, 0.5)) return Math.abs(x) < 0.03 ? (y > 0.43 ? knot : tie) : shirt;
         if (opening(x, y, z, 0.07, 0.2, 0.5)) return lapel; return jacket; }
-      if (part === "belly") { if (y < 0.075) return trousers;
+      if (part === "belly") { if (y < WAIST) return trousers;
         if (opening(x, y - 0.11, z, 0.02, 0.04, 0.4)) return Math.abs(x) < 0.025 ? tie : shirt; return jacket; }
       if (part === "arm") return jacket;
       if (part === "fore") return y > WRIST ? jacket : y > CUFF ? shirt : null;
@@ -165,7 +165,7 @@
   // `h` tall, with its top and bottom edges, and a buckle at the front. Cached by rig.
   const belts = new WeakMap();
   const belt = (r, opts = {}) => { const key = JSON.stringify(opts); let per = belts.get(r); if (!per) belts.set(r, per = new Map()); if (per.has(key)) return per.get(key);
-    const W = surface(r), y = opts.y == null ? 0.075 : opts.y, h = opts.h || 0.045, off = opts.off || 0.012, n = 64, s = W.slice(y), col = hex(opts.color || "#1f1a17").map((v) => v / 255), brass = hex(opts.brass || "#b8913a").map((v) => v / 255);
+    const W = surface(r), y = opts.y == null ? WAIST : opts.y, h = opts.h || 0.045, off = opts.off || 0.012, n = 64, s = W.slice(y), col = hex(opts.color || "#1f1a17").map((v) => v / 255), brass = hex(opts.brass || "#b8913a").map((v) => v / 255);
     const ring = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2, rays = [y - h / 2, y + h / 2].map((yy) => W.side(yy, s.cz, Math.sin(a), Math.cos(a))); ring.push(rays); }
     // the band's outer face follows the widest of its two edges at each angle, so its height is the same all round
     const verts = [], faces = [], push = (p) => { verts.push(...p); return verts.length / 3 - 1; };
