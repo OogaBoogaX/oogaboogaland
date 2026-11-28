@@ -860,7 +860,7 @@
       if (selfReactT > 0 || ownHand) {
         const rig = own && (own.parts ? own : own.gorilla);
         headMinX = Infinity; headMaxX = -Infinity; headTop = Infinity;
-        if (rig && rig.parts && rig.parts.head && rig.root.visible) projectHead(rig.parts.head, project);
+        if (rig && rig.parts && rig.parts.head && rig.root.visible) projectHead(rig.visualHead || rig.parts.head, project);
         if (headTop !== Infinity) {
           const x = Math.round((headMinX + headMaxX) / 2), y = Math.round(headTop);
           drawReaction(ctx, x, y, selfReact, selfReactT, ownHand);
@@ -896,10 +896,10 @@
         const rec = entry.cloud ? cloudOf(entry.id) : net.remotes.get(entry.id);
         if (!rec || !entry.cave.root.visible) continue;
         headMinX = Infinity; headMaxX = -Infinity; headTop = Infinity;
-        projectHead(entry.cave.parts.head, project);
+        projectHead(entry.cave.visualHead || entry.cave.parts.head, project);
         if (headTop === Infinity) continue;
         headMinX = Infinity; headMaxX = -Infinity; headTop = Infinity;
-        anchorHead(entry.cave.parts.head, exact);
+        anchorHead(entry.cave.visualHead || entry.cave.parts.head, exact);
         if (headTop === Infinity) continue;
         // A speaker seated on a cloud whose head is wholly out of the view has no plate: clamped to the edge, a bench's
         // names would float there in a stack over nobody. (A walking player's plate keeps to the edge, as an NPC's does.)

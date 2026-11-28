@@ -79,6 +79,8 @@
   };
   const updateWorld = (node, parentWorld) => {
     if (!node.visible) return;
+    // A node may bring itself up to date first (a clanker's body taking its driver's pose: clanker-body.js).
+    if (node.beforeWorld) node.beforeWorld(parentWorld);
     updateLocal(node);
     if (parentWorld) mat4.multiply(node.world, parentWorld, node.local);
     else node.world.set(node.local);

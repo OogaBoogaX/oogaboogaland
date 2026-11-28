@@ -1,0 +1,163 @@
+# head
+pivot 0 21.56 16.59
+# One character a block, on the six-view sheet's own grid (x across, y up from the ground, z from the rear to the
+# front; a block is 0.053 m). Rows run bottom to top: "y <row> x <first column> z <first line>". In a row the first
+# line is the front-most; columns run from the gorilla's right to its left, as the FRONT view shows them.
+# Colours: 0-9 a b greys from darkest to lightest (c d lighter still) (fur is about 1-3, the chest and muzzle about 6-8, the shoulder
+# silver about 8-b), o black, i eye brown, h eye highlight; '.' is empty.
+# Authored in the six-view sheet's own columns and depths (the side panel's d, rear 0, muzzle front 29), then
+# moved onto Astra's neck: half a block across (the reference's head is centred half a block off the body's grid) and
+# one block back (b6: it had sat five more blocks back, over the neck, and hid the back's silver).
+offset -0.5 0 -1
+
+y 20 x -2 z 22
+43444
+44344
+44444
+
+y 21 x -3 z 23
+4434444
+4444444
+4444444
+4443344
+3444444
+4434444
+4444443
+
+y 22 x -4 z 23
+443444444
+444444344
+444444434
+443444444
+343344444
+444444444
+434444443
+
+y 23 x -4 z 23
+444343444
+444444444
+444434344
+333444444
+444444444
+344334334
+444444444
+444444444
+
+y 24 x -4 z 23
+444434443
+443443344
+444444444
+444434444
+444444444
+444443444
+443443444
+344444444
+
+y 25 x -4 z 23
+444444343
+444444444
+434444443
+444444444
+434444444
+444444444
+334444433
+343343444
+
+y 26 x -4 z 23
+444334444
+344444334
+343443444
+344444343
+344344434
+343444344
+444444334
+444444444
+
+y 27 x -4 z 23
+444444433
+443434444
+443444444
+444344444
+444434344
+444444443
+443344444
+444444434
+
+y 28 x -4 z 23
+444434443
+333444444
+444334443
+434444444
+344444444
+444444434
+433444443
+334434334
+
+y 29 x -4 z 23
+444444433
+444434334
+444343444
+444444444
+444444443
+444444444
+444434444
+544444443
+
+y 30 x -4 z 25
+76576565
+764444575
+654344446
+644444445
+543343445
+644444445
+734444445
+644434446
+644443476
+.56677655
+
+y 31 x -3 z 24
+.7765
+.743775
+6343466
+6344446
+7444346
+6344447
+6543446
+567555
+
+y 32 x -2 z 23
+.66
+5346
+64447
+53447
+57446
+.5765
+
+y 33 x -1 z 22
+66
+766
+756
+.56
+
+# The face: fine boxes in the sheet's own units (x0 x1, rows y0 y1, depth z0 z1), edges to a quarter block.
+fine -3.75 4.5 21.5 26.75 24 26.75 4
+fine -3.75 4.5 26.75 29.25 24 24.75 4
+fine -3.75 4.5 29.25 30 24 26.75 4
+fine -3.5 -2.25 24.5 26 26.5 26.75 5
+fine 3 4.25 24.5 26 26.5 26.75 5
+fine -3 3.75 27.75 29.25 24.75 27.25 a
+fine -3 3.75 26.75 27.75 24.75 26.75 1
+fine -1.75 -0.75 26.75 27.75 26.25 26.75 i
+fine -1 -0.75 27.25 27.5 26.5 26.75 h
+fine 1.25 2.25 26.75 27.75 26.25 26.75 i
+fine 2 2.25 27.25 27.5 26.5 26.75 h
+fine -2.25 3 21.5 24.5 25.75 29 8
+fine -2.25 3 23.5 24.5 25.75 29 a
+fine -1.75 2.5 21.25 21.5 27.75 28.75 4
+fine -1.25 2 24.5 26 26.25 28.75 a
+fine -1.25 2 25.75 26 26.25 28.75 b
+fine -1.25 -0.25 24.5 25.5 28.25 28.75 o
+fine 1 2 24.5 25.5 28.25 28.75 o
+fine -1.25 2 20.25 21.5 23.5 26.25 3
+fine -4.75 -3.75 27 29.5 20 21.75 9
+fine 4.5 5.5 27 29.5 20 21.75 9
