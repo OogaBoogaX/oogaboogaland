@@ -1148,13 +1148,17 @@
   const DISC = { cell: 0.32, mark: 2.75, block: 1e6, maxSide: 5, thick: 0.14, gap: 0.03, beadLift: 0.08, edge: 0.25, steps: 12 };
   // The outline on the cap as [x, z] loops: x across and z toward the back, so it reads upright to a visitor facing the
   // front; and whether a point is inside it (even-odd, so the counters stay open) and how far it is from its edge.
+  // Centred on its bounds the ₿ reads right of the ring's middle, its bowls bulging right of the stem, so it moves
+  // across by `ox` to put its area's middle there (the counters wound against the outer ring, so they come out of it).
   const DISC_RINGS = BL.factoryModels.bitcoinOutline().map((ring) => ring.map(([x, y]) => [x * DISC.mark, y * DISC.mark]));
+  DISC.ox = (() => { let a = 0, m = 0; for (const g of DISC_RINGS) for (let i = 0, j = g.length - 1; i < g.length; j = i++) { const [xi, zi] = g[i], [xj, zj] = g[j], k = xi * zj - xj * zi; a += k; m += (xi + xj) * k; } return -m / (3 * a); })();
+  for (const g of DISC_RINGS) for (const p of g) p[0] += DISC.ox;
   const discInside = (x, z) => { let c = false; for (const g of DISC_RINGS) for (let i = 0, j = g.length - 1; i < g.length; j = i++) { const [xi, zi] = g[i], [xj, zj] = g[j]; if ((zi > z) !== (zj > z) && x < xi + (z - zi) * (xj - xi) / (zj - zi)) c = !c; } return c; };
   const discEdge = (x, z) => { let d = Infinity; for (const g of DISC_RINGS) for (let i = 0, j = g.length - 1; i < g.length; j = i++) { const [ax, az] = g[j], ex = g[i][0] - ax, ez = g[i][1] - az, t = Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / (ex * ex + ez * ez))); d = Math.min(d, Math.hypot(x - ax - ex * t, z - az - ez * t)); } return d; };
   DISC.fine = DISC.cell / 2;
-  DISC.fc = 2 * Math.ceil(Math.max(...DISC_RINGS[0].map((p) => Math.abs(p[0]))) / DISC.fine) + 2;
+  DISC.fc = 2 * Math.ceil(Math.max(...DISC_RINGS[0].map((p) => Math.abs(p[0] - DISC.ox))) / DISC.fine) + 2;
   DISC.fr = 2 * Math.ceil(Math.max(...DISC_RINGS[0].map((p) => Math.abs(p[1]))) / DISC.fine) + 2;
-  const discX = (fc) => (fc - DISC.fc / 2) * DISC.fine, discZ = (fr) => -(fr - DISC.fr / 2) * DISC.fine;
+  const discX = (fc) => (fc - DISC.fc / 2) * DISC.fine + DISC.ox, discZ = (fr) => -(fr - DISC.fr / 2) * DISC.fine;
   // The ₿'s fine units (`inB`), and its foot's middle (the lowest four rows of it, the two strokes below), where a
   // found block falls from.
   const DISC_IN = new Uint8Array(DISC.fc * DISC.fr);
@@ -1211,7 +1215,7 @@
   // The beads' places: a hex grid of `cell` pitch over the dome, clear of the ₿ by a unit, nearest the middle first. Each holds four units' worth of the queue.
   DISC.beads = (() => {
     const out = [], R = CAP.rIn - DISC.edge, n = Math.ceil(R / DISC.cell) + 1, near = (fc, fr) => { for (let j = -1; j <= 2; j++) for (let i = -1; i <= 2; i++) { const c = fc + i, r = fr + j; if (c >= 0 && r >= 0 && c < DISC.fc && r < DISC.fr && DISC_IN[r * DISC.fc + c]) return true; } return false; };
-    const at = (x, z) => { const fc = Math.round(x / DISC.fine + DISC.fc / 2) - 1, fr = Math.round(-z / DISC.fine + DISC.fr / 2) - 1; if (Math.hypot(x, z) <= R && !near(fc, fr)) out.push({ x, z, d: Math.hypot(x, z) }); };
+    const at = (x, z) => { const fc = Math.round((x - DISC.ox) / DISC.fine + DISC.fc / 2) - 1, fr = Math.round(-z / DISC.fine + DISC.fr / 2) - 1; if (Math.hypot(x, z) <= R && !near(fc, fr)) out.push({ x, z, d: Math.hypot(x, z) }); };
     const dz = DISC.cell * 0.866; for (let gy = -n * 2; gy <= n * 2; gy++) for (let gx = -n; gx <= n; gx++) at((gx + (gy & 1 ? 0.5 : 0)) * DISC.cell, gy * dz);
     return out.sort((a, b) => a.d - b.d);
   })();
