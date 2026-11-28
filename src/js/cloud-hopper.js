@@ -211,7 +211,10 @@
       if (phase === "running") { if (say) hud.toast("Turn the ghost on or off before the run starts"); return true; }
       const was = replays.wanted;
       replays.toggle();
-      if (say) hud.toast(replays.wanted === was ? "No record ghost for this level yet" : replays.wanted ? "Record ghost on" : "Record ghost off");
+      // Unchanged means no ghost to race: a level with no time yet, or a record whose run left no replay.
+      const record = Object.keys(BL.highscores?.get(level.board)?.highscores || {}).length > 0;
+      if (say) hud.toast(replays.wanted !== was ? replays.wanted ? "Record ghost on" : "Record ghost off"
+        : record ? "This record has no saved replay to race" : "No record ghost for this level yet");
       return true;
     };
     const audio = BL.cloudHopperAudio.create();

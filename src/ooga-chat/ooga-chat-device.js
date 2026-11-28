@@ -1,5 +1,6 @@
 // Ooga Chat on its device (#657, docs/ooga-chat-app.md): whether the network is there, whether and how the browser
-// offers to install the app, whether a newer version is waiting, and the M key. `create` reports `{ online, install,
+// offers to install the app, whether a newer version is waiting, the M key, and on Android a page kept clear of the
+// system bars. `create` reports `{ online, install,
 // update }`: `install` is "prompt" where the browser lets the page offer it (`beforeinstallprompt`), "ios" on Safari
 // for iOS, which installs only from its Share menu, and null otherwise or once installed; `update` is true while a
 // newer service worker waits. Nothing is promised that the browser does not offer, and installing never gates
@@ -7,11 +8,16 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  // M mutes or unmutes only a plain press: not while typing in a field or composing with an IME, not with a modifier
-  // held, and not on key repeat.
+  // On Android the app stays inside the system bars. With viewport-fit=cover, Chrome's edge to edge and an installed
+  // app can draw the page under the navigation bar while reporting no bottom inset, which hid the chat's footer under
+  // it; without it the browser keeps the page clear of the bars itself. iOS keeps cover, whose insets it reports.
+  const viewport = /Android/.test(window.navigator?.userAgent || "") && window.document?.querySelector('meta[name="viewport"]');
+  if (viewport) viewport.content = viewport.content.replace(/,\s*viewport-fit=cover/, "");
+  // M mutes or unmutes as the island's M does: Shift+M too, but not while typing in a field or composing with an IME,
+  // not with Ctrl, Meta or Alt held, and not on key repeat.
   const isMuteKey = (event) => {
     if (event.key !== "m" && event.key !== "M") return false;
-    if (event.repeat || event.isComposing || event.keyCode === 229 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return false;
+    if (event.repeat || event.isComposing || event.keyCode === 229 || event.ctrlKey || event.metaKey || event.altKey) return false;
     const target = event.target;
     if (!target) return true;
     if (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName || "")) return false;
