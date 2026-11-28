@@ -149,7 +149,7 @@ results read, so the two always agree (`TALLY` in `block-sim.js` is the one list
   line instead of over it.
 - **Live rounds:** the host's sim counts and each frame carries `grabs` with the other counts (`NUMBERS` in
   `block-live.js`), so a guest's panel and board read the host's numbers, its own row being its own seat (`seatMap`).
-  The viewing chairs keep their own Stolen column (blocks taken off the stand since the viewer sat down).
+  The viewing spot keeps its own Stolen column (blocks taken off the stand since the viewer arrived).
 - The trophy card's tables gain a Grabbed column and the Your round medal says it too. The saved record
   (`game.state.block`) is unchanged.
 
@@ -160,9 +160,9 @@ visitor's own running tally in this browser: rounds played (`games`) and won (`w
 (`best`), and their own blocks mined (`mined`), blocks brought home (`home`), splats landed (`splats`), times splatted
 (`splatted`) and rounds as the most valuable Ooga (`mvps`). A finished round adds to it once, solo or live
 (`SIM.tallyOf`, the same per-actor counts the trophy card shows, into `game.recordBlock`); a round left early isn't
-over and adds nothing, nor does one watched from the chairs. A save from before the tally keeps its rounds and best
-and starts the new counts at 0. Nothing is sent anywhere: a record across devices needs the server and is not built.
-The board's Record panel shows it under Your record, and the trophy card's last medal in short.
+over and adds nothing, nor does one watched from the viewing spot. A save from before the tally keeps its rounds and
+best and starts the new counts at 0. Nothing is sent anywhere: a record across devices needs the server and is not
+built. The board's Record panel shows it under Your record, and the trophy card's last medal in short.
 
 ## The board's weapons preview
 
@@ -494,6 +494,6 @@ Clanktown extends the frame layout and event list to `WIRE` 7. The live tally ad
 - **Registry** (`worker/src/block.js`, contract in `block-wire.js`): one match a room. `reg`/`unreg`/`ready`/`opt` in the lobby; the first in picks the map, size and scoring rule (2v2 to 4v4, `MIN_SIDE` to `MAX_SIDE`; NPCs fill any empty seat, so there is never a 1v1); `reg` carries the map already picked on their board, and registered players' boards follow the match's map, grown if more have registered than it seats. With two or more registered, everyone ready starts a 3 s countdown. One person alone chooses: Start with NPCs (`alone`, at once with NPCs) or Wait for players (marks them ready, which starts nothing until someone else registers and readies). If the others leave, the choice comes back.
 - **Teams:** random and as even as can be (`split`); empty seats are NPCs.
 - **Host:** one seated page runs `block-sim.js`, chosen by the room (longest in the room, a visible page first). If it leaves, the next seated page continues from its last snapshot, and a block in the air at that handover lands without scoring, since frames don't say who threw it; if no seated human is left, the round ends. A leaver's seat goes to an NPC.
-- **No joining mid-round.** Late arrivals sit in the viewing chairs (`block-viewer.js`, `phase === "watch"`), a row of plain chairs in a blank white space above the game, as do visitors sent by `BL.blockLive.openWatchDeck(go)`. A viewer has no body, sends no input or position and is local to its page; it asks for the feed (`watch`) and receives every other frame, drawn smoothly between them, and only the match draws. The wheel, a pinch or the scope's +/- keys zoom the view (local only, stopping at the default view); a dark sports-style scoreboard in the corner, with a small table per player of blocks mined, stolen (counted on the viewer from who starts carrying the other side's block) and splats landed and the block-mined sound (once per capture, read from the score) come from the same match state. It has no voice in this version. It can register for the next round from there.
+- **No joining mid-round.** Late arrivals go to the viewing spot (`block-viewer.js`, `phase === "watch"`), a view across the field from its long side (blue's fort on the left, red's on the right; a phone held upright frames the two forts) in a blank white space, with no chairs or body of its own, as do visitors sent by `BL.blockLive.openWatchDeck(go)`. A viewer has no body, sends no input or position and is local to its page; it asks for the feed (`watch`) and receives every other frame, drawn smoothly between them, and only the match draws. The wheel, a pinch or the scope's +/- keys zoom the view (local only, stopping at the default view); a dark sports-style scoreboard in the corner, with a small table per player of blocks mined, stolen (counted on the viewer from who starts carrying the other side's block) and splats landed and the block-mined sound (once per capture, read from the score) come from the same match state. It has no voice in this version. It can register for the next round from there.
 - **Wire:** binary frames (`"BFZ1"`, round tag, host epoch, sequence, at most 2048 bytes, 12/s), JSON inputs (20/s, at most four actions a message). Nothing reaches storage: the match rides one socket attachment.
 - **Voice:** zone `block-frenzy`, its own voice group, blended in from the arcade down the zipline (`voice-blend.js`), isolated on arrival.

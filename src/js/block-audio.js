@@ -142,7 +142,7 @@
       rescue: () => chord([0, 4, 7], 0.06, "triangle", 0.06, 0.18),
       drop: (k = 1) => blip("triangle", NOTE(7), NOTE(-5), 0.01, 0.05, 0.3, 0.2 * k),
       pass: (k = 1) => blip("sine", 300, 700, 0.02, 0.1, 0.2, 0.16 * k),
-      // Landing in the viewing chairs: two soft high sine notes, nothing like a capture.
+      // Arriving at the viewing spot: two soft high sine notes, nothing like a capture.
       seat: () => { blip("sine", NOTE(19), NOTE(24), 0.02, 0.1, 0.35, 0.1); blip("sine", NOTE(24), NOTE(24), 0.02, 0.06, 0.4, 0.07, 0.12); },
       // A block mined: three warm low triangle notes rising, short and soft, with no high edge or tail.
       capture: () => { blip("triangle", NOTE(3), NOTE(3), 0.01, 0.07, 0.12, 0.16); blip("triangle", NOTE(7), NOTE(7), 0.01, 0.07, 0.12, 0.16, 0.09); blip("triangle", NOTE(12), NOTE(12), 0.01, 0.1, 0.18, 0.18, 0.18); },

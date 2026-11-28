@@ -154,7 +154,7 @@
   // Came through the arcade's watch door: every way out goes back in front of it, and full chairs turn the viewer back there.
   let doorVisit = false, chairsBounce = false;
   const goHome = () => go(home, doorVisit ? WIRE.DOOR_PLACE : undefined);
-  let chairsGreeted = false, chairsFull = false, watchVisit = false, deckLive = false, round = null, you = 0, liveCast = null, kept = null, arrival = true, deck = null, deckYaw = 0, deckPitch = 0;
+  let chairsGreeted = false, chairsFull = false, watchVisit = false, deckLive = false, round = null, you = 0, liveCast = null, kept = null, arrival = true, deck = false, deckYaw = 0, deckPitch = 0;
   const onDeck = () => phase === "watch";
   // The scope's +/- keys, the wheel and a pinch all zoom the chairs' view: the game's own zoom controls, nothing new.
   const zoomDeck = (k) => { audio.unlock(); deckZoomTo = BL.blockViewer.zoomBy(deckZoomTo, k); };
@@ -542,18 +542,16 @@
     el.watchReg.hidden = !round;
     you = -9;
     phase = "watch"; paused = false;
-    deck ||= BL.blockViewer.buildChairs(createNode, addChild, place(createNode()), SIM.ARENA);
-    BL.blockViewer.place(deck, SIM.ARENA);
+    deck = true;
     deckZoom = deckZoomTo = 1; deckYaw = deckPitch = 0;
     deckBoard.blue = -1; deckCaps.total = -1; deckCapSeen.length = 0; deckSteals.was.length = 0; deckSteals.count.length = 0; deckSteals.home.blue = deckSteals.home.red = false;
     el.viewerCaps.textContent = ""; el.viewerCaps.hidden = true;
     el.gameButtons(true);
-    // A late arrival skips the title card: the chairs are the place they came to.
+    // A late arrival skips the title card: the viewing spot is the place they came to.
     document.querySelector('[data-intro="block"]:not([hidden]) [data-action="intro-go"]')?.click();
     audio.unlock();
     if (!chairsGreeted) { chairsGreeted = true; audio.cues.seat(); }
     el.viewerBoard.hidden = false;
-    deck.visible = true;
     // Only the match below: no drifting clouds, campfire or sounds of its own.
     for (const n of mapClouds) n.visible = false;
     for (const n of skyClouds) n.visible = false;
@@ -577,7 +575,9 @@
   const hearCaptures = () => { for (let n = BL.blockViewer.newCaptures(sim, deckCaps, !!round && round.hasFrame); n > 0; n--) audio.cues.capture(); };
   const deckView = (dt) => {
     deckZoom = BL.blockViewer.easeZoom(deckZoom, deckZoomTo, dt, hookStill);
-    BL.blockViewer.look(camera, SIM.ARENA, deckYaw, deckPitch, setVec, deckZoom);
+    // The view's shape frames the field (`blockViewer.frame`): a phone held upright gets its own framing.
+    const aspect = el.canvas.width / (el.canvas.height || 1);
+    BL.blockViewer.look(camera, SIM.ARENA, deckYaw, deckPitch, setVec, deckZoom, aspect);
     hearCaptures();
     BL.blockViewer.trackSteals(sim, deckSteals);
     const statRows = BL.blockViewer.statRows(sim, deckSteals, deckCapSeen);
@@ -625,7 +625,7 @@
     if (!play) chairsFull = false;
     el.liveTitle.textContent = play ? "Round under way" : m && m.phase === "countdown" ? "Starting…" : "Multiplayer";
     const solo = !!m && m.phase === "lobby" && count === 1 && me, waiting = solo && isReady();
-    el.liveStatus.textContent = chairsFull ? "The viewing chairs are full. You can register for the next round or go back."
+    el.liveStatus.textContent = chairsFull ? "The viewing spots are full. You can register for the next round or go back."
       : !m || !count && !play ? "Play with whoever's here. The first to join picks the map, size and scoring. NPCs fill any empty seats."
       : waiting ? `You're first in · waiting for someone to join · ${matchLine(m)}. You can still change the size here and the map below.`
       : solo ? `You're first in, so you pick · ${matchLine(m)}. Pick the size here and the map below, then start now or wait for players.`
@@ -646,8 +646,8 @@
     el.liveReady.textContent = me && isReady() ? "Not ready" : "Ready!";
     el.liveWatch.hidden = !(play && !seated && phase === "board");
     if (el.watch) {
-      el.watchLine.textContent = !play ? (me ? "No round running. You've joined: open Main menu to ready up." : "No round running. Join here, or open the lobby from Main menu.") : me ? "You're registered for the next round. It opens when this one ends." : "Round under way · you're in the viewing chairs. You can't enter until it ends.";
-      el.watchReg.textContent = me ? "Leave match" : "Join next round";
+      el.watchLine.textContent = !play ? (me ? "No round running. You've joined: open Main menu to ready up." : "No round running. Join here, or open the lobby from Main menu.") : me ? "You're registered for the next round. It opens when this one ends." : "Round under way · you're watching from the viewing spot. You can't enter until it ends.";
+      el.watchReg.textContent = me ? "Leave match" : "Join next round"; el.watchReg.classList.toggle("foot-primary", !me);
     }
     // The round over or gone: the deck, or a round whose host vanished, goes back to the shared menu.
     if (watchVisit && onDeck() && deckLive && !(play)) { deckLive = false; SIM.reset(sim, sim.seed); deckSteals.was.length = 0; deckSteals.count.length = 0; deckSteals.home.blue = deckSteals.home.red = false; }
@@ -684,7 +684,7 @@
     if (round && chairsFull) renderLive(round.match);
     undeckRender();
     if (el.gameButtons) el.gameButtons(false);
-    if (deck) { deck.visible = false; for (const n of mapClouds) n.visible = true; if (fireNode) fireNode.visible = true; if (dancers) for (const d of dancers) d.visible = true; }
+    if (deck) { for (const n of mapClouds) n.visible = true; if (fireNode) fireNode.visible = true; if (dancers) for (const d of dancers) d.visible = true; }
     if (onDeck() && round) round.watchFeed(false);
     you = 0; watchVisit = false; chairsGreeted = false;
     if (kept) { Object.assign(selection, kept); kept = null; liveCast = null; if (sim) { const was = sim.map; recast(); if (was !== selection.map) { buildMap(); mapBase = null; } } }
@@ -3297,7 +3297,7 @@
     // The page's other scenes draw at their tier's own density.
     renderer.setScale(1);
     chairsGreeted = false;
-    deck = null; you = 0; kept = null; liveCast = null; watchVisit = false; panelOpen = false;
+    deck = false; you = 0; kept = null; liveCast = null; watchVisit = false; panelOpen = false;
     BL.net.setBody(null);
     audio.dispose();
     audio = null;

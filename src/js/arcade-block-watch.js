@@ -1,8 +1,8 @@
 // The way to watch Block Frenzy: a walk-through doorway in the east wall of its entry hall (`BLOCK_HALL`), between the
 // torch and the last map picture, with the shared Ooga portal in it. It is separate from the zipline, which stays the way
 // to play. Layout, the signed-in rule and the door's walking are pure, for scene-arcade.js and the tests. `goToWatchDeck`
-// is the one place the viewer leaves for Block Frenzy's viewing chairs. The way back is `PLACE`: the chairs send a viewer
-// to `go("arcade", PLACE)` and they stand at `ARRIVAL`; `PLACE_FULL` is the same, for five chairs already taken.
+// is the one place the viewer leaves for Block Frenzy's viewing spot. The way back is `PLACE`: the viewing spot sends a
+// viewer to `go("arcade", PLACE)` and they stand at `ARRIVAL`; `PLACE_FULL` is the same, for five viewers already there.
 (() => {
   "use strict";
   const BL = window.BL;
@@ -27,8 +27,8 @@
   const onBlockGround = (x, z) => x > BH.x0 - SIDE && x < BH.x1 + SIDE && z < HALL.back;
   const atPortal = (x, z, feet) => onBlockGround(x, z) && x >= DOOR.plane - 0.05 && x <= DOOR.reach && z > DOOR.z0 && z < DOOR.z1 && Math.abs(feet - Y) < 0.6;
   const mayWatch = (signedIn, debug) => !!signedIn || !!debug;
-  const SIGN_IN = "Sign in to watch Block Frenzy", FULL = "The viewing chairs are full. Try again in a moment";
-  // Off to the chairs, through the scene's own way of changing scene (`open`).
+  const SIGN_IN = "Sign in to watch Block Frenzy", FULL = "The viewing spots are full. Try again in a moment";
+  // Off to the viewing spot, through the scene's own way of changing scene (`open`).
   const goToWatchDeck = (open) => BL.blockLive.openWatchDeck(open);
   BL.arcadeBlockWatch = { SIGN_Y, BLADE_Y, DOOR, APERTURE, PLACE, PLACE_FULL, ARRIVAL, SIGN_IN, FULL, doorDepth, onBlockGround, atPortal, mayWatch, goToWatchDeck };
 })();

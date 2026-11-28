@@ -8843,29 +8843,31 @@ const gameRulesChecks = async () => {
     record("block live: the watch-deck entry opens the game on the deck, and with no round a page sends nothing", wentTo[0] === "block" && wentTo[1] === W.WATCH_DECK_PLACE && idle.live.role === "none" && idle.sent.length === 0 && idle.bins.length === 0);
     idle.live.dispose();
     {
-      const viewerCtx = { window: { BL: { models: { box: () => ({}) } } } };
+      const viewerCtx = { window: { BL: {} } };
       runInNewContext(await readFile(new URL("../src/js/block-viewer.js", import.meta.url), "utf8"), viewerCtx);
-      const V = viewerCtx.window.BL.blockViewer, node = (o = {}) => ({ position: { x: 0, y: 0, z: 0 }, ...o, kids: [] }), arena = { L: 20 }, kids = [], cam = { position: {}, target: {} };
+      const V = viewerCtx.window.BL.blockViewer, arena = S.ARENAS.town, cam = { position: {}, target: {} };
       const set = (v, x, y, z) => { v.x = x; v.y = y; v.z = z; };
-      const chairs = V.buildChairs(node, (p, ...c) => { p.kids.push(...c); kids.push(...c); }, node(), arena);
       V.look(cam, arena, 0, 0, set);
       const opts = {}; for (const k of ["clear", "horizon", "zenith", "sky"]) opts[k] = new Float32Array(3); V.white(opts);
-      record("block live: the viewing chairs are a row of plain chairs above the field, on a white backdrop", kids.length === 11 && chairs.position.y > 5 && cam.position.y > cam.target.y && [...opts.sky].every(v => v === 1) && opts.clouds === 0 && opts.bloomStrength === 0 && opts.sea === null);
-      // The default view holds every map's whole island; measured by projecting its rim through the camera.
-      const fits = (A, aspect) => {
-        const f = {}; V.frame(A, f);
-        const dx = 0, dy = -Math.sin(f.down), dz = -Math.cos(f.down), ux = 0, uy = Math.cos(f.down), uz = -Math.sin(f.down);
-        const tanV = Math.tan(V.FOV / 2), tanH = tanV * aspect;
-        for (let i = 0; i < 64; i++) {
-          const a = i / 64 * Math.PI * 2, x = A.W * Math.cos(a), y = -f.y, z = A.L * Math.sin(a) - f.z;
-          const depth = dx * x + dy * y + dz * z, up = ux * x + uy * y + uz * z, side = x;
-          if (depth <= 0 || Math.abs(up / depth) > tanV * 1.02 || Math.abs(side / depth) > tanH) return false;
-        }
-        return true;
+      record("block live: the viewing spot has no chairs and looks at the field from above it, on a white backdrop", V.buildChairs === undefined && V.place === undefined && cam.position.y > 5 && cam.position.y > cam.target.y && [...opts.sky].every(v => v === 1) && opts.clouds === 0 && opts.bloomStrength === 0 && opts.sea === null);
+      // The default view looks across the field from its long side: a point projected through the camera `look` places,
+      // as [right, up] in units of the view's half width and half height (beyond 1 is off screen), or null behind it.
+      const shot = (A, aspect) => {
+        const c = { position: {}, target: {} }; V.look(c, A, 0, 0, set, 1, aspect);
+        const p = c.position, fx0 = c.target.x - p.x, fy0 = c.target.y - p.y, fz0 = c.target.z - p.z, n = Math.hypot(fx0, fy0, fz0), fx = fx0 / n, fy = fy0 / n, fz = fz0 / n;
+        const rl = Math.hypot(fz, fx), rx = -fz / rl, rz = fx / rl, ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;
+        const tanV = Math.tan(c.fov / 2), tanH = tanV * aspect;
+        return (x, y, z) => { const dx = x - p.x, dy = y - p.y, dz = z - p.z, depth = dx * fx + dy * fy + dz * fz; return depth <= 0 ? null : [(dx * rx + dz * rz) / depth / tanH, (dx * ux + dy * uy + dz * uz) / depth / tanV]; };
       };
-      const all = Object.keys(S.ARENAS).every(k => fits(S.ARENAS[k], 16 / 9));
-      const seats = Object.keys(S.ARENAS).every(k => { const f = V.frame(S.ARENAS[k], {}); return f.y < 46 && f.y > 0; });
-      record("block live: the chairs sit closer and still hold the whole field at the default view", all && seats);
+      const on = (q, k = 1) => !!q && Math.abs(q[0]) <= k && Math.abs(q[1]) <= k;
+      // Wide: every map's whole field (its four corners, and its forts' stands) is in view, blue's end on the left and red's on the right.
+      const wide = Object.keys(S.ARENAS).every(k => { const A = S.ARENAS[k], see = shot(A, 16 / 9), blue = see(A.stands.blue.x, 0, A.stands.blue.z), red = see(A.stands.red.x, 0, A.stands.red.z);
+        return [[1, 1], [1, -1], [-1, 1], [-1, -1]].every(([a, b]) => on(see(a * A.fieldW, 0, b * A.fieldL))) && on(blue) && on(red) && blue[0] < -0.4 && red[0] > 0.4; });
+      // A tall phone: both forts' stands in view and spread across most of the width, so the field isn't a thin strip.
+      const tall = Object.keys(S.ARENAS).every(k => { const A = S.ARENAS[k], see = shot(A, 390 / 844), blue = see(A.stands.blue.x, 0, A.stands.blue.z), red = see(A.stands.red.x, 0, A.stands.red.z);
+        return on(blue) && on(red) && blue[0] < -0.7 && red[0] > 0.7; });
+      const seats = Object.keys(S.ARENAS).every(k => [16 / 9, 390 / 844].every(a => { const f = V.frame(S.ARENAS[k], {}, a); return f.y < 60 && f.y > 0 && f.x > S.ARENAS[k].fieldW; }));
+      record("block live: the viewing spot looks across the field from its side, blue's fort left and red's right, the whole field in view on a wide screen and the forts spread across a tall phone", wide && tall && seats, JSON.stringify({ wide, tall, seats }));
       record("block live: viewer zoom stops at the default view and a maximum, eases, and is direct under Calm", V.zoomBy(1, 0.5) === 1 && V.zoomBy(3, 9) === V.ZOOM_MAX && V.clampZoom(2) === 2 && V.easeZoom(1, 2, 0.05, false) > 1 && V.easeZoom(1, 2, 0.05, false) < 2 && V.easeZoom(1, 2, 0.05, true) === 2);
       const seen = { total: -1 }, capSim = { score: { blue: 1, red: 2 } };
       const onSit = V.newCaptures(capSim, seen), none = V.newCaptures(capSim, seen);
@@ -10464,7 +10466,7 @@ const gameRulesChecks = async () => {
       const tags = [...page.matchAll(/<script src="js\/([\w.-]+\.js)"(?: data-defer="([\w-]+)")?><\/script>/g)], groupOf = new Map(tags.map(([, f, g]) => [f, g || ""])), owners = new Map();
       for (const [f, g] of groupOf) if (g) for (const [, name] of source(f).matchAll(/BL\.(\w+)\s*=(?!=)/g)) if (!owners.has(name)) owners.set(name, g);
       for (const [f, g] of groupOf) if (!g && !f.endsWith(".gen.js")) for (const [, name] of source(f).matchAll(/BL\.(\w+)\s*=(?!=)/g)) owners.delete(name);
-      // Each of these is read only on a path that has loaded its group: the viewing chairs, and a line laid in DSB Land.
+      // Each of these is read only on a path that has loaded its group: the viewing spot, and a line laid in DSB Land.
       const loaded = { "scene-block.js": ["blockViewer"], "zipline.js": ["dsbCoast"] };
       const stray = [...groupOf.keys()].filter(f => /^(block-|scene-block|zipline|arcade-scene-models)/.test(f)).flatMap(f => [...new Set([...source(f).matchAll(/BL\.(\w+)/g)].map(m => m[1]))]
         .filter(n => owners.has(n) && owners.get(n) !== groupOf.get(f) && !(loaded[f] || []).includes(n)).map(n => f + ": " + n));
