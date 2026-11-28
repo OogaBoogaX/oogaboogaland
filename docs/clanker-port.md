@@ -25,7 +25,8 @@ The clanker gorillas are being rebuilt on a new rig, worked out in `untracked/cl
   - its stance comes from the driver's chest pitch, and its gait phase and stride from the driver's;
   - `pose` is far too slow to run per gorilla per frame (250 to 350 µs, allocating), so poses are sampled once on a rig of their own, on a grid (stance in 20 steps, phase in 24, the rest in quarters);
   - each frame blends the samples either side, which allocates nothing.
-- **Retargeted head and limbs.** When the driver does something the new rig has no pose for, or a scene has turned its parts, the head and limbs take the driver's bones, eased over a fifth of a second. That covers a pound, a chest beat, a drag, lab or desk work, grooming, a roll, a swim and eating. The torso stays native, with the stance from the pitch, so the welded belly and live sleeve stay whole.
+- **Native moves.** The driver's own moves are the new rig's poses too (`act` fields in `pose`, b201 in rig.mjs, each unchanged at zero): the ground pound (`pound`: fists overhead; `slam`: struck down onto the ground ahead), the worker's shorter pound, the chest beat (`beat`), the drag and throw (`drag`, `throw`, a straight left arm where the driver holds the Ooga), the swim (`swim`, a dog paddle held at the stance's height), grooming (`groom`), seated rest fidgets (`rest`), eating (`eat`), the B.C.A. desk seat (`seat`, on the chair's seat over its swivel; `type`, `tap`, `abacus`), lab bench work (`reach`, `touch`, `carry`, the left arm at the driver's angle) and the roll (`roll`, tucked). The body reads the driver's state into a move, its hand or work, and an amount; periodic moves take the phase grid in place of the gait's. The amount is sampled on a grid of 12 and blended with stance and phase (8 samples while it is between steps), a change of move eases from the last pose shown over a fifth of a second, and the head takes the driver's own look while seated or at a desk. A smash runs one path through its amount: rising to a third, the strike to two thirds, the recovery to 1. The sample cache holds 1,600 poses a form and drops its older half when full; the hub with every Ooga working fills about 600.
+- **Retargeted head and limbs.** When the driver leans back on its hands (the `lean-*` lounges), which the new rig still has no pose for, or a scene has turned its parts, the head and limbs take the driver's bones, eased over a fifth of a second. The torso stays native, with the stance from the pitch, so the welded belly and live sleeve stay whole. The body's easing follows the time the driver posed through (`notePosed(dt)`), not the wall clock.
 - **Whole-body turns.** The driver's hips (rolling, the slope underfoot) tilt the whole body; lying and sitting are the new rig's own poses.
 - **Sockets.** `agent.socket(name)` gives a node that follows a driver part, for what a scene hangs on the gorilla. Anything still hung on a driver part is moved onto its socket. The lab item is held on the left arm's socket.
 - **Outlines.** The outline registry (`object-guides.js`) reads a geometry's `outline` stand-in where it has one: each new mesh's surface in 10 cm blocks, merged. The torso welds share one stand-in and the live sleeve has none.
@@ -37,7 +38,8 @@ Status of this design (next steps below):
 - **Boot time:**
   - **Ordinary boot:** the hub is ready about 0.75 s later than with the old body (3.8 s against 3.1 s). Building the fur form's parts and 41 torso welds moved into the hub's slices, but its cost is still on the way to ready.
   - **Every Ooga working** (`status=clankin`): ready at 14.7 s against 11.5 s. That cost is the perception pass asking whether each gorilla is concealed from the camera (`concealed`, then `cameraPropFaceBlocked`), patch by patch. The stand-ins (solid, in 15 cm blocks, 856 faces a gorilla against the old body's 1,931) brought it down from 23 s. What remains is mostly the new rig's 14 meshes against the old one's 8.
-- **Retargeted limbs** keep the old rig's straight arm (the forearm stays at its rest bend), and held things sit where the old hand was. Those are the next refinements, with the new moves themselves.
+- **Retargeted limbs** (now only the lean lounges and scene-written poses) keep the old rig's straight arm (the forearm stays at its rest bend). Held things (the dragged Ooga, a lab item) still sit at the driver's hand: the native drag and carry point a straight arm the driver's way, so the new fist is near it, not on it.
+- **The new body stands about 0.45 m behind the driver's root** (the rig's hips sit behind its origin). The desk seat moves it forward onto the chair (`SEATFWD`); elsewhere it is as before.
 - **The hub's browser checks** (`node test/run.mjs --browser-only hub`): after the fixes, every check that failed with the body passes except these:
   - **"gorilla traversal":** stepping off a crate the visible body must move less than 0.3 m a step. The controller's support offset now carries onto the body; whether that is enough is not yet confirmed.
   - **"live nameplates":** a gorilla's live nameplate must stand where its NPC name tooltip does. The nameplate now measures the drawn head (`agent.visualHead`); whether the tooltip measures the same is not yet confirmed.
@@ -137,17 +139,10 @@ A survey of every `BL.agent` call site and every movement the old rig's `poseMan
   - a throw: a wind-up and release that `throwProgress` drives.
 
 ### Actions and poses the new rig has no form for yet
-- **Ground pound:** a charge, a slam and the triple-tap combo (`pound`, `poundCharge`, `BL.agent.POUND`, `TRIPLE`).
-- **Other moves:** chest beat (`beat`), the rage smash (`smash`, `cancelSmash`) and the poke reaction (`poke`).
-- **Eating:** feeding with the mouth opening (`feed`, `mouth`, `openingSettle`).
-- **Grooming** (`groom`, `groomPhase`, `groomSide`) and **rolling** (`roll`, `rollAngle`, `rollSide`).
+- **Done natively** (see Native moves): the pound, charge and smash (`pound`, `poundCharge`, `smash`), the chest beat (`beat`, and the lab Agent's `poke`), eating (`feed`, without a jaw yet), grooming and seated rest (`groom`, `groomPhase`, `groomSide`, `sitLook`), the roll's tuck (`roll`; its spin is still the driver's whole-body turn), the swim, the B.C.A. desk seat, typing, the abacus and looking about (the head takes `officeLook`), and lab typing, touch and carry. Still to do: the triple-tap combo's own look, `sitShift`'s lean, the abacus hand following the beads (`officeHands`), the lab item and dragged Ooga in the new fist, and the `lean-*` lounges.
 - **Jumping:** take-off and landing phases (`takeoff`, `landing`).
-- **Swimming:** the dog paddle (`swim`).
-- **Sitting and lying:**
-  - sitting with a look and a shift (`sitLook`, `sitShift`), and the B.C.A. desk seat with its swivel chair;
-  - lying in the 20 HQ and basement beds, and the sleep beam's landing check against a bed's pose.
-- **Lab work:** bench reach, squeeze, die roll, run-in, the touch screen (`labWork`, `labReach`, `labSqueeze`, `labRoll`, `labRunIn`, `labTouchArm`) and `workExit`.
-- **Office work:** typing, the abacus and looking about (`officeWork`, `officeHands`, `officeLook`, `officePhase`).
+- **Lying** in the 20 HQ and basement beds, and the sleep beam's landing check against a bed's pose.
+- **Lab work** still on the driver: squeeze, the die roll's own look, run-in (`labSqueeze`, `labRoll`, `labRunIn`, `labTouchArm`) and `workExit`.
 - **Gaits:** the knuckle, upright and run gaits mapped onto `pose`'s gait (`walkGait`, `walkPhase`, `BL.agent.GAITS`), and `supportOffset`.
 
 ### Scenes that pose the old parts directly
