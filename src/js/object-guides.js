@@ -135,7 +135,7 @@
         const face = readFace(geometry, index);
         if (face.visibility !== false && face.i.length > 2) slots += face.i.length - 2;
       }
-      const v = geometry.verts, triangleIndices = new Uint32Array(slots * 3), triangleBounds = new Float64Array(slots * 6), triangleCoverFaces = new Int32Array(slots), coverFaces = [], edgeMap = new Map(), planes = new Map();
+      const v = geometry.verts, triangleCoverFaces = new Int32Array(slots), coverFaces = [], edgeMap = new Map(), planes = new Map();
       let count = 0;
       // Witnesses dedupe by rounded coordinates, first point kept, in insertion order: an open-addressing table of
       // id + 1 over each id's rounded key triplet, doubled at half load.
@@ -190,7 +190,7 @@
         const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2], vx = v[c] - v[a], vy = v[c + 1] - v[a + 1], vz = v[c + 2] - v[a + 2];
         let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
         const length = Math.hypot(nx, ny, nz);
-        if (length < EPS) continue;
+        if (length < EPS) { triangleCoverFaces.fill(-1, count, count + face.i.length - 2); count += face.i.length - 2; continue; }
         nx /= length; ny /= length; nz /= length;
         let convex = true;
         for (let j = 0; j < face.i.length && convex; j++) {
@@ -222,13 +222,7 @@
         const nu = Math.max(1, Math.ceil((bounds[u + 3] - bounds[u]) / SURFACE_STEP)), nw = Math.max(1, Math.ceil((bounds[w + 3] - bounds[w]) / SURFACE_STEP));
         interior((u === 0 ? centerX : u === 1 ? centerY : centerZ) / face.i.length, (w === 0 ? centerX : w === 1 ? centerY : centerZ) / face.i.length);
         for (let iu = 0; iu < nu; iu++) for (let iw = 0; iw < nw; iw++) interior(bounds[u] + (bounds[u + 3] - bounds[u]) * (iu + 0.5) / nu, bounds[w] + (bounds[w + 3] - bounds[w]) * (iw + 0.5) / nw);
-        for (let j = 1; j < face.i.length - 1; j++, count++) {
-          const b = face.i[j] * 3, c = face.i[j + 1] * 3, t = count * 3, box = count * 6;
-          triangleIndices[t] = a; triangleIndices[t + 1] = b; triangleIndices[t + 2] = c;
-          triangleCoverFaces[count] = coverIndex;
-          triangleBounds[box] = Math.min(v[a], v[b], v[c]); triangleBounds[box + 1] = Math.min(v[a + 1], v[b + 1], v[c + 1]); triangleBounds[box + 2] = Math.min(v[a + 2], v[b + 2], v[c + 2]);
-          triangleBounds[box + 3] = Math.max(v[a], v[b], v[c]); triangleBounds[box + 4] = Math.max(v[a + 1], v[b + 1], v[c + 1]); triangleBounds[box + 5] = Math.max(v[a + 2], v[b + 2], v[c + 2]);
-        }
+        for (let j = 1; j < face.i.length - 1; j++, count++) triangleCoverFaces[count] = coverIndex;
         for (let j = 0; j < face.i.length; j++) {
           const a = face.i[j] * 3, b = face.i[(j + 1) % face.i.length] * 3, ak = vertexIds[a / 3], bk = vertexIds[b / 3], key = ak < bk ? ak * 67108864 + bk : bk * 67108864 + ak;
           const existing = edgeMap.get(key);
@@ -336,23 +330,15 @@
         }
       }
       if (!count) return null;
-      const indices = Uint32Array.from({ length: count }, (_, i) => i), scratch = BL.math.sortScratch(count), bounds = [], left = [], right = [], starts = [], counts = [];
-      // Centroid sort keys computed once rather than inside every comparison.
-      const keys = new Float64Array(count * 3);
-      for (let i = 0; i < count; i++) for (let axis = 0; axis < 3; axis++) keys[i * 3 + axis] = triangleBounds[i * 6 + axis] + triangleBounds[i * 6 + axis + 3];
-      const build = (lo, hi) => {
-        const id = left.length, b = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
-        for (let n = lo; n < hi; n++) { const at = indices[n] * 6; for (let axis = 0; axis < 3; axis++) { b[axis] = Math.min(b[axis], triangleBounds[at + axis]); b[axis + 3] = Math.max(b[axis + 3], triangleBounds[at + axis + 3]); } }
-        bounds.push(...b); left.push(-1); right.push(-1); starts.push(lo); counts.push(hi - lo);
-        if (hi - lo <= 8) return id;
-        let axis = 0; if (b[4] - b[1] > b[3] - b[0]) axis = 1; if (b[5] - b[2] > b[axis + 3] - b[axis]) axis = 2;
-        BL.math.sortByKey(indices, lo, hi, keys, 3, axis, scratch);
-        const middle = (lo + hi) >> 1;
-        left[id] = build(lo, middle); right[id] = build(middle, hi); counts[id] = 0;
-        return id;
-      };
-      if (count) build(0, count);
-      cached = { lines: edgeLines, samples, sampleBounds, coverFaces: new Uint32Array(coverFaces), triangleCoverFaces: count === slots ? triangleCoverFaces : triangleCoverFaces.slice(0, count), edgeStarts, edgeNormals: new Float64Array(edgeNormals), vertices: v, triangleIndices: count === slots ? triangleIndices : triangleIndices.slice(0, count * 3), indices, bounds: new Float64Array(bounds), left: new Int32Array(left), right: new Int32Array(right), starts: new Uint32Array(starts), counts: new Uint32Array(counts), sphere: BL.scene.boundsOf(geometry) };
+      const shared = BL.characterVisibility.meshOf(geometry), bounds = [], left = [], right = [], starts = [], counts = [];
+      count = shared.indices.length / 3;
+      for (const node of shared.nodes) {
+        bounds.push(...node.box);
+        left.push(node.left); right.push(node.right);
+        starts.push(node.from); counts.push(node.to - node.from);
+      }
+      const indices = shared.order, triangleIndices = shared.indices;
+      cached = { lines: edgeLines, samples, sampleBounds, coverFaces: new Uint32Array(coverFaces), triangleCoverFaces: count === slots ? triangleCoverFaces : triangleCoverFaces.slice(0, count), edgeStarts, edgeNormals: new Float64Array(edgeNormals), vertices: v, triangleIndices, indices, bounds: new Float64Array(bounds), left: new Int32Array(left), right: new Int32Array(right), starts: new Uint32Array(starts), counts: new Uint32Array(counts), sphere: BL.scene.boundsOf(geometry) };
       const bake = { faces: BL.compactGeometry?.storageOf(geometry) ? null : geometry.faces.map((face) => face.visibility === false ? null : face.i), compact: BL.compactGeometry?.storageOf(geometry) || null, record: cached };
       if (baked) baked.push(bake); else bakes.set(geometry.verts, [bake]);
       stats.triangles += count; stats.triangleBytes += cached.triangleIndices.byteLength; stats.samples += samples.length / 3;
@@ -382,7 +368,7 @@
         group.actorView = new Float64Array(20); group.actorView.fill(NaN);
         group.witnessEntry = group.witnessSource = null; group.witnessAt = -1;
         group.cameraWitnessEntry = group.cameraWitnessSource = null; group.cameraWitnessAt = -1;
-        group.boundaryStamp = -1; group.boundaryDepth = 0; group.boundaryEntries = [null, null]; group.boundaryGrid = null;
+        group.boundaryStamp = -1; group.boundaryDefer = false; group.boundaryDepth = 0; group.boundaryEntries = [null, null]; group.boundaryGrid = null;
         ownerEntries.set(owner, group); ownerGroups.push(group);
       }
       return group;
@@ -399,7 +385,7 @@
           let entry = entries.get(node);
           if (!entry) {
             const group = groupOf(owner);
-            entry = { node, owner, group, character, geometry, hitTriangle: -1, capacity: 0, source: node.geometry, inverse: BL.math.mat4.create(), world: new Float64Array(16), visible: false, shown: false, clipMinY: -Infinity, worldMinY: -Infinity, worldMaxY: Infinity, x: 0, y: 0, z: 0, radius: 0, hx: 0, hy: 0, hz: 0, scaleX: 0, scaleY: 0, scaleZ: 0, centerY: 0, halfY: 0, boundsGeometry: null, boundaryBounds: new Float64Array(4), boundaryTriangles: new Float64Array(0), boundaryBoxes: new Float64Array(0), boundaryNodes: new Float64Array(0), boundaryRay: new Float64Array(12), boundaryHits: new Int32Array([-1, -1]), boundaryGrid: null, boundaryReserve: 0, boundaryNodeReserve: 0 };
+            entry = { node, owner, group, character, geometry, hitTriangle: -1, capacity: 0, source: node.geometry, inverse: BL.math.mat4.create(), world: new Float64Array(16), visible: false, shown: false, clipMinY: -Infinity, worldMinY: -Infinity, worldMaxY: Infinity, x: 0, y: 0, z: 0, radius: 0, hx: 0, hy: 0, hz: 0, scaleX: 0, scaleY: 0, scaleZ: 0, centerY: 0, halfY: 0, boundsGeometry: null, coarseStamp: -1, coarseBounds: new Float64Array(4), boundaryStamp: -1, boundaryBounds: new Float64Array(4), boundaryTriangles: new Float64Array(0), boundaryBoxes: new Float64Array(0), boundaryNodes: new Float64Array(0), boundaryRay: new Float64Array(12), boundaryHits: new Int32Array([-1, -1]), boundaryGrid: null, boundaryReserve: 0, boundaryNodeReserve: 0 };
             registered.push(entry); entries.set(node, entry); group.push(entry);
             descriptorUsers.get(geometry)?.add(entry);
           }
@@ -449,6 +435,7 @@
       let capacity = 0;
       stats.boundaryGridBytes = stats.boundaryGridReferences = 0;
       for (const entry of registered) {
+        entry.coarseStamp = entry.boundaryStamp = -1;
         if (!entry.group.provider) capacity += entry.capacity;
         const grid = entry.boundaryGrid;
         if (grid) {
@@ -890,7 +877,7 @@
       while (top) {
         const id = stack[--top];
         if (!boxHit(g.bounds, id * 6, x, y, z, dx, dy, dz)) continue;
-        if (!g.counts[id]) { stack[top++] = g.left[id]; stack[top++] = g.right[id]; continue; }
+        if (g.left[id] >= 0) { stack[top++] = g.left[id]; stack[top++] = g.right[id]; continue; }
         for (let i = g.starts[id], end = i + g.counts[id]; i < end; i++) {
           const at = g.indices[i] * 9;
           if (triangleBlocks(e, at, x, y, z, dx, dy, dz, ay, vy)) { e.hitTriangle = at; return false; }
@@ -1529,6 +1516,28 @@
       group.actorResult = present;
       return group.actorResult;
     };
+    const coarseBounds = (entry) => {
+      const bounds = entry.coarseBounds, box = entry.geometry.sphere, m = boundaryView;
+      BL.math.mat4.multiply(m, cameraView, entry.world);
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, front = false, crosses = false;
+      // A positive denominator makes each projected coordinate extremal at an AABB corner. Any near-plane crossing
+      // stays unbounded instead of guessing a finite intersection rectangle; wholly behind boxes stay empty.
+      for (let corner = 0; corner < 8; corner++) {
+        const x = corner & 1 ? box.max[0] : box.min[0], y = corner & 2 ? box.max[1] : box.min[1], z = corner & 4 ? box.max[2] : box.min[2];
+        const depth = -(m[2] * x + m[6] * y + m[10] * z + m[14]);
+        if (depth <= near) { crosses = true; continue; }
+        front = true;
+        const px = (m[0] * x + m[4] * y + m[8] * z + m[12]) / depth, py = (m[1] * x + m[5] * y + m[9] * z + m[13]) / depth;
+        minX = Math.min(minX, px); minY = Math.min(minY, py); maxX = Math.max(maxX, px); maxY = Math.max(maxY, py);
+      }
+      if (!front) { bounds[0] = bounds[1] = Infinity; bounds[2] = bounds[3] = -Infinity; }
+      else if (crosses) { bounds[0] = bounds[1] = -Infinity; bounds[2] = bounds[3] = Infinity; }
+      else {
+        const pad = Math.max(1, Math.abs(minX), Math.abs(minY), Math.abs(maxX), Math.abs(maxY)) * EPS;
+        bounds[0] = minX - pad; bounds[1] = minY - pad; bounds[2] = maxX + pad; bounds[3] = maxY + pad;
+      }
+      entry.coarseStamp = collectStamp;
+    };
     const boundaryBounds = (entry) => {
       stats.boundaryBuilds++;
       boundaryStorage(entry);
@@ -1591,7 +1600,7 @@
       const nodes = entry.boundaryNodes, boxes = entry.boundaryBoxes;
       for (let id = geometry.counts.length - 1; id >= 0; id--) {
         const at = id * 4;
-        if (geometry.counts[id]) {
+        if (geometry.left[id] < 0) {
           let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
           for (let n = geometry.starts[id], end = n + geometry.counts[id]; n < end; n++) {
             const box = geometry.indices[n] * 4;
@@ -1646,13 +1655,13 @@
       }
       grid.active = true; stats.boundaryGridBuilds++;
     };
-    const indexBoundary = (group) => {
+    const indexBoundary = (group, deferTriangles) => {
       const grid = group.boundaryGrid;
       if (!grid) return;
       grid.active = false;
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (let i = 0; i < group.length; i++) if (group[i].visible) {
-        const b = group[i].boundaryBounds;
+        const b = deferTriangles ? group[i].coarseBounds : group[i].boundaryBounds;
         minX = Math.min(minX, b[0]); minY = Math.min(minY, b[1]); maxX = Math.max(maxX, b[2]); maxY = Math.max(maxY, b[3]);
       }
       const width = maxX - minX, height = maxY - minY;
@@ -1664,7 +1673,7 @@
       // Each bucket can hold every part. Registration reserves this fixed
       // capacity, and insertion keeps the original owner-part order.
       for (let i = 0; i < group.length; i++) if (group[i].visible) {
-        const b = group[i].boundaryBounds;
+        const b = deferTriangles ? group[i].coarseBounds : group[i].boundaryBounds;
         const x0 = Math.max(0, Math.min(BOUNDARY_GRID - 1, Math.floor((b[0] - minX) * scaleX))), x1 = Math.min(BOUNDARY_GRID - 1, Math.floor((b[2] - minX) * scaleX));
         const y0 = Math.max(0, Math.min(BOUNDARY_GRID - 1, Math.floor((b[1] - minY) * scaleY))), y1 = Math.min(BOUNDARY_GRID - 1, Math.floor((b[3] - minY) * scaleY));
         for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
@@ -1692,9 +1701,14 @@
       const worldY = cameraY + (cameraView[4] * sx + cameraView[5] * sy - cameraView[6]) * depth;
       return y >= entry.clipMinY && worldY >= entry.worldMinY && worldY <= entry.worldMaxY;
     };
-    const entryBoundaryHit = (e, sx, sy, side) => {
+    const entryBoundaryHit = (e, sx, sy, side, deferTriangles) => {
       stats.boundaryEntries++;
       if (!e.visible) return false;
+      if (deferTriangles) {
+        const coarse = e.coarseBounds;
+        if (sx < coarse[0] || sx > coarse[2] || sy < coarse[1] || sy > coarse[3]) return false;
+        if (e.boundaryStamp !== collectStamp) { boundaryBounds(e); e.boundaryStamp = collectStamp; }
+      }
       const b = e.boundaryBounds, g = e.geometry;
       if (sx < b[0] || sx > b[2] || sy < b[1] || sy > b[3]) return false;
       const nodes = e.boundaryNodes, boxes = e.boundaryBoxes, previous = e.boundaryHits[side];
@@ -1735,7 +1749,7 @@
         const id = stack[--top], at = id * 4;
         stats.boundaryNodes++;
         if (sx < nodes[at] || sx > nodes[at + 2] || sy < nodes[at + 1] || sy > nodes[at + 3]) continue;
-        if (!g.counts[id]) { stack[top++] = g.left[id]; stack[top++] = g.right[id]; continue; }
+        if (g.left[id] >= 0) { stack[top++] = g.left[id]; stack[top++] = g.right[id]; continue; }
         // The exact triangle query checks finite depth and every clip plane;
         // a second local-space ray/box query adds no hit information here.
         for (let n = g.starts[id], end = n + g.counts[id]; n < end; n++) {
@@ -1748,12 +1762,12 @@
       }
       return false;
     };
-    const ownerHit = (group, sx, sy, side) => {
+    const ownerHit = (group, sx, sy, side, deferTriangles) => {
       const previous = group.boundaryEntries[side];
       // Adjacent union rays usually cross the same part. This is only a hint:
       // its current visibility, clipping and triangles are still tested. Each
       // side keeps its own hint so the two offset rays cannot evict each other.
-      if (previous && entryBoundaryHit(previous, sx, sy, side)) return true;
+      if (previous && entryBoundaryHit(previous, sx, sy, side, deferTriangles)) return true;
       const grid = group.boundaryGrid;
       if (grid && grid.active) {
         const b = grid.bounds;
@@ -1761,17 +1775,17 @@
         const x = Math.min(BOUNDARY_GRID - 1, Math.floor((sx - b[0]) * grid.scaleX)), y = Math.min(BOUNDARY_GRID - 1, Math.floor((sy - b[1]) * grid.scaleY)), cell = y * BOUNDARY_GRID + x;
         for (let n = cell * grid.stride, end = n + grid.counts[cell]; n < end; n++) {
           const entry = group[grid.indices[n]];
-          if (entry !== previous && entryBoundaryHit(entry, sx, sy, side)) { group.boundaryEntries[side] = entry; return true; }
+          if (entry !== previous && entryBoundaryHit(entry, sx, sy, side, deferTriangles)) { group.boundaryEntries[side] = entry; return true; }
         }
         return false;
       }
       for (let i = 0; i < group.length; i++) {
         const entry = group[i];
-        if (entry !== previous && entryBoundaryHit(entry, sx, sy, side)) { group.boundaryEntries[side] = entry; return true; }
+        if (entry !== previous && entryBoundaryHit(entry, sx, sy, side, deferTriangles)) { group.boundaryEntries[side] = entry; return true; }
       }
       return false;
     };
-    const ownerBoundaryAt = (owner, x, y, z, dx, dy, dz) => {
+    const ownerBoundaryAt = (owner, x, y, z, dx, dy, dz, deferTriangles = false) => {
       const group = ownerEntries.get(owner);
       if (!hasCamera || !group) return false;
       const m = cameraView, vx = x - cameraX, vy = y - cameraY, vz = z - cameraZ;
@@ -1784,24 +1798,25 @@
       // Quarter of a pixel in a fixed 1024-wide view (depth * tanX / 2048): sample the projected owner union on
       // both sides, so a limb or pillow contour over another part has two solid sides.
       const epsilon = Math.max(1e-5, depth * tanX / 2048), px = -ty / length * epsilon, py = tx / length * epsilon;
-      if (group.boundaryStamp !== collectStamp) {
+      if (group.boundaryStamp !== collectStamp || group.boundaryDefer !== deferTriangles) {
         let endDepth = near;
         for (let i = 0; i < group.length; i++) {
           const e = group[i];
           if (e.visible) {
-            boundaryBounds(e);
+            if (deferTriangles) { if (e.coarseStamp !== collectStamp) coarseBounds(e); }
+            else { boundaryBounds(e); e.boundaryStamp = collectStamp; }
             endDepth = Math.max(endDepth, -(m[2] * (e.x - cameraX) + m[6] * (e.y - cameraY) + m[10] * (e.z - cameraZ)) + e.radius + 0.01);
           }
         }
-        indexBoundary(group);
-        group.boundaryDepth = Math.min(far, endDepth); group.boundaryStamp = collectStamp;
+        indexBoundary(group, deferTriangles);
+        group.boundaryDepth = Math.min(far, endDepth); group.boundaryStamp = collectStamp; group.boundaryDefer = deferTriangles;
       }
       const endDepth = group.boundaryDepth;
       // Both rays and every triangle share these limits; this query has no callbacks.
       boundarySpan = endDepth - near;
       boundaryFirstDepth = near + boundarySpan * 1e-5; boundaryLastDepth = endDepth - boundarySpan * 1e-5;
       if (!(endDepth > near)) return false;
-      const left = ownerHit(group, (rx + px) / depth, (ry + py) / depth, 0);
+      const left = ownerHit(group, (rx + px) / depth, (ry + py) / depth, 0, deferTriangles);
       const sx = (rx - px) / depth, sy = (ry - py) / depth;
       if (left) {
         // The first ray already validated this entry. Test its triangle directly for the adjacent ray.
@@ -1811,7 +1826,7 @@
           return false;
         }
       }
-      return left !== ownerHit(group, sx, sy, 1);
+      return left !== ownerHit(group, sx, sy, 1, deferTriangles);
     };
     const refresh = () => {
       contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
