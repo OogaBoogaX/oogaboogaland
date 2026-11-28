@@ -12,7 +12,7 @@
     set(el, "hidden", !p || p.role !== "speaker");
     if (!p || p.role !== "speaker") return;
     describeMic(ctx, p, self, micState);
-    if (el.dataset.voice !== micState.look) el.dataset.voice = micState.look;
+    BL.nativeIcons.setVoiceLook(el, micState.look);
     attr(el, "data-participant", p.id);
     attr(el, "data-self", String(self));
     set(el, "disabled", micState.micDisabled);

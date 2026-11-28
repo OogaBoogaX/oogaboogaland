@@ -269,7 +269,7 @@
       row.voiceLook = look; row.voiceLogin = login; row.voiceSelf = self; row.blocked = blocked;
       const button = row.voice, words = BL.hud.voiceWords(look, self, blocked, login) + (duelMuted ? ". Automatically muted until their duel ends" : "");
       button.hidden = !look;
-      button.dataset.voice = look; button.dataset.login = login; button.dataset.self = String(self);
+      BL.nativeIcons.setVoiceLook(button, look); button.dataset.login = login; button.dataset.self = String(self);
       button.disabled = !login && !self;
       button.setAttribute("aria-pressed", String(blocked));
       button.title = words; button.setAttribute("aria-label", words);
