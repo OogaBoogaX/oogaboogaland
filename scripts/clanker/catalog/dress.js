@@ -123,14 +123,14 @@
     const slice = (y) => { const f = side(y, 0.1, 0, 1), b = side(y, 0.1, 0, -1), x = side(y, 0.1, 1, 0); return f && b && x ? { hx: x.p[0], hz: (f.p[2] - b.p[2]) / 2, cz: (f.p[2] + b.p[2]) / 2 } : { hx: 0.3, hz: 0.3, cz: 0.1 }; };
     const out = { side, top, slice, y0, y1 }; surfaces.set(r, out); return out; };
   // A geometry's faces split until no edge is longer than `edge` (shared vertices kept shared), so a flat piece bends.
-  const subdivide = (geo, edge) => { const V = [...geo.verts], mids = new Map(), at = (i) => [V[i * 3], V[i * 3 + 1], V[i * 3 + 2]];
-    const mid = (a, b) => { const k = a < b ? a + "," + b : b + "," + a; if (mids.has(k)) return mids.get(k); const p = at(a), q = at(b), n = V.length / 3; V.push((p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2); mids.set(k, n); return n; };
+  const subdivide = (geo, edge, mark = null) => { const V = [...geo.verts], mids = new Map(), at = (i) => [V[i * 3], V[i * 3 + 1], V[i * 3 + 2]];
+    const mid = (a, b) => { const k = a < b ? a + "," + b : b + "," + a; if (mids.has(k)) return mids.get(k); const p = at(a), q = at(b), n = V.length / 3; V.push((p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2); mids.set(k, n); if (mark) mark[n] = mark[a] && mark[b]; return n; };
     const len = (a, b) => { const p = at(a), q = at(b); return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]); };
     const faces = []; const split = (f, a, b, c, depth) => { const ab = len(a, b), bc = len(b, c), ca = len(c, a), m = Math.max(ab, bc, ca);
       if (m <= edge || depth > 8) { faces.push({ ...f, i: [a, b, c] }); return; }
       if (m === ab) { const d = mid(a, b); split(f, a, d, c, depth + 1); split(f, d, b, c, depth + 1); } else if (m === bc) { const d = mid(b, c); split(f, a, b, d, depth + 1); split(f, a, d, c, depth + 1); } else { const d = mid(c, a); split(f, a, b, d, depth + 1); split(f, d, b, c, depth + 1); } };
     for (const f of geo.faces) for (let k = 1; k + 1 < f.i.length; k++) split(f, f.i[0], f.i[k], f.i[k + 1], 0);
-    return { ...geo, verts: V, faces }; };
+    return { ...geo, verts: V, faces, mark }; };
   // Normals again after the verts moved: each vertex the mean of the faces using it (a flat piece's own vertices are its
   // own, so it stays flat).
   const renormal = (geo) => { const V = geo.verts, N = new Array(V.length).fill(0);
@@ -147,20 +147,28 @@
   const wraps = new WeakMap();
   const wrap = (r, geometry, opts = {}) => { let per = wraps.get(geometry); if (!per) wraps.set(geometry, per = new WeakMap()); if (per.has(r)) return per.get(r);
     const W = surface(r), hip = -0.207, armY = 0.711, ky = (armY - hip) / OLD.arm, hug = opts.hug == null ? 0.55 : opts.hug, gap = opts.gap == null ? 0.008 : opts.gap;
-    const g = subdivide(geometry, opts.edge || 0.035), V = g.verts, out = new Array(V.length), onArm = new Set(), flat = [];
-    for (let i = 0; i < V.length; i += 3) { const x = V[i], y = V[i + 1], z = V[i + 2], hx = OLD.hx(y), sideOut = Math.max(Math.abs(x) - hx, Math.abs(z) - OLD.hz), topOut = y - OLD.top;
-      let p = null;
+    // a piece kept rigid (the round token on the back): every face whose corners all are, and the midpoints between them
+    const mark0 = []; if (opts.rigid) for (const f of geometry.faces) if (f.i.every((k) => opts.rigid(geometry.verts[k * 3], geometry.verts[k * 3 + 1], geometry.verts[k * 3 + 2]))) for (const k of f.i) mark0[k] = 1;
+    const g = subdivide(geometry, opts.edge || 0.035, opts.rigid ? mark0 : null), V = g.verts, out = new Array(V.length), onArm = new Set(), rigid = [];
+    // where a point of the old torso lands on the new one, with the surface's outward normal there (horizontal on the
+    // sides; up over the shoulders)
+    const under = opts.under, z0 = under ? Math.min(...geometry.verts.filter((v, n) => n % 3 === 2 && under(geometry.verts[n - 2], geometry.verts[n - 1], v))) : 0;
+    const place = (x, y, z) => { const hx = OLD.hx(y), sideOut = Math.max(Math.abs(x) - hx, Math.abs(z) - OLD.hz), topOut = y - OLD.top;
       if (topOut > sideOut && Math.abs(x) < 0.75) { const s0 = W.slice(armY), nx = x * (0.51 / 0.516), nz = s0.cz + z * (s0.hz / OLD.hz), h = W.top(nx, nz);
-        if (h != null) { p = [nx, h.h + gap + Math.max(0, topOut) * hug, nz]; if (h.arm) onArm.add(i / 3); } }
-      if (!p) { const ny = hip + y * ky, s = W.slice(ny), ux = x / hx, uz = z / OLD.hz, dx = ux * s.hx, dz = uz * s.hz; let hit = W.side(ny, s.cz, dx, dz);
-        // cloth hangs straight down off the widest of the body above it (an apron off the belly, tails off the seat)
-        if (ny < 0.3) for (let h = ny + 0.03; h < Math.min(0.3, ny + 0.45); h += 0.03) { const up = W.side(h, s.cz, dx, dz); if (up && (!hit || Math.hypot(up.p[0], up.p[2] - s.cz) > Math.hypot(hit.p[0], hit.p[2] - s.cz))) hit = { ...up, p: [up.p[0], ny, up.p[2]] }; }
-        if (hit) { const d = gap + Math.max(0, sideOut) * hug; p = [hit.p[0] + hit.n[0] * d, ny, hit.p[2] + hit.n[2] * d]; } else p = [x, ny, z]; }
-      out[i] = p[0]; out[i + 1] = p[1]; out[i + 2] = p[2]; if (opts.straight && opts.straight(x, y, z)) flat.push(i); }
-    // a piece hung straight (an apron's skirt): one flat plane in front of the furthest of the body it hangs off, its
-    // layers kept in their order and its width scaled with the body's, rather than following the body round
-    if (flat.length) { let front = -1e9, z0 = 1e9; for (const i of flat) { front = Math.max(front, out[i + 2]); z0 = Math.min(z0, V[i + 2]); }
-      for (const i of flat) { out[i] = V[i] * (0.39 / 0.43); out[i + 2] = front + (V[i + 2] - z0) * hug; } }
+        if (h != null) return { p: [nx, h.h + gap + Math.max(0, topOut) * hug, nz], n: [0, 1, 0], arm: h.arm }; }
+      const ny = hip + y * ky, s = W.slice(ny), ux = x / hx, uz = z / OLD.hz, dx = ux * s.hx, dz = uz * s.hz; let hit = W.side(ny, s.cz, dx, dz);
+      // cloth hangs straight down off the widest of the body above it (an apron off the belly, tails off the seat)
+      if (ny < 0.3) for (let h = ny + 0.03; h < Math.min(0.3, ny + 0.45); h += 0.03) { const up = W.side(h, s.cz, dx, dz); if (up && (!hit || Math.hypot(up.p[0], up.p[2] - s.cz) > Math.hypot(hit.p[0], hit.p[2] - s.cz))) hit = { ...up, p: [up.p[0], ny, up.p[2]] }; }
+      if (!hit) return { p: [x, ny, z], n: [0, 0, z < 0 ? -1 : 1] };
+      // (a piece worn under the rest, an apron's skirt, lies on the body with only its own layers' depths)
+      const d = under && under(x, y, z) ? 0.004 + (z - z0) * hug : gap + Math.max(0, sideOut) * hug; return { p: [hit.p[0] + hit.n[0] * d, ny, hit.p[2] + hit.n[2] * d], n: hit.n }; };
+    for (let i = 0; i < V.length; i += 3) { if (g.mark && g.mark[i / 3]) { rigid.push(i); continue; } const q = place(V[i], V[i + 1], V[i + 2]);
+      if (q.arm) onArm.add(i / 3); out[i] = q.p[0]; out[i + 1] = q.p[1]; out[i + 2] = q.p[2]; }
+    // the rigid piece: its middle placed as any point, the piece itself turned to face along the surface there and
+    // scaled the same every way (by the torso's narrowing across), so a circle stays a circle
+    if (rigid.length) { const c = [0, 0, 0]; for (const i of rigid) for (let m = 0; m < 3; m++) c[m] += V[i + m] / rigid.length;
+      const q = place(c[0], c[1], c[2]), th = Math.atan2(-q.n[0], -q.n[2]), cs = Math.cos(th), sn = Math.sin(th), k = opts.rigidScale || 0.85;
+      for (const i of rigid) { const d = [V[i] - c[0], V[i + 1] - c[1], V[i + 2] - c[2]]; out[i] = q.p[0] + k * (cs * d[0] + sn * d[2]); out[i + 1] = q.p[1] + k * d[1]; out[i + 2] = q.p[2] + k * (-sn * d[0] + cs * d[2]); } }
     // what came down on the upper arm is left off (the sleeve is painted there, and the arm swings apart from the belly),
     // all but gold (the gamemaster's epaulettes)
     const gold = (c) => { const m = Math.max(...c) || 1; return c[0] / m > 0.9 && c[1] / m > 0.6 && c[1] / m < 0.85 && c[2] / m < 0.4; };
