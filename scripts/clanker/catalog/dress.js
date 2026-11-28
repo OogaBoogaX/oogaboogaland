@@ -17,11 +17,15 @@
   const opening = (x, y, z, w0, w1, top) => z > 0.12 && Math.abs(x) < w0 + (w1 - w0) * Math.max(0, Math.min(1, y / top));
   const OUTFITS = {
     lab: (part, x, y, z) => {
-      const coat = C("#f3f1df"), cuff = C("#c5ccd0"), collar = C("#e4e1cc");
-      if (part === "chest") return opening(x, y, z, 0.2, 0.2, 0.55) ? (y > 0.4 && Math.abs(x) > 0.11 ? collar : null) : coat;
-      if (part === "belly") return z > 0.15 && Math.abs(x) < 0.15 ? null : coat;
+      const coat = C("#f3f1df"), cuff = C("#c5ccd0"), trousers = C("#e4e1cc"), hood = C("#f6f5ee");
+      // the coat closed all the way down the front, with white trousers under it
+      if (part === "chest") return coat;
+      if (part === "belly") return coat;
+      if (part === "leg" || part === "shin") return trousers;
       if (part === "arm") return coat;
       if (part === "fore") return y > WRIST ? coat : y > CUFF ? cuff : null;
+      // a clean-room hood over the head, open at the face (its front third, under the brow)
+      if (part === "head") return z > 0.28 && y < 0.5 ? null : hood;
       return null;
     }
   };
@@ -47,7 +51,9 @@
   // The Arcade staff's short sleeves: the uniform's red down the upper arm to one of its rings (they stand square to its
   // length every 0.025, so the cut runs cleanly across it), finished with a ring of gold piping.
   const SLEEVE = { piping: -0.12, cut: -0.145 };
-  OUTFITS.staff = (part, x, y, z) => part === "arm" ? (y > SLEEVE.piping ? C("#b3322b") : y > SLEEVE.cut ? C("#f2b63e") : null) : null;
+  // and the coat itself, one piece all round the upper body down to the vest's hem, under the vest's front panels, collar
+  // and trim (its own back and side panels left off, `drop` in the wrap)
+  OUTFITS.staff = (part, x, y, z) => part === "arm" ? (y > SLEEVE.piping ? C("#b3322b") : y > SLEEVE.cut ? C("#f2b63e") : null) : part === "chest" ? C("#b3322b") : part === "belly" ? (y > 0.01 ? C("#b3322b") : null) : null;
   // A copy of a geometry with its faces recoloured by a rule; cached by geometry and outfit.
   const cache = new Map();
   const painted = (geo, region, outfit) => {
@@ -124,7 +130,7 @@
     const out = { side, top, slice, y0, y1 }; surfaces.set(r, out); return out; };
   // A geometry's faces split until no edge is longer than `edge` (shared vertices kept shared), so a flat piece bends.
   const subdivide = (geo, edge, mark = null) => { const V = [...geo.verts], mids = new Map(), at = (i) => [V[i * 3], V[i * 3 + 1], V[i * 3 + 2]];
-    const mid = (a, b) => { const k = a < b ? a + "," + b : b + "," + a; if (mids.has(k)) return mids.get(k); const p = at(a), q = at(b), n = V.length / 3; V.push((p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2); mids.set(k, n); if (mark) mark[n] = mark[a] && mark[b]; return n; };
+    const mid = (a, b) => { const k = a < b ? a + "," + b : b + "," + a; if (mids.has(k)) return mids.get(k); const p = at(a), q = at(b), n = V.length / 3; V.push((p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2); mids.set(k, n); if (mark) mark[n] = mark[a] && mark[a] === mark[b] ? mark[a] : 0; return n; };
     const len = (a, b) => { const p = at(a), q = at(b); return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]); };
     const faces = []; const split = (f, a, b, c, depth) => { const ab = len(a, b), bc = len(b, c), ca = len(c, a), m = Math.max(ab, bc, ca);
       if (m <= edge || depth > 8) { faces.push({ ...f, i: [a, b, c] }); return; }
@@ -148,15 +154,21 @@
   const wrap = (r, geometry, opts = {}) => { let per = wraps.get(geometry); if (!per) wraps.set(geometry, per = new WeakMap()); if (per.has(r)) return per.get(r);
     const W = surface(r), hip = -0.207, armY = 0.711, ky = (armY - hip) / OLD.arm, hug = opts.hug == null ? 0.55 : opts.hug, gap = opts.gap == null ? 0.008 : opts.gap;
     // a piece kept rigid (the round token on the back): every face whose corners all are, and the midpoints between them
-    const mark0 = []; if (opts.rigid) for (const f of geometry.faces) if (f.i.every((k) => opts.rigid(geometry.verts[k * 3], geometry.verts[k * 3 + 1], geometry.verts[k * 3 + 2]))) for (const k of f.i) mark0[k] = 1;
+    // pieces left off (`drop`, unless they are rigid): what the painted body stands for now
+    if (opts.drop) { const G = geometry.verts, all = (f, fn) => f.i.every((k) => fn(G[k * 3], G[k * 3 + 1], G[k * 3 + 2], f.color));
+      geometry = { ...geometry, faces: geometry.faces.filter((f) => !all(f, opts.drop) || (opts.rigid && all(f, opts.rigid))) }; }
+    const mark0 = []; if (opts.rigid) for (const f of geometry.faces) { const G = geometry.verts, g0 = opts.rigid(G[f.i[0] * 3], G[f.i[0] * 3 + 1], G[f.i[0] * 3 + 2]);
+      if (g0 && f.i.every((k) => opts.rigid(G[k * 3], G[k * 3 + 1], G[k * 3 + 2]) === g0)) for (const k of f.i) mark0[k] = g0; }
     const g = subdivide(geometry, opts.edge || 0.035, opts.rigid ? mark0 : null), V = g.verts, out = new Array(V.length), onArm = new Set(), rigid = [];
     // where a point of the old torso lands on the new one, with the surface's outward normal there (horizontal on the
     // sides; up over the shoulders)
     const under = opts.under, z0 = under ? Math.min(...geometry.verts.filter((v, n) => n % 3 === 2 && under(geometry.verts[n - 2], geometry.verts[n - 1], v))) : 0;
-    const place = (x, y, z) => { const hx = OLD.hx(y), sideOut = Math.max(Math.abs(x) - hx, Math.abs(z) - OLD.hz), topOut = y - OLD.top;
+    // (with panels dropped, `panels` gives the old surface as their outsides, so what lay on them comes down onto the body)
+    const P = opts.panels, oldX = (y) => P && y > P.y0 && y < P.y1 ? Math.max(OLD.hx(y), P.side) : OLD.hx(y), oldZ = (y, z) => P && z < 0 && y > P.y0 && y < P.y1 ? P.back : OLD.hz;
+    const place = (x, y, z) => { const hx = oldX(y), hz = oldZ(y, z), sideOut = Math.max(Math.abs(x) - hx, Math.abs(z) - hz), topOut = y - OLD.top;
       if (topOut > sideOut && Math.abs(x) < 0.75) { const s0 = W.slice(armY), nx = x * (0.51 / 0.516), nz = s0.cz + z * (s0.hz / OLD.hz), h = W.top(nx, nz);
         if (h != null) return { p: [nx, h.h + gap + Math.max(0, topOut) * hug, nz], n: [0, 1, 0], arm: h.arm }; }
-      const ny = hip + y * ky, s = W.slice(ny), ux = x / hx, uz = z / OLD.hz, dx = ux * s.hx, dz = uz * s.hz; let hit = W.side(ny, s.cz, dx, dz);
+      const ny = hip + y * ky, s = W.slice(ny), ux = x / hx, uz = z / hz, dx = ux * s.hx, dz = uz * s.hz; let hit = W.side(ny, s.cz, dx, dz);
       // cloth hangs straight down off the widest of the body above it (an apron off the belly, tails off the seat)
       if (ny < 0.3) for (let h = ny + 0.03; h < Math.min(0.3, ny + 0.45); h += 0.03) { const up = W.side(h, s.cz, dx, dz); if (up && (!hit || Math.hypot(up.p[0], up.p[2] - s.cz) > Math.hypot(hit.p[0], hit.p[2] - s.cz))) hit = { ...up, p: [up.p[0], ny, up.p[2]] }; }
       if (!hit) return { p: [x, ny, z], n: [0, 0, z < 0 ? -1 : 1] };
@@ -166,9 +178,10 @@
       if (q.arm) onArm.add(i / 3); out[i] = q.p[0]; out[i + 1] = q.p[1]; out[i + 2] = q.p[2]; }
     // the rigid piece: its middle placed as any point, the piece itself turned to face along the surface there and
     // scaled the same every way (by the torso's narrowing across), so a circle stays a circle
-    if (rigid.length) { const c = [0, 0, 0]; for (const i of rigid) for (let m = 0; m < 3; m++) c[m] += V[i + m] / rigid.length;
-      const q = place(c[0], c[1], c[2]), th = Math.atan2(-q.n[0], -q.n[2]), cs = Math.cos(th), sn = Math.sin(th), k = opts.rigidScale || 0.85;
-      for (const i of rigid) { const d = [V[i] - c[0], V[i + 1] - c[1], V[i + 2] - c[2]]; out[i] = q.p[0] + k * (cs * d[0] + sn * d[2]); out[i + 1] = q.p[1] + k * d[1]; out[i + 2] = q.p[2] + k * (-sn * d[0] + cs * d[2]); } }
+    const groups = new Map(); for (const i of rigid) { const k = g.mark[i / 3]; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(i); }
+    for (const list of groups.values()) { const c = [0, 0, 0]; for (const i of list) for (let m = 0; m < 3; m++) c[m] += V[i + m] / list.length;
+      const q = place(c[0], c[1], c[2]), th = c[2] < 0 ? Math.atan2(-q.n[0], -q.n[2]) : Math.atan2(q.n[0], q.n[2]), cs = Math.cos(th), sn = Math.sin(th), k = opts.rigidScale || 0.85, lift = opts.rigidLift || 0;
+      for (const i of list) { const d = [V[i] - c[0], V[i + 1] - c[1], V[i + 2] - c[2]]; out[i] = q.p[0] + q.n[0] * lift + k * (cs * d[0] + sn * d[2]); out[i + 1] = q.p[1] + q.n[1] * lift + k * d[1]; out[i + 2] = q.p[2] + q.n[2] * lift + k * (-sn * d[0] + cs * d[2]); } }
     // what came down on the upper arm is left off (the sleeve is painted there, and the arm swings apart from the belly),
     // all but gold (the gamemaster's epaulettes)
     const gold = (c) => { const m = Math.max(...c) || 1; return c[0] / m > 0.9 && c[1] / m > 0.6 && c[1] / m < 0.85 && c[2] / m < 0.4; };
@@ -179,7 +192,7 @@
   // `h` tall, with its top and bottom edges, and a buckle at the front. Cached by rig.
   const belts = new WeakMap();
   const belt = (r, opts = {}) => { const key = JSON.stringify(opts); let per = belts.get(r); if (!per) belts.set(r, per = new Map()); if (per.has(key)) return per.get(key);
-    const W = surface(r), yf = opts.y == null ? WAIST : opts.y, yb = opts.back == null ? WAIST_BACK : opts.back, h = opts.h || 0.045, off = opts.off || 0.012, n = 64, s = W.slice(yf), col = hex(opts.color || "#1f1a17").map((v) => v / 255);
+    const W = surface(r), yf = opts.y == null ? WAIST : opts.y, yb = opts.back == null ? WAIST_BACK : opts.back, h = opts.h || 0.045, off = opts.off || 0.012, n = 64, s = W.slice(yf), col = hex(opts.color || "#1f1a17");
     // the belt's height round the body: under the belly in front, up over the top of the seat behind
     const yAt = (a) => yf + (yb - yf) * (1 - Math.cos(a)) / 2;
     // the band's outer face follows the widest of the body at its top, middle and bottom at each angle, so its height is
@@ -215,5 +228,33 @@
     const button = (y) => at(M.prism(Array.from({ length: 8 }, (_, a) => [Math.cos(a / 8 * Math.PI * 2) * 0.02, y + Math.sin(a / 8 * Math.PI * 2) * 0.02]), 0.01, P[1]), 0.31);
     parts.push(button(0.56));
     return M.merge(...parts); })());
-  window.__dress = { paint, fit, box, height, torsoBox, hat, hatPlace, wrap, belt, tie, front, surface, OUTFITS };
+  // The lab coat's ID badge, modelled on the old box torso's front and wrapped on like the tie: a card on a clip on the
+  // right of the chest, with its photo, a teal band and name lines.
+  let labKitGeo = null;
+  const LABKIT = { badge: [-0.32, 0.66], size: 1.8 };
+  const labKit = () => labKitGeo || (labKitGeo = (() => { const b = (w, h, d, color, x, y, z) => M.box({ w, h, d, color, offset: { x, y, z } }), F = 0.302, [bx, by] = LABKIT.badge;
+    const parts = [b(0.15, 0.19, 0.008, "#f7f6ee", bx, by, F + 0.004), b(0.15, 0.04, 0.003, "#3fae8a", bx, by + 0.075, F + 0.009), b(0.06, 0.066, 0.003, "#7d8a90", bx - 0.034, by + 0.012, F + 0.009),
+      b(0.05, 0.012, 0.003, "#2b3236", bx + 0.033, by + 0.03, F + 0.009), b(0.05, 0.012, 0.003, "#2b3236", bx + 0.033, by + 0.004, F + 0.009), b(0.12, 0.012, 0.003, "#2b3236", bx, by - 0.055, F + 0.009),
+      b(0.045, 0.045, 0.014, "#a9b2b6", bx, by + 0.11, F + 0.007)];
+    // grown about its middle
+    const g = M.merge(...parts), V = g.verts; for (let i = 0; i < V.length; i += 3) { const cx = bx, cy = by, K = LABKIT.size; V[i] = cx + (V[i] - cx) * K; V[i + 1] = cy + (V[i + 1] - cy) * K; V[i + 2] = F + (V[i + 2] - F) * 1.4; }
+    return g; })());
+  // The clean-room hood's visor, in the head's frame: a clear shield curving round the face (an ellipse round the head's
+  // middle, out past the muzzle and back beside the cheeks into the hood), in the game's glass, framed in white along its
+  // top and bottom. Built once; the glass is two-sided.
+  let visorGeo = null;
+  const visor = () => visorGeo || (visorGeo = (() => { const cz = 0.15, rx = 0.34, rz = 0.52, y0 = -0.03, y1 = 0.56, A = 1.3, n = 18, rows = 6;
+    const at = (a, r = 0) => [Math.sin(a) * (rx + r), cz + Math.cos(a) * (rz + r)];
+    const glass = { verts: [], faces: [], lines: [] }, push = (g, p) => { g.verts.push(...p); return g.verts.length / 3 - 1; };
+    const grid = []; for (let j = 0; j <= rows; j++) { grid.push([]); for (let k = 0; k <= n; k++) { const [x, z] = at(-A + 2 * A * k / n); grid[j].push(push(glass, [x, y0 + (y1 - y0) * j / rows, z])); } }
+    const tint = hex("#d5ece8");
+    for (let j = 0; j < rows; j++) for (let k = 0; k < n; k++) { const q = [grid[j][k], grid[j][k + 1], grid[j + 1][k + 1], grid[j + 1][k]]; glass.faces.push({ i: q, color: tint }, { i: q.slice().reverse(), color: tint }); }
+    glass.glassOpacity = 0.18; glass.castShadow = false; glass.smooth = true;
+    const frame = { verts: [], faces: [], lines: [] }, white = hex("#f6f5ee");
+    for (const [ya, yb] of [[y1 - 0.004, y1 + 0.03], [y0 - 0.03, y0 + 0.004]]) for (let k = 0; k < n; k++) { const a0 = -A + 2 * A * k / n, a1 = -A + 2 * A * (k + 1) / n, [x0, z0] = at(a0, 0.012), [x1, z1] = at(a1, 0.012), [u0, w0] = at(a0, -0.03), [u1, w1] = at(a1, -0.03);
+      frame.faces.push({ i: [push(frame, [x0, ya, z0]), push(frame, [x1, ya, z1]), push(frame, [x1, yb, z1]), push(frame, [x0, yb, z0])], color: white },
+        { i: [push(frame, [u0, yb, w0]), push(frame, [x0, yb, z0]), push(frame, [x1, yb, z1]), push(frame, [u1, yb, w1])], color: white },
+        { i: [push(frame, [u1, ya, w1]), push(frame, [x1, ya, z1]), push(frame, [x0, ya, z0]), push(frame, [u0, ya, w0])], color: white }); }
+    return { glass, frame }; })());
+  window.__dress = { paint, fit, box, height, torsoBox, hat, hatPlace, wrap, belt, tie, front, labKit, visor, surface, OUTFITS };
 })();
