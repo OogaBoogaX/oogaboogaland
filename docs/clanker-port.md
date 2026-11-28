@@ -119,10 +119,10 @@ The new rig has more parts (forearm, shin and foot apart from the upper arm and 
 ## Steps
 
 1. **Load it:**
-   - **Script tag:** add the model to the page's script order.
-   - **Load cost:** build geometry lazily, per form and outfit, on first use, not every set at load.
-   - **Pose:** make `pose` allocate nothing per frame (it allocates arrays now).
-   - **Page weight:** check it (the model is 250 KB of source, against agent.js's 121 KB).
+   - **Script tag:** done; it loads right after `agent.js`.
+   - **Load cost:** done. Nothing is built at load (3 ms to evaluate, no heap), and the page boots with a clean console. A form's parts and its 41 torso welds are built the first time they are asked for. `prepareSteps(form, slice)` builds them for `BL.buildTasks` in 16 slices. Its worst slice is 79 ms, one body part, so that part still wants splitting. A rig of a prepared form takes 2 ms; an unprepared one takes about 700 ms.
+   - **Pose:** make `pose` allocate nothing per frame and cost far less. It allocates arrays now and takes 250 µs standing, 350 µs walking. The hub poses about twenty gorillas a frame, so this matters most.
+   - **Page weight:** 251 KB of source, 72 KB gzipped, against `agent.js`'s 121 KB and 33 KB. Removing `agent.js` brings the net to about 39 KB gzipped.
 2. **A rig adapter:** give the new rig the interface above, under `BL.agent` or behind it, so the call sites keep working:
    - managed and unmanaged rigs;
    - collision shapes and body sizes from the new body;
