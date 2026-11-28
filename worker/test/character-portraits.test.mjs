@@ -259,6 +259,7 @@ test("a quiet Listen view refreshes cached faces and stops its polling while hid
     return { draw(list, describe) { people = list; paint(describe); }, repaint: paint, pop: noop, dispose: noop };
   } };
   BL.oogaChatPortraits.configure(async () => { calls++; return answer; });
+  runInNewContext(readFileSync(new URL("../../src/js/microphone-picker.js", import.meta.url), "utf8"), f.context);
   runInNewContext(readFileSync(new URL("../../src/ooga-chat/ooga-chat-views.js", import.meta.url), "utf8"), f.context);
   const voice = { role: "listener", phase: "idle", talking: [] }, state = {
     mode: "live", boot: { features: {} }, auth: "signed-in", busy: null, device: { online: true }, zone: "main", voice,

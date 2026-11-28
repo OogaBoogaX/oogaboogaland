@@ -2063,6 +2063,7 @@
     slot.replaceWith(copy);
     accountPrefixes.push(prefix);
   }
+  let accountPickers = null;
   const accountFields = new Map();
   const fieldsFor = (id) => {
     if (!accountFields.has(id)) accountFields.set(id, accountPrefixes.map((prefix) => $(prefix + id)));
@@ -2086,6 +2087,11 @@
     if (!recipe.open) recipe.showModal();
   };
   const showAccount = (state) => {
+    if (!accountPickers) accountPickers = accountPrefixes.map((prefix) => {
+      const picker = BL.microphonePicker.create();
+      $(prefix + "account-mute").after(picker.button);
+      return picker;
+    });
     // The name carries no count of who is online (the Online Oogas tab's title says it): only the room's own trouble.
     const { backend, me, room } = state;
     const live = !!me && room === "live", words = live ? "" : ROOM_WORDS[room] || "";
@@ -2109,6 +2115,7 @@
     // chat's microphone, Join voice or Leave voice on its stage, then End chat for its host or Leave chat for anyone
     // else; the name and Sign out stay under them.
     const calls = BL.chatCall, chat = me && calls && calls.room || null;
+    for (const picker of accountPickers) picker.update(chat ? calls.media : BL.voice, !!me && (chat || live && !state.copy));
     writeAccount("account-chat-end", "hidden", !chat || chat.you?.rank !== "host");
     writeAccount("account-chat-leave", "hidden", !chat || chat.you?.rank === "host");
     for (const row of fieldsFor("account")) if (row.dataset.chat !== String(!!chat)) row.dataset.chat = String(!!chat);

@@ -117,6 +117,7 @@
     return {
       PeerConnection: typeof RTCPeerConnection === "function" ? RTCPeerConnection : null,
       getUserMedia: devices && typeof devices.getUserMedia === "function" ? (constraints) => devices.getUserMedia(constraints) : null,
+      enumerateDevices: devices && typeof devices.enumerateDevices === "function" ? () => devices.enumerateDevices() : null,
       stream: (track) => new MediaStream([track]),
       audio: () => new Audio()
     };
@@ -591,6 +592,8 @@
       timers.clear(holdTimer);
       holdTimer = 0;
       stopMeter();
+      // Once capture ends, the next join uses the browser's current default, not a possibly unplugged input.
+      deviceId = "";
       if (!mic) return;
       mic.track.enabled = false;
       mic.track.removeEventListener("ended", micEnded);
@@ -643,8 +646,10 @@
       request("setMic", { muted: true });
       emit();
     }
-    const capture = async () => {
-      const stream = await R.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+    let deviceId = "", switchingMic = false, switchError = "";
+    const capture = async (id = deviceId) => {
+      const stream = await R.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+        ...(id ? { deviceId: { exact: id } } : {}) }, video: false });
       const track = stream && stream.getAudioTracks()[0];
       // Off from its first frame: nothing is published, and nothing would be heard, until the speaker unmutes.
       if (track) track.enabled = false;
@@ -655,6 +660,40 @@
       stats.captured++;
       startMeter(stream);
       track.addEventListener("ended", micEnded);
+    };
+    const microphone = () => ({ active: !!mic && mic.track.readyState !== "ended",
+      id: mic?.track.getSettings?.().deviceId || deviceId, label: mic?.track.label || "Microphone",
+      switching: switchingMic, error: switchError, available: speaker && !!mic && !!R.enumerateDevices && !BUSY.has(phase) });
+    const devices = async () => (await R.enumerateDevices()).filter((d) => d.kind === "audioinput")
+      .map((d) => ({ deviceId: d.deviceId, label: d.label }));
+    const selectDevice = async (id) => {
+      if (!speaker || !mic || !pub || switchingMic || recapturing || BUSY.has(phase)) return false;
+      const old = mic, publisher = pub, ticket = joinTicket;
+      const valid = () => !disposed && speaker && mic === old && pub === publisher && ticket === joinTicket;
+      let got = null;
+      switchingMic = true; switchError = ""; localVersion++; emit();
+      try {
+        got = await capture(String(id || ""));
+        if (!got.track || got.track.readyState === "ended") throw failure("nodevice");
+        if (!valid()) return false;
+        await publisher.tx.sender.replaceTrack(got.track);
+        if (!valid()) return false;
+        if (got.track.readyState === "ended") {
+          await publisher.tx.sender.replaceTrack(old.track);
+          throw failure("nodevice");
+        }
+        releaseMic();
+        deviceId = String(id || "");
+        hold(got); got = null;
+        mic.track.enabled = !muted;
+        return true;
+      } catch {
+        if (valid()) switchError = "Could not switch microphones. Your previous microphone is still selected.";
+        return false;
+      } finally {
+        if (got?.stream) for (const t of got.stream.getTracks()) t.stop();
+        switchingMic = false; localVersion++; emit();
+      }
     };
     // A publishing connection that failed under a live feed: the lease is given back and asked for again, landing as
     // the speaker had it (`reopen`). One that drops is the first sign of a network change: the feed checks its socket
@@ -1002,7 +1041,7 @@
     };
     const supported = () => typeof R.PeerConnection === "function" && typeof R.getUserMedia === "function";
     const available = () => supported() && !!allowed();
-    return { heard, status, zone: zoneTo, join, leave, mute, level, ownLevel, subscribeLevels, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, identify, release, stop, retry, remember, dispose,
+    return { heard, status, zone: zoneTo, join, leave, mute, microphone, devices, selectDevice, level, ownLevel, subscribeLevels, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, identify, release, stop, retry, remember, dispose,
       get available() { return available(); }, get why() { return supported() ? "" : NOTICE.unsupported; },
       get state() { return state; }, get stats() { return { ...stats, voices: voices.size, receiving: !!sub, publishing: !!pub, capturing: !!mic, connection, lease, relay: !!(ice && ice.relay), bare }; } };
   };
