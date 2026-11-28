@@ -1,0 +1,64 @@
+# shinR
+pivot -8.87 6.63 0.83
+# One character a block, on the six-view sheet's own grid (x across, y up from the ground, z from the rear to the
+# front; a block is 0.053 m). Rows run bottom to top: "y <row> x <first column> z <first line>". In a row the first
+# line is the front-most; columns run from the gorilla's right to its left, as the FRONT view shows them.
+# Colours: 0-9 a b greys from darkest to lightest (fur is about 1-3, the chest and muzzle about 6-8, the shoulder
+# silver about 8-b), o black, i eye brown, h eye highlight; '.' is empty.
+
+y 0 x -13 z 6
+939939
+333333
+333433
+333333
+334334
+343333
+
+y 1 x -12 z 6
+39939
+33333
+33333
+43333
+33333
+43333
+
+y 2 x -12 z 4
+3aa3
+3334
+3333
+3334
+
+y 3 x -12 z 4
+3343
+33343
+34334
+33333
+3433
+
+y 4 x -12 z 4
+33433
+33333
+34334
+43333
+3333
+
+y 5 x -11 z 4
+33333
+33334
+33333
+33334
+.333
+
+y 6 x -11 z 4
+33333
+33333
+33333
+33433
+.334
+
+y 7 x -10 z 4
+433
+3433
+3343
+3333
+333
