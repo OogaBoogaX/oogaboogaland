@@ -2918,10 +2918,9 @@
   // `clankerGripAt`, `alignDraggedFoot` and `grabbedOogaPose` (private to its scene) cut down to a flat field.
   const GRIP_HAND = [0, 0, 0], GRIP_FOOT = [0, 0, 0];
   const holdByFoot = (rig, a, heading) => {
-    const arm = rig.parts.armL, foot = a.cave.parts.legR, M4 = BL.math.mat4, p = a.body.position;
+    const foot = a.cave.parts.legR, M4 = BL.math.mat4, p = a.body.position;
     updateWorld(rig.root, rig.root.parent.world);
-    const hb = boundsOf(arm.geometry);
-    M4.transformPoint(GRIP_HAND, arm.world, hb.center[0], hb.min[1] + 0.08, hb.center[2]);
+    rig.grip("armL", GRIP_HAND);
     const reach = a.cave.traits.height * 0.9;
     a.body.rotation.x = -Math.acos(clamp((0.12 - GRIP_HAND[1]) / reach, -0.7, 0.3));
     a.body.rotation.y = heading; a.body.rotation.z = 0;

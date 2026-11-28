@@ -163,7 +163,7 @@
     p.armL.rotation.x=-.83; S.addChild(root,agent.root);
     const silver="#c8d2c9";
     const shaker=turned(0,0,0,[[0,0],[.071,0],[.105,.21],[.108,.265],[.071,.305],[.048,.33],[.05,.375],[0,.375]],silver,12,.55);
-    add(p.armR,M.moved(M.turnedX(shaker,.85),0,-.69,.10));
+    add(agent.socket("handR"),M.moved(M.turnedX(shaker,.85),0,-.69,.10));
     const lipZ=-33.17;
     const pour=add(root,turned(0,0,0,[[.011,0],[.014,.27]],"#cf7137",6,.67),serviceX-.30,1.23,lipZ);
     const spoon=add(root,M.merge(beam(0,0,0,.04,.27,0,.015,silver),

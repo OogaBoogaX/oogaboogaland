@@ -430,7 +430,7 @@
       if (d.head) S.addChild(p.head, S.createNode({ geometry: d.head }));
       S.addChild(p.torso, S.createNode({ geometry: d.torso }));
       if(d.drinks) m.drinks=d.drinks.map(geometry=>{
-        const glass=S.createNode({geometry}); glass.visible=false; S.addChild(p.armR,glass); return glass;
+        const glass=S.createNode({geometry}); glass.visible=false; S.addChild(m.agent ? m.agent.socket("handR") : p.armR,glass); return glass;
       });
       if (d.arm) S.addChild(p.armR, S.createNode({ geometry: d.arm }));
       for (const arm of [p.armR, p.armL]) S.addChild(arm, S.createNode({ geometry: d.sleeve }));
