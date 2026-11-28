@@ -224,3 +224,42 @@ Run `npm run test:unit` and require all checks to pass. Then run `CHROME_ARCH=ar
 git add src/js/object-guides.js src/js/scene-hub.js test/run.mjs
 git commit -m "Prepare covered-view boundaries on demand"
 ```
+
+
+---
+
+### Task 5: Gate detailed boundary preparation with conservative projected AABBs
+
+**Files:**
+- Modify: `src/js/object-guides.js` entry registration, `indexBoundary`, `entryBoundaryHit`, `ownerBoundaryAt`
+- Modify: `src/js/scene-hub.js:12794`
+- Modify: `test/run.mjs` existing owner-boundary fixture
+
+**Interfaces:**
+- Consumes: reverted Task 4, default eager behavior, and the hub's optional final `deferTriangles` argument.
+- Produces: per-entry `coarseBounds`/`coarseStamp`, computed from eight transformed local-AABB corners. Default `deferTriangles=false` retains all eager behavior. Hub sight options pass `true`.
+
+- [ ] **Step 1: Add the exact-oracle regression**
+
+For the same near-boundary points, compare eager results with `ownerBoundaryAt(...,true)`. Require identical booleans, active owner grids in both paths, and fewer detailed `boundaryBuilds` after a coherent second lazy query. Preserve all original eager assertions.
+
+- [ ] **Step 2: Verify the regression fails**
+
+Run `npm run test:unit`; expected FAIL because detailed preparation remains eager and the optional argument has no effect.
+
+- [ ] **Step 3: Implement conservative coarse gating**
+
+For each entry, transform its eight local AABB corners by `cameraView * entry.world`. Project corners with positive depth; if the box crosses the near plane use an unbounded rectangle, and if every corner is behind it use an empty rectangle. Store this per `collectStamp` in allocation-free reused fields.
+
+Default mode retains the current full `boundaryBounds` group preparation. Coarse-lazy mode prepares only `coarseBounds` up front and uses those conservative rectangles for `indexBoundary`. `entryBoundaryHit` first rejects against `coarseBounds`, then calls full `boundaryBounds` only for a candidate. Existing detailed bounds, grid traversal, hit hints, triangle/depth/clip predicates, and booleans stay unchanged.
+
+- [ ] **Step 4: Verify correctness and profile**
+
+Run `npm run test:unit`, then `CHROME_ARCH=arm64 node scripts/profile-covered-movement.mjs --cpu`. Keep only if exact results match, detailed builds fall, owner grids remain active, and delivered frame metrics do not regress. Revert on a material regression.
+
+- [ ] **Step 5: Commit if both gates pass**
+
+```bash
+git add src/js/object-guides.js src/js/scene-hub.js test/run.mjs
+git commit -m "Gate detailed boundary preparation with coarse bounds"
+```
