@@ -437,30 +437,70 @@
     }
     return M.merge(...p);
   };
-  const booths=[];
+  const booths=[], pitRadius=1.04;
   const fixtures=[{x:station.x,z:station.z,r:.55}];
   for(const side of [-1,1]) for(const [x,offset] of [[30.6,9],[40,17.8],[far-5.7,8.4]]){
-    const z=side*offset, planterX=x-2.36, planterZ=z+side*1.60;
-    booths.push({x,z,side,planterX,planterZ});
-    fixtures.push({x,z,r:.50},{x:planterX,z:planterZ,r:.50});
-    for(let i=0;i<7;i++){const a=.12+i*(Math.PI-.24)/6;fixtures.push({x:x+1.48*Math.cos(a),z:z+side*1.48*Math.sin(a),r:.52});}
-  }
-  // Reject a sweep through the wall beside the opening, including diagonal steps from the terrace.
-  const clear = (ax,az,bx,bz,r) => {
-    if(Math.max(ax,bx)<=23-r) return true;
-    for(const f of BL.pokerClub.fixtures) if(BL.pokerModels.crosses(ax,az,bx,bz,r,f)) return false;
-    const opening=BL.pokerGlazing.OPEN-r;
-    if(bx>outer(bz)-r || (bx>23-r && Math.abs(bz)>(bx<inner+r?opening:halfSpan-r))) return false;
-    for(let i=0;i<2;i++){
-      const x=i?inner+r:23-r;
-      if((ax-x)*(bx-x)<0 && Math.abs(az+(bz-az)*(x-ax)/(bx-ax))>opening) return false;
+    const z=side*offset, planterX=x-2.65, planterZ=z+side*2.65, seats=[];
+    const pit={x,z:z-side*1.8,r:pitRadius};
+    booths.push({x,z,side,planterX,planterZ,seats,pit});
+    fixtures.push(pit,{x:planterX,z:planterZ,r:.50});
+    for(let i=0;i<7;i++){
+      const a=.12+i*(Math.PI-.24)/6, dx=Math.cos(a),dz=side*Math.sin(a);
+      const seat={x:x+2.2*dx,z:z+2.2*dz,ry:Math.atan2(-dx,-dz),r:.64,pit};
+      seats.push(seat);fixtures.push(seat);
     }
+  }
+  // Revolve the bowl, its lining and both brass bands about the same axis as the walking boundary.
+  const firepitBowl=lite=>{
+    const segments=lite?16:32;
+    const shell=(profile,color,glow)=>turned(0,0,0,profile,color,segments,glow);
+    const parts=[
+      shell([[0,.06],[.73,.06],[.76,.11],[.73,.18],[.57,.22]],dark,.23),
+      shell([[.57,.20],[.74,.28],[.96,.43],[pitRadius,.54],[pitRadius,.60],[.86,.60],[.78,.46],[.60,.33],[0,.33]],copper,.29),
+      shell([[1.015,.505],[1.035,.53],[1.037,.548]],brass,.43),
+      shell([[pitRadius,.575],[pitRadius,.607],[.86,.607],[.855,.584]],edge,.52),
+      shell([[.855,.58],[.77,.456],[.59,.35],[0,.35]],"#332d30",.23)
+    ];
+    for(let i=0;i<12;i++){
+      const a=i*tau/12,dx=Math.cos(a),dz=Math.sin(a);
+      parts.push(beam(.68*dx,.265,.68*dz,.965*dx,.46,.965*dz,.027,brass));
+    }
+    for(let i=0;i<6;i++){
+      const a=i*tau/6,dx=Math.cos(a),dz=Math.sin(a);
+      parts.push(beam(.12*dx,.38,.12*dz,.64*dx,.41,.64*dz,.13,"#4f3230"),
+        turned(.44*dx,.415,.44*dz,[[.09,0],[.105,.03],[.066,.064],[0,.067]],i%2?"#ee7430":"#ffc453",8,.92));
+    }
+    return K.staticMesh(M.merge(...parts));
+  };
+  const fixturesClear = (ax,az,bx,bz,r) => {
+    for(const f of BL.pokerClub.fixtures) if(BL.pokerModels.crosses(ax,az,bx,bz,r,f)) return false;
     const dx=bx-ax,dz=bz-az,dd=dx*dx+dz*dz;
     for(const f of fixtures){
       const u=dd?Math.max(0,Math.min(1,((f.x-ax)*dx+(f.z-az)*dz)/dd)):0;
       if((ax+dx*u-f.x)**2+(az+dz*u-f.z)**2<(f.r+r)**2) return false;
     }
     return true;
+  };
+  // Reject a sweep through the wall beside the opening, including diagonal steps from the terrace.
+  const clear = (ax,az,bx,bz,r) => {
+    if(Math.max(ax,bx)<=23-r) return true;
+    const opening=BL.pokerGlazing.OPEN-r;
+    if(bx>outer(bz)-r || (bx>23-r && Math.abs(bz)>(bx<inner+r?opening:halfSpan-r))) return false;
+    for(let i=0;i<2;i++){
+      const x=i?inner+r:23-r;
+      if((ax-x)*(bx-x)<0 && Math.abs(az+(bz-az)*(x-ax)/(bx-ax))>opening) return false;
+    }
+    return fixturesClear(ax,az,bx,bz,r);
+  };
+  const {SILL,RAIL}=BL.pokerGlazing;
+  const hall={x:0,z:0,hx:SILL.outer,hz:SILL.endOuter};
+  // The promenade joins the loggia inside both end posts. Keep a swept body between the sill and rail.
+  const promenadeClear=(ax,az,bx,bz,r)=>{
+    const limit=RAIL.x-.10-r;
+    if(Math.abs(ax)>limit || Math.abs(bx)>limit || Math.max(Math.abs(az),Math.abs(bz))>RAIL.z-.10-r)return false;
+    if(BL.pokerModels.crosses(ax,az,bx,bz,r,hall))return false;
+    // Only the loggia has furniture. All other stretches are clear between the sill and the rail.
+    return Math.max(ax,bx)<inner || Math.min(az,bz)>halfSpan || Math.max(az,bz)<-halfSpan || fixturesClear(ax,az,bx,bz,r);
   };
   // Seated guests and roaming waiters use the crowd graph. These parties stay at their rail or bar.
   const company=(root,lite)=>{
@@ -570,7 +610,7 @@
       p.push(beam(x,-.075,z,xx,-.075,zz,.065,brass));
     }
     p.push(apron);install();
-    const perimeter=[[inner,-BL.pokerGlazing.OPEN],...rim,[inner,BL.pokerGlazing.OPEN]],points=[];
+    const perimeter=[[RAIL.x,-halfSpan],...rim.slice(1,-1),[RAIL.x,halfSpan]],points=[];
     for(let i=0;i<perimeter.length-1;i++){
       const [x,z]=perimeter[i],[xx,zz]=perimeter[i+1],n=Math.ceil(Math.hypot(xx-x,zz-z)/3.4);
       for(let k=0;k<n;k++)points.push([x+(xx-x)*k/n,z+(zz-z)*k/n]);
@@ -594,16 +634,33 @@
       p.push(lamp(24.15,2.26,z-s*.22,.68));
     }
     install();
-    for(const {x:cx,z:bz,side:s,planterX:px,planterZ:pz} of booths){
-      for(let i=0;i<7;i++){
-        const a=.12+i*(Math.PI-.24)/6, x=cx+1.48*Math.cos(a),zz=bz+s*1.48*Math.sin(a);
-        const padded=(w,h,d,y,z,color)=>M.bevelBox({w,h,d,color,bevel:.064,offset:{x:0,y,z}});
-        const cushion=M.merge(box(0,.28,0,.76,.35,.87,dark),box(0,.235,0,.78,.036,.89,edge),
-          padded(.76,.19,.84,.50,0,leather),padded(.75,.72,.23,.83,.36,leather),
-          box(0,1.19,.36,.74,.032,.20,brass),box(0,.87,.23,.028,.04,.018,brass));
-        p.push(M.moved(M.turnedY(cushion,Math.atan2(Math.cos(a),s*Math.sin(a))),x,0,zz));
+    const seatNodes=[],firepits=[],fire=BL.pokerHearth.fire(true),bowl=firepitBowl(lite);
+    const padded=(w,h,d,y,z,color)=>M.bevelBox({w,h,d,color,bevel:.075,offset:{x:0,y,z}});
+    const cushion=K.staticMesh(M.merge(box(0,.29,0,1.11,.38,1.08,dark),box(0,.235,0,1.13,.036,1.10,edge),
+      padded(1.12,.22,1.05,.50,0,leather),padded(1.09,.83,.25,.91,.44,leather),
+      box(0,1.34,.44,1.04,.032,.21,brass),box(0,.95,.302,.034,.048,.018,brass)));
+    for(const {x,z,side,planterX:px,planterZ:pz,seats,pit} of booths){
+      // A continuous leather rail and brass piping join the individual cushions into a banquette.
+      for(let j=1;j<=14;j++){
+        const a=.12+(j-1)*(Math.PI-.24)/14,b=.12+j*(Math.PI-.24)/14;
+        for(const [radius,y,width,color] of [[2.63,1.23,.16,leather],[2.64,1.33,.045,edge]]){
+          p.push(beam(x+radius*Math.cos(a),y,z+side*radius*Math.sin(a),
+            x+radius*Math.cos(b),y,z+side*radius*Math.sin(b),width,color));
+        }
       }
-      p.push(turned(cx,0,bz,[[0,.06],[.31,.06],[.29,.13],[.075,.20],[.075,.68],[.48,.70],[.5,.76],[0,.76]],brass),lamp(cx,.76,bz,.33));
+      for(const seat of seats){
+        const node=add(root,cushion,seat.x,0,seat.z);
+        node.rotation.y=seat.ry+Math.PI;
+        seatNodes.push({node,seat});
+      }
+      const basin=add(root,bowl,pit.x,0,pit.z);
+      firepits.push(basin);
+      for(let i=0;i<fire.plumes.length;i++){
+        const plume=fire.plumes[i],a=i*tau/fire.plumes.length;
+        const flame=add(basin,plume.geometry,.18*Math.sin(a),.38,.18*Math.cos(a));
+        flame.rotation.y=a;
+        Object.assign(flame.scale,{x:plume.rx*.55,y:plume.scaleY*.45,z:plume.rz*.65});
+      }
       p.push(turned(px,0,pz,[[0,.06],[.31,.06],[.45,.49],[.48,.53],[.47,.60],[0,.60]],copper));
       for(let i=0;i<(lite?8:17);i++){
         const a=i*2.40,len=.72+(i%4)*.15,h=.9+(i%3)*.24,leaf=M.merge();
@@ -634,9 +691,10 @@
     install();
     const engines=miningShelf(root,add,lite);
     const bartender=service(root,add), guests=company(root,lite);
-    const updateService=(t,calm,listener,fx,pressureAge=Infinity)=>{bartender(t,calm);guests.update(t,calm,listener,fx);engines.update(t,calm,pressureAge);};
+    const updateService=(t,calm,listener,fx,pressureAge=Infinity)=>{bartender(t,calm);guests.update(t,calm,listener,fx);engines.update(t,calm,pressureAge);
+      if(listener && contains(listener.root.position.x,listener.root.position.z))fire.update(calm?0:t);};
     const scope=mount(station); S.addChild(root,scope.root);
-    return {root,engines,updateService,guestsClear:guests.clear,yaw:scope.yaw,pitch:scope.pitch,target:scope.target,station};
+    return {root,engines,seatNodes,firepits,updateService,guestsClear:guests.clear,yaw:scope.yaw,pitch:scope.pitch,target:scope.target,station};
   };
   const mount=station=>{
     const root=S.createNode(), p=[];
@@ -661,5 +719,5 @@
     for(const y of [-.43,-.13,.23,.60]){const r=y>.2?.165:.134;const band=turned(0,0,0,[[r,y],[r+.007,y+.016],[r,y+.044]],dark,16);S.addChild(pitch,S.createNode({geometry:M.turnedX(band,Math.PI/2)}));}
     const target=add(pitch,M.turnedX(tube,Math.PI/2));return {root,yaw,pitch,target,station};
   };
-  BL.pokerTerrace=Object.freeze({station,halfSpan,outer,contains,clear,serviceX,cocktail,bar,roofBar,mount,build});
+  BL.pokerTerrace=Object.freeze({station,booths,inner,halfSpan,outer,contains,clear,promenadeClear,serviceX,cocktail,bar,roofBar,mount,build});
 })();

@@ -47,14 +47,14 @@
   // presses close the emote menu. Both are optional: without `emote` the Emote buttons never show.
   // `npcAt(table, seat)` says whether a computer opponent's figure sits at a seat (1), or one asked to move after this
   // hand (2), else 0: such a seat's card is the Ask Ooga To Move button. Optional: without it no seat offers it.
-  const create = (action, select, faceFor, emote, hud, npcAt = null) => {
-    const el = document.getElementById("poker"), lobby = document.getElementById("poker-panel"), edge = el.querySelector(".panel-edge");
+  const create = (action, faceFor, emote, hud, npcAt = null) => {
+    const el = document.getElementById("poker");
     const fields = Object.create(null);
     for (const node of el.querySelectorAll("[data-poker]")) fields[node.dataset.poker] ??= node;
     const by = name => fields[name];
-    const focus = by("focus"), seatRoot = el.querySelector(".poker-seats"), rows = [], seats = [];
+    const focus = by("focus"), seatRoot = el.querySelector(".poker-seats"), seats = [];
     const era = BL.pokerTableHud.create(el), themes = BL.pokerTableHud.tables;
-    const board = by("board"), hand = by("hand"), status = by("status"), notice = by("notice"), floorNotice = by("floor-notice");
+    const board = by("board"), hand = by("hand"), status = by("status"), notice = by("notice");
     const amount = by("amount"), slider = by("slider"), controls = by("controls"), raiseButton = by("raise");
     const presets = Array.from(el.querySelectorAll("[data-poker-size]"));
     const auto = el.querySelector('[data-poker-option="auto"]'), sound = el.querySelector('[data-poker-option="sound"]');
@@ -112,18 +112,10 @@
     };
     look.addEventListener("pointerdown",lookStart);look.addEventListener("pointermove",lookMove);
     look.addEventListener("lostpointercapture",lookEnd);look.addEventListener("keydown",lookKey);
-    let filter = "all", viewBusy = false, lastLog = "", viewerId = null;
-    const filterButtons = Array.from(el.querySelectorAll("[data-poker-filter]"));
+    let viewBusy = false, lastLog = "", viewerId = null;
     const dealer = el.querySelector(".poker-dealer"), endDeal = () => { dealTimer = 0; dealer.removeAttribute("data-dealing"); };
     let dealTimer = 0;
     const make = (tag, className, parent) => { const n = document.createElement(tag); if (className) n.className = className; if (parent) parent.appendChild(n); return n; };
-    for (let i = 0; i < 10; i++) {
-      const b = make("button", "poker-table-row", by("tables")); b.type = "button"; b.dataset.watch = i;
-      const title = make("strong", "", b), info = make("span", "", b), state = make("small", "", b);
-      const dots = make("div", "poker-seat-dots", b); dots.setAttribute("aria-hidden", "true");
-      for (let j = 0; j < R.SEATS; j++) make("i", "", dots);
-      title.textContent = String(i + 1).padStart(2, "0") + " · " + themes[i][0]; rows.push({ b, info, state, dots, open: true, playing: false });
-    }
     for (let i = 0; i < R.SEATS; i++) {
       const wrapper = make("div", "poker-seat", seatRoot), b = make("button", "poker-seat-button", wrapper);
       b.type = "button"; b.dataset.seat = i; b.dataset.seatNumber = i + 1;
@@ -219,39 +211,11 @@
       slider.setAttribute("aria-valuetext", `${chips(n)} total this round, adds ${chips(extra)} chips`);
       for (const b of presets) b.setAttribute("aria-pressed", String(b.dataset.pokerSize === preset));
     };
-    const noticeText = text => { if (notice.textContent !== text) notice.textContent = floorNotice.textContent = text; };
-    const filterRows = () => {
-      let count = 0;
-      for (const row of rows) {
-        row.b.hidden = filter === "open" ? !row.open : filter === "playing" ? !row.playing : false;
-        if (!row.b.hidden) count++;
-      }
-      by("empty-list").hidden = count > 0;
-      by("lobby-count").textContent = `${count} ${count === 1 ? "table" : "tables"}`;
-      for (const b of filterButtons) b.setAttribute("aria-pressed", String(b.dataset.pokerFilter === filter));
-    };
-    let lobbySnapshots = null, lobbyIndex = -1, lobbyViewer = null, lobbyBlocked = false;
-    const drawLobby = () => {
-      if (!lobbySnapshots || focused || lobby.dataset.folded === "true") return;
-      let changed = false;
-      lobbySnapshots.forEach((table, i) => {
-        const selected = i === lobbyIndex, disabled = lobbyBlocked || !!lobbyViewer && !selected;
-        const row = rows[i], mine = !!lobbyViewer && selected;
-        if (row.table === table && row.selected === selected && row.mine === mine && row.disabled === disabled) return;
-        row.table = table; row.selected = selected; row.mine = mine; row.disabled = disabled;
-        changed = true;
-        const occupied = table.seats.filter(Boolean).length;
-        row.open = occupied < R.SEATS && ["waiting", "showdown"].includes(table.phase) && (!live || ["idle", "complete", "aborted"].includes(table.fairPhase));
-        row.playing = !["waiting", "showdown"].includes(table.phase) || !!live && !["idle", "complete", "aborted"].includes(table.fairPhase);
-        row.info.textContent = `${occupied} / ${R.SEATS}`; row.state.textContent = row.open ? occupied ? "Join between hands" : "Start a table" : row.playing ? `${streetName[table.phase] === "Waiting for players" ? "Preparing hand" : streetName[table.phase]} · Watch` : "Table full · Watch";
-        row.b.classList.toggle("selected", selected); row.b.classList.toggle("your-table", mine); row.b.disabled = disabled;
-        for (let j = 0; j < R.SEATS; j++) row.dots.children[j].classList.toggle("occupied", !!table.seats[j]);
-        row.b.setAttribute("aria-label", `Table ${i + 1}, ${themes[i][0]}, ${occupied} of ${R.SEATS} seats, ${row.state.textContent}`);
-      });
-      if (changed) filterRows();
+    const noticeText = text => {
+      if (notice.textContent !== text) notice.textContent = text;
+      if (text && !focused) hud?.toast(text);
     };
     const phone = matchMedia("(max-width: 720px), (pointer: coarse) and (max-width: 960px) and (max-height: 520px)"), sheet = el.querySelector(".poker-sheet");
-    const compactLobby = matchMedia("(max-width: 720px), (pointer: coarse)");
     const sheetTitle = sheet.querySelector("h3"), content = sheet.querySelector(".poker-sheet-content");
     const betOpener = el.querySelector('[data-sheet="bet"]'), moved = [];
     const toolsNav = sheet.querySelector(".poker-sheet-nav"), panes = Array.from(sheet.querySelectorAll("[data-table-pane]"));
@@ -268,7 +232,6 @@
     const cancelSheet = e => { e.preventDefault(); closeSheet(); };
     const seatButtons = () => {
       closeSheet();
-      if (!focused && compactLobby.matches) { lobby.dataset.folded = "true"; edge.setAttribute("aria-expanded","false"); }
       for (const node of seats) node.b.disabled = !phone.matches && !node.available;
     };
     sheet.addEventListener("cancel", cancelSheet);
@@ -319,12 +282,7 @@
     };
     const onClick = e => {
       const b = e.target.closest("button"); if (!b || b.disabled || !el.contains(b)) return;
-      if (b.dataset.fold === "poker-panel") {
-        const folded = lobby.dataset.folded === "true";
-        edge.setAttribute("aria-expanded", String(!folded));
-        if (!folded) drawLobby();
-        (folded ? edge : lobby.querySelector(".panel-fold")).focus({preventScroll:true});
-      } else if (b.dataset.poker === "stay") leaveDialog.close();
+      if (b.dataset.poker === "stay") leaveDialog.close();
       else if (b.dataset.poker === "confirm-leave" && leaveDialog.open) {
         leaveDialog.close(); if (viewerId && snapshot.hand === leaveHand) action("depart");
       } else if (b.dataset.pokerAction === "walk") requestWalk();
@@ -338,11 +296,9 @@
       } else if (b.dataset.seat !== undefined && phone.matches) openSheet("seat", Number(b.dataset.seat));
       else if (b.dataset.poker === "emote") { pressOnEmote = false; if (!closeEmoteMenu()) openEmoteMenu(); }
       else if (b.dataset.emote) pickEmote(b.dataset.emote);
-      else if (b.dataset.watch !== undefined) select(Number(b.dataset.watch));
-      else if (b.dataset.pokerFilter) { filter = b.dataset.pokerFilter; filterRows(); }
       else if (b.dataset.seat !== undefined) action(b.dataset.npc ? "ask" : "seat", Number(b.dataset.seat));
       else if (b.dataset.pokerSize) setAmount(betAmount(snapshot, b.dataset.pokerSize), b.dataset.pokerSize);
-      else if (b.dataset.pokerAction) { noticeText(""); const version = sheetKind === "bet" ? sheetVersion : snapshot?.version; if (sheetKind === "bet") closeSheet(); action(b.dataset.pokerAction, Number(amount.value), version); }
+      else if (b.dataset.pokerAction) { noticeText(""); const version = sheetKind === "bet" ? sheetVersion : snapshot?.version; if (sheetKind === "bet" || ["quick", "connect", "practice", "forget"].includes(b.dataset.pokerAction)) closeSheet(); action(b.dataset.pokerAction, Number(amount.value), version); }
     };
     const onInput = e => { if (e.target === slider) setAmount(slider.value); };
     const onChange = e => {
@@ -366,13 +322,13 @@
     const setFocused = value => {
       // Returning to the floor gives Space back to the walker.
       const leaving = focused && !value;
-      focused = !!value; focus.hidden = !focused; lobby.hidden = edge.hidden = focused;
+      focused = !!value; focus.hidden = !focused; by("return").hidden = focused || !viewerId;
       // The emote menu goes with the table view, however it was left (Walk the floor from the keyboard presses nothing outside it).
       if (!focused) { setChairView(false); if (leaveDialog.open) leaveDialog.close(); closeEmoteMenu(); closeSheet(); }
       else if (snapshot && lastIndex >= 0) era.update(lastIndex,true);
       el.dataset.tableView = String(focused);
       if (focused) { document.body.dataset.pokerTableView = "true"; by("title").focus({ preventScroll: true }); }
-      else { document.body.removeAttribute("data-poker-table-view"); lobby.dataset.folded = String(compactLobby.matches); edge.setAttribute("aria-expanded", String(!compactLobby.matches)); drawLobby(); if (leaving) document.getElementById("scene").focus({ preventScroll: true }); }
+      else { document.body.removeAttribute("data-poker-table-view"); if (leaving) document.getElementById("scene").focus({ preventScroll: true }); }
     };
     const update = (index, snapshots, viewer, pendingStand, isPaused, autoDeal) => {
       const previous = snapshot, switched = index !== lastIndex;
@@ -394,15 +350,13 @@
           if (history[i].length > 12) history[i].pop();
         }
       });
-      lobbySnapshots = snapshots; lobbyIndex = index; lobbyViewer = viewer; lobbyBlocked = blocked;
-      drawLobby();
       by("title").textContent = `${themes[index][0]}`;
       by("edition").textContent = `Table ${String(index + 1).padStart(2,"0")} · Banana Club`;
       status.textContent = "No-limit Hold’em · blinds 5 / 10";
       by("hand-number").textContent = s.hand ? `#${s.hand}` : "Not dealt";
       by("seat-count").textContent = `${s.seats.filter(Boolean).length} / ${R.SEATS} seated`;
       by("private-label").textContent = own ? "YOUR HAND" : "WATCHING THE TABLE";
-      by("return").hidden = !viewer; by("return").disabled = pendingStand;
+      by("return").hidden = focused || !viewer; by("return").disabled = pendingStand;
       by("return-label").textContent = `Your seat · Table ${String(index + 1).padStart(2, "0")}`;
       by("floor-turn").textContent = pendingStand ? "Leaving when the live hand settles" : blocked ? live?.connection === "failed" ? "Reconnect to recover your seat" : "Waiting for the table to confirm…" : legal ? "Your turn — return to act" : own?.folded ? "You folded · the hand continues" : own?.stack === 0 && own.inHand ? "All in · waiting for the result" : idle ? "Ready for the next hand" : "Your seat is waiting for you";
       el.dataset.yourTurn = String(!!legal && !paused && !pendingStand && !blocked);
@@ -518,7 +472,6 @@
       by("mode-badge").textContent = live ? "LIVE TABLE" : "PRACTICE";
       by("connection").textContent = connection === "practice" ? "Practice · on your device" : connection === "failed" ? "Connection stopped" : connection === "reconnecting" ? "Reconnecting · waiting for table" : connection === "connecting" ? "Connecting to live tables…" : ["betting", "complete"].includes(live.phase) ? "Connected · shuffle checked" : "Connected · " + (fairName[live.phase] || "waiting for players");
       by("reconnect").hidden = connection !== "failed";
-      by("reconnect-floor").hidden = connection !== "failed";
       by("connect").hidden = !!live; by("practice").hidden = !live;
       by("forget").hidden = !live?.recoverable;
       by("nickname").disabled = !!live?.recoverable;
@@ -560,7 +513,7 @@
       emoteOn = false; emoteLabel(false); for (const b of emoteButtons) b.hidden = true;
       if (hud) window.removeEventListener("pointerdown", notePress, true);
       el.removeEventListener("click", onClick); el.removeEventListener("input", onInput); el.removeEventListener("change", onChange);
-      by("tables").replaceChildren(); seatRoot.replaceChildren(); board.replaceChildren(); hand.replaceChildren(); potRoot.replaceChildren(); by("history").replaceChildren();
+      seatRoot.replaceChildren(); board.replaceChildren(); hand.replaceChildren(); potRoot.replaceChildren(); by("history").replaceChildren();
       el.removeAttribute("data-your-turn"); el.removeAttribute("data-connection");
       sound.checked = false; setFocused(false); soundChannel.release(); if (audio) { audio.close().catch(() => {}); audio = null; }
     } };

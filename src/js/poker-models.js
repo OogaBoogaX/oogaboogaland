@@ -144,11 +144,6 @@
     // A table lamp at each end: a gold foot and stem under a glowing silk shade, so the lounge reads warm against the night.
     ...[-1, 1].flatMap(sz => [flat(0.16, 0.04, 0.16, GOLD, 0, 0.4, sz * 0.6), flat(0.035, 0.36, 0.035, GOLD, 0, 0.6, sz * 0.6),
       flat(0.3, 0.22, 0.3, "#ffd9a0", 0, 0.89, sz * 0.6, 0.95), flat(0.32, 0.02, 0.32, GOLD, 0, 1.01, sz * 0.6)]));
-  // A high-top cocktail table for the crowd to stand at with a drink: a small round marble top at 0.95 (the bar
-  // counter's height, at an Ooga's chest) with a gold rim, on a gold stem and foot.
-  const highTop = () => M.merge(M.lathe({ segments: lite ? 6 : 16, profile: [[0, 0], [0.24, 0], [0.24, 0.025], [0.07, 0.05], [0.035, 0.08], [0.035, 0.88], [0.09, 0.9], [0, 0.9]], color: GOLD }),
-    M.lathe({ segments: lite ? 8 : 24, profile: [[0, 0.9], [0.34, 0.9], [0.345, 0.925], [0.34, 0.95], [0, 0.95]], color: K.WHITE }),
-    M.lathe({ segments: lite ? 8 : 24, profile: [[0.34, 0.925], [0.352, 0.925], [0.352, 0.952], [0.34, 0.952]], color: GOLD }));
   const ropePost = () => M.lathe({ segments: lite ? 4 : 12, profile: [[0, 0], [0.17, 0], [0.17, 0.035], [0.06, 0.075], [0.035, 0.1], [0.035, 0.79], [0.06, 0.81], [0.075, 0.855], [0.05, 0.895], [0, 0.9]], color: K.BRASS });
   // The dressing kit's palm is a 4 m tree; a potted one grows hub leaf cards from a lathe pot, its crown pulled in to the box.
   const palm = () => {
@@ -365,7 +360,7 @@
       button: disk(0.16, 0, 0.055, "#ece3c7"),
       vaultSign: BL.pokerIce.sign(lite),
       title: BL.pokerIce.line("GENESIS VAULT", 0.213, "#e0f4ff", lite),
-      stool: stool(), tealStool: stool("#28615c"), sofa: sofa(), armchair: armchair(), lowTable: lowTable(), highTop: highTop(),
+      stool: stool(), tealStool: stool("#28615c"), sofa: sofa(), armchair: armchair(), lowTable: lowTable(),
       // Floor tiles (the floor module's six veined white seeds and two dark ones for the border).
       tiles: BL.pokerFloor.tiles(lite),
       column: K.column({ h: 8.8 }), palm: palm(), post: ropePost(), chandelier: chandelierFrame(), crystals: crystals(), ray: chandelierRay(),
@@ -611,7 +606,6 @@
       // Facing its `yaw`: the piece's front looks down -x, so it turns by a quarter more.
       else if (f.kind === "armchair") { const n = node(geo.armchair, f.x, 0, f.z); n.rotation.y = f.yaw + Math.PI / 2; S.addChild(environment, n); }
       else if (f.kind === "lowTable") S.addChild(environment, node(geo.lowTable, f.x, 0, f.z));
-      else if (f.kind === "highTop") S.addChild(environment, node(geo.highTop, f.x, 0, f.z));
       else if (f.kind === "palm") S.addChild(environment, node(geo.palm, f.x, 0, f.z));
       else if (f.kind === "ropePost") S.addChild(environment, node(geo.post, f.x, 0, f.z));
       else if (f.kind === "cage") {
@@ -633,9 +627,10 @@
   // the same table. `solid` ones stop walkers, while the high-roller corner is only a mark round table 9.
   // Beside the tables on the side aisles' side (x 17) and the promenade's (x 5.5), 2.4 m and more clear of the chairs,
   // off the cross aisles, the fountain's ring and the high-roller's ropes.
-  const HIGH_TOPS = [...[-17, 17].flatMap(x => [24, 12, 0, -12].map(z => [x, z])), ...[-5.5, 5.5].flatMap(x => [24, 12, -12].map(z => [x, z])), [-5.5, -24]];
+  const CONVERSATION_SPOTS = [...[-17, 17].flatMap(x => [24, 12, 0, -12].map(z => [x, z])), ...[-5.5, 5.5].flatMap(x => [24, 12, -12].map(z => [x, z])), [-5.5, -24]];
   const FURNITURE = Object.freeze([
     BL.pokerBandstand.floor,
+    { kind: "lift", x: BL.pokerVault.LIFT.x, z: BL.pokerVault.LIFT.z, hx: BL.pokerVault.LIFT.half, hz: BL.pokerVault.LIFT.half, solid: true },
     { kind: "bar", x: -10, z: -34.55, hx: 8, hz: 1.65, solid: true }, { kind: "bar", x: 10, z: -34.55, hx: 8, hz: 1.65, solid: true },
     ...Object.keys(BL.pokerEraTables.names).map(key=>({kind:"eraSign",x:TABLES[key].x+SIGN_X,z:TABLES[key].z+SIGN_Z,hx:.78,hz:.75,solid:true})),
     {kind:"founderChair",x:TABLES[0].x-3.08,z:TABLES[0].z-2.76,hx:1.04,hz:.81,solid:true},
@@ -656,10 +651,7 @@
     ...[-27.1,-25.1,-22.9,-20.9].map(z=>({kind:"ropePost", x:7.08, z, hx:.2,hz:.2,solid:true})),
     ...[-26.1,-21.9].map(z=>({kind:"rope", x:7.08,z,hx:.1,hz:1,solid:true})),
     { kind: "highRoller", x: 11, z: -24, hx: 4, hz: 4, solid: false },
-    // High-top cocktail tables for the crowd beside the tables, fifteen down the two banks.
-    ...HIGH_TOPS.map(([x, z]) => x === BL.pokerHourglass.X && z === BL.pokerHourglass.Z
-      ? { kind: "hourglass", x, z, hx: BL.pokerHourglass.RADIUS, hz: BL.pokerHourglass.RADIUS, solid: true }
-      : { kind: "highTop", x, z, hx: 0.3, hz: 0.3, solid: true }),
+    { kind: "hourglass", x: BL.pokerHourglass.X, z: BL.pokerHourglass.Z, hx: BL.pokerHourglass.RADIUS, hz: BL.pokerHourglass.RADIUS, solid: true },
     // The gaming tables (turned only by half turns, so their boxes keep their own half-extents).
     ...GAMES.map((g, game) => ({ kind: "game", game, x: g.x, z: g.z, hx: BL.pokerGames.FOOT[g.kind].hx, hz: BL.pokerGames.FOOT[g.kind].hz, solid: true })),
     // Each statue from its plinth's back edge to as far as it reaches toward the room, and as wide as it reaches, so no
@@ -786,8 +778,8 @@
     for (const z of STROLL_Z) for (const x of [-20, 0, 20]) stand("stroll", x, aisle(x, z), 0);
     for (const z of STROLL_MID) for (const x of [-20, 0, 20]) if (x || Math.abs(z) > 6) stand("stroll", x, aisle(x, z), 0);
     for (const x of [-3, 3]) stand("door", x, 33, Math.PI);
-    // Three guests round each high-top, facing it, as a conversation group.
-    for (const [gx, gz] of HIGH_TOPS) for (let k = 0; k < 3; k++) {
+    // Three guests face each other in the open aisles.
+    for (const [gx, gz] of CONVERSATION_SPOTS) for (let k = 0; k < 3; k++) {
       const a = (k + 0.5) * 2 * Math.PI / 3 + gz * 0.1;
       nearestClear(gx + Math.sin(a) * 0.95, gz + Math.cos(a) * 0.95, STAND, clear);
       add("group", clear.x, clear.z, Math.atan2(gx - clear.x, gz - clear.z));

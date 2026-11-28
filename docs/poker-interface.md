@@ -8,11 +8,8 @@ banana chips.
 
 ## Player flow
 
-- **Enter:** choose Play a practice hand for four-player practice, or Join live
-  tables for the configured service. Each mode is labeled throughout the view.
-- **Find a table:** ten compact cards show occupancy and hand status. All
-  tables, Open seats and In play filters help find a seat or a hand to watch.
-  Open seats means a seat can be taken between hands, not a mid-hand waitlist.
+- Walk up to a chair, then press **Y** or tap **Open table** to watch or take a seat.
+- For a quick practice hand or live play, open **Table tools → Options** at a table.
 - **Follow a hand:** the oval table emphasizes the board, pot, acting player,
   stacks and round bets. Private cards sit beside the turn prompt. Table tools
   opens hand history and table options.
@@ -40,7 +37,7 @@ banana chips.
 
 The selected table sets the artwork, title, crest, rail, seat and control palette in practice and live play. Each surface follows its matching floor table. The hosted site fetches the selected picture when the table opens. The single-file build embeds all ten.
 
-On portrait phones the action dock sits below the table. In phone landscape it sits beside the board. Tap a seat to inspect its stack and last action. The seat sheet offers the applicable seating or move action. Bet or Raise opens the sizing sheet, where the player chooses an amount and submits it. Table tools opens on Hand history. Open Options to manage preferences. Choose another table from the casino floor. On touchscreens the floor list starts closed and the Tables button sits above the look stick. A changed turn or connection closes an outstanding bet before it can be submitted.
+On portrait phones the action dock sits below the table. In phone landscape it sits beside the board. Tap a seat to inspect its stack and last action. The seat sheet offers the applicable seating or move action. Bet or Raise opens the sizing sheet, where the player chooses an amount and submits it. Table tools opens on Hand history. Open Options to manage preferences. Choose another table from the casino floor. A changed turn or connection closes an outstanding bet before it can be submitted.
 
 ## The table view
 

@@ -18,9 +18,9 @@
   // The sill: inner faces clear of the columns' bases (which reach x 24.35) and of the mirror's back (36.91).
   const SILL = Object.freeze({ inner: 24.38, outer: 24.85, endInner: 36.91, endOuter: 37.3, body: 0.56, bead: 0.6, coping: 0.33 });
   // The terrace, its top just over the floor's: out to x +-TERRACE.out and z +-TERRACE.endOut, on a stepped podium.
-  const TERRACE = Object.freeze({ out: 26.6, endOut: 39, top: 0.04, under: -0.6, podium: -1.5, podiumIn: 24.7, podiumOut: 26.35, podiumEnd: 38.75 });
+  const TERRACE = Object.freeze({ out: SILL.outer + 3.5, endOut: SILL.endOuter + 3.4, top: 0.04, under: -0.6, podium: -1.5, podiumIn: 24.7, podiumOut: SILL.outer + 3.25, podiumEnd: SILL.endOuter + 3.15 });
   // The balustrade on the terrace: its line at x +-RAIL.x and z +-RAIL.z, its height over the terrace.
-  const RAIL = Object.freeze({ x: 26.3, z: 38.7, h: 1.05, pitch: 0.34, pitchLite: 1.1, sideSegments: 18, endSegments: 12 });
+  const RAIL = Object.freeze({ x: TERRACE.out - .3, z: TERRACE.endOut - .3, h: 1.05, pitch: 0.34, pitchLite: 1.1, sideSegments: 18, endSegments: 12 });
   // Members, metres: post (along the wall, then into it), mullion, transom height and depth.
   const POST = { w: 0.12, d: 0.16 }, MULLION = { w: 0.055, d: 0.1 }, TRANSOM = { h: 0.07, d: 0.12 }, LIGHT = 2.4;
   const COLUMN_X = 23.8, COLUMN_Z = Object.freeze(Array.from({ length: 9 }, (_, k) => -34 + k * 8.5)), SCONCE_Y = 3.2;

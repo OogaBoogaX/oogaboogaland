@@ -12,8 +12,8 @@ The ten-table floor has one look, Banana Club. Read
 [poker-protocol.md](poker-protocol.md) for the protocol, service commands,
 security assumptions and hosting requirements.
 
-The current interface revision adds a filtered table browser, a clearer betting
-dock and live connection feedback, and the table view now shows the room
+Walk up to a chair to open its table. The betting dock shows live connection
+feedback, and the table view shows the room
 behind it, a face at every seat, the pot's chips and the dealer's own gorilla.
 See [poker-interface.md](poker-interface.md)
 for the interaction changes and remaining play-tests, and
@@ -27,9 +27,15 @@ Follow the stream of amber blocks past the Bitcoin-orange Charging Bull to the G
 
 The hourglass on the west side of the promenade shows the observed block height. Gold sand drains according to the time since the tip and the recent average block interval. When a new tip arrives, the height lifts and a two-tone chime sounds. For 15 seconds, orange light travels across the three chandeliers from the hourglass toward the vault. The block hash selects which crystal facets and table bank catch the light first. With reduced motion, the chandeliers brighten together, hold steady, and fade gradually. On compact screens, one shaft lights up and reflections concentrate on the watched or nearest table. Opening the room on an existing tip is quiet. The sound follows the room audio controls.
 
-Walk through the middle of the even-numbered table wall to reach the marble terrace. Your Ooga gets a jetpack on the deck. Hold Jump to climb, use J or the jetpack button to toggle it, and land to walk back through the doorway. The brass telescope has controls for the Moon, black hole and Earth. At the portrait camera, use **Act**, take a picture and select **Save PNG**. Leaving the camera returns you to where you stood. The three plaques beside the booth rank settled player awards of at least 100 play chips observed by this browser. Returned bets are excluded. The board resets at 6 a.m. local time.
+Walk through the middle of the even-numbered table wall to reach the marble terrace. Your Ooga gets a jetpack on the deck. Hold Jump to climb, use J or the jetpack button to toggle it, and land to walk back through the doorway. The brass telescope has controls for the Moon, black hole and Earth. At the portrait camera, use **Act**, take a picture and select **Save PNG**. Leaving the camera returns you to where you stood. The three Wall of Fame plaques across the terrace from the booth rank settled player awards of at least 100 play chips observed by this browser. Returned bets are excluded. The board resets at 6 a.m. local time.
 
-Gate 21 at the east bar leads to the rooftop. The gate opens on the twenty-first visit or when you win a share of a non-refund pot worth at least 100 play chips. That win also opens Cold Storage. Upstairs, there is a fireside bar, a second telescope and a copy of the Wall of Fame. A hooded figure walks the rail at 9:21 p.m. local time. The marked return control leads back to the gaming floor.
+Use **Act** by a booth cushion or select it to sit facing its circular firepit. Move or use **Act** again to stand.
+
+At either end of the terrace, follow the marble walkway around the casino. It passes behind the bars and Genesis Vault, with views over the whale basin, and returns to the opposite end of the terrace.
+
+Fly above the eastern cornice and release Jump over the glass to land. You can walk along the curved roof and take the lit steps into the 21 Club on any visit.
+
+The glass elevator near the east bar also serves the club. Use **Act** at its panel to ride. The upward ride unlocks on the twenty-first visit or when you win a share of a non-refund pot worth at least 100 play chips. That win also opens Cold Storage. Upstairs, there is a fireside bar, a second telescope and a copy of the Wall of Fame. A hooded figure walks the rail at 9:21 p.m. local time. The Gaming Floor control calls the car for the ride down.
 
 The vault-side jazz stage counts blocks until the next halving. The river, dome and Whale Watch aquarium also use recent transactions sampled by the existing mempool socket. A passing whale represents a transaction with at least 10 BTC in total outputs, including change. A new high in Kraken’s BTC/USD trading history brings up the hall lights and sounds a short fanfare. The first reading establishes a silent baseline.
 
@@ -58,10 +64,10 @@ back to ₿IFRÖST, in front of that window.
 
 On the gaming floor, walk up to a chair to see its table number and name. Choose **Open table** (Y on a keyboard) to watch, then **Take a seat** when you want to play. **Keep walking** dismisses the offer until you approach again. Jump and Act let you move past tables.
 
-**Play a practice hand** takes a free seat, adds enough computer opponents for four
+In **Table tools → Options**, **Play a practice hand** takes a free seat, adds enough computer opponents for four
 players and deals. If every table is mid-hand, it keeps a seat at the table shown
-and sits you down when that hand ends. Or choose any of the ten lobby table cards,
-take a specific seat between hands, add up to three bots at a time, and deal when
+and sits you down when that hand ends. You can also pick a chair at any table,
+take that seat between hands, add up to three bots at a time, and deal when
 ready. Every table has nine player seats plus a suited gorilla dealer. Two funded
 seats suffice; there is no table owner or privileged host.
 
@@ -150,7 +156,7 @@ Card motion and the dealer's deal gesture respect the reduced-motion preference.
 
 WASD/sticks move the spectator; drag/look controls use the shared pilot. The
 central aisle and passages between table rows remain walkable. **Walk the floor**
-closes the playing view. Fold the lobby to see more of the room. All physical
+closes the playing view. All physical
 tabletop hole cards are identical backs; walking behind a seat reveals nothing.
 A spectator can watch the focused view, return to walking, and select another
 table. Taking a second seat requires leaving the first.
@@ -291,9 +297,7 @@ at the knees, with the thighs over the cushion and the calves below its front ed
 back pad meets the Ooga's back and its carved crest stands at 1.06 m, about a
 seated Ooga's shoulder. Each chair's front is about 0.15 m from the rail, so a
 seated Ooga is at the table. The table lamps hang 0.6 m lower than before, as
-the tables came down 0.6 m, and closer together over the smaller felt. Fifteen
-high-top cocktail tables (a small marble top at 0.95 m on a gold stem) stand
-beside the tables, where guests gather in threes with their drinks, and each
+the tables came down 0.6 m, and closer together over the smaller felt. Guests gather in threes with their drinks in the open aisles, and each
 table has two rings of watchers' places. The dealer
 gorilla stands about as tall as a standing guest. Bar stools are 0.62 m at a
 0.95 m counter whose marble is set back under the top; the cashier's counter is
