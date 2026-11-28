@@ -27,7 +27,7 @@
   const RELIT_MAX = 8;
   const QUALITY = {
     high: { dpr: 1.5, msaa: 2, shadow: 2048, bloom: true, shafts: true, mirror: 1024, mirrorCadence: 1, prepass: true, environment: 128, environmentCadence: 1, lights: 32 },
-    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, shafts: true, mirror: 768, mirrorCadence: 2, prepass: true, environment: 96, environmentCadence: 2, lights: 20 },
+    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, shafts: false, mirror: 768, mirrorCadence: 2, prepass: true, environment: 96, environmentCadence: 2, lights: 20 },
     low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, shafts: false, mirror: 256, mirrorCadence: 4, prepass: true, environment: 64, environmentCadence: 4, lights: 10 }
   };
   const INSTANCE_FLOATS = 20;
