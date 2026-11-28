@@ -152,7 +152,9 @@
     const last = new Float32Array(SOCKETS.length * 3 + 8);
     // A pose a scene has written over: each driver part's turn as the driver last left it, compared at sync.
     const posed = new Float32Array(SOCKETS.length * 3);
-    const notePosed = () => { let k = 0; for (const name of SOCKETS) { const p = dparts[name]; posed[k++] = p ? p.rotation.x : 0; posed[k++] = p ? p.rotation.y : 0; posed[k++] = p ? p.rotation.z : 0; } };
+    // (and, as the driver poses, the controller's support offset, which eases the body up or down a step, as agent.js adds
+    // it to the hips: set here, not at sync, so a body stepped without drawing has it too)
+    const notePosed = () => { tilt.position.y = managed ? (state.supportOffset || 0) / (droot.scale.y || 1) : 0; let k = 0; for (const name of SOCKETS) { const p = dparts[name]; posed[k++] = p ? p.rotation.x : 0; posed[k++] = p ? p.rotation.y : 0; posed[k++] = p ? p.rotation.z : 0; } };
     const overridden = () => { let k = 0; for (const name of SOCKETS) { const p = dparts[name]; if (p && (Math.abs(posed[k] - p.rotation.x) > 1e-6 || Math.abs(posed[k + 1] - p.rotation.y) > 1e-6 || Math.abs(posed[k + 2] - p.rotation.z) > 1e-6)) return true; k += 3; } return false; };
     // What the driver is doing that the new rig has no pose for.
     const acting = () => state.gait === "beat" || state.beat > 0 || (managed && (state.pound > 0 || state.poundCharge > 0 || state.dragging || state.chewing > 0
@@ -190,8 +192,6 @@
       if (r.rain) r.rain((typeof performance !== "undefined" ? performance.now() : 0) / 1000);
       // The driver's whole-body turn at its hips, but for lying and sitting, which the new rig poses itself.
       if (lounge) { tilt.quaternion[0] = tilt.quaternion[1] = tilt.quaternion[2] = 0; tilt.quaternion[3] = 1; } else qset(tilt.quaternion, dq.hips);
-      // and the controller's support offset, which eases the body up or down a step (agent.js adds it to the hips)
-      tilt.position.y = managed ? (state.supportOffset || 0) / (droot.scale.y || 1) : 0;
       // Retargeted head and limbs, eased in and out over a fifth of a second.
       const tnow = now() || clock + 16, dt = Math.min(0.1, Math.max(0, (tnow - clock) / 1000)); clock = tnow;
       const want = acting() || overridden() ? 1 : 0;
