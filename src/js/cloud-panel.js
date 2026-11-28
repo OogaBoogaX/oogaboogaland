@@ -148,6 +148,8 @@
   // The footer, from the room's word on the visitor and this page's own voice session.
   const support = voice.support();
   const reason = !support.secure ? "Voice needs a secure page" : !support.webrtc ? "This browser has no WebRTC" : !support.mic ? "This browser has no microphone" : "";
+  const micPicker = BL.microphonePicker.create();
+  mute.after(micPicker.button);
   let footerState = null;
   // The name's dot says where the visitor is online, the same in every panel: on the island, green, in a chat or not, as
   // every account row has it (hud.js); Ooga Chat's app draws its own purple.
@@ -160,6 +162,7 @@
     const me = net.state.me;
     set(footName, "textContent", me ? me.display || me.login : "");
     islandDot();
+    micPicker.update(voice, !!me);
     footerState = A.footer(model.you, voice.stats, reason);
     BL.nativeIcons.label(mute, footerState.mute.text);
     set(mute, "disabled", footerState.mute.disabled);
@@ -323,6 +326,7 @@
   // Join voice or Leave voice, both only while signed in with the room live.
   const islandFoot = () => {
     const me = net.state.me, vs = voice.stats, live = !!me && net.state.room === "live";
+    micPicker.update(voice, live);
     set(footName, "textContent", me ? me.display || me.login : "");
     islandDot();
     const inVoice = vs.enabled || vs.returning || vs.reconnecting, micOn = inVoice && !reason, asMic = micOn && !vs.reconnecting;
@@ -341,6 +345,7 @@
   // In a chat: the chat's voice, as Ooga Chat's footer works it (ooga-chat-views.js `cloudFoot`).
   const chatFoot = (s, me) => {
     const v = s.voice, room = s.room;
+    micPicker.update(calls.media, !!me);
     set(footName, "textContent", me ? me.display : "");
     const speaker = v.role === "speaker";
     islandDot();
@@ -532,6 +537,7 @@
   paintChat();
 
   const dispose = () => {
+    micPicker.dispose();
     for (const off of subs) off();
     subs.length = 0;
     watch.disconnect();
