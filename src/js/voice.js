@@ -791,7 +791,7 @@
     if (stats.publishing || microphoneWanted) return;
     micGeneration++;
     if (mic) for (const track of mic.getTracks()) track.stop();
-    mic = null; dropFilter();
+    mic = null; stats.deviceId = ""; dropFilter();
     dropMeter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
     if (!up()) { window.clearInterval(speakTimer); speakTimer = 0; }
@@ -1190,7 +1190,7 @@
     disarmPassive();
     stats.joining = false; teardown();
     if (mic) for (const t of mic.getTracks()) t.stop();
-    mic = null; dropFilter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
+    mic = null; stats.deviceId = ""; dropFilter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
     dropMeter();
     if (audio) audio.close().catch(() => {});
@@ -1213,7 +1213,7 @@
     micGeneration++; microphoneWanted = stats.micWanted = false; stats.joining = false;
     if (!stats.enabled) clearRelay();
     if (mic) for (const track of mic.getTracks()) track.stop();
-    mic = null; dropFilter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
+    mic = null; stats.deviceId = ""; dropFilter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
     dropMeter();
     if (pubPc) pubPc.close();
@@ -1243,7 +1243,7 @@
     recover.wanted = false; recover.returning = true;
     micGeneration++; microphoneWanted = stats.micWanted = false;
     if (mic) for (const track of mic.getTracks()) track.stop();
-    mic = null; dropFilter(); stats.micLevel = 0;
+    mic = null; stats.deviceId = ""; dropFilter(); stats.micLevel = 0;
     dropMeter();
     emit();
   };

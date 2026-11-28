@@ -47475,6 +47475,7 @@ const cloudPanelChecks = async BL => {
     removeAttribute(k) { delete this.attrs[k]; if (k === "src") { this.src = undefined; this.cleared++; } },
     append(...xs) { for (const x of xs) { if (x.parent) x.remove(); x.parent = this; this.children.push(x); } },
     insertBefore(x, ref) { if (x.parent) x.remove(); x.parent = this; const at = ref ? this.children.indexOf(ref) : -1; this.children.splice(at < 0 ? this.children.length : at, 0, x); return x; },
+    after(node) { if (this.parent) this.parent.insertBefore(node, this.parent.children[this.parent.children.indexOf(this) + 1]); },
     focus() {},
     prepend(x) { x.parent = this; this.children.unshift(x); },
     replaceChildren(...xs) { this.replaced++; for (const c of this.children) c.parent = null; this.children = []; this.append(...xs); },
@@ -47501,7 +47502,7 @@ const cloudPanelChecks = async BL => {
     chatCall: { available: () => false, room: null, subscribe: () => () => {}, hear: () => () => {}, identity: () => null },
     reactions: { mount: (host, options) => { gate = options.handAllowed; }, refresh: () => refreshes.push(gate()) } } };
   const document = { getElementById: $, createElement: el, querySelector: () => el("svg"), addEventListener() {}, removeEventListener() {} };
-  runInNewContext(["src/js/audience-tiles.js", "src/js/cloud-panel.js"].map(file => readFileSync(join(root, file), "utf8")).join("\n"), { window, document, getComputedStyle: () => ({ gridTemplateColumns: "1fr 1fr 1fr 1fr" }), location: { search: "" }, URLSearchParams, MutationObserver: class { constructor(fn) { observers.push(fn); } observe() {} disconnect() {} } });
+  runInNewContext(["src/js/microphone-picker.js", "src/js/audience-tiles.js", "src/js/cloud-panel.js"].map(file => readFileSync(join(root, file), "utf8")).join("\n"), { window, document, getComputedStyle: () => ({ gridTemplateColumns: "1fr 1fr 1fr 1fr" }), location: { search: "" }, URLSearchParams, MutationObserver: class { constructor(fn) { observers.push(fn); } observe() {} disconnect() {} } });
   const P = window.BL.cloudPanel, hear = msg => { for (const fn of subs.audience) fn(msg); }, tick = () => { for (const fn of subs.net) fn(state); };
   const row = (id, role, extra = {}) => ({ id, login: id, provider: "github", role, ...(role === "speaker" ? { source: "world" } : {}), ...extra });
   const asked = sent.map(x => `${x.type}:${x.zone}`).join();
@@ -49699,7 +49700,7 @@ const studioVoiceLifecycleProof = async () => {
     const context={window:win,Date:{now:()=>clock.at??Date.now()},document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){},removeItem(){}},AbortController,RTCPeerConnection:Peer,Audio:Sound,MediaStream:class {constructor(tracks){this.tracks=tracks;}getTracks(){return this.tracks;}},navigator:{mediaDevices:{enumerateDevices:async()=>[{kind:"audioinput",deviceId:"synthetic-mic",label:"Synthetic mic"},{kind:"videoinput",deviceId:"camera",label:"Camera"}],getUserMedia:constraints=>{gum++;calls.push({op:"capture",constraints});return permission||Promise.resolve(makeStream());}}},
       fetch:async(url,options)=>{const op=url.split("/").at(-1);calls.push({op,body:JSON.parse(options.body)});if(failing.get(op)>0){failing.set(op,failing.get(op)-1);return {ok:false,status:502,json:async()=>({error:"synthetic failure"})};}if(deferred?.op===op)return deferred.promise;if(op==="publish"&&publishResponse)return publishResponse;if(op==="pull")return {ok:true,json:async()=>({tracks:JSON.parse(options.body).ids.map(id=>({id,mid:String(id)}))})};return {ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})};}};
     runInNewContext(source,context);
-    return {net:win.BL.net,clock,failNext(op,n=1){failing.set(op,n);},fire(delay){const found=[...timers].find(([,task])=>task.delay===delay);if(!found)return false;timers.delete(found[0]);return found[1].fn();},defer(op){let finish;const promise=new Promise(resolve=>{finish=resolve;});deferred={op,promise};return data=>{deferred=null;finish({ok:true,json:async()=>data});};},voice:win.BL.voice,calls,streams,peers,elements,timers,get gum(){return gum;},makeStream,denyPermission(){permission=Promise.reject(Object.assign(Error("denied"),{name:"NotAllowedError"}));},deferPermission(){permission=new Promise(resolve=>{this.resolvePermission=resolve;});},deferPublish(){publishResponse=new Promise(resolve=>{this.resolvePublish=()=>resolve({ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})});});}};
+    return {net:win.BL.net,media:context.navigator.mediaDevices,clock,failNext(op,n=1){failing.set(op,n);},fire(delay){const found=[...timers].find(([,task])=>task.delay===delay);if(!found)return false;timers.delete(found[0]);return found[1].fn();},defer(op){let finish;const promise=new Promise(resolve=>{finish=resolve;});deferred={op,promise};return data=>{deferred=null;finish({ok:true,json:async()=>data});};},voice:win.BL.voice,calls,streams,peers,elements,timers,get gum(){return gum;},makeStream,denyPermission(){permission=Promise.reject(Object.assign(Error("denied"),{name:"NotAllowedError"}));},deferPermission(){permission=new Promise(resolve=>{this.resolvePermission=resolve;});},deferPublish(){publishResponse=new Promise(resolve=>{this.resolvePublish=()=>resolve({ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})});});}};
   };
   const drain=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
   // A gather timeout is inconclusive; only a completed empty gather may refuse the listener.
@@ -49756,6 +49757,24 @@ const studioVoiceLifecycleProof = async () => {
   record("OBL microphone picker: same publication and mute, failed replacement retains capture, mute during acquisition, leave cancels late capture",
     kept&&failed&&muteDuring&&cancelled,JSON.stringify({kept,failed,muteDuring,cancelled}));
   }
+  // Once a chosen input is released, unplugging it cannot trap a later Join voice or returning Unmute.
+  const releasedDevices=[];
+  for(const release of ["stop","dropMic","cancelPreflight","hold"]){
+    const f=fixture();
+    if(release==="cancelPreflight")await f.voice.preflight();else await f.voice.enable();
+    await f.voice.selectDevice("usb");
+    const capture=f.media.getUserMedia;
+    f.media.getUserMedia=constraints=>constraints.audio.deviceId?.exact==="usb"
+      ?Promise.reject(Object.assign(Error("unplugged"),{name:"OverconstrainedError"})):capture(constraints);
+    if(release==="hold"){
+      f.net.state.room="connecting";await f.voice.restart();await drain();f.fire(120000);
+      f.net.state.room="live";await f.voice.restart(true);await drain();f.voice.toggle();await drain();
+    }else{f.voice[release]();await f.voice.enable();}
+    releasedDevices.push({release,publishing:f.voice.stats.publishing,defaultInput:!f.calls.filter(c=>c.op==="capture").at(-1).constraints.audio.deviceId});
+    f.voice.dispose();await drain();
+  }
+  record("OBL microphone picker: unplugging a released selection cannot block rejoin, revocation recovery, a cancelled preview or returning Unmute",
+    releasedDevices.every(r=>r.publishing&&r.defaultInput),JSON.stringify(releasedDevices));
   const preview=fixture();const deviceList=await preview.voice.devices();await preview.voice.selectDevice("synthetic-mic");
   const localPreview=preview.voice.stats.preflight&&preview.voice.stats.permission==="granted"&&!preview.voice.stats.publishing&&preview.calls.filter(c=>c.op!=="capture").length===0&&preview.calls[0].constraints.audio.deviceId.exact==="synthetic-mic"&&deviceList.length===1;
   preview.voice.cancelPreflight();const previewReleased=preview.streams[0].track.stops===1&&!preview.voice.stats.preflight;
@@ -50017,15 +50036,19 @@ const listenOnlyMicStatusProof = async () => {
   const back=quiet({});
   // A returning listener's failed ICE probe must say why it failed instead of offering an unexplained Unmute.
   const accountStart=source.indexOf("  const ROOM_WORDS"),accountEnd=source.indexOf("\n  // The microphone's note",accountStart);
-  const nodes=new Map(),element=id=>{if(!nodes.has(id))nodes.set(id,{dataset:{},getAttribute(){return "";},setAttribute(){}});return nodes.get(id);};
+  const nodes=new Map(),makeElement=()=>({dataset:{},getAttribute(){return "";},setAttribute(){},addEventListener(){},after(node){this.picker=node;}}),element=id=>{if(!nodes.has(id))nodes.set(id,makeElement());return nodes.get(id);};
   const voice={stats:{returning:true,muted:true,enabled:false,joining:false,micError:"",error:"WebRTC blocked"},ICE_BLOCKED:"WebRTC blocked",support:()=>({secure:true,webrtc:true,mic:true})};
-  const account={BL:{voice,nativeIcons:{label:(button,text)=>{button.textContent=text;}}},document:{querySelectorAll:()=>[]},$:element};
+  const account={BL:{voice,nativeIcons:{label:(button,text)=>{button.textContent=text;}}},document:{querySelectorAll:()=>[],createElement:makeElement},$:element};
+  runInNewContext(await readFile(join(root,"src/js/microphone-picker.js"),"utf8"),{window:{BL:account.BL},document:account.document});
   runInNewContext(source.slice(accountStart,accountEnd)+";globalThis.showAccount=showAccount;",account);
   const live={backend:true,me:{display:"Listener"},room:"live",online:1};account.showAccount(live);
   const blockedReturn=element("account-mute").textContent==="Voice: WebRTC blocked"&&!element("account-mute").disabled&&!!element("account-mute").title;
   voice.stats.error="";account.showAccount(live);
   const clearedReturn=element("account-mute").textContent==="Unmute"&&element("account-mute").title==="";
-  return {listening,listeningAlone,listeningMuted,afterDrop,speakerAlone,speakerMuted,speakerOn,back,blockedReturn,clearedReturn};
+  const picker=element("account-mute").picker,listenerPickerHidden=picker.hidden;
+  voice.microphone=()=>({active:true,available:true,label:"USB microphone"});account.showAccount(live);
+  const pickerShown=!picker.hidden&&!picker.disabled&&picker.title==="Microphone: USB microphone";
+  return {listening,listeningAlone,listeningMuted,afterDrop,speakerAlone,speakerMuted,speakerOn,back,blockedReturn,clearedReturn,listenerPickerHidden,pickerShown};
 };
 
 // terrain-cache.js under an in-memory IndexedDB and a stand-in Worker: a boot miss must not wait on the Worker (it starts
@@ -51093,6 +51116,24 @@ const oogaChatChecks = async () => {
     record("Ooga Chat microphone picker: same publication and receive connection, failed replacement retains capture, mute during acquisition, leave cancels late capture",
       kept && rejected && muteDuring && cancelled, JSON.stringify({ kept, rejected, muteDuring, cancelled }));
     }
+    const releasedDevices = [];
+    for (const release of ["leave", "hold"]) {
+      const f = rig(); f.c.zone("main"); snap(f, "devices", "eligible"); await flush();
+      const first = f.c.join(); await flush(); f.answer(true, { id: "gh:1", speak: "pending", lease: 19 }); await first;
+      await f.c.selectDevice("usb");
+      const capture = f.rtc.getUserMedia, constraintsSeen = [];
+      f.rtc.getUserMedia = constraints => {
+        constraintsSeen.push(constraints);
+        return constraints.audio.deviceId?.exact === "usb" ? Promise.reject(Object.assign(Error("unplugged"), { name: "NotFoundError" })) : capture(constraints);
+      };
+      if (release === "hold") { f.c.status("reconnecting"); f.fire(120000); snap(f, "devices-back", "eligible"); }
+      else { await f.c.leave(); f.c.heard({ type: "you", zone: "main", you: { id: "gh:1", speak: "eligible" } }); }
+      const again = f.c.join(); await flush(); f.answer(true, { id: "gh:1", speak: "pending", lease: 20 }); await again; await flush();
+      releasedDevices.push({ release, speaker: f.c.state.role === "speaker", defaultInput: constraintsSeen.length === 1 && !constraintsSeen[0].audio.deviceId });
+      f.c.dispose();
+    }
+    record("Ooga Chat microphone picker: unplugging a released selection cannot block rejoin or recovery after the hold expires",
+      releasedDevices.every(r => r.speaker && r.defaultInput), JSON.stringify(releasedDevices));
     // A listener: hears the zone, never captures, can't join.
     let r = rig({ allowed: false });
     r.c.zone("main"); snap(r, "c1", "none"); await flush();

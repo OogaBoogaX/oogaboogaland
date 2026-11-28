@@ -592,6 +592,8 @@
       timers.clear(holdTimer);
       holdTimer = 0;
       stopMeter();
+      // Once capture ends, the next join uses the browser's current default, not a possibly unplugged input.
+      deviceId = "";
       if (!mic) return;
       mic.track.enabled = false;
       mic.track.removeEventListener("ended", micEnded);
@@ -638,7 +640,6 @@
     function micEnded() {
       if (!speaker) { if (BUSY.has(phase)) endSpeaking(NOTICE.mic); return; }
       releaseMic();
-      deviceId = "";
       muted = true;
       phase = "muted";
       notice = NOTICE.interrupted;

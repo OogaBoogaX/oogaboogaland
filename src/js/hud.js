@@ -2063,11 +2063,7 @@
     slot.replaceWith(copy);
     accountPrefixes.push(prefix);
   }
-  const accountPickers = accountPrefixes.map((prefix) => {
-    const picker = BL.microphonePicker.create();
-    $(prefix + "account-mute").after(picker.button);
-    return picker;
-  });
+  let accountPickers = null;
   const accountFields = new Map();
   const fieldsFor = (id) => {
     if (!accountFields.has(id)) accountFields.set(id, accountPrefixes.map((prefix) => $(prefix + id)));
@@ -2091,6 +2087,11 @@
     if (!recipe.open) recipe.showModal();
   };
   const showAccount = (state) => {
+    if (!accountPickers) accountPickers = accountPrefixes.map((prefix) => {
+      const picker = BL.microphonePicker.create();
+      $(prefix + "account-mute").after(picker.button);
+      return picker;
+    });
     // The name carries no count of who is online (the Online Oogas tab's title says it): only the room's own trouble.
     const { backend, me, room } = state;
     const live = !!me && room === "live", words = live ? "" : ROOM_WORDS[room] || "";
