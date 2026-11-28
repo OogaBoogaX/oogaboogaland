@@ -44,6 +44,10 @@
     if (part === "arm") return jacket;
     if (part === "fore") return y > WRIST ? jacket : y > CUFF ? shirt : null;
     return null; };
+  // The Arcade staff's short sleeves: the uniform's red down the upper arm to one of its rings (they stand square to its
+  // length every 0.025, so the cut runs cleanly across it), finished with a ring of gold piping.
+  const SLEEVE = { piping: -0.12, cut: -0.145 };
+  OUTFITS.staff = (part, x, y, z) => part === "arm" ? (y > SLEEVE.piping ? C("#b3322b") : y > SLEEVE.cut ? C("#f2b63e") : null) : null;
   // A copy of a geometry with its faces recoloured by a rule; cached by geometry and outfit.
   const cache = new Map();
   const painted = (geo, region, outfit) => {
@@ -97,7 +101,7 @@
     const tris = (nodes) => { const out = []; for (const n of nodes) { if (!n || !n.geometry || n.visible === false) continue; const V = n.geometry.verts, W = n.world, P = [];
         for (let i = 0; i < V.length; i += 3) P.push(inv(W[0] * V[i] + W[4] * V[i + 1] + W[8] * V[i + 2] + W[12], W[1] * V[i] + W[5] * V[i + 1] + W[9] * V[i + 2] + W[13], W[2] * V[i] + W[6] * V[i + 1] + W[10] * V[i + 2] + W[14]));
         for (const f of n.geometry.faces) for (let k = 1; k + 1 < f.i.length; k++) out.push([P[f.i[0]], P[f.i[k]], P[f.i[k + 1]]]); } return out; };
-    const body = tris([r.chest, ...(r.torsoWeld || []), r.sleeveNode]), over = body.concat(tris([r.armR, r.armL]));
+    const body = tris([r.chest, ...(r.torsoWeld || []), r.sleeveNode]), arms = tris([r.armR, r.armL]), over = body.concat(arms);
     const BIN = 0.02, bins = new Map(); for (const t of body) { const lo = Math.floor(Math.min(t[0][1], t[1][1], t[2][1]) / BIN), hi = Math.floor(Math.max(t[0][1], t[1][1], t[2][1]) / BIN); for (let b = lo; b <= hi; b++) { if (!bins.has(b)) bins.set(b, []); bins.get(b).push(t); } }
     let y0 = 1e9, y1 = -1e9; for (const t of body) for (const p of t) { y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
     // a ray (o, d) against a triangle: its distance, or -1
@@ -113,7 +117,7 @@
       if (!best) return null; let n = normal(best.tri); n = [n[0], 0, n[2]]; const nl = Math.hypot(n[0], n[2]) || 1; n = [n[0] / nl, 0, n[2] / nl]; if (n[0] * d[0] + n[2] * d[2] < 0) n = [-n[0], 0, -n[2]];
       return { y, p: [d[0] * best.t, y, cz + d[2] * best.t], n }; };
     // the topmost crossing straight down at (x, z), the upper arms included
-    const top = (x, z) => { let best = -1e9; for (const t of over) { const k = hit([x, 5, z], [0, -1, 0], t); if (k > 0) best = Math.max(best, 5 - k); } return best > -1e8 ? best : null; };
+    const top = (x, z) => { let best = -1e9, arm = false; for (const t of over) { const k = hit([x, 5, z], [0, -1, 0], t); if (k > 0 && 5 - k > best) { best = 5 - k; arm = arms.includes(t); } } return best > -1e8 ? { h: best, arm } : null; };
     // the middle front to back and the half-width at a height
     const slice = (y) => { const f = side(y, 0.1, 0, 1), b = side(y, 0.1, 0, -1), x = side(y, 0.1, 1, 0); return f && b && x ? { hx: x.p[0], hz: (f.p[2] - b.p[2]) / 2, cz: (f.p[2] + b.p[2]) / 2 } : { hx: 0.3, hz: 0.3, cz: 0.1 }; };
     const out = { side, top, slice, y0, y1 }; surfaces.set(r, out); return out; };
@@ -142,17 +146,21 @@
   const wraps = new WeakMap();
   const wrap = (r, geometry, opts = {}) => { let per = wraps.get(geometry); if (!per) wraps.set(geometry, per = new WeakMap()); if (per.has(r)) return per.get(r);
     const W = surface(r), hip = -0.207, armY = 0.711, ky = (armY - hip) / OLD.arm, hug = opts.hug == null ? 0.55 : opts.hug, gap = opts.gap == null ? 0.008 : opts.gap;
-    const g = subdivide(geometry, opts.edge || 0.035), V = g.verts, out = new Array(V.length);
+    const g = subdivide(geometry, opts.edge || 0.035), V = g.verts, out = new Array(V.length), onArm = new Set();
     for (let i = 0; i < V.length; i += 3) { const x = V[i], y = V[i + 1], z = V[i + 2], hx = OLD.hx(y), sideOut = Math.max(Math.abs(x) - hx, Math.abs(z) - OLD.hz), topOut = y - OLD.top;
       let p = null;
       if (topOut > sideOut && Math.abs(x) < 0.75) { const s0 = W.slice(armY), nx = x * (0.51 / 0.516), nz = s0.cz + z * (s0.hz / OLD.hz), h = W.top(nx, nz);
-        if (h != null) p = [nx, h + gap + Math.max(0, topOut) * hug, nz]; }
+        if (h != null) { p = [nx, h.h + gap + Math.max(0, topOut) * hug, nz]; if (h.arm) onArm.add(i / 3); } }
       if (!p) { const ny = hip + y * ky, s = W.slice(ny), ux = x / hx, uz = z / OLD.hz, dx = ux * s.hx, dz = uz * s.hz; let hit = W.side(ny, s.cz, dx, dz);
         // cloth hangs straight down off the widest of the body above it (an apron off the belly, tails off the seat)
         if (ny < 0.3) for (let h = ny + 0.03; h < Math.min(0.3, ny + 0.45); h += 0.03) { const up = W.side(h, s.cz, dx, dz); if (up && (!hit || Math.hypot(up.p[0], up.p[2] - s.cz) > Math.hypot(hit.p[0], hit.p[2] - s.cz))) hit = { ...up, p: [up.p[0], ny, up.p[2]] }; }
         if (hit) { const d = gap + Math.max(0, sideOut) * hug; p = [hit.p[0] + hit.n[0] * d, ny, hit.p[2] + hit.n[2] * d]; } else p = [x, ny, z]; }
       out[i] = p[0]; out[i + 1] = p[1]; out[i + 2] = p[2]; }
-    const made = renormal({ ...g, verts: out }); per.set(r, made); return made; };
+    // what came down on the upper arm is left off (the sleeve is painted there, and the arm swings apart from the belly),
+    // all but gold (the gamemaster's epaulettes)
+    const gold = (c) => { const m = Math.max(...c) || 1; return c[0] / m > 0.9 && c[1] / m > 0.6 && c[1] / m < 0.85 && c[2] / m < 0.4; };
+    const faces = g.faces.filter((f) => !f.i.every((k) => onArm.has(k)) || gold(f.color));
+    const made = renormal({ ...g, verts: out, faces }); per.set(r, made); return made; };
   // A belt of one height all round the waist (in the belly's frame, at `y`): a band standing `off` out from the body,
   // `h` tall, with its top and bottom edges, and a buckle at the front. Cached by rig.
   const belts = new WeakMap();
