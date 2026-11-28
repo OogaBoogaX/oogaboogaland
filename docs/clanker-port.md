@@ -20,14 +20,15 @@ The clanker gorillas are being rebuilt on a new rig, worked out in `untracked/cl
 `src/js/clanker-body.js` (`BL.clankerBody`) puts the new rig on every gorilla without changing what the gorillas do:
 
 - **The driver.** `BL.agent.create` still builds and runs the old rig, off the scene. Its behaviour, collision envelope, previews and compact profiles stay as they were, and so do the poses scenes write on `parts.*`. The hub's movement planning and the suite's checks keep their meaning.
-- **The body.** The scene gets `root`, a node that shares the driver root's position, rotation and scale, holding the new rig scaled to the old height (0.956). A hook in `BL.scene.updateWorld` (`beforeWorld`) brings it up to date just before anything reads world matrices.
+- **The body.** The scene gets `root`, a node that shares the driver root's position, rotation and scale, holding the new rig scaled to the old height (0.956), its hips moved forward over the root as the driver's stand (the new rig's own stand 0.56 m back of it). A hook in `BL.scene.updateWorld` (`beforeWorld`) brings it up to date just before anything reads world matrices.
 - **Native poses.** Standing up, walking, galloping, jumping, landing, climbing, sitting and lying come from the new rig's own `pose`:
   - its stance comes from the driver's chest pitch, and its gait phase and stride from the driver's;
   - `pose` is far too slow to run per gorilla per frame (250 to 350 µs, allocating), so poses are sampled once on a rig of their own, on a grid (stance in 20 steps, phase in 24, the rest in quarters);
   - each frame blends the samples either side, which allocates nothing.
 - **Retargeted head and limbs.** When the driver does something the new rig has no pose for, or a scene has turned its parts, the head and limbs take the driver's bones, eased over a fifth of a second. That covers a pound, a chest beat, a drag, lab or desk work, grooming, a roll, a swim and eating. The torso stays native, with the stance from the pitch, so the welded belly and live sleeve stay whole.
 - **Whole-body turns.** The driver's hips (rolling, the slope underfoot) tilt the whole body; lying and sitting are the new rig's own poses.
-- **Sockets.** `agent.socket(name)` gives a node that follows a driver part, for what a scene hangs on the gorilla. Anything still hung on a driver part is moved onto its socket. The lab item is held on the left arm's socket.
+- **Sockets.** `agent.socket(name)` gives a node that follows a driver part, for what a scene hangs on the gorilla. Anything still hung on a driver part is moved onto its socket. `socket("handR")` and `socket("handL")` follow the drawn fists instead: the driver arm's frame carried so its hand (where the hub measured its grip, 8 cm over the arm's bottom) lands in the fist's middle, turning with the forearm. Held things hang there: the lab item, the Arcade staff's props (the level ones undo the hand's turn) and the service bay's driver, the Ember Den crowd's drinks and the terrace server's shaker.
+- **Reading the drawn body.** `agent.drawn(name)` is the drawn part a driver part stands for and `agent.grip(side, out)` the drawn fist's middle in the world; the body gives its nodes by driver part (`body.region(name)`, `body.regionOf(node)`) and tells `body.onRig` of each rig it makes (the glyph form's comes later). The driven gorilla's eye, first-person head and shoulder height, the hub's grip and Block Frenzy's dragged Ooga, portraits and the hockey bot's nameplate read the drawn body.
 - **Outlines.** The outline registry (`object-guides.js`) reads a geometry's `outline` stand-in where it has one: each new mesh's surface in 10 cm blocks, merged. The torso welds share one stand-in and the live sleeve has none.
 - **Preparing a form.** The hub prepares the fur form in its slices (`prepareSteps`) and the glyph form at idle once the page is playable.
 - `?clanker=0` keeps the old body, for comparison.
@@ -37,7 +38,7 @@ Status of this design (next steps below):
 - **Boot time:**
   - **Ordinary boot:** the hub is ready about 0.75 s later than with the old body (3.8 s against 3.1 s). Building the fur form's parts and 41 torso welds moved into the hub's slices, but its cost is still on the way to ready.
   - **Every Ooga working** (`status=clankin`): ready at 14.7 s against 11.5 s. That cost is the perception pass asking whether each gorilla is concealed from the camera (`concealed`, then `cameraPropFaceBlocked`), patch by patch. The stand-ins (solid, in 15 cm blocks, 856 faces a gorilla against the old body's 1,931) brought it down from 23 s. What remains is mostly the new rig's 14 meshes against the old one's 8.
-- **Retargeted limbs** keep the old rig's straight arm (the forearm stays at its rest bend), and held things sit where the old hand was. Those are the next refinements, with the new moves themselves.
+- **Retargeted limbs:** each arm reaches the driver's hand: the elbow bends (in the rest bend's plane) until the fist is as far from the shoulder as the hand, then the arm swings onto it. The old arm reaches about 12 cm further than the new one straight, so a fully outstretched old arm leaves the fist that much short. The stance comes from the driver's chest as it stands, so a scene that leans the chest (the hangar's operators, the service bay mechanic) leans the drawn body. Legs and the head still take the driver's turns as they are.
 - **The hub's browser checks** (`node test/run.mjs --browser-only hub`): after the fixes, every check that failed with the body passes except these:
   - **"gorilla traversal":** stepping off a crate the visible body must move less than 0.3 m a step. The controller's support offset now carries onto the body; whether that is enough is not yet confirmed.
   - **"live nameplates":** a gorilla's live nameplate must stand where its NPC name tooltip does. The nameplate now measures the drawn head (`agent.visualHead`); whether the tooltip measures the same is not yet confirmed.
@@ -151,7 +152,7 @@ A survey of every `BL.agent` call site and every movement the old rig's `poseMan
 - **Gaits:** the knuckle, upright and run gaits mapped onto `pose`'s gait (`walkGait`, `walkPhase`, `BL.agent.GAITS`), and `supportOffset`.
 
 ### Scenes that pose the old parts directly
-These write rotations on `chest` and `parts.*` themselves, so each needs rewriting for the new rig's quaternions and extra parts:
+These write rotations on `chest` and `parts.*` themselves. They now show on the drawn body by the retarget: the stance from the chest as the scene leans it, the head and legs from the driver, each arm reaching the driver's hand, and what they hold in the hand sockets. Compared in play against `?clanker=0` (the hidden driver drawn in the same frame): the Arcade staff and the service bay mechanic, the Factory and Hangar crews, the room-fire operator carrying the extinguisher, the Ember Den dealers, and the Orbit cameo. Hats, vests, sleeves and jackets still hang on the driver's head and torso sockets, so they sit off the drawn head and chest (for the outfit pass). The list as it was:
 - **Ooga Arcade:**
   - the staff's job poses (sweep, stock, claw, scoop, hand, dust, fan, rail and others, scene-arcade.js);
   - the Rally repair mechanic;
@@ -178,12 +179,12 @@ These write rotations on `chest` and `parts.*` themselves, so each needs rewriti
 - **island-world:** the island-world server GameHost is planned to run the gorillas next; its collision sizes have to match the new body.
 
 ### Looks and effects layered on the rig
-- **Ghost look:** the NPC ghost look's tinted twins, one per source geometry (`npc-ghosts.js`). The new rig swaps meshes: 41 welds, the live sleeve, glyph-rain layers. Each needs a twin, or a material path.
-- **Tints and highlight:** burn tints, the hover highlight and breathing (`chest.scale.y`, which the chest's weld swap affects).
-- **Beams:** sleep and status beams measure the posed body (sleep-beam.js, npc-status-beams.js); the rage glyph look too.
-- **Reflections:** lower-tier reflections keep only `characterPart` geometry, so every new mesh, worn piece and wrapped outfit must be marked.
+- **Ghost look:** done for the welds and the sleeve: a twin carries `restyle`, so the body's weld and chest swaps take the twin of the next mesh, and a painted live sleeve copies its shape each pose. The glyph form's rain layers still swap to unpainted frames.
+- **Tints and highlight:** done. Burns are laid on the drawn region of each driver part (and on what hangs on its socket), with sparks off the drawn part; the hover highlight walks the drawn meshes (the glyph rig's are added as it is made); the driver's breathing scales the drawn chest.
+- **Beams:** sleep and status beams already measure `root`, the drawn body (its posed locals as of the last pose); the rage and beam glyph looks set the form and `matrixNative` on the drawn root.
+- **Reflections:** every mesh of both forms is `characterPart`, the welds and rain frames too; worn pieces and wrapped outfits still must be.
 - **Visibility:** the outline through walls and the camera-cover outline of a hidden walker need the driven gorilla's meshes. In first person the head hides, with the near fade.
-- **Picking and targets:** hovering, tooltips and shots use the gorilla's parts as targets (`bodyTarget`, the head as the eye, the left hand as a grip).
+- **Picking and targets:** the hub's hover regions (the drawn head is `head`), the lab Agent's taps and the ghost brutes' targets are the drawn meshes. Hit sweeps for a gorilla's own blows (the pound's fists against the mirror and targets) and collision stay on the driver.
 - **Companion styles:** the hub gives each Ooga's companion its style (remote-players.js:115, clankers.js:2152). Check what that sets on the old rig.
 - **Sounds:** sounds timed to the old animation (the pound's impact and others) must follow the new rig's timings.
 
