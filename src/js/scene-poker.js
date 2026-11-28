@@ -1464,6 +1464,7 @@
       hud.toast("Pull the Bitcoin book and choose lounge.roompack to enter.");
     } else if (loungeStart) {
       salon = 0; salons.show(salon);
+      room.glazing.walkway.visible=terrace.root.visible=false;
       const r = currentSalon();
       pilot.navigate({ position: { x: r.x, y: r.y, z: r.z + 4.9 }, yaw: 0, pitch: .18, dist: 3 });
       hud.setAreaLabel(r.name);
@@ -1749,7 +1750,11 @@
       lights[o + 5] = theme.roomLight[1] + (1.38 - theme.roomLight[1]) * ease;
       lights[o + 6] = theme.roomLight[2] + (0.18 - theme.roomLight[2]) * ease;
     }
-    salons.portalView(camera.position,salon);
+    const chapelEye=salons.portalView(camera.position,salon);
+    // The exterior walkway overlaps the chapel entrance in world coordinates.
+    const chapelView=salon===0 || salon<0 && !promenade && salons.shelf.opened && chapelEye;
+    room.glazing.walkway.visible=!chapelView;
+    terraceScope.root.visible=salon!==1 && !chapelView;
     if (room.floor.gloss) room.floor.gloss.visible = salon < 0 || salon === 2;
     room.hall.aquarium.root.visible = salon < 0 || salon === 2;
     room.hall.update(dt, elapsed, calm, room.root.visible);

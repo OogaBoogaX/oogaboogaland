@@ -355,12 +355,16 @@
     ...BL.pokerStatues.SLOTS.flatMap(({ x, z }) => { const front = x - Math.sign(x) * (BL.pokerStatues.PLINTH.w / 2 + 0.16); return [[front, z - 0.45], [front, z + 0.45]]; })
   ].map(p => Object.freeze(p)));
   const build = (lite = false) => {
-    const p = parts(lite), root = S.createNode(), glass = lite ? [p.pane] : [p.pane, p.paneLow], flames = [];
-    const put = (geo, x, y, z, ry = 0) => { const n = S.createNode({ geometry: geo, position: { x, y, z } }); n.rotation.y = ry; S.addChild(root, n); return n; };
+    const p = parts(lite), root = S.createNode(), walkway = S.createNode(), glass = lite ? [p.pane] : [p.pane, p.paneLow], flames = [];
+    S.addChild(root,walkway);
+    const put = (geo, x, y, z, ry = 0, parent=root) => { const n = S.createNode({ geometry: geo, position: { x, y, z } }); n.rotation.y = ry; S.addChild(parent, n); return n; };
     for (const s of [1, -1]) {
       const ry = s > 0 ? 0 : Math.PI;
       // The terrace's nodes glow, so its moonlit share shows.
-      put(s > 0 ? p.eastSide : p.side, 0, 0, 0, ry).glow = 1; put(s > 0 ? p.eastTerrace : p.terraceSide, 0, 0, 0, ry).glow = 1; put(s<0?p.bookEnd:p.end, 0, 0, 0, ry).glow = 1; put(s<0?p.bookTerrace:p.terraceEnd, 0, 0, 0, ry).glow = 1;
+      put(s > 0 ? p.eastSide : p.side, 0, 0, 0, ry).glow = 1;
+      put(s<0?p.bookEnd:p.end, 0, 0, 0, ry).glow = 1;
+      put(s>0?p.eastTerrace:p.terraceSide, 0, 0, 0, ry, walkway).glow = 1;
+      put(s<0?p.bookTerrace:p.terraceEnd, 0, 0, 0, ry, walkway).glow = 1;
     }
     // The panes, one a bay and tier on every wall, all one geometry: the long sides facing -x / +x, the ends -z / +z.
     // The lower tier's panes glow their sheen; the lite set (Canvas 2D, which sorts its translucent faces by depth and
@@ -478,7 +482,7 @@
     // Every pane whole and every shard pooled at once, for a scene's leave.
     const reset = () => { for (let s = 0; s < MAX_BROKEN; s++) if (slots[s].id >= 0) heal(s); };
     const dispose = () => { reset(); while (root.children.length) S.removeChild(root, root.children[root.children.length - 1]); };
-    return { root, glass, flames, shardNodes:shards, dispose, panes: () => list, blockers, shatter, update, intact, broken, shards: shardsOut, reset };
+    return { root, walkway, glass, flames, shardNodes:shards, dispose, panes: () => list, blockers, shatter, update, intact, broken, shards: shardsOut, reset };
   };
   BL.pokerGlazing = Object.freeze({ barGlass, OPEN, BOOK_X, BOOK_HALF, SIDE_X, END_Z, SILL_TOP, HEAD, TRANSOM_Y, SILL, TERRACE, RAIL, columnX, COLUMN_X, COLUMN_Z, SCONCE_Y, CUPS, PORTAL_Z, BOARD_Y, BOARD_Z,
     supportAt, HEAL_AFTER, HEAL_TIME, SHARD_LIFE, SHARDS_PER, SHARD_CAP, MAX_BROKEN, sidePosts, endPosts, parts, panes, blockers, build });

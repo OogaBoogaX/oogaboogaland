@@ -451,7 +451,7 @@
   const install=(room,r,group,windows,rect,occluders,lite,groundMesh,signal,surfaces={})=>{
     if(typeof Image==="undefined")return [];
     if(!atlas)atlas=readImage(BL.pokerTimelineArt);
-    const entrance=wallGlass(room,r,true,surfaces),hearth=wallGlass(room,r,false,surfaces),vault=ceilingGlass(room,r,surfaces);
+    const entrance=wallGlass(group,r,true,surfaces),hearth=wallGlass(group,r,false,surfaces),vault=ceilingGlass(group,r,surfaces);
     const width=r.w-.36,depth=r.d-.36,front=depth/2,height=r.h-.20,floorY=BL.pokerFloor.Y;
     const slice={budget:5,until:0,work:0};
     const illuminate=function* ([img,portrait,transfer,ceiling,landscape]){

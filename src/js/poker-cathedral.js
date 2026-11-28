@@ -493,7 +493,7 @@
     h.addColorStop(0,"rgba(255,226,150,.75)");h.addColorStop(.45,"rgba(255,206,120,.35)");h.addColorStop(1,"rgba(255,180,80,0)");
     c.fillStyle=h;c.fillRect(0,0,w,w);
   },1));
-  const installSteps=function* (room,r,{item,add},lite,items,solids,slice){
+  const installSteps=function* (room,r,{item,add,windowLight},lite,items,solids,slice){
     const relics=[],hollows=[],canopies=[],treeOccluders=[],candles=[],dust=[],runes=[],birdPairs=[];
     let blossom=null,blossomFrom=null,cherryAt=null;
     const whitened=[];
@@ -552,37 +552,37 @@
     // The desert garden behind the trees; its solids go in before the check, which holds them clear of the shrines.
     yield* BL.pokerDesertGarden.plantSteps(room,r,add,lite,items,solids,slice);
     checkLayout(items,solids,r);
-    const fittings=BL.scene.createNode({scale:{x:2,y:2,z:2}});
-    BL.scene.addChild(room,fittings);
+    const roseFrame=BL.scene.createNode({scale:{x:2,y:2,z:2}});
+    BL.scene.addChild(windowLight,roseFrame);
     const rear=-r.d/4,roseY=10.33;
     const flower=roseGlass();
     yield* BL.pokerGlassMaterial.fitSteps(flower.imageSurface,"flower",slice);
-    add(fittings,flower,0,roseY,rear+.96);
-    const sunAt=BL.pokerBirthSky.sunOn(ROSE_RADIUS),sun=add(fittings,roseSun(),sunAt.x,roseY+sunAt.y,rear+.975);
+    add(roseFrame,flower,0,roseY,rear+.96);
+    const sunAt=BL.pokerBirthSky.sunOn(ROSE_RADIUS),sun=add(roseFrame,roseSun(),sunAt.x,roseY+sunAt.y,rear+.975);
     const haloGlass=roseHalo();
     if(haloGlass.imageSurface)Object.assign(haloGlass.imageSurface,{blend:"add",soft:true,cutout:true});
-    const halo=add(fittings,haloGlass,sunAt.x,roseY+sunAt.y,rear+.99);halo.visible=false;
-    // The shaft runs from the sun on the glass (room-local, the fittings doubled) to the floor at the cherry's foot.
+    const halo=add(roseFrame,haloGlass,sunAt.x,roseY+sunAt.y,rear+.99);halo.visible=false;
+    // The shaft runs from the sun on the glass (room-local, the rose frame doubled) to the floor at the cherry's foot.
     const from={x:2*sunAt.x,y:2*(roseY+sunAt.y),z:2*(rear+1.04)},to={x:cherryAt.x+2.7,y:BL.pokerFloor.Y,z:cherryAt.z};
     const dx=to.x-from.x,dy=to.y-from.y,dz=to.z-from.z,length=Math.hypot(dx,dy,dz);
-    const shaft=add(room,shaftGeometry(length),from.x,from.y,from.z);
+    const shaft=add(windowLight,shaftGeometry(length),from.x,from.y,from.z);
     // Turn local +x onto the shaft: about x cross d, by the angle between them.
     const across=Math.hypot(dz,dy);
     shaft.quaternion=BL.math.quat.fromAxisAngle(BL.math.quat.create(),0,-dz/across,dy/across,Math.acos(dx/length));
     shaft.visible=false;
     const pool=shaftPool();
     if(pool.imageSurface)Object.assign(pool.imageSurface,{blend:"add",soft:true,cutout:true});
-    const poolNode=add(room,pool,to.x,to.y+.012,to.z);poolNode.rotation.x=-Math.PI/2;poolNode.visible=false;
+    const poolNode=add(windowLight,pool,to.x,to.y+.012,to.z);poolNode.rotation.x=-Math.PI/2;poolNode.visible=false;
     for(const n of whitened)n.visible=false;
     for(const [radius,width,color] of [[1.548,.032,"#635545"],[1.57,.072,white],[1.68,.048,shade]]){
-      add(fittings,M.turnedX(M.torus(radius,width,color,.42,64,8),Math.PI/2),0,roseY,rear+1.04);
+      add(roseFrame,M.turnedX(M.torus(radius,width,color,.42,64,8),Math.PI/2),0,roseY,rear+1.04);
     }
     // The room's local origin is the midpoint of both pairs of walls. Set
     // the glass just above the turf where its rim covers the edge of the lawn.
     const inlayY=BL.pokerFloor.Y-.0035;
-    const city=cityView(room,r,add,inlayY);
+    const city=cityView(windowLight,r,add,inlayY);
     yield* BL.buildTasks.pause(slice);
-    const rays=logoRays(room,add,inlayY+.003);
+    const rays=logoRays(windowLight,add,inlayY+.003);
     yield* BL.buildTasks.pause(slice);
     const view=eye=>{
       city(eye);
@@ -590,16 +590,18 @@
     };
     const floorGlass=studioGlass();
     yield* BL.pokerGlassMaterial.fitSteps(floorGlass.imageSurface,"floor",slice);
-    const med=add(room,floorGlass,0,inlayY+.0008,0);med.rotation.x=-Math.PI/2;
+    const med=add(windowLight,floorGlass,0,inlayY+.0008,0);med.rotation.x=-Math.PI/2;
     const flash=circle(studioRadius,512,(c,w)=>{
       c.translate(w/2,w/2);
       for(const radius of [83,222,250])ring(c,radius,"#d8ffe4",1.6);
     },.9);
     if(flash.imageSurface)Object.assign(flash.imageSurface,{blend:"add",soft:true,cutout:true});
-    const pulse=add(room,flash,0,inlayY+.001,0);pulse.rotation.x=-Math.PI/2;pulse.visible=false;
+    const pulse=add(windowLight,flash,0,inlayY+.001,0);pulse.rotation.x=-Math.PI/2;pulse.visible=false;
     let last=Math.max(BL.mempool.state.height||0,BL.chain?.snapshot?.height||0),age=10,time=0,lastTier="";
     const block=(value,animate)=>{if(value>last){last=value;age=animate?0:10;}};
     if(!lite){
+      const fittings=BL.scene.createNode({scale:{x:2,y:2,z:2}});
+      BL.scene.addChild(room,fittings);
       const taper=M.merge(turn(0,0,0,[[.034,0],[.043,.018],[.035,.13],[.030,.16],[0,.16]],wax,.60,8),
         turn(0,.151,0,[[.012,0],[.026,.03],[.016,.06],[0,.114]],"#ffcf79",1,8));
       const mote=turn(0,0,0,[[0,0],[.014,.013],[0,.029]],"#f6c477",.96,5);
